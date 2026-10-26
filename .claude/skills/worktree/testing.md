@@ -51,22 +51,51 @@ The variable turns a missing-backend skip into a failure.
 
 - Lib unit tests use `remove::test_support::TestRepo` (local bare `origin`, plus
   a `pusher` clone for other people's pushes).
+- Waits, mount boundaries, and filesystem failures go through injected seams,
+  never real sleeps, mounts, or privileges:
+    - `remove::clock::Clock`: `ManualClock` records each sleep and can cancel
+      after N; `Backoff` is tested through it;
+    - `remove::mounts::MountInfo`: `FixedMounts`, including same-device bind
+      mounts. `mounts_within` matches by mount point, never device ID.
+      `LiveMounts` + `MountDuringDeletion` (as `FsFaults`) publish a mount
+      once deletion has begun, for the mid-deletion boundary;
+    - `remove::faults::FsFaults`: `ScriptedFaults::times` fails an operation
+      on a path N times (temporary), `::always` fails it every time
+      (permanent).
+
+  The doubles are in `remove/test_support.rs`.
 - `cli/tests/remove.rs` sets `NO_COLOR=1`. Its zero-network tests point origin
   at `http://gitea.test/…` with every proxy variable aimed at a local counting
   listener, since a file-path origin never reaches the PR lookup.
+- `wt remove`'s question and outcome text is unit-tested from library values
+  in `cli/src/commands/remove/{report,outcome}.rs`; the binary tests assert
+  exit codes, the final line, and what is left on disk.
+- A test that makes `wt` the child of a shell standing in the worktree runs
+  `sh -c '"$0" remove …; status=$?; exit $status'`: the second command keeps
+  `sh` from exec'ing `wt`, so `sh` stays the parent whose PID `facts`
+  filters from the program list.
+- **Sniff's usage budget (2 s) has no test override.** A no-`--force` binary
+  test on a heavily loaded host can see `the time allowed for the check ran
+  out`, which is a warning and so exit 3. Rerun that test alone before
+  suspecting the code.
 - `cli/tests/level2_remove.rs` drives bash, zsh, and fish wrappers in tmux, with
   a `wt` shim that runs `WT_TEST_BETWEEN` before the handoff call.
-- `cli/tests/powershell_wrapper_exec.rs` is Windows-only L1.
+- `cli/tests/powershell_wrapper_exec.rs` is Windows-only L1, so a macOS run
+  never compiles it: after changing `wt remove`'s output or flow, run
+  `just cross-check worktree-cli --os windows` (or at least clippy with
+  `--target x86_64-pc-windows-gnu`) before calling the CLI tests green.
 - `cli/tests/level2_powershell_remove.rs` is the Windows L2:
   - PowerShell 5.1 in a ConPTY pseudoconsole (`xpty`, no window, no focus),
     launched *inside* the worktree, the prompt answered through the console;
   - assertions read the console's own screen buffer
     (`$Host.UI.RawUI.GetBufferContents`), since ConPTY's output stream is a
     repaint, not text in order;
-  - a third case runs `wt remove --force-worktree` from the base repo while a
-    windowless `ping` stands in the worktree, and asserts the usage refusal
-    (exit 3, naming `PING.EXE`; Sniff reports the held directory as an open
-    handle there) with files, registration, and branch intact.
+  - further cases run `wt remove` from the base repo while a windowless
+    `ping` stands in the worktree: without `--force` it is exit 3 naming
+    `PING.EXE` (Sniff reports the held directory as an open handle there),
+    and with `--force` the checkout is deleted in place once `ping` exits
+    (opening the held root for the move is a sharing violation, which means
+    in place, not a refusal).
   - It needs no terminal backend, so **CI never runs it**: `windows-latest`
     hosts none of `l2-backends` and the L2 cell is an accepted gap. Run it with
     `./scripts/cross-check.sh --os windows git-wt-cli --features terminal-tests level2_powershell`

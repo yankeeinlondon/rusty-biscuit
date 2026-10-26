@@ -209,7 +209,9 @@ fn staged_unstaged_both_and_untracked_paths_union_once() {
     std::fs::write(dir.path().join("staged.txt"), "s2\n").unwrap();
     stage(dir.path(), "staged.txt");
 
-    std::fs::write(dir.path().join("unstaged.txt"), "u2\n").unwrap();
+    // A new size, so a stat check cannot miss an edit made within the
+    // index's timestamp granularity.
+    std::fs::write(dir.path().join("unstaged.txt"), "u2-worktree\n").unwrap();
 
     std::fs::write(dir.path().join("both.txt"), "b2-staged\n").unwrap();
     stage(dir.path(), "both.txt");

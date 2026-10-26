@@ -4,11 +4,11 @@
 //! cacheable compose operations. Variant parameters determine the
 //! cached core result; post parameters are applied after cache lookup.
 
-use biscuit_hash::xx_hash;
+use biscuit_hash::{canonical_json, xx_hash};
 use serde_json::Value;
 use std::path::Path;
 
-use super::hashing::{canonical_json_sorted, compose_cache_key, operation_entry_key};
+use super::hashing::{compose_cache_key, operation_entry_key};
 use crate::markdown::compose::toc_linking::TocLinkingOptions;
 use crate::markdown::compose::transclusion::{BlockOptions, ReplaceOption};
 
@@ -74,7 +74,7 @@ impl CacheableOperation for CodeOperation {
                     .push(("replace".to_string(), "parent_wins".to_string()));
             }
             ReplaceOption::OneOff(map) => {
-                let canonical = canonical_json_sorted(&Value::Object(map.clone()));
+                let canonical = canonical_json(&Value::Object(map.clone()));
                 buckets.variant.push(("replace".to_string(), canonical));
             }
         }

@@ -311,3 +311,23 @@ async fn an_invalid_secret_continuation_is_not_in_the_error_text() {
     pages.next().await.expect("page").expect("a page");
     assert_quiet(&pages.next().await.expect_err("ambiguous"));
 }
+
+#[tokio::test]
+async fn endpoint_origin_override_reaches_followed_page_and_caller_can_tighten_it() {
+    let a = MockServer::start().await;
+    let b = MockServer::start().await;
+    let next = format!("{}/next", b.uri());
+    otherwise(&a, json(json!({ "values": numbered(1..=1), "next": next }))).await;
+    otherwise(&b, json(json!({ "values": numbered(2..=2) }))).await;
+    let definition = schematic_runtime::ApiDefinition::new(a.uri())
+        .endpoint_cross_origin("BodyNextPrevious", schematic_runtime::OriginPolicy::allow_origins([b.uri()]));
+    let allowed = crate::support::builder(definition.clone(), &a.uri()).build().unwrap();
+    let collected = allowed.send(BodyNextPrevious::get()).pager().collect_all().await.expect("endpoint follows B");
+    assert_eq!(ids(&collected), [1, 2]);
+    let tightened = crate::support::builder(definition, &a.uri())
+        .cross_origin(schematic_runtime::OriginPolicy::same_origin()).build().unwrap();
+    let incomplete = tightened.send(BodyNextPrevious::get()).pager().collect_all().await.expect_err("caller refuses B");
+    assert_eq!(ids(&incomplete.items), [1]);
+    assert_eq!(incomplete.reason, IncompleteReason::CrossOriginRejected);
+    assert_eq!(received(&b).await.len(), 1, "tightening sends no second request to B");
+}

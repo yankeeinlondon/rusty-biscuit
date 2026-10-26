@@ -82,12 +82,42 @@ enum Commands {
 
         #[arg(long)]
         no_postman: bool,
+
+        /// Also write each collection's Postman environment
+        /// (`<module>.postman_environment.json`) beside it
+        #[arg(long)]
+        postman_environment: bool,
     },
 
     /// Validate an API definition without generating code
     Validate {
         #[arg(short, long)]
         api: String,
+    },
+
+    /// Write an API's self-contained definition bundle as canonical JSON
+    Bundle {
+        #[arg(short, long)]
+        api: String,
+
+        /// Bundle file to write; standard output when omitted
+        #[arg(long, value_name = "FILE")]
+        out: Option<String>,
+    },
+
+    /// Export OpenAPI and Postman from a definition bundle, without the registry
+    ExportBundle {
+        #[arg(short, long, value_name = "FILE")]
+        input: String,
+
+        #[arg(long, value_name = "DIR")]
+        openapi_out: Option<String>,
+
+        #[arg(long, value_enum, default_value = "json")]
+        openapi_format: OpenApiFormat,
+
+        #[arg(long, value_name = "DIR")]
+        postman_out: Option<String>,
     },
 
     /// Import an OpenAPI specification and generate Rust client code
@@ -128,7 +158,21 @@ enum Commands {
         strict: bool,
     },
 
-    /// Import an AsyncAPI specification and emit websocket import artifacts
+    /// Export one AsyncAPI 3.0 document per registered WebSocket API
+    ExportAsyncapi {
+        /// Directory the documents are written to
+        #[arg(short, long, value_name = "DIR")]
+        output: String,
+
+        /// One WebSocket API by name (for example `ElevenLabsTTS`); all when omitted
+        #[arg(long, value_name = "NAME")]
+        api: Option<String>,
+
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Import an AsyncAPI 2.x or 3.0 document and persist its WebSocket definition and models
     ImportAsyncapi {
         #[arg(short, long)]
         input: String,
@@ -167,6 +211,7 @@ fn main() -> ExitCode {
             postman_out,
             no_openapi,
             no_postman,
+            postman_environment,
         }) => pipeline::run_generate(
             &api,
             &GenerateOpts {
@@ -179,9 +224,31 @@ fn main() -> ExitCode {
                 postman_out: postman_out.as_deref(),
                 no_openapi,
                 no_postman,
+                postman_environment,
             },
         ),
         Some(Commands::Validate { api }) => pipeline::run_validate(&api, cli.verbose),
+        Some(Commands::Bundle { api, out }) => pipeline::run_bundle(&api, out.as_deref()),
+        Some(Commands::ExportBundle {
+            input,
+            openapi_out,
+            openapi_format,
+            postman_out,
+        }) => pipeline::run_export_bundle(
+            &input,
+            &GenerateOpts {
+                output: "",
+                dry_run: false,
+                verbose: cli.verbose,
+                openapi_out: openapi_out.as_deref(),
+                openapi_format: openapi_format.into(),
+                openapi_version: None,
+                postman_out: postman_out.as_deref(),
+                no_openapi: false,
+                no_postman: false,
+                postman_environment: false,
+            },
+        ),
         Some(Commands::Import {
             input,
             api_name,
@@ -209,6 +276,9 @@ fn main() -> ExitCode {
             },
             cli.verbose,
         ),
+        Some(Commands::ExportAsyncapi { output, api, dry_run }) => {
+            schematic_gen::commands::run_export_asyncapi_command(&output, api.as_deref(), dry_run, cli.verbose)
+        }
         Some(Commands::ImportAsyncapi {
             input,
             api_name,
@@ -241,6 +311,7 @@ fn main() -> ExitCode {
                         postman_out: None,
                         no_openapi: false,
                         no_postman: false,
+                        postman_environment: false,
                     },
                 )
             } else {

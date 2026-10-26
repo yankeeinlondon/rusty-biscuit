@@ -210,6 +210,39 @@ again.
 `--save` is not supported for stdin input or for directories. It prints an
 explanation of what changed rather than the raw hash.
 
+### Indented Frontmatter
+
+`--save` edits frontmatter text in place, and that editor needs top-level keys
+at column 0. When every top-level key is indented, `--save` refuses, exits
+`1`, and leaves the file byte-for-byte unchanged, even when the hash is
+already current and nothing would be written:
+
+```markdown
+---
+  title: Weekly report
+  prompt: Summarize the week.
+---
+```
+
+```text
+frontmatter root mapping is indented by 2 spaces; text-preserving edits
+require top-level keys at column 0 (run `md clean --save <file>` to fix)
+```
+
+Indented frontmatter is still valid YAML: reading the document, printing its
+hash, and `--diff` all accept it. Only the in-place edit is refused. Run
+[`md clean --save`](./clean.md#indented-root-mappings-yamlroot-indentation)
+to move the keys to column 0 without changing their values, then save again:
+
+```bash
+md clean doc.md --save
+md hash doc.md --save
+```
+
+The same refusal applies to the other text-preserving frontmatter editors in
+the library, such as property restore, which Claudine's `inline-compose`
+relies on.
+
 ### `--diff` Behavior
 
 `--diff` reports how the document differs from its stored hash, at the
@@ -273,14 +306,17 @@ and `detailed` kinds are rejected with a usage error. Directory output forms:
 
 **Non-strict mode**
 
-- Frontmatter: canonicalized by sorted keys and JSON-serialized values.
+- Frontmatter: canonicalized by sorted keys and canonical-JSON values, so
+  object key order is ignored at every depth (including objects inside
+  arrays). Array element order still changes the hash.
 - Frontmatter keys (`structured`/`detailed` `fm_keys`): sorted before hashing.
 - Body: leading/trailing whitespace and blank-line variants are ignored, so
   whitespace-only edits do not change the semantic hash.
 
 **Strict mode**
 
-- Frontmatter: hashes YAML serialization without canonical key sorting.
+- Frontmatter: hashes YAML serialization in the author's key order, so
+  reordering keys at any depth, nested ones included, changes the hash.
 - Frontmatter keys (`structured`/`detailed` `fm_keys`): preserved in document
   order — strict performs no key reordering.
 - Body: hashes raw body bytes.

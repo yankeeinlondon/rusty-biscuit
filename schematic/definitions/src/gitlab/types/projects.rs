@@ -13,6 +13,13 @@ pub struct TreeItem {
     #[serde(default)]
     pub mode: Option<String>,
 }
+impl schematic_define::Registration for TreeItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TreeItem));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct FileContent {
@@ -30,6 +37,13 @@ pub struct FileContent {
     #[serde(default)]
     pub last_commit_id: Option<String>,
 }
+impl schematic_define::Registration for FileContent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(FileContent));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Namespace {
@@ -98,4 +112,10 @@ pub struct Project {
     pub wiki_enabled: Option<bool>,
     #[serde(default)]
     pub avatar_url: Option<String>,
+}
+impl schematic_define::Registration for Project {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(Project));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }

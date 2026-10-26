@@ -82,6 +82,13 @@ pub struct Message {
     pub images: Option<Vec<String>>,
 }
 
+impl schematic_define::Registration for Message {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("Message");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Request body for the `/api/generate` endpoint.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GenerateBody {
@@ -124,9 +131,20 @@ pub struct GenerateBody {
     pub context: Option<Vec<i64>>,
 }
 
-/// Response from the `/api/generate` endpoint (non-streaming).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GenerateResponse {
+impl schematic_define::Registration for GenerateBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("GenerateBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
+/// Buffered reply from the `/api/generate` endpoint, returned when `stream`
+/// is false.
+///
+/// Not named `GenerateResponse`: that is the generated success enum of the
+/// `Generate` endpoint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GenerateCompletion {
     /// Model that generated the response.
     pub model: String,
 
@@ -168,6 +186,13 @@ pub struct GenerateResponse {
     pub eval_duration: Option<u64>,
 }
 
+impl schematic_define::Registration for GenerateCompletion {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("GenerateCompletion");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Request body for the `/api/chat` endpoint.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatBody {
@@ -194,9 +219,20 @@ pub struct ChatBody {
     pub format: Option<String>,
 }
 
-/// Response from the `/api/chat` endpoint (non-streaming).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ChatResponse {
+impl schematic_define::Registration for ChatBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ChatBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
+/// Buffered reply from the `/api/chat` endpoint, returned when `stream` is
+/// false.
+///
+/// Not named `ChatResponse`: that is the generated success enum of the `Chat`
+/// endpoint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ChatCompletion {
     /// Model that generated the response.
     pub model: String,
 
@@ -234,6 +270,13 @@ pub struct ChatResponse {
     pub eval_duration: Option<u64>,
 }
 
+impl schematic_define::Registration for ChatCompletion {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ChatCompletion");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Request body for the `/api/embeddings` endpoint.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EmbeddingsBody {
@@ -252,6 +295,13 @@ pub struct EmbeddingsBody {
     pub keep_alive: Option<String>,
 }
 
+impl schematic_define::Registration for EmbeddingsBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("EmbeddingsBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Response from the `/api/embeddings` endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EmbeddingsResponse {
@@ -259,8 +309,15 @@ pub struct EmbeddingsResponse {
     pub embedding: Vec<f64>,
 }
 
+impl schematic_define::Registration for EmbeddingsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("EmbeddingsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// A streaming chunk from the `/api/chat` endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ChatStreamChunk {
     /// Model that generated the response.
     pub model: String,
@@ -288,8 +345,15 @@ pub struct ChatStreamChunk {
     pub eval_count: Option<u32>,
 }
 
+impl schematic_define::Registration for ChatStreamChunk {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ChatStreamChunk");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// A streaming chunk from the `/api/generate` endpoint.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GenerateStreamChunk {
     /// Model that generated the response.
     pub model: String,
@@ -319,6 +383,68 @@ pub struct GenerateStreamChunk {
     /// Number of tokens generated (final chunk only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub eval_count: Option<u32>,
+}
+
+impl schematic_define::Registration for GenerateStreamChunk {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("GenerateStreamChunk");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
+
+/// A mid-stream error line, such as `{"error": "model not found"}`.
+///
+/// Ollama can send it inside a stream whose status is still 200, so every
+/// native NDJSON item type carries it as a variant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct StreamErrorLine {
+    /// The error message.
+    pub error: String,
+}
+
+impl schematic_define::Registration for StreamErrorLine {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("StreamErrorLine");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
+/// One NDJSON line from the streaming `/api/generate` endpoint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum GenerateStreamItem {
+    // Tried first: a chunk never carries `error`, and an error line lacks the
+    // chunk's required fields.
+    /// A mid-stream error line.
+    Error(StreamErrorLine),
+    /// A generated text chunk; the final one has `done: true` and statistics.
+    Chunk(GenerateStreamChunk),
+}
+
+impl schematic_define::Registration for GenerateStreamItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("GenerateStreamItem");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
+/// One NDJSON line from the streaming `/api/chat` endpoint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ChatStreamItem {
+    // Tried first, as in `GenerateStreamItem`.
+    /// A mid-stream error line.
+    Error(StreamErrorLine),
+    /// A message chunk; the final one has `done: true` and statistics.
+    Chunk(ChatStreamChunk),
+}
+
+impl schematic_define::Registration for ChatStreamItem {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ChatStreamItem");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 #[cfg(test)]
@@ -397,7 +523,7 @@ mod tests {
             "total_duration": 123456789
         }"#;
 
-        let response: GenerateResponse = serde_json::from_str(json).unwrap();
+        let response: GenerateCompletion = serde_json::from_str(json).unwrap();
         assert_eq!(response.model, "llama3");
         assert!(response.done);
         assert_eq!(response.total_duration, Some(123456789));
@@ -432,7 +558,7 @@ mod tests {
             "done": true
         }"#;
 
-        let response: ChatResponse = serde_json::from_str(json).unwrap();
+        let response: ChatCompletion = serde_json::from_str(json).unwrap();
         assert_eq!(response.model, "llama3");
         assert_eq!(response.message.role, "assistant");
     }
@@ -463,5 +589,60 @@ mod tests {
         let chunk: ChatStreamChunk = serde_json::from_str(json).unwrap();
         assert!(!chunk.done);
         assert!(chunk.message.is_some());
+    }
+
+    #[test]
+    fn generate_stream_item_decodes_a_text_chunk() {
+        let line = r#"{"model":"llama3.2","created_at":"2023-08-04T08:52:19.385406455-07:00","response":"The","done":false}"#;
+
+        let item: GenerateStreamItem = serde_json::from_str(line).unwrap();
+
+        let GenerateStreamItem::Chunk(chunk) = item else { panic!("expected a chunk: {item:?}") };
+        assert_eq!(chunk.response.as_deref(), Some("The"));
+        assert!(!chunk.done);
+    }
+
+    #[test]
+    fn generate_stream_item_decodes_the_final_line_with_statistics() {
+        let line = r#"{"model":"llama3.2","created_at":"2023-08-04T19:22:45.499127Z","response":"","done":true,"done_reason":"stop","context":[1,2,3],"total_duration":10706818083,"load_duration":6338219291,"prompt_eval_count":26,"prompt_eval_duration":130079000,"eval_count":259,"eval_duration":4232710000}"#;
+
+        let item: GenerateStreamItem = serde_json::from_str(line).unwrap();
+
+        let GenerateStreamItem::Chunk(chunk) = item else { panic!("expected a chunk: {item:?}") };
+        assert!(chunk.done);
+        assert_eq!(chunk.context, Some(vec![1, 2, 3]));
+        assert_eq!(chunk.total_duration, Some(10_706_818_083));
+        assert_eq!(chunk.prompt_eval_count, Some(26));
+        assert_eq!(chunk.eval_count, Some(259));
+    }
+
+    #[test]
+    fn generate_stream_item_decodes_an_error_line_as_the_error_variant() {
+        let line = r#"{"error":"an error was encountered while running the model"}"#;
+
+        let item: GenerateStreamItem = serde_json::from_str(line).unwrap();
+
+        assert_eq!(
+            item,
+            GenerateStreamItem::Error(StreamErrorLine { error: "an error was encountered while running the model".to_string() })
+        );
+    }
+
+    #[test]
+    fn chat_stream_item_decodes_chunk_final_and_error_lines() {
+        let chunk = r#"{"model":"llama3.2","created_at":"2023-08-04T08:52:19.385406455-07:00","message":{"role":"assistant","content":"The"},"done":false}"#;
+        let last = r#"{"model":"llama3.2","created_at":"2023-08-04T19:22:45.499127Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","total_duration":4883583458,"load_duration":1334875,"prompt_eval_count":26,"prompt_eval_duration":342546000,"eval_count":282,"eval_duration":4535599000}"#;
+        let error = r#"{"error":"model 'nope' not found"}"#;
+
+        let chunk: ChatStreamItem = serde_json::from_str(chunk).unwrap();
+        let last: ChatStreamItem = serde_json::from_str(last).unwrap();
+        let error: ChatStreamItem = serde_json::from_str(error).unwrap();
+
+        let ChatStreamItem::Chunk(chunk) = chunk else { panic!("expected a chunk: {chunk:?}") };
+        assert_eq!(chunk.message.map(|message| message.content).as_deref(), Some("The"));
+        let ChatStreamItem::Chunk(last) = last else { panic!("expected the final chunk: {last:?}") };
+        assert!(last.done);
+        assert_eq!(last.eval_count, Some(282));
+        assert_eq!(error, ChatStreamItem::Error(StreamErrorLine { error: "model 'nope' not found".to_string() }));
     }
 }

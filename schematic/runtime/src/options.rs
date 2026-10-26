@@ -12,6 +12,11 @@ use crate::deadline::Deadline;
 /// [`credential`](Self::credential) overrides those, and
 /// [`anonymous`](Self::anonymous) bypasses every credential source; the two
 /// are mutually exclusive, and the last one set wins.
+///
+/// The endpoint's policy decides which credentials apply: a public endpoint
+/// sends none, whatever the options say, and an endpoint whose policy
+/// replaces the API's refuses a send that resolves nothing instead of
+/// sending it anonymously (see [`crate::credentials`]).
 #[derive(Debug, Clone, Default)]
 pub struct CallOptions {
     pub(crate) auth: CallAuth,

@@ -1,0 +1,289 @@
+{
+  "definition": {
+    "auth": {
+      "BearerToken": {
+        "header": null
+      }
+    },
+    "auth_policy": null,
+    "base_url": "http://localhost:1234",
+    "cross_origin": "SameOrigin",
+    "default_pagination": null,
+    "description": "LM Studio v1 native REST API for local LLM inference and model management",
+    "docs_url": "https://lmstudio.ai/docs/developer/rest",
+    "endpoints": [
+      {
+        "description": "Chat completion with SSE streaming support",
+        "headers": [],
+        "id": "Chat",
+        "method": "POST",
+        "params": null,
+        "path": "/api/v1/chat",
+        "request": {
+          "Json": {
+            "Named": "ChatBody"
+          }
+        },
+        "response": "Binary"
+      },
+      {
+        "description": "List available models",
+        "headers": [],
+        "id": "ListModels",
+        "method": "GET",
+        "params": null,
+        "path": "/api/v1/models",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "ListModelsResponse"
+          }
+        }
+      },
+      {
+        "description": "Load a model into memory",
+        "headers": [],
+        "id": "LoadModel",
+        "method": "POST",
+        "params": null,
+        "path": "/api/v1/models/load",
+        "request": {
+          "Json": {
+            "Named": "LoadModelBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "LoadModelResponse"
+          }
+        }
+      },
+      {
+        "description": "Unload a model from memory",
+        "headers": [],
+        "id": "UnloadModel",
+        "method": "POST",
+        "params": null,
+        "path": "/api/v1/models/unload",
+        "request": {
+          "Json": {
+            "Named": "UnloadModelBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "UnloadModelResponse"
+          }
+        }
+      },
+      {
+        "description": "Download a model from HuggingFace with SSE progress",
+        "headers": [],
+        "id": "DownloadModel",
+        "method": "POST",
+        "params": null,
+        "path": "/api/v1/models/download",
+        "request": {
+          "Json": {
+            "Named": "DownloadModelBody"
+          }
+        },
+        "response": "Binary"
+      },
+      {
+        "description": "Check the status of a download job",
+        "headers": [],
+        "id": "GetDownloadStatus",
+        "method": "POST",
+        "params": null,
+        "path": "/api/v1/models/download/status",
+        "request": {
+          "Json": {
+            "Named": "DownloadStatusBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "DownloadStatusResponse"
+          }
+        }
+      }
+    ],
+    "env_auth": [
+      "LM_API_TOKEN"
+    ],
+    "env_mapping": {
+      "api_key": null,
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    },
+    "env_username": null,
+    "headers": [],
+    "module_path": null,
+    "name": "LmStudio",
+    "request_id_header": null,
+    "request_suffix": null,
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "ef53981f19fbe304cf1591641525e98254b1f89f3bfa0b6a4223c8429f3b9f39",
+    "endpoints": [
+      {
+        "blake3": "fd9bab3353040b5bdb6bacee393f1f0079d69859a60326ba5932bd1a4e1d52e8",
+        "id": "Chat"
+      },
+      {
+        "blake3": "0fae5b4031bf055d46ed8669d78413da63af681c965b3722a9b206ca82b96224",
+        "id": "ListModels"
+      },
+      {
+        "blake3": "6d6b7bfbe0db6fa86b1653171f428ad45a379ca294711764ab6e5ff3b9300a90",
+        "id": "LoadModel"
+      },
+      {
+        "blake3": "4e906f5d35a62ae51a47e8a8987cb2ec0c85c58c7ce4459b4ef23b294a9f2546",
+        "id": "UnloadModel"
+      },
+      {
+        "blake3": "410b376c72fa10dbdd62d70010b3d89b655a2553ca3eaee39ef23875ef2cafba",
+        "id": "DownloadModel"
+      },
+      {
+        "blake3": "5d791a02326ef7af28d6a70e66eda52a58859bcefc8d8621a8ab7aafd9cd72d4",
+        "id": "GetDownloadStatus"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "Chat",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListModels",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "LoadModel",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "UnloadModel",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "DownloadModel",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetDownloadStatus",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "e1cf1adddaf259386ac00cc364c130891e877fcd70766b1d0748a72450919522",
+      "name": "ChatBody",
+      "rust_path": "::schematic_definitions::lmstudio::ChatBody"
+    },
+    {
+      "blake3": "e9a02366eac1c54609d4c236baca65c9d2761a165b5f73c8b7cbe27b8ebee0f6",
+      "name": "Message",
+      "rust_path": null
+    },
+    {
+      "blake3": "f03467170330a0c60d2ab6047fd07795e51e0962b7500c86e89b1fc4d43bf5ae",
+      "name": "LoadModelBody",
+      "rust_path": "::schematic_definitions::lmstudio::LoadModelBody"
+    },
+    {
+      "blake3": "ca2c083a67e5dc9b04da7313347431a096f8ec68eaaa152d48be5989987da9ae",
+      "name": "Integration",
+      "rust_path": null
+    },
+    {
+      "blake3": "dbf70123a4670210bcf5dbf1ecce116af907e41d6428b52fcf946fce0a8d3cb0",
+      "name": "LoadConfig",
+      "rust_path": null
+    },
+    {
+      "blake3": "84879926966506f34bf9aa5faa2eef79673368fc5f3c10f70f2b70bd21bf2380",
+      "name": "UnloadModelBody",
+      "rust_path": "::schematic_definitions::lmstudio::UnloadModelBody"
+    },
+    {
+      "blake3": "7325738e82d2f8d61f4a49e812f8ee5610d9e262309cc024f757c44e681f0399",
+      "name": "DownloadModelBody",
+      "rust_path": "::schematic_definitions::lmstudio::DownloadModelBody"
+    },
+    {
+      "blake3": "d46008ea153192a77470e1e3ce6dc98e9c33f8bd3a8eda159946bfff55e8c41b",
+      "name": "DownloadStatusBody",
+      "rust_path": "::schematic_definitions::lmstudio::DownloadStatusBody"
+    },
+    {
+      "blake3": "62b08a68a3be6244955ac05fd8d046b7388e680828f1dfe4adee384eb2b3a846",
+      "name": "ListModelsResponse",
+      "rust_path": "::schematic_definitions::lmstudio::ListModelsResponse"
+    },
+    {
+      "blake3": "b226d1792d4f5bba62e523e1a6bb689685c4b920236c807c71ff5d37fdb830ea",
+      "name": "Capabilities",
+      "rust_path": "::schematic_definitions::lmstudio::Capabilities"
+    },
+    {
+      "blake3": "33a49f6834bda9035f5934d523fc68e4a8869a2d787a1a14621e22f59da31df4",
+      "name": "LoadedInstance",
+      "rust_path": "::schematic_definitions::lmstudio::LoadedInstance"
+    },
+    {
+      "blake3": "86e62779f3d82a759bd45df052fb3b071102483be41961b78fedfe0dae6ae876",
+      "name": "ModelInfo",
+      "rust_path": "::schematic_definitions::lmstudio::ModelInfo"
+    },
+    {
+      "blake3": "c749e1208070f99fc7ef3173138a4b5ba94efda0dc6961c5137eb81d33ec8219",
+      "name": "Quantization",
+      "rust_path": "::schematic_definitions::lmstudio::Quantization"
+    },
+    {
+      "blake3": "08f6e5d949a4da79640332beb2f8bd411f62f889c8b743f29c7b578e36a314b3",
+      "name": "Stats",
+      "rust_path": "::schematic_definitions::lmstudio::Stats"
+    },
+    {
+      "blake3": "41f7507576d24812d518e101fe429f26d64b57d01661260bb228f043a35f6382",
+      "name": "LoadModelResponse",
+      "rust_path": "::schematic_definitions::lmstudio::LoadModelResponse"
+    },
+    {
+      "blake3": "18c6db3597d1cab1ef5e3c71f36533c444e20ae70095ccb7728a79df73411088",
+      "name": "UnloadModelResponse",
+      "rust_path": "::schematic_definitions::lmstudio::UnloadModelResponse"
+    },
+    {
+      "blake3": "e110d2d7f6fb6ccbfbf30551b256e9759463473835d6480bc5a27ab580dff507",
+      "name": "DownloadStatusResponse",
+      "rust_path": "::schematic_definitions::lmstudio::DownloadStatusResponse"
+    },
+    {
+      "blake3": "bf1415eae9b91ae301ca628310f4511a34eccda35b54ede6dedbe3708aae8b56",
+      "name": "OutputItem",
+      "rust_path": "::schematic_definitions::lmstudio::OutputItem"
+    }
+  ]
+}

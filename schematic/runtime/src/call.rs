@@ -73,6 +73,9 @@ impl<'a, A: Api, R: EndpointSpec<Api = A>> Call<'a, A, R> {
     /// Sends `credential` for this call, overriding the client's credential
     /// and the environment. Replaces [`anonymous`](Self::anonymous); the last
     /// one set wins.
+    ///
+    /// A public endpoint drops it; an endpoint whose policy does not accept
+    /// its kind refuses the send before any request.
     pub fn credential(mut self, credential: Credential) -> Self {
         self.options = self.options.credential(credential);
         self

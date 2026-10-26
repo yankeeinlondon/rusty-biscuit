@@ -1,73 +1,38 @@
-use schematic_define::{ApiRequest, ApiResponse, Endpoint, RestMethod};
+use super::super::*;
+use schematic_define::{DefinitionContext, DefinitionError};
+use schematic_define::{Endpoint, RestMethod};
 
 /// Rules engine endpoints (list, create, get, update, delete, test).
-pub fn rules_endpoints() -> Vec<Endpoint> {
-    vec![
-        Endpoint {
-            id: "ListRules".to_string(),
-            method: RestMethod::Get,
-            path: "/rules".to_string(),
-            description: "List all rules in the rules engine".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListRulesResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateRule".to_string(),
-            method: RestMethod::Post,
-            path: "/rules".to_string(),
-            description: "Create a new rule in the rules engine".to_string(),
-            request: Some(ApiRequest::json_type("CreateRuleBody")),
-            response: ApiResponse::json_type("RuleInfo"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetRule".to_string(),
-            method: RestMethod::Get,
-            path: "/rules/{id}".to_string(),
-            description: "Get details of a specific rule".to_string(),
-            request: None,
-            response: ApiResponse::json_type("RuleInfo"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateRule".to_string(),
-            method: RestMethod::Put,
-            path: "/rules/{id}".to_string(),
-            description: "Update an existing rule".to_string(),
-            request: Some(ApiRequest::json_type("CreateRuleBody")),
-            response: ApiResponse::json_type("RuleInfo"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteRule".to_string(),
-            method: RestMethod::Delete,
-            path: "/rules/{id}".to_string(),
-            description: "Delete a rule from the rules engine".to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "TestRule".to_string(),
-            method: RestMethod::Post,
-            path: "/rules/{id}/test".to_string(),
-            description: "Test a rule with sample data".to_string(),
-            request: Some(ApiRequest::json_type("TestRuleBody")),
-            response: ApiResponse::json_type("TestRuleResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-    ]
+pub fn rules_endpoints(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
+    Ok(vec![
+        Endpoint::new("ListRules", RestMethod::Get, "/rules")
+            .describes("List all rules in the rules engine")
+            .returns_json::<ListRulesResponse>(ctx)
+            .pagination(schematic_define::pagination::Collection::at("data").item_type("RuleInfo").unpaginated())
+            .build()?,
+        Endpoint::new("CreateRule", RestMethod::Post, "/rules")
+            .describes("Create a new rule in the rules engine")
+            .request_json::<CreateRuleBody>(ctx)
+            .returns_json::<RuleInfo>(ctx)
+            .build()?,
+        Endpoint::new("GetRule", RestMethod::Get, "/rules/{id}")
+            .describes("Get details of a specific rule")
+            .returns_json::<RuleInfo>(ctx)
+            .build()?,
+        Endpoint::new("UpdateRule", RestMethod::Put, "/rules/{id}")
+            .describes("Update an existing rule")
+            .request_json::<CreateRuleBody>(ctx)
+            .returns_json::<RuleInfo>(ctx)
+            .build()?,
+        Endpoint::new("DeleteRule", RestMethod::Delete, "/rules/{id}")
+            .describes("Delete a rule from the rules engine")
+            .returns_empty()
+            .build()?,
+        Endpoint::new("TestRule", RestMethod::Post, "/rules/{id}/test")
+            .describes("Test a rule with sample data")
+            .request_json::<TestRuleBody>(ctx)
+            .returns_json::<TestRuleResponse>(ctx)
+            .build()?,
+    ])
+
 }

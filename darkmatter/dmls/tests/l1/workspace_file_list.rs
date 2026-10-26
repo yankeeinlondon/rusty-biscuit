@@ -1,9 +1,12 @@
 //! Level-1 sessions for the workspace file list and on-demand parsing: what
 //! startup reads, when path diagnostics publish, which documents a feature
 //! parses, and how disk changes, open buffers, and watch fallbacks keep the
-//! list and the parses current.
+//! list and the parses current. The live graph's path-derived work (wiki
+//! universes, path facts, portability keys, document tables) is rebuilt
+//! only when the list, the graph's documents, or the wiki roots change,
+//! never for a content edit.
 //!
-//! Parse and read counts come from `dmls::work_counters`, which are
+//! Parse, read, and path-work counts come from `dmls::work_counters`, which are
 //! process-wide; nextest runs each test in its own process, so a delta
 //! counts only this test's server.
 
@@ -131,7 +134,14 @@ fn path_diagnostics_wait_for_the_file_list() {
     let mut fixture = LspFixture::start_with_file_list_gate(&workspace);
     fixture.initialize_unlisted(watched_params(workspace.path()));
     open(&fixture, &uri(&source), text);
-    let early = codes(&latest(&mut fixture, &uri(&source)));
+    // Startup counts as an outstanding registry job until discovery returns,
+    // so `latest`'s flush would wait for the gated walk; a document request
+    // alone settles the open's diagnostics (the document has no frontmatter,
+    // so it queues no registry job).
+    let response = fixture.request("textDocument/documentSymbol", json!({ "textDocument": { "uri": uri(&source) } }));
+    assert!(response.error.is_none(), "{response:?}");
+    let early = fixture.take_buffered_diagnostics(&uri(&source)).expect("diagnostics were published");
+    let early = codes(early["diagnostics"].as_array().expect("diagnostics array"));
     let duplicate = "dm.links.duplicate_heading".to_string();
     assert_eq!(early, vec![duplicate.clone(), duplicate.clone()], "before the list: {early:?}");
 
@@ -503,5 +513,241 @@ fn transclusion_cycles_are_found_through_unopened_documents() {
     let diagnostics = codes(&latest(&mut fixture, &uri(&source)));
     assert!(diagnostics.contains(&"dm.transclusion.cycle".to_string()), "{diagnostics:?}");
     assert_eq!(work_since(before).parses, 3, "a.md, then b.md and c.md outward; not unrelated.md");
+    fixture.shutdown();
+}
+
+/// `didChangeWatchedFiles` for several paths in one notification, which the
+/// server applies as one index batch.
+fn watched_changes(fixture: &LspFixture<'_>, changes: &[(&std::path::Path, u32)]) {
+    let changes: Vec<Value> = changes.iter().map(|(path, kind)| json!({ "uri": uri(path), "type": kind })).collect();
+    fixture.notify("workspace/didChangeWatchedFiles", json!({ "changes": changes }));
+}
+
+/// [`latest`], also requiring the publication to carry the open buffer's
+/// `version`, so it was computed after the edit that set it.
+fn latest_versioned(fixture: &mut LspFixture<'_>, uri: &str, version: i32) -> Vec<Value> {
+    fixture.flush_server_with("textDocument/documentSymbol", json!({ "textDocument": { "uri": uri } }));
+    let latest = fixture.take_buffered_diagnostics(uri).expect("diagnostics were published");
+    while fixture.take_buffered_diagnostics(uri).is_some() {}
+    assert_eq!(latest["version"], json!(version), "{latest}");
+    latest["diagnostics"].as_array().cloned().unwrap_or_default()
+}
+
+fn position(fixture: &mut LspFixture<'_>, method: &str, uri: &str, line: u32, character: u32) -> Value {
+    let response = fixture.request(
+        method,
+        json!({ "textDocument": { "uri": uri }, "position": { "line": line, "character": character } }),
+    );
+    assert!(response.error.is_none(), "{method}: {:?}", response.error);
+    response.result.unwrap_or(Value::Null)
+}
+
+/// Each definition target as its URI and start line, sorted.
+fn definition_targets(result: &Value) -> Vec<(String, u64)> {
+    let locations = match result {
+        Value::Array(locations) => locations.clone(),
+        Value::Null => Vec::new(),
+        location => vec![location.clone()],
+    };
+    let mut targets: Vec<(String, u64)> = locations
+        .iter()
+        .map(|location| {
+            let uri = location.get("targetUri").or_else(|| location.get("uri")).and_then(Value::as_str);
+            let range = location.get("targetSelectionRange").or_else(|| location.get("range"));
+            let line = range.and_then(|range| range["start"]["line"].as_u64());
+            (uri.unwrap_or_default().to_string(), line.unwrap_or(u64::MAX))
+        })
+        .collect();
+    targets.sort();
+    targets
+}
+
+fn completion_labels(result: &Value) -> Vec<String> {
+    let items = result.as_array().cloned().or_else(|| result["items"].as_array().cloned()).unwrap_or_default();
+    let mut labels: Vec<String> = items.iter().filter_map(|item| item["label"].as_str().map(str::to_string)).collect();
+    labels.sort();
+    labels
+}
+
+/// The live graph's path-derived work: universes, wiki path facts,
+/// portability keys, and document tables.
+fn path_work(work: WorkCounts) -> [usize; 4] {
+    [work.wiki_universes, work.wiki_path_facts, work.wiki_portability_keys, work.document_tables]
+}
+
+#[test]
+fn a_listed_target_edit_reuses_path_work_and_refreshes_its_dependents() {
+    let workspace = LspWorkspace::new();
+    let target = workspace.path().join("target.md");
+    std::fs::write(&target, "# Alpha\n\n## Beta\n").unwrap();
+    let source = workspace.path().join("source.md");
+    let text = "[a](target.md#alpha)\n\n::file ./target.md\n";
+    std::fs::write(&source, text).unwrap();
+    let (source_uri, target_uri) = (uri(&source), uri(&target));
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_params(workspace.path()));
+    open(&fixture, &source_uri, text);
+    assert!(latest(&mut fixture, &source_uri).is_empty());
+    // The anchor check prepared the target; opening it with its disk bytes
+    // makes it a listed open target.
+    open(&fixture, &target_uri, "# Alpha\n\n## Beta\n");
+    latest(&mut fixture, &target_uri);
+    assert!(latest(&mut fixture, &source_uri).is_empty());
+    let anchor = "[a](target.md#".len() as u32;
+    let definition = position(&mut fixture, "textDocument/definition", &source_uri, 0, anchor + 2);
+    assert_eq!(definition_targets(&definition), vec![(target_uri.clone(), 0)]);
+
+    // `alpha` moves to line four and the target transcludes its source.
+    let before = work_counts();
+    change(&fixture, &target_uri, 2, "# Intro\n\nText.\n\n## Alpha\n\n::file ./source.md\n");
+    latest_versioned(&mut fixture, &target_uri, 2);
+    let dependent = codes(&latest_versioned(&mut fixture, &source_uri, 1));
+    assert_eq!(path_work(work_since(before)), [0; 4], "a content edit reuses every path fact");
+    assert_eq!(dependent, vec!["dm.transclusion.cycle".to_string()]);
+    let definition = position(&mut fixture, "textDocument/definition", &source_uri, 0, anchor + 2);
+    assert_eq!(definition_targets(&definition), vec![(target_uri.clone(), 4)], "{definition}");
+    let hover = position(&mut fixture, "textDocument/hover", &source_uri, 0, anchor + 2)["contents"].to_string();
+    assert!(hover.contains("Intro") && !hover.contains("Beta"), "{hover}");
+    let completion = position(&mut fixture, "textDocument/completion", &source_uri, 0, anchor);
+    assert_eq!(completion_labels(&completion), vec!["alpha".to_string(), "intro".to_string()]);
+
+    // Renaming the heading breaks the anchor; the cycle goes with the
+    // transclusion.
+    let before = work_counts();
+    change(&fixture, &target_uri, 3, "# Intro\n\n## Omega\n");
+    latest_versioned(&mut fixture, &target_uri, 3);
+    let dependent = codes(&latest_versioned(&mut fixture, &source_uri, 1));
+    assert_eq!(path_work(work_since(before)), [0; 4]);
+    assert_eq!(dependent, vec!["dm.links.missing_anchor".to_string()]);
+    let completion = position(&mut fixture, "textDocument/completion", &source_uri, 0, anchor);
+    assert_eq!(completion_labels(&completion), vec!["intro".to_string(), "omega".to_string()]);
+    fixture.shutdown();
+}
+
+#[test]
+fn one_watched_batch_of_creations_and_one_of_deletions_each_rebuild_once() {
+    let workspace = LspWorkspace::new();
+    // A `dup.md` beside the source would win as the same-directory match,
+    // never ambiguous, so every candidate sits in its own folder.
+    let unique = workspace.path().join("notes/dup.md");
+    std::fs::create_dir(unique.parent().unwrap()).unwrap();
+    std::fs::write(&unique, "# Dup\n").unwrap();
+    let source = workspace.path().join("source.md");
+    let text = "[[dup]]\n";
+    let source_uri = uri(&source);
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_params(workspace.path()));
+    open(&fixture, &source_uri, text);
+    assert!(latest(&mut fixture, &source_uri).is_empty());
+    let definition = position(&mut fixture, "textDocument/definition", &source_uri, 0, 3);
+    assert_eq!(definition_targets(&definition), vec![(uri(&unique), 0)]);
+
+    let created: Vec<std::path::PathBuf> =
+        ["a", "b"].iter().map(|folder| workspace.path().join(folder).join("dup.md")).collect();
+    for path in &created {
+        std::fs::create_dir(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "# Dup\n").unwrap();
+    }
+    let before = work_counts();
+    watched_changes(&fixture, &[(&created[0], 1), (&created[1], 1)]);
+    let ambiguous = codes(&latest_versioned(&mut fixture, &source_uri, 1));
+    let work = work_since(before);
+    assert_eq!((work.wiki_universes, work.document_tables), (1, 1), "one rebuild for the batch: {work:?}");
+    assert_eq!(ambiguous, vec!["wiki.ambiguous-target".to_string()]);
+    let definition = position(&mut fixture, "textDocument/definition", &source_uri, 0, 3);
+    let mut expected: Vec<(String, u64)> =
+        [&unique, &created[0], &created[1]].iter().map(|path| (uri(path), 0)).collect();
+    expected.sort();
+    assert_eq!(definition_targets(&definition), expected, "{definition}");
+
+    for path in &created {
+        std::fs::remove_file(path).unwrap();
+    }
+    let before = work_counts();
+    watched_changes(&fixture, &[(&created[0], 3), (&created[1], 3)]);
+    let unique_again = latest_versioned(&mut fixture, &source_uri, 1);
+    let work = work_since(before);
+    assert_eq!((work.wiki_universes, work.document_tables), (1, 1), "one rebuild for the batch: {work:?}");
+    assert!(unique_again.is_empty(), "{unique_again:?}");
+    let definition = position(&mut fixture, "textDocument/definition", &source_uri, 0, 3);
+    assert_eq!(definition_targets(&definition), vec![(uri(&unique), 0)]);
+    fixture.shutdown();
+}
+
+#[test]
+fn an_awaited_unlisted_creation_resolves_and_build_output_costs_nothing() {
+    let workspace = LspWorkspace::new();
+    std::fs::write(workspace.path().join(".gitignore"), "generated/\ntarget/\n").unwrap();
+    let source = workspace.path().join("source.md");
+    let text = "[g](generated/report.md)\n";
+    let source_uri = uri(&source);
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_params(workspace.path()));
+    open(&fixture, &source_uri, text);
+    assert_eq!(codes(&latest(&mut fixture, &source_uri)), vec!["dm.links.broken_path".to_string()]);
+
+    // The ignored folder keeps the report out of the list; the broken link
+    // is waiting for it, so its creation re-resolves through the resolver.
+    let report = workspace.path().join("generated/report.md");
+    std::fs::create_dir(report.parent().unwrap()).unwrap();
+    std::fs::write(&report, "# Report\n").unwrap();
+    let before = work_counts();
+    watched_change(&fixture, &report, 1);
+    let resolved = latest_versioned(&mut fixture, &source_uri, 1);
+    let work = work_since(before);
+    assert!(resolved.is_empty(), "{resolved:?}");
+    assert_eq!(path_work(work), [0; 4], "the list did not change: {work:?}");
+    let definition = position(&mut fixture, "textDocument/definition", &source_uri, 0, 6);
+    assert_eq!(definition_targets(&definition), vec![(uri(&report), 0)], "{definition}");
+
+    // Build output nothing links to: no graph work and no parse.
+    let output = workspace.path().join("target/debug/notes.md");
+    std::fs::create_dir_all(output.parent().unwrap()).unwrap();
+    std::fs::write(&output, "# Notes\n").unwrap();
+    let before = work_counts();
+    watched_change(&fixture, &output, 1);
+    let unchanged = latest_versioned(&mut fixture, &source_uri, 1);
+    let work = work_since(before);
+    assert!(unchanged.is_empty(), "{unchanged:?}");
+    assert_eq!(path_work(work), [0; 4], "{work:?}");
+    assert_eq!((work.parses, work.reads), (0, 0), "{work:?}");
+    fixture.shutdown();
+}
+
+#[test]
+fn opening_a_loaded_ignored_target_with_its_disk_text_makes_it_a_wiki_target_at_once() {
+    let workspace = LspWorkspace::new();
+    std::fs::write(workspace.path().join(".gitignore"), "generated/\n").unwrap();
+    let report = workspace.path().join("generated/report.md");
+    std::fs::create_dir(report.parent().unwrap()).unwrap();
+    let report_text = "# Report\n\n[back](../guide.md)\n";
+    std::fs::write(&report, report_text).unwrap();
+    let guide = workspace.path().join("guide.md");
+    let text = "[r](generated/report.md#report)\n[[report]]\n[[rep\n";
+    let (guide_uri, report_uri) = (uri(&guide), uri(&report));
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_params(workspace.path()));
+    open(&fixture, &guide_uri, text);
+    // The anchor check loads the ignored report as a dependency, which no
+    // wiki link may match.
+    let before_open = codes(&latest(&mut fixture, &guide_uri));
+    let definition = position(&mut fixture, "textDocument/definition", &guide_uri, 1, 3);
+    assert_eq!(definition_targets(&definition), Vec::new(), "{before_open:?} {definition}");
+    let completion = position(&mut fixture, "textDocument/completion", &guide_uri, 2, 5);
+    assert!(!completion_labels(&completion).contains(&"report".to_string()), "{completion}");
+
+    // Opening it with the bytes already parsed makes it an ordinary open
+    // document: the next requests see it as a wiki target.
+    let before = work_counts();
+    open(&fixture, &report_uri, report_text);
+    latest(&mut fixture, &report_uri);
+    let work = work_since(before);
+    assert_eq!((work.wiki_universes, work.document_tables), (1, 1), "one rebuild: {work:?}");
+    let definition = position(&mut fixture, "textDocument/definition", &guide_uri, 1, 3);
+    assert_eq!(definition_targets(&definition), vec![(report_uri.clone(), 0)], "{definition}");
+    let completion = position(&mut fixture, "textDocument/completion", &guide_uri, 2, 5);
+    assert!(completion_labels(&completion).contains(&"report".to_string()), "{completion}");
+    let after_open = codes(&latest(&mut fixture, &guide_uri));
+    assert!(after_open.iter().all(|code| !code.starts_with("wiki.")), "{before_open:?} -> {after_open:?}");
     fixture.shutdown();
 }

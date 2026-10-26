@@ -148,6 +148,45 @@ cwd and subscription mechanisms stay unsupported (see the `os` skill).
 Every backend shares the per-mechanism `Tally` in `backend.rs`. Contract:
 `sniff/docs/topics/filesystem-query.md`.
 
+Each `ProcessRecord` also carries context (schema 3): `parent_pid`,
+`app_name` (macOS nearest `.app` bundle name, Windows `FileDescription`,
+Linux always `None`), `ancestors` (verified, nearest first, at most
+`MAX_ANCESTORS` = 8, never PID 0/1), and `ancestry_end`, the explicit
+reason the chain stops (`not_read`, `unsupported`, `unreadable`, ... — read
+it before treating a missing parent as "none"). `process::contextualize` runs
+after enrichment and `ancestry::chain` (pure, unit-tested with an injected
+reader) walks parents through `UsageBackend::link`, one PID per read; a parent
+whose start order exceeds its child's is a reused PID and ends the chain.
+Never build the chain from `os::self_and_ancestors`: it refreshes the whole
+process table. macOS ancestors use `proc_bsdshortinfo` plus `sysctl`
+`kern.proc.pid` start time because `proc_bsdinfo` is same-user only and would
+stop at a root-owned `login`. Windows `OpenHandle` evidence keeps
+`access: None`: the file-side holder query returns PIDs only. Each read counts
+`filesystem.query.parent_lookups`. The new fields deserialize with
+`#[serde(default)]` so persisted schema 1/2 reports (`wt` recovery records)
+still load.
+
+**A library that walks a tree before asking who uses it should supply its own
+index** (`TreeIndex::builder(root_identity)` + `entry(relative, kind,
+identity)` → `PathUsageOptions::with_tree_index(Arc)`) instead of letting the
+query walk again; `wt remove` passes its deletion inventory this way. The
+walk and the builder produce the same root-relative `TreeIndex` (root = empty
+path), and paths are joined onto `root.resolved` only for matches and the
+Windows probe list (`TreeIndex::probe_entries`, built once per scan in
+`win32.rs`). Root verification and the recheck still run; a different root
+identity, a file root, or `target_only` is `InvalidOption`. The report's
+`index_provenance` (`walked`/`supplied`/`unknown`) is required at schema 2;
+`PathUsageReport` deserializes through a private `RawReport`
+(`try_from`) so absent-at-schema-1 reads as `unknown`, never `walked`. Keep
+that loader when adding report fields. Tests: the "caller-supplied tree index"
+section of `query/tests.rs`.
+
+`filesystem::space::available_space(path)` is the focused free-space reading
+(nearest existing ancestor, aliases resolved by canonicalization, `f_bavail` /
+`GetDiskFreeSpaceExW` caller quota). It never calls `hardware::storage`
+(device inventory that spawns `diskutil`). Its `SpaceSource` trait is the
+test seam. Contract: `sniff/docs/topics/available-space.md`.
+
 `SniffConfig` remains a compatibility surface, but new code should use request
 plans.
 

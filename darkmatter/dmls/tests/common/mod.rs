@@ -175,6 +175,14 @@ pub struct LspFixture<'workspace> {
     /// or dropped, for a fixture started with
     /// [`LspFixture::start_with_registry_gate`].
     registry_gate: Option<crossbeam_channel::Sender<()>>,
+    /// Holds each workspace-pass probe until sent to (one probe per message)
+    /// or dropped, for a fixture started with
+    /// [`LspFixture::start_with_registry_probe_gate`].
+    registry_probe_gate: Option<crossbeam_channel::Sender<()>>,
+    /// Holds each startup-phase probe until sent to (one probe per message)
+    /// or dropped, for a fixture started with
+    /// [`LspFixture::start_with_startup_probe_gate`].
+    startup_probe_gate: Option<crossbeam_channel::Sender<()>>,
     /// The last [`dmls::StartupEvent::RegistryJobsOutstanding`] count seen.
     registry_jobs: usize,
 }
@@ -261,14 +269,22 @@ impl<'workspace> LspFixture<'workspace> {
     /// so a test can talk to the server while a preparation is held.
     pub fn start_with_registry_gate(workspace: &'workspace LspWorkspace) -> Self {
         let (gate_tx, gate_rx) = crossbeam_channel::unbounded();
-        let mut fixture = Self::spawn_with_all_hooks(
-            workspace,
-            Duration::ZERO,
-            Self::fixture_snapshot(workspace),
-            None,
-            None,
-            Some(gate_rx),
-        );
+        let hooks = dmls::StartupHooks { registry_gate: Some(gate_rx), ..dmls::StartupHooks::default() };
+        let mut fixture = Self::spawn_with_all_hooks(workspace, Duration::ZERO, Self::fixture_snapshot(workspace), hooks);
+        fixture.registry_gate = Some(gate_tx);
+        fixture
+    }
+
+    /// [`LspFixture::start_with_registry_gate`] on a server timed by `clock`,
+    /// so a test can advance time while a request is parked on a held job.
+    pub fn start_with_registry_gate_and_clock(
+        workspace: &'workspace LspWorkspace,
+        clock: Arc<dyn dmls::clock::Clock>,
+    ) -> Self {
+        let (gate_tx, gate_rx) = crossbeam_channel::unbounded();
+        let hooks = dmls::StartupHooks { registry_gate: Some(gate_rx), ..dmls::StartupHooks::default() };
+        let mut fixture =
+            Self::spawn_with_clock(workspace, Duration::ZERO, Self::fixture_snapshot(workspace), hooks, Some(clock));
         fixture.registry_gate = Some(gate_tx);
         fixture
     }
@@ -283,6 +299,121 @@ impl<'workspace> LspFixture<'workspace> {
     /// Lets every current and later trigger-registry job through.
     pub fn open_registry_gate(&mut self) {
         self.registry_gate = None;
+    }
+
+    /// Like [`LspFixture::start`], but each probe of a workspace pass on the
+    /// registry worker waits for [`LspFixture::release_registry_probe`] (or
+    /// [`LspFixture::open_registry_probe_gate`]) before it is prepared, so a
+    /// test can hold a pass between two probes. Document jobs are not held.
+    pub fn start_with_registry_probe_gate(workspace: &'workspace LspWorkspace) -> Self {
+        let (gate_tx, gate_rx) = crossbeam_channel::unbounded();
+        let hooks = dmls::StartupHooks { registry_probe_gate: Some(gate_rx), ..dmls::StartupHooks::default() };
+        let mut fixture = Self::spawn_with_all_hooks(workspace, Duration::ZERO, Self::fixture_snapshot(workspace), hooks);
+        fixture.registry_probe_gate = Some(gate_tx);
+        fixture
+    }
+
+    /// Lets one held workspace probe through.
+    pub fn release_registry_probe(&self) {
+        if let Some(gate) = &self.registry_probe_gate {
+            gate.send(()).expect("registry probe gate open");
+        }
+    }
+
+    /// Lets every current and later workspace probe through.
+    pub fn open_registry_probe_gate(&mut self) {
+        self.registry_probe_gate = None;
+    }
+
+    /// Like [`LspFixture::start`], but each probe preparation a startup
+    /// phase runs on the registry worker, once it has read its inputs, waits
+    /// for [`LspFixture::release_startup_probe`] (or
+    /// [`LspFixture::open_startup_probe_gate`]) before installing its result,
+    /// so a test can hold startup's preparation in flight while discovery,
+    /// requests, and changes proceed. Initialize it with
+    /// [`LspFixture::initialize_unlisted`].
+    pub fn start_with_startup_probe_gate(workspace: &'workspace LspWorkspace) -> Self {
+        let (gate_tx, gate_rx) = crossbeam_channel::unbounded();
+        let hooks = dmls::StartupHooks { startup_probe_gate: Some(gate_rx), ..dmls::StartupHooks::default() };
+        let mut fixture = Self::spawn_with_all_hooks(workspace, Duration::ZERO, Self::fixture_snapshot(workspace), hooks);
+        fixture.startup_probe_gate = Some(gate_tx);
+        fixture
+    }
+
+    /// Like [`LspFixture::start_with_startup_probe_gate`], but the file-list
+    /// walk also waits for [`LspFixture::release_file_list`], so a test
+    /// decides whether discovery's repositories are found before or after
+    /// the initial phase lists its probes.
+    pub fn start_with_file_list_and_startup_probe_gates(workspace: &'workspace LspWorkspace) -> Self {
+        let (file_list_tx, file_list_rx) = crossbeam_channel::bounded(1);
+        let (probe_tx, probe_rx) = crossbeam_channel::unbounded();
+        let hooks = dmls::StartupHooks {
+            file_list_gate: Some(file_list_rx),
+            startup_probe_gate: Some(probe_rx),
+            ..dmls::StartupHooks::default()
+        };
+        let mut fixture = Self::spawn_with_all_hooks(workspace, Duration::ZERO, Self::fixture_snapshot(workspace), hooks);
+        fixture.file_list_gate = Some(file_list_tx);
+        fixture.startup_probe_gate = Some(probe_tx);
+        fixture
+    }
+
+    /// Lets one held startup probe through.
+    pub fn release_startup_probe(&self) {
+        if let Some(gate) = &self.startup_probe_gate {
+            gate.send(()).expect("startup probe gate open");
+        }
+    }
+
+    /// Lets every current and later startup probe through.
+    pub fn open_startup_probe_gate(&mut self) {
+        self.startup_probe_gate = None;
+    }
+
+    /// The kinds of the trigger-registry preparations that finish, in the
+    /// order the server handled them, until no job is queued or running.
+    ///
+    /// The server reports a job's decremented count before its
+    /// [`dmls::StartupEvent::RegistryPrepared`], so each decrement owes one
+    /// completion still to read.
+    pub fn registry_jobs_until_idle(&mut self) -> Vec<dmls::RegistryJobKind> {
+        let mut jobs = Vec::new();
+        let mut owed = 0usize;
+        let mut waiting = false;
+        loop {
+            let event = if waiting {
+                match self.startup_events.recv_timeout(MESSAGE_BOUND) {
+                    Ok(event) => event,
+                    Err(error) => panic!(
+                        "{} registry jobs still outstanding after {MESSAGE_BOUND:?}: {error}",
+                        self.registry_jobs
+                    ),
+                }
+            } else {
+                match self.startup_events.try_recv() {
+                    Ok(event) => event,
+                    Err(_) if self.registry_jobs == 0 && owed == 0 => return jobs,
+                    Err(_) => {
+                        waiting = true;
+                        continue;
+                    }
+                }
+            };
+            match event {
+                dmls::StartupEvent::RegistryJobsOutstanding(outstanding) => {
+                    owed += self.registry_jobs.saturating_sub(outstanding);
+                    self.registry_jobs = outstanding;
+                }
+                dmls::StartupEvent::RegistryPrepared { job, .. } => {
+                    owed = owed.saturating_sub(1);
+                    jobs.push(job);
+                }
+                _ => {}
+            }
+            if waiting && self.registry_jobs == 0 && owed == 0 {
+                return jobs;
+            }
+        }
     }
 
     /// Waits for a trigger-registry preparation of kind `job` to finish and
@@ -332,6 +463,23 @@ impl<'workspace> LspFixture<'workspace> {
                 Ok(seen) if seen == event => return,
                 Ok(_) => {}
                 Err(error) => panic!("no {event:?} within {MESSAGE_BOUND:?}: {error}"),
+            }
+        }
+    }
+
+    /// The startup events the server reports, in order, up to and including
+    /// the first that `last` accepts.
+    pub fn startup_events_until(&mut self, last: impl Fn(&dmls::StartupEvent) -> bool) -> Vec<dmls::StartupEvent> {
+        let mut events = Vec::new();
+        loop {
+            match self.next_event() {
+                Ok(event) => {
+                    events.push(event);
+                    if last(&event) {
+                        return events;
+                    }
+                }
+                Err(error) => panic!("no expected startup event within {MESSAGE_BOUND:?}: {error}; saw {events:?}"),
             }
         }
     }
@@ -398,31 +546,41 @@ impl<'workspace> LspFixture<'workspace> {
         file_list_gate: Option<crossbeam_channel::Receiver<()>>,
         index_round_gate: Option<crossbeam_channel::Receiver<()>>,
     ) -> Self {
-        Self::spawn_with_all_hooks(workspace, epilogue_delay, snapshot, file_list_gate, index_round_gate, None)
+        let hooks = dmls::StartupHooks { file_list_gate, index_round_gate, ..dmls::StartupHooks::default() };
+        Self::spawn_with_all_hooks(workspace, epilogue_delay, snapshot, hooks)
     }
 
+    /// Starts the server with `hooks`' gates; the fixture supplies the
+    /// observer.
     fn spawn_with_all_hooks(
         workspace: &'workspace LspWorkspace,
         epilogue_delay: Duration,
         snapshot: RequestSnapshot,
-        file_list_gate: Option<crossbeam_channel::Receiver<()>>,
-        index_round_gate: Option<crossbeam_channel::Receiver<()>>,
-        registry_gate: Option<crossbeam_channel::Receiver<()>>,
+        hooks: dmls::StartupHooks,
+    ) -> Self {
+        Self::spawn_with_clock(workspace, epilogue_delay, snapshot, hooks, None)
+    }
+
+    /// [`LspFixture::spawn_with_all_hooks`], timed by `clock` when given.
+    fn spawn_with_clock(
+        workspace: &'workspace LspWorkspace,
+        epilogue_delay: Duration,
+        snapshot: RequestSnapshot,
+        mut hooks: dmls::StartupHooks,
+        clock: Option<Arc<dyn dmls::clock::Clock>>,
     ) -> Self {
         let (events_tx, events_rx) = crossbeam_channel::unbounded();
-        let hooks = dmls::StartupHooks {
-            file_list_gate,
-            index_round_gate,
-            registry_gate,
-            observer: Some(events_tx),
-        };
+        hooks.observer = Some(events_tx);
         let (server_side, client_side) = Connection::memory();
         let (outcome_tx, outcome_rx) = mpsc::channel();
         let observations = workspace.observations();
         let worker_observations = Arc::clone(&observations);
         let workspace_root: PathBuf = workspace.path().to_path_buf();
         let server_thread = std::thread::spawn(move || {
-            let options = dmls::RunOptions::new(snapshot).with_startup_hooks(hooks);
+            let mut options = dmls::RunOptions::new(snapshot).with_startup_hooks(hooks);
+            if let Some(clock) = clock {
+                options = options.with_clock(clock);
+            }
             let result = dmls::run_server(server_side, options).map_err(|error| error.to_string());
             if !epilogue_delay.is_zero() {
                 std::thread::sleep(epilogue_delay);
@@ -449,6 +607,8 @@ impl<'workspace> LspFixture<'workspace> {
             file_list_gate: None,
             index_round_gate: None,
             registry_gate: None,
+            registry_probe_gate: None,
+            startup_probe_gate: None,
             registry_jobs: 0,
         }
     }
@@ -571,13 +731,32 @@ impl<'workspace> LspFixture<'workspace> {
         }
     }
 
-    /// Initializes the session and waits for the workspace file list, so
-    /// every later diagnostic is computed against it. The startup registry
-    /// line is logged before the list installs.
+    /// Initializes the session and waits for the workspace file list and
+    /// for startup's trigger registries, so every later diagnostic is
+    /// computed against both. The list installs first; the startup registry
+    /// line follows startup's last preparation phase.
     pub fn initialize(&mut self, params: Value) -> Value {
         let result = self.initialize_unlisted(params);
-        self.wait_for_file_list();
+        self.wait_for_startup_events();
         result
+    }
+
+    /// Waits for both [`dmls::StartupEvent::FileListInstalled`] and the
+    /// startup [`dmls::StartupEvent::RegistryPrepared`], in either order.
+    pub fn wait_for_startup_events(&mut self) {
+        let (mut listed, mut prepared) = (false, false);
+        while !(listed && prepared) {
+            match self.next_event() {
+                Ok(dmls::StartupEvent::FileListInstalled) => listed = true,
+                Ok(dmls::StartupEvent::RegistryPrepared { job: dmls::RegistryJobKind::Startup, .. }) => {
+                    prepared = true;
+                }
+                Ok(_) => {}
+                Err(error) => panic!(
+                    "startup incomplete within {MESSAGE_BOUND:?} (listed {listed}, prepared {prepared}): {error}"
+                ),
+            }
+        }
     }
 
     /// Initializes the session without waiting for the file list or for the

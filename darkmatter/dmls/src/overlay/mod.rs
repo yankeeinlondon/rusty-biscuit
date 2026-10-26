@@ -146,8 +146,7 @@ pub struct OverlayState {
     inner: Mutex<OverlayCache>,
     /// The repositories the last workspace listing found below the
     /// workspace folders, whose scopes
-    /// [`prepare_workspace_registries`](Self::prepare_workspace_registries)
-    /// adds. A separate lock, so recording them never waits for a lookup.
+    /// [`workspace_probes`](Self::workspace_probes) adds. A separate lock, so recording them never waits for a lookup.
     workspace_repositories: Mutex<Vec<PathBuf>>,
 }
 
@@ -531,44 +530,56 @@ impl OverlayState {
         cache.triggers.invalidate_all();
     }
 
-    /// The folders the prepared trigger registries read from, for
-    /// schema-location watches.
-    pub fn trigger_watch_folders(&self) -> std::collections::BTreeSet<PathBuf> {
+    /// The folders the prepared trigger registries read from or searched,
+    /// for schema-location watches.
+    pub fn trigger_watch_folders(&self) -> std::collections::BTreeSet<crate::workspace::watch::WatchedFolder> {
         let cache = self.inner.lock().expect("overlay lock poisoned");
         cache.triggers.watch_folders()
     }
 
-    /// Prepares the trigger registries of the workspace scopes (see
-    /// [`workspace_probes`]): each workspace folder, each repository the
-    /// last listing found below one
+    /// The probe documents of the workspace scopes (see [`workspace_probes`]),
+    /// from the repositories and catalogs current now: each workspace
+    /// folder, each repository the last listing found below one
     /// ([`set_workspace_repositories`](Self::set_workspace_repositories)),
     /// and inside each of those the packages and package areas its
     /// repository's scope catalog lists, plus each first-level directory of
     /// a monorepo that is a package area only by the catalog's first-directory
     /// fallback and has a `schemas` folder. Their union is the set of schema
-    /// roots the folders' documents apply, so every root is classified and
-    /// its payloads loaded at startup, and again after every refresh that
-    /// marked them stale.
+    /// roots the folders' documents apply, so preparing every probe (startup
+    /// does, and again every refresh that marked them stale) classifies every
+    /// root and loads its payloads.
     ///
     /// Each scope is prepared as a document named [`WORKSPACE_PROBE`] in its
-    /// folder, through [`prepare_registry`](Self::prepare_registry), as a
-    /// document there would be; no such file is read and no Markdown is
-    /// parsed. A registry that is still fresh is not prepared again. A
-    /// folder whose context cannot be built is skipped, since its documents
-    /// report the context failure. Does I/O: the server calls it only off
+    /// folder ([`prepare_workspace_probe`](Self::prepare_workspace_probe)), as
+    /// a document there would be; no such file is read and no Markdown is
+    /// parsed. Builds contexts, so it does I/O: the server calls it only off
     /// its dispatch thread.
-    pub fn prepare_workspace_registries(
+    pub fn workspace_probes(
         &self,
         workspace_roots: &[PathBuf],
         contexts: &crate::context::RepositoryContexts,
-    ) {
-        let repositories = self.workspace_repositories();
-        for probe in workspace_probes(workspace_roots, &repositories, contexts) {
-            let resolution = contexts.for_document(&probe);
-            let Ok(context) = resolution.context() else {
-                continue;
-            };
-            self.prepare_registry(&probe, workspace_roots, context);
+    ) -> Vec<PathBuf> {
+        workspace_probes(workspace_roots, &self.workspace_repositories(), contexts)
+    }
+
+    /// Prepares one of the [`workspace_probes`](Self::workspace_probes) in
+    /// its folder's current context, through
+    /// [`prepare_registry_held`](Self::prepare_registry_held) with `hold`. A
+    /// registry that is still fresh is not prepared again, and a folder
+    /// whose context cannot be built is skipped (and reported
+    /// [`Failed`](ProbeOutcome::Failed)), since its documents report the
+    /// context failure.
+    pub fn prepare_workspace_probe(
+        &self,
+        probe: &Path,
+        workspace_roots: &[PathBuf],
+        contexts: &crate::context::RepositoryContexts,
+        hold: &dyn Fn(),
+    ) -> ProbeOutcome {
+        let resolution = contexts.for_document(probe);
+        match resolution.context() {
+            Ok(context) => self.run_preparation(probe, workspace_roots, context, hold).0,
+            Err(_) => ProbeOutcome::Failed,
         }
     }
 
@@ -657,19 +668,50 @@ impl OverlayState {
         workspace_roots: &[PathBuf],
         context: &FileResolutionContext,
     ) -> bool {
+        self.prepare_registry_held(path, workspace_roots, context, &|| {})
+    }
+
+    /// [`prepare_registry`](Self::prepare_registry), calling `hold` (a test
+    /// seam) when a preparation that ran has read its inputs and before its
+    /// result is installed, so a change recorded meanwhile makes it stale.
+    pub fn prepare_registry_held(
+        &self,
+        path: &Path,
+        workspace_roots: &[PathBuf],
+        context: &FileResolutionContext,
+        hold: &dyn Fn(),
+    ) -> bool {
+        self.run_preparation(path, workspace_roots, context, hold).1
+    }
+
+    /// [`prepare_registry_held`](Self::prepare_registry_held), also reporting
+    /// what the preparation did.
+    ///
+    /// ## Returns
+    ///
+    /// The outcome, and whether the registry is fresh afterwards.
+    fn run_preparation(
+        &self,
+        path: &Path,
+        workspace_roots: &[PathBuf],
+        context: &FileResolutionContext,
+        hold: &dyn Fn(),
+    ) -> (ProbeOutcome, bool) {
         let Some(boundary) = schema::trigger_boundary(path, workspace_roots) else {
-            return true;
+            return (ProbeOutcome::Fresh, true);
         };
         let preparation = {
             let mut cache = self.inner.lock().expect("overlay lock poisoned");
             cache.triggers.begin(path, &boundary, context)
         };
         let Some(preparation) = preparation else {
-            return true;
+            return (ProbeOutcome::Fresh, true);
         };
         let prepared = preparation.run();
+        let outcome = if prepared.failed() { ProbeOutcome::Failed } else { ProbeOutcome::Prepared };
+        hold();
         let mut cache = self.inner.lock().expect("overlay lock poisoned");
-        cache.triggers.install(prepared)
+        (outcome, cache.triggers.install(prepared))
     }
 
     /// [`prepare_registry`](Self::prepare_registry) for the registry
@@ -888,7 +930,7 @@ fn is_trigger_envelope(text: &str, path: &Path) -> bool {
 }
 
 /// The document name a workspace scope's registry is prepared under (see
-/// [`OverlayState::prepare_workspace_registries`]). Only its folder matters:
+/// [`OverlayState::workspace_probes`]). Only its folder matters:
 /// the registry is the one any document directly in the folder gets.
 pub const WORKSPACE_PROBE: &str = ".dmls-workspace";
 
@@ -901,6 +943,19 @@ pub const WORKSPACE_PROBE: &str = ".dmls-workspace";
 /// A scope that contains the folder (a package or repository above a
 /// workspace subfolder) is the folder's own context and needs no probe of
 /// its own; a catalog root outside every folder has no workspace documents.
+/// What [`OverlayState::prepare_workspace_probe`] did with one probe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProbeOutcome {
+    /// Nothing to prepare: the registry was fresh, or the probe is under no
+    /// trigger boundary. Nothing was read.
+    Fresh,
+    /// A preparation ran and its registry loaded.
+    Prepared,
+    /// A preparation ran and failed (a trigger or schema root did not
+    /// load), or the folder's context could not be built.
+    Failed,
+}
+
 fn workspace_probes(
     workspace_roots: &[PathBuf],
     repositories: &[PathBuf],
@@ -989,6 +1044,9 @@ fn fallback_areas(
 
 /// Content-and-config identity for the schema cache: the document text plus a
 /// signature of the schema configuration (extensions + strict mode).
+///
+/// The config bytes are already key-order-insensitive: `SchemaConfig` holds
+/// only a `bool` and a `BTreeMap`, which serializes sorted.
 fn schema_cache_key(text: &str, config: &DmlsConfig) -> u64 {
     let config_bytes = serde_json::to_vec(&config.schema).unwrap_or_default();
     xx_hash_bytes(text.as_bytes()) ^ xx_hash_bytes(&config_bytes)

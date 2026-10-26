@@ -14,6 +14,31 @@
       "key": "bearerToken",
       "value": "",
       "description": "Bearer token for Authorization header"
+    },
+    {
+      "key": "path_repo_id",
+      "value": "",
+      "description": "Value of the `repo_id` path parameter"
+    },
+    {
+      "key": "path_revision",
+      "value": "",
+      "description": "Value of the `revision` path parameter"
+    },
+    {
+      "key": "path_path",
+      "value": "",
+      "description": "Value of the `path` path parameter"
+    },
+    {
+      "key": "path_repo_type",
+      "value": "",
+      "description": "Value of the `repo_type` path parameter"
+    },
+    {
+      "key": "path_username",
+      "value": "",
+      "description": "Value of the `username` path parameter"
     }
   ],
   "auth": {
@@ -43,7 +68,21 @@
               ]
             },
             "description": "Lists datasets with optional filtering. Query params: search, author, filter, sort, direction, limit, full"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetDataset",
@@ -61,12 +100,26 @@
               "variable": [
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 }
               ]
             },
             "description": "Gets detailed information about a specific dataset"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"disabled\": false,\n  \"downloads\": 0,\n  \"id\": \"string\",\n  \"likes\": 0,\n  \"private\": false\n}"
+            }
+          ]
         },
         {
           "name": "ListDatasetFiles",
@@ -86,16 +139,30 @@
               "variable": [
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 },
                 {
                   "key": "revision",
-                  "value": "<revision>"
+                  "value": "{{path_revision}}"
                 }
               ]
             },
             "description": "Lists files in a dataset repository at a specific revision"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetDatasetFile",
@@ -116,20 +183,34 @@
               "variable": [
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 },
                 {
                   "key": "revision",
-                  "value": "<revision>"
+                  "value": "{{path_revision}}"
                 },
                 {
                   "key": "path",
-                  "value": "<path>"
+                  "value": "{{path_path}}"
                 }
               ]
             },
             "description": "Gets file metadata for a specific file in a dataset repository"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"path\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "ListDatasetCommits",
@@ -149,16 +230,30 @@
               "variable": [
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 },
                 {
                   "key": "revision",
-                  "value": "<revision>"
+                  "value": "{{path_revision}}"
                 }
               ]
             },
             "description": "Lists commits for a dataset repository"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetDatasetReadme",
@@ -179,16 +274,30 @@
               "variable": [
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 },
                 {
                   "key": "revision",
-                  "value": "<revision>"
+                  "value": "{{path_revision}}"
                 }
               ]
             },
             "description": "Gets the README file content for a dataset"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (text/plain)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/plain"
+                }
+              ],
+              "body": "string"
+            }
+          ]
         }
       ]
     },
@@ -209,7 +318,21 @@
               ]
             },
             "description": "Lists models with optional filtering. Query params: search, author, filter, sort, direction, limit, full, config"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetModel",
@@ -227,12 +350,26 @@
               "variable": [
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 }
               ]
             },
             "description": "Gets detailed information about a specific model"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"disabled\": false,\n  \"downloads\": 0,\n  \"likes\": 0,\n  \"modelId\": \"string\",\n  \"private\": false\n}"
+            }
+          ]
         },
         {
           "name": "ListModelFiles",
@@ -252,16 +389,30 @@
               "variable": [
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 },
                 {
                   "key": "revision",
-                  "value": "<revision>"
+                  "value": "{{path_revision}}"
                 }
               ]
             },
             "description": "Lists files in a model repository at a specific revision"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetModelFile",
@@ -282,20 +433,34 @@
               "variable": [
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 },
                 {
                   "key": "revision",
-                  "value": "<revision>"
+                  "value": "{{path_revision}}"
                 },
                 {
                   "key": "path",
-                  "value": "<path>"
+                  "value": "{{path_path}}"
                 }
               ]
             },
             "description": "Gets file metadata for a specific file in a model repository"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"path\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "ListModelCommits",
@@ -315,16 +480,30 @@
               "variable": [
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 },
                 {
                   "key": "revision",
-                  "value": "<revision>"
+                  "value": "{{path_revision}}"
                 }
               ]
             },
             "description": "Lists commits for a model repository"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetModelReadme",
@@ -345,16 +524,30 @@
               "variable": [
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 },
                 {
                   "key": "revision",
-                  "value": "<revision>"
+                  "value": "{{path_revision}}"
                 }
               ]
             },
             "description": "Gets the README file content for a model"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (text/plain)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/plain"
+                }
+              ],
+              "body": "string"
+            }
+          ]
         },
         {
           "name": "ListModelDiscussions",
@@ -373,12 +566,26 @@
               "variable": [
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 }
               ]
             },
             "description": "Lists discussions for a model repository"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"discussions\": []\n}"
+            }
+          ]
         },
         {
           "name": "GetModelCard",
@@ -399,16 +606,30 @@
               "variable": [
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 },
                 {
                   "key": "revision",
-                  "value": "<revision>"
+                  "value": "{{path_revision}}"
                 }
               ]
             },
             "description": "Gets the model card file content"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (text/plain)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/plain"
+                }
+              ],
+              "body": "string"
+            }
+          ]
         }
       ]
     },
@@ -431,7 +652,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"name\": \"string\",\n  \"private\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -439,7 +660,21 @@
               }
             },
             "description": "Creates a new repository (model, dataset, or space)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"url\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DeleteRepo",
@@ -457,7 +692,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"repoId\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -465,7 +700,21 @@
               }
             },
             "description": "Deletes a repository"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{}"
+            }
+          ]
         },
         {
           "name": "UpdateRepoSettings",
@@ -485,11 +734,11 @@
               "variable": [
                 {
                   "key": "repo_type",
-                  "value": "<repo_type>"
+                  "value": "{{path_repo_type}}"
                 },
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 }
               ]
             },
@@ -503,7 +752,21 @@
               }
             },
             "description": "Updates repository settings (visibility, gated access, etc.)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{}"
+            }
+          ]
         },
         {
           "name": "MoveRepo",
@@ -521,7 +784,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"fromRepo\": \"string\",\n  \"toRepo\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -529,7 +792,21 @@
               }
             },
             "description": "Moves/renames a repository"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{}"
+            }
+          ]
         }
       ]
     },
@@ -550,7 +827,21 @@
               ]
             },
             "description": "Lists spaces with optional filtering. Query params: search, author, filter, sort, direction, limit"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetSpace",
@@ -568,12 +859,26 @@
               "variable": [
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 }
               ]
             },
             "description": "Gets detailed information about a specific space"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"disabled\": false,\n  \"id\": \"string\",\n  \"likes\": 0,\n  \"pinned\": false,\n  \"private\": false\n}"
+            }
+          ]
         },
         {
           "name": "ListSpaceFiles",
@@ -593,16 +898,30 @@
               "variable": [
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 },
                 {
                   "key": "revision",
-                  "value": "<revision>"
+                  "value": "{{path_revision}}"
                 }
               ]
             },
             "description": "Lists files in a space repository at a specific revision"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetSpaceFile",
@@ -623,20 +942,34 @@
               "variable": [
                 {
                   "key": "repo_id",
-                  "value": "<repo_id>"
+                  "value": "{{path_repo_id}}"
                 },
                 {
                   "key": "revision",
-                  "value": "<revision>"
+                  "value": "{{path_revision}}"
                 },
                 {
                   "key": "path",
-                  "value": "<path>"
+                  "value": "{{path_path}}"
                 }
               ]
             },
             "description": "Gets file metadata for a specific file in a space repository"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"path\": \"string\"\n}"
+            }
+          ]
         }
       ]
     },
@@ -659,12 +992,26 @@
               "variable": [
                 {
                   "key": "username",
-                  "value": "<username>"
+                  "value": "{{path_username}}"
                 }
               ]
             },
             "description": "Gets public information about a user"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"isPro\": false,\n  \"name\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "ListUserRepos",
@@ -683,12 +1030,26 @@
               "variable": [
                 {
                   "key": "username",
-                  "value": "<username>"
+                  "value": "{{path_username}}"
                 }
               ]
             },
             "description": "Lists repositories owned by a user"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         },
         {
           "name": "GetUserCollections",
@@ -707,12 +1068,26 @@
               "variable": [
                 {
                   "key": "username",
-                  "value": "<username>"
+                  "value": "{{path_username}}"
                 }
               ]
             },
             "description": "Gets collections created by a user"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         }
       ]
     },
@@ -733,7 +1108,21 @@
               ]
             },
             "description": "Gets information about the authenticated user"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"isPro\": false,\n  \"name\": \"string\"\n}"
+            }
+          ]
         }
       ]
     }

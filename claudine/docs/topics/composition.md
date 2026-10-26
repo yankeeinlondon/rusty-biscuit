@@ -400,8 +400,9 @@ Steps:
    verdict comes **after** this step, so a `--set`, positional `prompt=…`, or
    interactively collected eager `prompt` satisfies the gate and becomes the
    delivered prompt without being written to the file.
-4. **Compose** — compose the effective `prompt` through Darkmatter, then wrap
-   it: a header naming the document (`**Document:** \`{native absolute path}\``,
+4. **Compose** — first confirm the closure will be able to stamp the document
+   (see [Launch-time baseline check](#launch-time-baseline-check)), then
+   compose the effective `prompt` through Darkmatter and wrap it: a header naming the document (`**Document:** \`{native absolute path}\``,
    never JSON-escaped, plus a property table — type expression, present/absent at
    launch, required/optional at completion — when a `$schema` is declared), the
    composed prompt, and the guardrails from `.claudine/inline-compose.md` (a
@@ -511,6 +512,76 @@ Steps:
      document.
 10. **Completion verdict** — see [Completion Verdict](#completion-verdict).
 
+### Launch-time baseline check
+
+The closure's last act is to restore the owned properties and stamp `hash`
+and `last_updated` into the document's text (step 9). Some documents can never
+be stamped that way, and finding out only after the agent has worked wastes
+the run. So every inline preparation first rehearses that stamp on the
+document as read: it restores the owned properties from the document into
+itself, stamps the result with the closure's hash options, and throws the
+result away. Nothing is written.
+
+When the rehearsal fails, the run is refused with
+`CompositionError::InlineBaselineUnstampable` (code `composition.failed`),
+rendered under the header *inline baseline not editable* with the document's
+path and Darkmatter's reason. The refusal comes before composition, so:
+
+- no frontmatter `$(…)` command or `::shell` directive runs;
+- `.claudine/inline-compose.md` is not created or migrated;
+- no provider launches;
+- the document is byte-for-byte unchanged.
+
+Shell approval runs earlier, but it only discovers and approves commands; it
+does not execute them. A document that declares `initialize` is checked on its
+stabilized reread, so its `initialize` stack has already run by then.
+
+The usual cause is frontmatter whose top-level keys are all indented. It is
+valid YAML, but Darkmatter's text-preserving editors need keys at column 0:
+
+```markdown
+---
+  prompt: Summarize the release notes.
+  phase: 2
+---
+```
+
+```text
+frontmatter root mapping is indented by 2 spaces; text-preserving edits
+require top-level keys at column 0 (run `md clean --save <file>` to fix)
+```
+
+Run [`md clean --save`](../../../darkmatter/docs/cli/clean.md#indented-root-mappings-yamlroot-indentation)
+on the document to move the keys to column 0 without changing their values,
+then run `inline-compose` again.
+
+A malformed stored `hash` value fails the same rehearsal, so it is now
+refused at launch with this error, naming the `hash` property, instead of
+failing after the agent has run. Replace or delete the value, then run
+again.
+
+The check applies wherever inline preparation happens: an ordinary run,
+`--dry-run` (which therefore refuses before its composition shell work runs),
+loop iterations, sequence steps run inline, and `retry`, `resume`, and
+`proxy` re-entry. `compose` and `sequence` documents composed directly never
+stamp their source and are not checked.
+
+Passing the check only says the document was editable when the run started.
+If the agent writes frontmatter the closure cannot edit, for example by
+indenting the keys itself, the closure still refuses it and the
+[guard](#the-inline-guard-and-rollback) restores the original bytes.
+
+```mermaid
+flowchart TD
+    prep[Inline preparation] --> rehearse{Rehearse baseline stamp}
+    rehearse -- fails --> refuse[Refuse: InlineBaselineUnstampable<br/>nothing composed, run, or written]
+    rehearse -- passes --> compose[Compose prompt and guardrails]
+    compose --> agent[Agent edits the document]
+    agent --> closure{Closure validation}
+    closure -- accepted --> stamp[Restore owned properties, stamp, write once]
+    closure -- refused --> restore[Restore the original bytes]
+```
+
 ### The inline guard and rollback
 
 The guard captured at step 5 is **operation-level**: it is taken once from the
@@ -611,8 +682,10 @@ that persists the body.
   stored value. You can verify this with `md hash --diff <file>`, which exits
   `0` when the file matches its stored hash.
 - **Malformed existing hash** — if the source file contains a malformed
-  `hash:` value, the closure fails with `CompositionError::InlineHashMalformed`
-  before any write occurs, leaving the file on disk untouched.
+  `hash:` value, the run is refused at launch by the
+  [baseline check](#launch-time-baseline-check), before anything is composed
+  or launched. The closure keeps its own `CompositionError::InlineHashMalformed`
+  check, which fails before any write and leaves the file untouched.
 - **Unwritable `last_updated`** — if `last_updated` carries a YAML anchor
   (`&name`), alias (`*name`), or tag (`!tag`), or holds a list or mapping, the
   date cannot be stamped without changing other values, so the closure fails

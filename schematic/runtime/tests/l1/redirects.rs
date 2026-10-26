@@ -702,3 +702,48 @@ async fn a_cross_origin_override_can_only_tighten_the_definition() {
     assert_eq!(requests(&origins.c).await.len(), 0, "no rejected or refused form reached C");
     assert_eq!(requests(&origins.b).await.len(), 1, "only the subset client reached B");
 }
+
+struct Sibling(Call<Json<Item>>);
+
+impl schematic_runtime::EndpointSpec for Sibling {
+    type Api = TestApi;
+    type Success = Item;
+    type Failure = NoDeclaredError;
+    type Decoder = Json<Item>;
+    const ENDPOINT_ID: &'static str = "sibling";
+    const METHOD: Method = Method::GET;
+    fn into_parts(self) -> Result<RequestParts, schematic_runtime::InvalidArgument> {
+        schematic_runtime::EndpointSpec::into_parts(self.0)
+    }
+}
+
+#[tokio::test]
+async fn endpoint_origin_replacement_controls_redirects_links_and_caller_tightening() {
+    let a = MockServer::start().await;
+    let b = MockServer::start().await;
+    let target = format!("{}/target", b.uri());
+    mount(&a, "/redirect", redirect(302, &target)).await;
+    mount(&b, "/target", json(42)).await;
+    let definition = ApiDefinition::new(a.uri());
+    let endpoint_id = <Call<Json<Item>> as schematic_runtime::EndpointSpec>::ENDPOINT_ID;
+    let definition = definition.endpoint_cross_origin(endpoint_id, OriginPolicy::allow_origins([b.uri()]));
+    let allowed = builder(definition.clone(), &a.uri()).build().expect("valid endpoint override");
+    assert_eq!(get(&allowed, "/redirect").await.into_result().expect("redirect reaches B").id, 42);
+    allowed.check_link::<Call<Json<Item>>>(&url::Url::parse(&target).unwrap()).expect("followed link allowed");
+    assert_eq!(get(&allowed, &target).await.into_result().expect("absolute link reaches B").id, 42);
+    let refused = allowed.send(Sibling(Call::<Json<Item>>::get("/redirect"))).full().await.unwrap();
+    assert_eq!(refusal(&refused), Some(RedirectRefusal::CrossOrigin));
+    assert!(allowed.check_link::<Sibling>(&url::Url::parse(&target).unwrap()).is_err());
+    let tightened = builder(definition, &a.uri()).cross_origin(OriginPolicy::same_origin()).build().unwrap();
+    assert_eq!(refusal(&get(&tightened, "/redirect").await), Some(RedirectRefusal::CrossOrigin));
+    assert!(tightened.check_link::<Call<Json<Item>>>(&url::Url::parse(&target).unwrap()).is_err());
+    assert_eq!(requests(&b).await.len(), 2, "refused clients never reach B");
+}
+
+#[test]
+fn endpoint_origin_replacement_validates_exact_origins() {
+    let invalid = ApiDefinition::new("https://a.test")
+        .endpoint_cross_origin("Get", OriginPolicy::allow_origins(["https://b.test/path"]));
+    assert_eq!(Client::<TestApi>::new(invalid).build().expect_err("invalid endpoint origin"),
+        BuildError::InvalidAllowedOrigin { reason: "has a path" });
+}

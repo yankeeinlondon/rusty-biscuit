@@ -201,12 +201,33 @@ fn playa_dry_run_prepares_nothing_and_leaves_no_audio_artifacts() {
 
 /// Every accepted `PLAYA_DRY_RUN` spelling stops the worker before it prepares
 /// anything.
-#[test]
-fn every_accepted_playa_dry_run_spelling_prepares_nothing() {
-    let fixture = CliProcessFixture::named("prewarm-playa-spellings");
-    common::launch_recorder::install(&fixture, "goose", "exit 0");
-    let document = write_document(&fixture, "doc.md", EARLY_AND_LATE);
-    for value in ["1", "true", "TRUE", "yes"] {
+mod every_accepted_playa_dry_run_spelling_prepares_nothing {
+    use super::*;
+
+    const SPELLINGS: [&str; 4] = ["1", "true", "TRUE", "yes"];
+
+    macro_rules! spelling_tests {
+        ($($test:ident => $value:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_spelling_prepares_nothing($value); })*
+
+            #[test]
+            fn every_row_has_a_listed_test() {
+                assert_eq!(SPELLINGS, [$($value),*]);
+            }
+        };
+    }
+
+    spelling_tests! {
+        one => "1",
+        lowercase_true => "true",
+        uppercase_true => "TRUE",
+        yes => "yes",
+    }
+
+    fn assert_spelling_prepares_nothing(value: &str) {
+        let fixture = CliProcessFixture::named("prewarm-playa-spellings");
+        common::launch_recorder::install(&fixture, "goose", "exit 0");
+        let document = write_document(&fixture, "doc.md", EARLY_AND_LATE);
         let output = observed(&fixture, "record")
             .env("PLAYA_DRY_RUN", value)
             .args(["compose", "--goose", document.to_str().unwrap()])

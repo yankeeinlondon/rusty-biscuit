@@ -1,110 +1,51 @@
-use schematic_define::{ApiResponse, Endpoint, RestMethod};
+use super::super::*;
+use schematic_define::{DefinitionContext, DefinitionError};
+use schematic_define::{Endpoint, RestMethod};
 
 /// Monitoring endpoints (nodes, cluster, listeners, metrics, stats, alarms, prometheus).
-pub fn monitoring_endpoints() -> Vec<Endpoint> {
-    vec![
+pub fn monitoring_endpoints(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
+    Ok(vec![
         // Node & Cluster
-        Endpoint {
-            id: "ListNodes".to_string(),
-            method: RestMethod::Get,
-            path: "/nodes".to_string(),
-            description: "List all nodes in the EMQX cluster".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListNodesResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetNode".to_string(),
-            method: RestMethod::Get,
-            path: "/nodes/{node}".to_string(),
-            description: "Get detailed information about a specific node".to_string(),
-            request: None,
-            response: ApiResponse::json_type("NodeInfo"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetCluster".to_string(),
-            method: RestMethod::Get,
-            path: "/cluster".to_string(),
-            description: "Get cluster status and node membership".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ClusterStatus"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
+        Endpoint::new("ListNodes", RestMethod::Get, "/nodes")
+            .describes("List all nodes in the EMQX cluster")
+            .returns_json::<ListNodesResponse>(ctx)
+            .build()?,
+        Endpoint::new("GetNode", RestMethod::Get, "/nodes/{node}")
+            .describes("Get detailed information about a specific node")
+            .returns_json::<NodeInfo>(ctx)
+            .build()?,
+        Endpoint::new("GetCluster", RestMethod::Get, "/cluster")
+            .describes("Get cluster status and node membership")
+            .returns_json::<ClusterStatus>(ctx)
+            .build()?,
         // Listeners
-        Endpoint {
-            id: "ListListeners".to_string(),
-            method: RestMethod::Get,
-            path: "/listeners".to_string(),
-            description: "List all configured listeners".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListListenersResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetListener".to_string(),
-            method: RestMethod::Get,
-            path: "/listeners/{id}".to_string(),
-            description: "Get details of a specific listener".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListenerInfo"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
+        Endpoint::new("ListListeners", RestMethod::Get, "/listeners")
+            .describes("List all configured listeners")
+            .returns_json::<ListListenersResponse>(ctx)
+            .build()?,
+        Endpoint::new("GetListener", RestMethod::Get, "/listeners/{id}")
+            .describes("Get details of a specific listener")
+            .returns_json::<ListenerInfo>(ctx)
+            .build()?,
         // Metrics & Stats
-        Endpoint {
-            id: "ListMetrics".to_string(),
-            method: RestMethod::Get,
-            path: "/metrics".to_string(),
-            description: "Get broker metrics for all nodes".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListMetricsResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListStats".to_string(),
-            method: RestMethod::Get,
-            path: "/stats".to_string(),
-            description: "Get broker statistics for all nodes".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListStatsResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetPrometheus".to_string(),
-            method: RestMethod::Get,
-            path: "/prometheus/stats".to_string(),
-            description: "Get metrics in Prometheus format".to_string(),
-            request: None,
-            response: ApiResponse::Text,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
+        Endpoint::new("ListMetrics", RestMethod::Get, "/metrics")
+            .describes("Get broker metrics for all nodes")
+            .returns_json::<ListMetricsResponse>(ctx)
+            .build()?,
+        Endpoint::new("ListStats", RestMethod::Get, "/stats")
+            .describes("Get broker statistics for all nodes")
+            .returns_json::<ListStatsResponse>(ctx)
+            .build()?,
+        Endpoint::new("GetPrometheus", RestMethod::Get, "/prometheus/stats")
+            .describes("Get metrics in Prometheus format")
+            .returns_text()
+            .build()?,
         // Alarms
-        Endpoint {
-            id: "ListAlarms".to_string(),
-            method: RestMethod::Get,
-            path: "/alarms".to_string(),
-            description: "List active alarms".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListAlarmsResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-    ]
+        Endpoint::new("ListAlarms", RestMethod::Get, "/alarms")
+            .describes("List active alarms")
+            .returns_json::<ListAlarmsResponse>(ctx)
+            .pagination(schematic_define::pagination::Collection::at("data").item_type("AlarmInfo").unpaginated())
+            .build()?,
+    ])
+
 }

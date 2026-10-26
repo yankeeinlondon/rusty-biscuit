@@ -1709,3 +1709,97 @@ fn anchored_overlays_layer_value_and_origin_together() {
     assert!(!records.contains_key("removed"), "a removal has no value to anchor");
     assert_eq!(format!("{layered:?}"), r#"["kept", "replaced", "removed"]"#, "debug output names keys, never values");
 }
+
+// -- inline baseline preflight ----------------------------------------------
+
+/// Write `text` verbatim (so its frontmatter layout survives) and resolve it.
+fn raw_source(dir: &TempDir, text: &str) -> ResolvedCompositionSource {
+    let file = dir.path().join("inline.md");
+    fs::write(&file, text).unwrap();
+    ResolvedCompositionSource {
+        original_ref: file.to_str().unwrap().to_string(),
+        resolved_path: file,
+        original_text: text.to_string(),
+        markdown: text.to_string().into(),
+    }
+}
+
+/// A frontmatter `$(…)` that leaves a `ran` directory beside the document when
+/// composition runs it; `mkdir` means the same thing to `sh` and `cmd`, and
+/// the shell policy refuses output redirection.
+const SENTINEL_COMMAND: &str = "$(mkdir ran)";
+
+fn baseline_document(indent: &str) -> String {
+    format!(
+        "---\n{indent}prompt: Summarize the notes\n{indent}probe: \"{SENTINEL_COMMAND}\"\n---\nOld body\n"
+    )
+}
+
+fn repo_options(dir: &TempDir) -> PrepareOptions {
+    PrepareOptions {
+        source_repo_root: Some(dir.path().to_path_buf()),
+        // Approved up front so the outcome never depends on the host's shell
+        // whitelist.
+        pre_approved_commands: Some(
+            std::collections::HashSet::from(["mkdir ran".to_string()]).into(),
+        ),
+        ..PrepareOptions::new(crate::test_support::context_at(dir.path()))
+    }
+}
+
+/// Every inline preparation path (the launch/preview read, the loop seed, and
+/// the sequence probe) refuses an uneditable baseline before it composes:
+/// the frontmatter command never runs, no guardrail file is created, and the
+/// document keeps its bytes.
+#[test]
+fn inline_preparation_refuses_an_indented_baseline_before_composing() {
+    type Prepare = fn(&ResolvedCompositionSource, PrepareOptions) -> Result<PreparedComposition, CompositionError>;
+    let entries: [(&str, Prepare); 3] = [
+        ("prepare_inline", prepare_inline),
+        ("prepare_loop_seed", |source, options| {
+            prepare_loop_seed(source, options, CompositionMode::InlineFrontmatterPrompt)
+        }),
+        ("prepare_sequence_probe", |source, options| {
+            prepare_sequence_probe(source, options, CompositionMode::InlineFrontmatterPrompt)
+        }),
+    ];
+    for (entry, prepare) in entries {
+        let dir = TempDir::new().unwrap();
+        let document = baseline_document("    ");
+        let source = raw_source(&dir, &document);
+
+        let error = prepare(&source, repo_options(&dir)).unwrap_err();
+
+        let CompositionError::InlineBaselineUnstampable { path, source: cause } = &error else {
+            panic!("{entry}: expected an unstampable baseline, got {error:?}");
+        };
+        assert_eq!(path, &source.resolved_path, "{entry}");
+        let MarkdownError::FrontmatterTextEdit { reason } = cause.as_ref() else {
+            panic!("{entry}: expected a refused frontmatter edit, got {cause:?}");
+        };
+        assert!(reason.contains("indented by 4 spaces"), "{entry}: {reason}");
+        assert_eq!(fs::read_to_string(&source.resolved_path).unwrap(), document, "{entry}");
+        assert!(!dir.path().join("ran").is_dir(), "{entry}: the frontmatter command ran");
+        assert!(
+            !dir.path().join(".claudine/inline-compose.md").exists(),
+            "{entry}: the guardrail file was created"
+        );
+    }
+}
+
+/// The control for the refusal above: the same document at column 0 prepares,
+/// runs its frontmatter command, and creates the guardrail file, so their
+/// absence there is evidence of the early refusal.
+#[test]
+fn inline_preparation_of_a_column_zero_baseline_composes_and_writes_guardrails() {
+    let dir = TempDir::new().unwrap();
+    let document = baseline_document("");
+    let source = raw_source(&dir, &document);
+
+    let prepared = prepare_inline(&source, repo_options(&dir)).unwrap();
+
+    assert!(prepared.prompt.contains("Summarize the notes"), "{}", prepared.prompt);
+    assert!(dir.path().join("ran").is_dir(), "the frontmatter command ran");
+    assert!(dir.path().join(".claudine/inline-compose.md").exists());
+    assert_eq!(fs::read_to_string(&source.resolved_path).unwrap(), document);
+}

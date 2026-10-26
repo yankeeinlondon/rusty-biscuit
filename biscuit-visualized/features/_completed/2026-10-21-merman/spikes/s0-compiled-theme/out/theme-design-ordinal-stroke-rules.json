@@ -1,0 +1,348 @@
+{
+  "schema_version": 1,
+  "kind": "design",
+  "design": {
+    "tokens": {
+      "bg": {
+        "type": "color",
+        "value": "#1a1b26",
+        "label": "Background"
+      },
+      "fg": {
+        "type": "color",
+        "value": "#c0caf5",
+        "label": "Foreground"
+      }
+    },
+    "canvas": {
+      "base": {
+        "kind": "solid",
+        "color": {
+          "ref": "bg"
+        }
+      }
+    },
+    "styles": {
+      "node": {
+        "stroke": {
+          "paint": "#414868",
+          "width": 1.5
+        }
+      },
+      "node-label": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "edge": {
+        "stroke": {
+          "paint": "#757b98",
+          "width": 1.5
+        }
+      },
+      "edge-label": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "edge-label-background": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "bg"
+          }
+        }
+      },
+      "cluster": {
+        "fill": "#313443",
+        "stroke": {
+          "paint": "#414868"
+        }
+      },
+      "cluster-label": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "text": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "title": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "actor": {
+        "fill": "#272937",
+        "stroke": {
+          "paint": "#7aa2f7"
+        }
+      },
+      "actor-label": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "lifeline": {
+        "stroke": {
+          "paint": "#414868"
+        }
+      },
+      "message": {
+        "stroke": {
+          "paint": "#757b98"
+        }
+      },
+      "message-label": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "note": {
+        "fill": "#423933",
+        "stroke": {
+          "paint": "#e0af68"
+        }
+      },
+      "note-label": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "activation": {
+        "fill": "#313443",
+        "stroke": {
+          "paint": "#bb9af7"
+        }
+      },
+      "loop": {
+        "stroke": {
+          "paint": "#7dcfff"
+        }
+      },
+      "loop-label": {
+        "fill": {
+          "kind": "solid",
+          "color": {
+            "ref": "fg"
+          }
+        }
+      },
+      "loop-label-background": {
+        "fill": "#313443"
+      },
+      "marker": {
+        "fill": "#757b98",
+        "stroke": {
+          "paint": "#757b98"
+        }
+      }
+    },
+    "rules": [
+      {
+        "family": "flowchart",
+        "target": "node",
+        "ordinal": {
+          "cycle": {
+            "period": 6,
+            "offset": 0
+          }
+        },
+        "style": {
+          "stroke": {
+            "paint": "#f7768e"
+          }
+        }
+      },
+      {
+        "family": "flowchart",
+        "target": "node",
+        "ordinal": {
+          "cycle": {
+            "period": 6,
+            "offset": 1
+          }
+        },
+        "style": {
+          "stroke": {
+            "paint": "#9ece6a"
+          }
+        }
+      },
+      {
+        "family": "flowchart",
+        "target": "node",
+        "ordinal": {
+          "cycle": {
+            "period": 6,
+            "offset": 2
+          }
+        },
+        "style": {
+          "stroke": {
+            "paint": "#e0af68"
+          }
+        }
+      },
+      {
+        "family": "flowchart",
+        "target": "node",
+        "ordinal": {
+          "cycle": {
+            "period": 6,
+            "offset": 3
+          }
+        },
+        "style": {
+          "stroke": {
+            "paint": "#7aa2f7"
+          }
+        }
+      },
+      {
+        "family": "flowchart",
+        "target": "node",
+        "ordinal": {
+          "cycle": {
+            "period": 6,
+            "offset": 4
+          }
+        },
+        "style": {
+          "stroke": {
+            "paint": "#bb9af7"
+          }
+        }
+      },
+      {
+        "family": "flowchart",
+        "target": "node",
+        "ordinal": {
+          "cycle": {
+            "period": 6,
+            "offset": 5
+          }
+        },
+        "style": {
+          "stroke": {
+            "paint": "#7dcfff"
+          }
+        }
+      },
+      {
+        "family": "gitGraph",
+        "target": "node",
+        "ordinal": {
+          "cycle": {
+            "period": 6,
+            "offset": 0
+          }
+        },
+        "style": {
+          "fill": "#f7768e"
+        }
+      },
+      {
+        "family": "gitGraph",
+        "target": "node",
+        "ordinal": {
+          "cycle": {
+            "period": 6,
+            "offset": 1
+          }
+        },
+        "style": {
+          "fill": "#9ece6a"
+        }
+      },
+      {
+        "family": "gitGraph",
+        "target": "node",
+        "ordinal": {
+          "cycle": {
+            "period": 6,
+            "offset": 2
+          }
+        },
+        "style": {
+          "fill": "#e0af68"
+        }
+      },
+      {
+        "family": "gitGraph",
+        "target": "node",
+        "ordinal": {
+          "cycle": {
+            "period": 6,
+            "offset": 3
+          }
+        },
+        "style": {
+          "fill": "#7aa2f7"
+        }
+      },
+      {
+        "family": "gitGraph",
+        "target": "node",
+        "ordinal": {
+          "cycle": {
+            "period": 6,
+            "offset": 4
+          }
+        },
+        "style": {
+          "fill": "#bb9af7"
+        }
+      },
+      {
+        "family": "gitGraph",
+        "target": "node",
+        "ordinal": {
+          "cycle": {
+            "period": 6,
+            "offset": 5
+          }
+        },
+        "style": {
+          "fill": "#7dcfff"
+        }
+      }
+    ],
+    "palettes": {
+      "node": [
+        "#4b2f3d",
+        "#374235",
+        "#463c35",
+        "#2f3954",
+        "#3d3754",
+        "#304356"
+      ]
+    }
+  }
+}

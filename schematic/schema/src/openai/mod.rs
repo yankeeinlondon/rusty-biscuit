@@ -50,7 +50,6 @@
 //! - `DeleteSkill` - Delete a skill by its ID.
 //! - `DeleteSkillVersion` - Delete a skill version.
 //! - `DeleteThreadMethod` - Delete a ChatKit thread along with its items and stored attachments.
-//! - `BetaDeleteResponse` - Deletes a model response with the given ID.
 //!
 //! **GET**:
 //! - `ListVoiceConsents` - Returns a list of voice consent recordings.
@@ -164,8 +163,6 @@
 //! - `ListThreadItemsMethod` - List items that belong to a ChatKit thread.
 //! - `GetThreadMethod` - Retrieve a ChatKit thread by its identifier.
 //! - `ListThreadsMethod` - List ChatKit threads with optional pagination and user filters.
-//! - `BetaGetResponse` - Retrieves a model response with the given ID.
-//! - `BetaListInputItems` - Returns a list of input items for a given response.
 //!
 //! **POST**:
 //! - `CreateSpeech` - Generates audio from the input text.
@@ -276,31 +273,30 @@
 //! - `CreateSkillVersion` - Create a new immutable skill version.
 //! - `CancelChatSessionMethod` - Cancel an active ChatKit session and return its most recent metadata.
 //! - `CreateChatSessionMethod` - Create a ChatKit session.
-//! - `BetaCreateResponse` - Creates a model response. Provide [text](/docs/guides/text) or [image](/docs/guides/images) inputs to generate [text](/docs/guides/text) or [JSON](/docs/guides/structured-outputs) outputs. Have the model call your own [custom code](/docs/guides/function-calling) or use built-in [tools](/docs/guides/tools) like [web search](/docs/guides/tools-web-search) or [file search](/docs/guides/tools-file-search) to use your own data as input for the model's response.
-//! - `BetaCancelResponse` - Cancels a model response with the given ID. Only responses created with the `background` parameter set to `true` can be cancelled. [Learn more](/docs/guides/background).
-//! - `BetaCompactconversation` - Compact a conversation. Returns a compacted response object.
-//! - `BetaGetinputtokencounts` - Returns input token counts of the request.
 //!
 //! ## Examples
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
+//! use schematic_schema::openai::ListVoiceConsentsRequest;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = OpenAI::new();
-//!     let data = client.list_voice_consents().await?;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = OpenAI::new();
+//! let data = client.list_voice_consents().await?;
 //!
-//!     // the whole response: status, headers, and request id as well
-//!     let response = client.list_voice_consents().full().await?;
-//!     println!("{}", response.meta);
-//!     Ok(())
-//! }
+//! // the same request, built as a typed request and sent
+//! let data = client.send(ListVoiceConsentsRequest::default()).await?;
+//!
+//! // the whole response: status, headers, and request id as well
+//! let response = client.list_voice_consents().full().await?;
+//! println!("{}", response.meta);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ### Override Base URL
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
 //!
 //! let client = OpenAI::new().base_url("https://staging.example.com/v1");

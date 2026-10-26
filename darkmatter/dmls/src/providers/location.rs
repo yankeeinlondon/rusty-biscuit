@@ -41,6 +41,6 @@ pub fn node_line(graph: &WorkspaceGraph, id: NodeId) -> usize {
 pub fn node_location(graph: &WorkspaceGraph, id: NodeId) -> Option<Location> {
     let node = graph.node(id)?;
     let record = graph.document(node.document)?;
-    let uri = file_path_to_uri(&record.path)?;
+    let uri = file_path_to_uri(record.path)?;
     Some(Location::new(uri, line_range(node_line(graph, id))))
 }

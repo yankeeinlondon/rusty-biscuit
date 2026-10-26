@@ -102,9 +102,10 @@ pub enum Commands {
         )]
         name: Option<String>,
 
-        /// Remove the worktree even if it has uncommitted or ignored files
+        /// Delete the worktree without asking, whatever the warnings say
+        /// (uncommitted files, programs using it, a lock); never the branch
         #[arg(long)]
-        force_worktree: bool,
+        force: bool,
 
         /// Delete the local branch even if its commits exist nowhere else
         #[arg(long)]
@@ -119,7 +120,7 @@ pub enum Commands {
             long,
             hide = true,
             value_name = "TOKEN",
-            conflicts_with_all = ["name", "force_worktree", "force_branch", "force_remote"]
+            conflicts_with_all = ["name", "force", "force_branch", "force_remote"]
         )]
         handoff: Option<String>,
     },
@@ -180,9 +181,12 @@ Examples:
                         another branch); otherwise keep the branch and say why
   wt remove spike-parser --force-branch
                         Also delete a branch whose commits exist nowhere else
-  wt remove fix-wt-ux --force-worktree --force-branch --force-remote
-                        Remove everything: uncommitted files, the branch, and
-                        the branch on origin (closing any open PR)
+  wt remove fix-wt-ux --force
+                        Delete the worktree without asking, whatever it holds
+                        (the branch keeps its own rules)
+  wt remove fix-wt-ux --force --force-branch --force-remote
+                        Remove everything: the worktree, the branch, and the
+                        branch on origin (closing any open PR)
 
 Shell Integration (cd wrapper + completions; `wt go` needs it):
   source <(wt --completions bash)              Add to ~/.bashrc

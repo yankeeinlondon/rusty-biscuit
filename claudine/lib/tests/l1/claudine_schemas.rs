@@ -35,6 +35,7 @@ pub(crate) type BundleFile = (&'static str, String);
 /// a fixture home beside it.
 pub(crate) struct SchemaRepo {
     _dir: tempfile::TempDir,
+    schemas: PathBuf,
     docs: PathBuf,
     home: PathBuf,
 }
@@ -54,14 +55,27 @@ impl SchemaRepo {
             .expect("git config");
         let schemas = repo.join("schemas");
         std::fs::create_dir_all(&schemas).expect("schemas dir");
-        for (name, text) in files {
-            std::fs::write(schemas.join(name), text).expect("write schema");
-        }
         let docs = repo.join("docs");
         std::fs::create_dir_all(&docs).expect("docs dir");
         let home = dir.path().join("home");
         std::fs::create_dir_all(&home).expect("home dir");
-        Self { _dir: dir, docs, home }
+        let repo = Self { _dir: dir, schemas, docs, home };
+        repo.write_bundle(files);
+        repo
+    }
+
+    /// Writes `files` into `schemas/`, replacing any file of the same name.
+    ///
+    /// Rewriting one repository between matrix cells (rather than building a
+    /// fresh one per cell) keeps every trigger path stable, so Darkmatter's
+    /// process-wide payload memo reuses a trigger whose payload inputs are
+    /// byte-identical to an earlier cell's and resolves the rest afresh: the
+    /// memo is keyed by the trigger's path and payload and fingerprinted on
+    /// every file the payload read.
+    pub(crate) fn write_bundle(&self, files: &[BundleFile]) {
+        for (name, text) in files {
+            std::fs::write(self.schemas.join(name), text).expect("write schema");
+        }
     }
 
     /// Writes a document into the repository's `docs/` folder.
@@ -656,49 +670,77 @@ fn required_long_form_fields_survive_every_reference() {
 
 // ── AC1 / AC3: loading and typed levels ────────────────────────────────────
 
-#[test]
-fn every_file_loads_and_every_export_resolves() {
-    let repo = SchemaRepo::new(&shipped_bundle!());
-    let action = resolved_exports(&repo, "action.yaml", &["interpolation", "count", "communicate", "flow", "shell", "expression", "bundle", "initialize-bundle"]);
-    assert_eq!(action.len(), 8);
-    let lifecycle_exports = [
-        "bare-verb", "loose-body", "stack", "item-1", "conditional-1", "stack-2", "item-2", "conditional-2",
-        "stack-3", "item-3", "conditional-3", "initialize-stack", "initialize-item-1", "initialize-conditional-1",
-        "initialize-stack-2", "initialize-item-2", "initialize-conditional-2", "initialize-stack-3",
-        "initialize-item-3", "initialize-conditional-3", "cancelled-conditional-5", "cancelled-item-6",
-        "loop-action", "loop-action-entry", "loop",
-    ];
-    let lifecycle = resolved_exports(&repo, "lifecycle.yaml", &lifecycle_exports);
-    assert_eq!(lifecycle.len(), lifecycle_exports.len());
-    let linking_exports = [
-        "name", "allowed-tools", "tools", "skills", "license", "compatibility", "metadata",
-        "user-invocable", "disable-model-invocation", "argument-hint", "max_turns",
-    ];
-    assert_eq!(resolved_exports(&repo, "linking.yaml", &linking_exports).len(), 11);
-    let sequence_exports = [
-        "steps", "step", "task", "group", "steps-2", "step-2", "task-2", "group-2", "steps-3", "step-3", "task-3",
-        "group-3",
-    ];
-    assert_eq!(resolved_exports(&repo, "sequence-types.yaml", &sequence_exports).len(), sequence_exports.len());
+/// Every bundle file loads. The libraries are loaded by resolving each of
+/// their exports and the triggers by discovery; the work is split across
+/// tests because each resolution is expensive in a debug build (the
+/// first-level sequence types alone inline to megabytes of JSON Schema).
+mod every_file_loads {
+    use super::*;
 
-    // The three triggers load, and each payload resolves: a document
-    // selecting claudine.yaml and inline-compose.yaml gets every payload
-    // property of both.
-    let discovered = repo.discover().expect("the shipped bundle loads");
-    assert_eq!(discovered.schemas.trigger_registry().expect("registry").triggers.len(), 3);
-    let path = repo.write_document("both.md", "---\nprompt: hi\n---\n");
-    let judged = discovered
-        .judge(
-            &path,
-            include_str!("../../../schemas/claudine.yaml"),
-            include_str!("../../../schemas/inline-compose.yaml"),
-        )
-        .expect("both payloads resolve");
-    assert!(judged.claudine && judged.inline);
-    for property in ["initialize", "start", "loop", "agent", "hash", "last_updated", "max_turns", "verbosity"] {
-        assert!(judged.properties.contains(property), "the effective schema declares `{property}`");
+    #[test]
+    fn action_lifecycle_and_linking_exports_resolve() {
+        let repo = SchemaRepo::new(&shipped_bundle!());
+        let action = resolved_exports(&repo, "action.yaml", &["interpolation", "count", "communicate", "flow", "shell", "expression", "bundle", "initialize-bundle"]);
+        assert_eq!(action.len(), 8);
+        let lifecycle_exports = [
+            "bare-verb", "loose-body", "stack", "item-1", "conditional-1", "stack-2", "item-2", "conditional-2",
+            "stack-3", "item-3", "conditional-3", "initialize-stack", "initialize-item-1", "initialize-conditional-1",
+            "initialize-stack-2", "initialize-item-2", "initialize-conditional-2", "initialize-stack-3",
+            "initialize-item-3", "initialize-conditional-3", "cancelled-conditional-5", "cancelled-item-6",
+            "loop-action", "loop-action-entry", "loop",
+        ];
+        let lifecycle = resolved_exports(&repo, "lifecycle.yaml", &lifecycle_exports);
+        assert_eq!(lifecycle.len(), lifecycle_exports.len());
+        let linking_exports = [
+            "name", "allowed-tools", "tools", "skills", "license", "compatibility", "metadata",
+            "user-invocable", "disable-model-invocation", "argument-hint", "max_turns",
+        ];
+        assert_eq!(resolved_exports(&repo, "linking.yaml", &linking_exports).len(), 11);
     }
-    assert!(judged.report.valid, "{:?}", problems(&judged.report));
+
+    #[test]
+    fn sequence_types_level_1_steps_exports_resolve() {
+        let repo = SchemaRepo::new(&shipped_bundle!());
+        let sequence_exports = ["steps", "step"];
+        assert_eq!(resolved_exports(&repo, "sequence-types.yaml", &sequence_exports).len(), sequence_exports.len());
+    }
+
+    #[test]
+    fn sequence_types_level_1_task_and_group_exports_resolve() {
+        let repo = SchemaRepo::new(&shipped_bundle!());
+        let sequence_exports = ["task", "group"];
+        assert_eq!(resolved_exports(&repo, "sequence-types.yaml", &sequence_exports).len(), sequence_exports.len());
+    }
+
+    #[test]
+    fn sequence_types_levels_2_and_3_exports_resolve() {
+        let repo = SchemaRepo::new(&shipped_bundle!());
+        let sequence_exports = ["steps-2", "step-2", "task-2", "group-2", "steps-3", "step-3", "task-3", "group-3"];
+        assert_eq!(resolved_exports(&repo, "sequence-types.yaml", &sequence_exports).len(), sequence_exports.len());
+    }
+
+    /// The three triggers load, and each payload resolves: a document
+    /// selecting claudine.yaml and inline-compose.yaml gets every payload
+    /// property of both.
+    #[test]
+    fn triggers_load_and_their_payloads_resolve() {
+        let repo = SchemaRepo::new(&shipped_bundle!());
+        let discovered = repo.discover().expect("the shipped bundle loads");
+        assert_eq!(discovered.schemas.trigger_registry().expect("registry").triggers.len(), 3);
+        let path = repo.write_document("both.md", "---\nprompt: hi\n---\n");
+        let judged = discovered
+            .judge(
+                &path,
+                include_str!("../../../schemas/claudine.yaml"),
+                include_str!("../../../schemas/inline-compose.yaml"),
+            )
+            .expect("both payloads resolve");
+        assert!(judged.claudine && judged.inline);
+        for property in ["initialize", "start", "loop", "agent", "hash", "last_updated", "max_turns", "verbosity"] {
+            assert!(judged.properties.contains(property), "the effective schema declares `{property}`");
+        }
+        assert!(judged.report.valid, "{:?}", problems(&judged.report));
+    }
 }
 
 /// A stack whose innermost conditional is `depth` levels deep and holds

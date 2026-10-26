@@ -140,7 +140,7 @@ macro_rules! endpoint {
             #[allow(dead_code, reason = "only some fixtures take ordinary inputs")]
             pub fn with_query(query: &[(&str, &str)]) -> Self {
                 let mut parts = ::schematic_runtime::RequestParts::new(::http::Method::GET, $path);
-                parts.query = query.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect();
+                parts.query = query.iter().map(|(name, value)| ((*name).to_owned(), (*value).into())).collect();
                 Self(parts)
             }
         }
@@ -788,6 +788,46 @@ endpoint!(
     ItemSelector::ROOT
 );
 impl PageSizeKnob for SentDefaultFullPage {}
+
+endpoint!(
+    SentDefaultAboveMax,
+    PageNumberKind,
+    Item,
+    "/sent-default-above-max",
+    Def::new(Kind::PageNumber {
+        page: Input::Query("page"),
+        base: IndexBase::OneBased,
+        more: MoreSignal::NonEmptyPage,
+    })
+    .size(PageSize {
+        sent_default: Some(20),
+        max: Some(10),
+        ..size(Input::Query("limit"))
+    })
+    .done(),
+    ItemSelector::ROOT
+);
+impl PageSizeKnob for SentDefaultAboveMax {}
+
+endpoint!(
+    AdjustableLinkCursor,
+    NextLinkKind,
+    Item,
+    "/adjustable-link",
+    Def::new(Kind::NextLink {
+        next: LinkSource::LinkHeader { rel: "next" },
+        prev: None,
+    })
+    .size(PageSize {
+        max: Some(10),
+        adjustable: true,
+        ..size(Input::Query("limit"))
+    })
+    .done(),
+    ItemSelector::ROOT
+);
+impl PageSizeKnob for AdjustableLinkCursor {}
+impl AdjustablePageSize for AdjustableLinkCursor {}
 
 endpoint!(
     ServerDefaultFullPage,

@@ -1,16 +1,17 @@
-//! Validation of strategies, list shapes, and the exceptions table.
+//! Validation of strategies, endpoint collections, and list shapes.
 
 use std::collections::HashSet;
 use std::fmt;
 
 use super::collection::{Collection, Pagination};
-use super::resolve::{AdoptionOutcome, Resolution, param_adoptions, path_params, request_inputs, resolve};
+use super::lower::page_size_conflicts;
+use super::resolve::{AdoptionOutcome, ManagedRole, ParamLocation, Resolution, param_adoptions, path_params, request_inputs, resolve};
 use super::selector::{JsonPath, Step};
 use super::strategy::{
     Boundary, Carry, CountUnit, CursorSource, InputParam, LinkSource, MoreSignal, PageSize,
     PageStrategy, Session, SessionOpen, SessionStep, Strategy, ValueSource,
 };
-use crate::response::ApiResponse;
+use crate::params::{ParamDef, QueryParamType};
 use crate::types::{Endpoint, RestApi, RestMethod};
 
 /// The group a [`PaginationError`] belongs to.
@@ -18,7 +19,7 @@ use crate::types::{Endpoint, RestApi, RestMethod};
 pub enum PaginationRuleGroup {
     /// The shape of a strategy, alone or on its endpoint.
     Strategy,
-    /// A row of the exceptions table or the list shape it names.
+    /// An endpoint collection or the list shape it names.
     Exception,
     /// A strategy input against the endpoint's declared parameters.
     Parameter,
@@ -29,6 +30,7 @@ pub enum PaginationRuleGroup {
 #[non_exhaustive]
 pub enum PaginationError {
     // Strategy shape
+    UnmatchedManagedParam(String),
     CursorWithoutEndSignal,
     FullPageOnCursor,
     FullPageWithoutPageSize,
@@ -55,9 +57,8 @@ pub enum PaginationError {
     SessionStepNeedsHandle(String),
     KeepAliveWithoutInput,
     InvalidPartitionMax,
-    // Exceptions table and list shape
-    UnknownExceptionId { id: String, nearest: Option<String> },
-    DuplicateExceptionId(String),
+    PartitionedFirstPageSession,
+    // Endpoint collection and list shape
     InvalidItemSelector { selector: String, reason: &'static str },
     NotAnArrayLocation(String),
     MissingItemType,
@@ -68,13 +69,36 @@ pub enum PaginationError {
     // Declared parameters
     CollidesWithEndpointParam(String),
     AdoptionWithoutKnob(String),
-    PagerManagedRequiredWithoutDefault(String),
+    /// `strategy` is the adopting strategy's [`PageStrategy::kind_name`].
+    PagerManagedRequiredWithoutDefault { strategy: &'static str, param: String },
+    /// The value the pager sends for a required adopted parameter does not
+    /// parse as the parameter's declared type; `expected` names that type.
+    PagerManagedDefaultInvalid { strategy: &'static str, param: String, value: String, expected: &'static str },
+    /// The declared parameter adopted as the page size carries value rules
+    /// that disagree with the strategy's page size; see
+    /// [`page_size_constraints`](super::page_size_constraints).
+    PageSizeConstraintConflict { param: String, conflict: PageSizeConflict },
+}
+
+/// How an adopted page-size parameter's declared rules disagree with its
+/// strategy, reported by [`PaginationError::PageSizeConstraintConflict`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PageSizeConflict {
+    /// `minimum` or `maximum` is declared but the pair is not exactly the
+    /// strategy's `min` and `max` (a bound declared alone while the strategy
+    /// has the other also lands here). The declared bounds keep their text.
+    Bounds { declared_minimum: Option<String>, declared_maximum: Option<String>, min: u32, max: Option<u32> },
+    /// A value keyword other than the bounds and `format`, named by its JSON
+    /// Schema spelling; the pager chooses the value and cannot honor it.
+    Unenforceable(&'static str),
 }
 
 impl PaginationError {
     /// The rule's stable kebab-case id.
     pub fn rule(&self) -> &'static str {
         match self {
+            Self::UnmatchedManagedParam(_) => "unmatched-pager-managed-parameter",
             Self::CursorWithoutEndSignal => "cursor-without-end-signal",
             Self::FullPageOnCursor => "full-page-on-cursor",
             Self::FullPageWithoutPageSize => "full-page-without-page-size",
@@ -96,8 +120,7 @@ impl PaginationError {
             Self::SessionStepNeedsHandle(_) => "session-step-needs-handle",
             Self::KeepAliveWithoutInput => "keep-alive-without-input",
             Self::InvalidPartitionMax => "invalid-partition-max",
-            Self::UnknownExceptionId { .. } => "unknown-exception-id",
-            Self::DuplicateExceptionId(_) => "duplicate-exception-id",
+            Self::PartitionedFirstPageSession => "partitioned-first-page-session",
             Self::InvalidItemSelector { .. } => "invalid-item-selector",
             Self::NotAnArrayLocation(_) => "not-an-array-location",
             Self::MissingItemType => "missing-item-type",
@@ -107,24 +130,27 @@ impl PaginationError {
             Self::InvalidLabel(_) => "invalid-label",
             Self::CollidesWithEndpointParam(_) => "collides-with-endpoint-param",
             Self::AdoptionWithoutKnob(_) => "adoption-without-knob",
-            Self::PagerManagedRequiredWithoutDefault(_) => "pager-managed-required-without-default",
+            Self::PagerManagedRequiredWithoutDefault { .. } => "pager-managed-required-without-default",
+            Self::PagerManagedDefaultInvalid { .. } => "pager-managed-default-invalid",
+            Self::PageSizeConstraintConflict { .. } => "page-size-constraint-conflict",
         }
     }
 
     pub fn group(&self) -> PaginationRuleGroup {
         match self {
-            Self::UnknownExceptionId { .. }
-            | Self::DuplicateExceptionId(_)
-            | Self::InvalidItemSelector { .. }
+            Self::InvalidItemSelector { .. }
             | Self::NotAnArrayLocation(_)
             | Self::MissingItemType
             | Self::AlternatesWithoutPrimary
             | Self::AlternatesOnUnpaginated
             | Self::DuplicateLabel(_)
             | Self::InvalidLabel(_) => PaginationRuleGroup::Exception,
-            Self::CollidesWithEndpointParam(_)
+            Self::UnmatchedManagedParam(_)
+            | Self::CollidesWithEndpointParam(_)
             | Self::AdoptionWithoutKnob(_)
-            | Self::PagerManagedRequiredWithoutDefault(_) => PaginationRuleGroup::Parameter,
+            | Self::PagerManagedRequiredWithoutDefault { .. }
+            | Self::PagerManagedDefaultInvalid { .. }
+            | Self::PageSizeConstraintConflict { .. } => PaginationRuleGroup::Parameter,
             _ => PaginationRuleGroup::Strategy,
         }
     }
@@ -133,6 +159,7 @@ impl PaginationError {
 impl fmt::Display for PaginationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnmatchedManagedParam(name) => write!(f, "pager-managed parameter `{name}` has no matching strategy input and caller control"),
             Self::CursorWithoutEndSignal => f.write_str(
                 "a cursor read only from items has no end signal; add `more_when(..)`",
             ),
@@ -200,16 +227,10 @@ impl fmt::Display for PaginationError {
                 f.write_str("keep-alive is sent neither on open nor on pages")
             }
             Self::InvalidPartitionMax => f.write_str("the partition maximum must be at least 1"),
-            Self::UnknownExceptionId { id, nearest } => {
-                write!(f, "exception names `{id}`, which is not an endpoint of this API")?;
-                match nearest {
-                    Some(nearest) => write!(f, "; did you mean `{nearest}`?"),
-                    None => Ok(()),
-                }
-            }
-            Self::DuplicateExceptionId(id) => {
-                write!(f, "endpoint `{id}` has more than one exception row")
-            }
+            Self::PartitionedFirstPageSession => f.write_str(
+                "partitions require a session opened by a separate request; first-page opening \
+                 creates independent sessions without shared cleanup",
+            ),
             Self::InvalidItemSelector { selector, reason } => {
                 write!(f, "item selector `{selector}` is invalid: {reason}")
             }
@@ -238,10 +259,31 @@ impl fmt::Display for PaginationError {
                 "strategy would adopt declared parameter `{name}` without authoring the knob \
                  that replaces it; author the knob or leave the parameter out of the strategy"
             ),
-            Self::PagerManagedRequiredWithoutDefault(name) => write!(
+            Self::PagerManagedRequiredWithoutDefault { strategy, param } => write!(
                 f,
-                "required parameter `{name}` is pager-managed, so the strategy must author a \
-                 value to send when the caller sets none"
+                "required parameter `{param}` is pager-managed by the `{strategy}` strategy, so \
+                 the strategy must author a value to send when the caller sets none"
+            ),
+            Self::PagerManagedDefaultInvalid { strategy, param, value, expected } => write!(
+                f,
+                "required parameter `{param}` is pager-managed by the `{strategy}` strategy, whose \
+                 default `{value}` is not a valid {expected}"
+            ),
+            Self::PageSizeConstraintConflict { param, conflict: PageSizeConflict::Bounds { declared_minimum, declared_maximum, min, max } } => {
+                let text = |value: Option<&str>| value.map_or_else(|| "none".to_owned(), str::to_owned);
+                write!(
+                    f,
+                    "page-size parameter `{param}` declares minimum {} and maximum {}, but the strategy's \
+                     page size has min {min} and max {}; declare exactly those bounds or none",
+                    text(declared_minimum.as_deref()),
+                    text(declared_maximum.as_deref()),
+                    text(max.map(|max| max.to_string()).as_deref()),
+                )
+            }
+            Self::PageSizeConstraintConflict { param, conflict: PageSizeConflict::Unenforceable(keyword) } => write!(
+                f,
+                "page-size parameter `{param}` declares `{keyword}`, which the pager cannot honor \
+                 because it chooses the value; only `minimum`, `maximum`, and `format` are allowed"
             ),
         }
     }
@@ -268,45 +310,13 @@ impl fmt::Display for PaginationDiagnostic {
     }
 }
 
-/// Validates an API's default strategy, exceptions table, and every list it
+/// Validates an API's default strategy, endpoint collections, and every list it
 /// resolves.
 ///
 /// Intrinsic strategy errors of the API default are reported once, against no
 /// endpoint; each endpoint that inherits it is checked only for what depends
 /// on the endpoint (path parameters, methods, declared parameters).
 ///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::pagination::{
-///     Collection, PaginationError, PaginationException, validate_pagination,
-/// };
-/// # use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
-/// # let api = |exceptions| RestApi {
-/// #     name: "Forge".into(), description: String::new(), base_url: "https://forge.test".into(),
-/// #     docs_url: None, auth: AuthStrategy::None, auth_policy: None, env_auth: vec![],
-/// #     env_username: None, headers: vec![], module_path: None, request_suffix: None,
-/// #     version: None, env_mapping: None, cross_origin: CrossOrigin::default(),
-/// #     request_id_header: None, secret_names: vec![], default_pagination: None,
-/// #     endpoints: vec![Endpoint {
-/// #         id: "ListReleases".into(), method: RestMethod::Get, path: "/releases".into(),
-/// #         description: String::new(), request: None,
-/// #         response: ApiResponse::json_type("Vec<Release>"), headers: vec![], params: None,
-/// #         oauth_scopes: None,
-/// #     }],
-/// #     pagination_exceptions: exceptions,
-/// # };
-///
-/// let typo = api(vec![PaginationException::new("ListRelease", Collection::root().unpaginated())]);
-/// let diagnostics = validate_pagination(&typo);
-/// assert_eq!(
-///     diagnostics[0].error,
-///     PaginationError::UnknownExceptionId {
-///         id: "ListRelease".into(),
-///         nearest: Some("ListReleases".into()),
-///     }
-/// );
-/// ```
 pub fn validate_pagination(api: &RestApi) -> Vec<PaginationDiagnostic> {
     let mut diagnostics = Vec::new();
     let mut push = |endpoint: Option<&str>, alternate: Option<&str>, error: PaginationError| {
@@ -323,33 +333,23 @@ pub fn validate_pagination(api: &RestApi) -> Vec<PaginationDiagnostic> {
         }
     }
 
-    let endpoint_ids: Vec<&str> = api.endpoints.iter().map(|e| e.id.as_str()).collect();
-    let mut seen = HashSet::new();
-    for entry in &api.pagination_exceptions {
-        let id = entry.endpoint.as_str();
-        if !seen.insert(id) {
-            push(Some(id), None, PaginationError::DuplicateExceptionId(id.to_owned()));
-        }
-        if !endpoint_ids.contains(&id) {
-            push(
-                Some(id),
-                None,
-                PaginationError::UnknownExceptionId {
-                    id: id.to_owned(),
-                    nearest: nearest_id(id, &endpoint_ids),
-                },
-            );
-        }
-    }
-
     for endpoint in &api.endpoints {
+        let resolution = resolve(api, endpoint);
+        let adopted = resolution.strategy().map(|strategy| super::adopted_params(endpoint, strategy)).unwrap_or_default();
+        if let Some(params) = &endpoint.params {
+            for (location, parameters) in [(super::ParamLocation::Query, &params.query),
+                (super::ParamLocation::Header, &params.header), (super::ParamLocation::Cookie, &params.cookie)] {
+                for param in parameters.iter().filter(|param| param.pager_managed) {
+                    if !adopted.iter().any(|entry| entry.location == location && entry.name == param.name) {
+                        push(Some(&endpoint.id), None, PaginationError::UnmatchedManagedParam(param.name.clone()));
+                    }
+                }
+            }
+        }
         let id = Some(endpoint.id.as_str());
-        if let Some(entry) = api
-            .pagination_exceptions
-            .iter()
-            .find(|entry| entry.endpoint == endpoint.id)
+        if let Some(collection) = endpoint.pagination.as_ref()
         {
-            for error in collection_errors(api, endpoint, &entry.collection) {
+            for error in collection_errors(api, endpoint, collection) {
                 push(id, None, error);
             }
         }
@@ -386,33 +386,7 @@ pub fn validate_pagination(api: &RestApi) -> Vec<PaginationDiagnostic> {
     diagnostics
 }
 
-/// The endpoint id closest to `id` by edit distance, if one is close enough
-/// to be a likely typo.
-fn nearest_id(id: &str, candidates: &[&str]) -> Option<String> {
-    let limit = (id.chars().count() / 3).max(2);
-    candidates
-        .iter()
-        .map(|candidate| (edit_distance(id, candidate), *candidate))
-        .filter(|(distance, _)| *distance <= limit)
-        .min()
-        .map(|(_, candidate)| candidate.to_owned())
-}
-
-fn edit_distance(a: &str, b: &str) -> usize {
-    let b: Vec<char> = b.chars().collect();
-    let mut previous: Vec<usize> = (0..=b.len()).collect();
-    for (i, a_char) in a.chars().enumerate() {
-        let mut current = vec![i + 1];
-        for (j, b_char) in b.iter().enumerate() {
-            let substitution = previous[j] + usize::from(a_char != *b_char);
-            current.push(substitution.min(previous[j + 1] + 1).min(current[j] + 1));
-        }
-        previous = current;
-    }
-    previous[b.len()]
-}
-
-/// Errors in the list shape an exceptions row names.
+/// Errors in an authored collection shape.
 fn collection_errors(api: &RestApi, endpoint: &Endpoint, collection: &Collection) -> Vec<PaginationError> {
     let mut errors = Vec::new();
     if let Some(reason) = collection.items.syntax_problem() {
@@ -424,18 +398,18 @@ fn collection_errors(api: &RestApi, endpoint: &Endpoint, collection: &Collection
     if collection.item_type.as_deref().is_some_and(|ty| ty.trim().is_empty()) {
         errors.push(PaginationError::EmptyValue("item type"));
     }
-    match &endpoint.response {
-        ApiResponse::Json(schema) => {
-            let is_vec = super::root_array_item_type(&endpoint.response).is_some();
+    match super::resolve::sole_json(&endpoint.response) {
+        Some(reference) => {
+            let is_vec = super::root_array_item_type(api, &endpoint.response).is_some();
             if is_vec && matches!(collection.items.record.first(), Some(Step::Key(_))) {
                 errors.push(PaginationError::NotAnArrayLocation(format!(
                     "the response `{}` is a root array, so it has no key `{}`",
-                    schema.type_name, collection.items
+                    api.rust_type(reference).unwrap_or_default(), collection.items
                 )));
             }
         }
-        _ => errors.push(PaginationError::NotAnArrayLocation(
-            "the response is not JSON".to_owned(),
+        None => errors.push(PaginationError::NotAnArrayLocation(
+            "the response is not a single JSON shape".to_owned(),
         )),
     }
 
@@ -524,6 +498,9 @@ pub fn validate_strategy(strategy: &Strategy) -> Vec<PaginationError> {
 
     if let Some(session) = &strategy.session {
         errors.extend(session_errors(session, kind));
+        if strategy.partition.is_some() && matches!(session.open, SessionOpen::FirstPage) {
+            errors.push(PaginationError::PartitionedFirstPageSession);
+        }
     }
 
     if let Some(partition) = &strategy.partition
@@ -694,8 +671,9 @@ fn is_bodyless(method: RestMethod) -> bool {
 }
 
 /// The rules of a strategy that depend on its endpoint. Declared-parameter
-/// rules apply to the primary strategy only: alternates are not generated, so
-/// they remove no request field.
+/// rules, including agreement of an adopted page-size parameter's own value
+/// rules with the strategy's page size, apply to the primary strategy only:
+/// alternates are not generated, so they remove no request field.
 fn endpoint_errors(endpoint: &Endpoint, strategy: &Strategy, primary: bool) -> Vec<PaginationError> {
     let mut errors = Vec::new();
     let known_path = path_params(&endpoint.path);
@@ -808,6 +786,15 @@ fn endpoint_errors(endpoint: &Endpoint, strategy: &Strategy, primary: bool) -> V
 
     if primary {
         for adoption in param_adoptions(endpoint, strategy) {
+            if adoption.outcome == AdoptionOutcome::Adopted
+                && adoption.role == ManagedRole::PageSize
+                && let (Some(size), Some(declared)) =
+                    (strategy.kind.size(), declared_param(endpoint, adoption.location, &adoption.name))
+            {
+                errors.extend(page_size_conflicts(declared, size).into_iter().map(|conflict| {
+                    PaginationError::PageSizeConstraintConflict { param: adoption.name.clone(), conflict }
+                }));
+            }
             match adoption.outcome {
                 AdoptionOutcome::NearMiss | AdoptionOutcome::NotAdoptable => {
                     errors.push(PaginationError::CollidesWithEndpointParam(adoption.name));
@@ -816,11 +803,53 @@ fn endpoint_errors(endpoint: &Endpoint, strategy: &Strategy, primary: bool) -> V
                     errors.push(PaginationError::AdoptionWithoutKnob(adoption.name));
                 }
                 AdoptionOutcome::Adopted if adoption.required && !adoption.has_sent_default => {
-                    errors.push(PaginationError::PagerManagedRequiredWithoutDefault(adoption.name));
+                    errors.push(PaginationError::PagerManagedRequiredWithoutDefault {
+                        strategy: strategy.kind.kind_name(),
+                        param: adoption.name,
+                    });
+                }
+                AdoptionOutcome::Adopted if adoption.required => {
+                    let declared = declared_param(endpoint, adoption.location, &adoption.name);
+                    if let (Some(value), Some(declared)) = (adoption.role.sent_default(strategy), declared)
+                        && let Some(expected) = invalid_sent_default(&declared.param_type, &value)
+                    {
+                        errors.push(PaginationError::PagerManagedDefaultInvalid {
+                            strategy: strategy.kind.kind_name(),
+                            param: adoption.name,
+                            value,
+                            expected,
+                        });
+                    }
                 }
                 AdoptionOutcome::Adopted => {}
             }
         }
     }
     errors
+}
+
+/// The declared plain parameter an adoption names, matched the way
+/// [`param_adoptions`] matched it.
+pub(super) fn declared_param<'a>(endpoint: &'a Endpoint, location: ParamLocation, name: &str) -> Option<&'a ParamDef> {
+    let params = endpoint.params.as_ref()?;
+    let (defs, any_case) = match location {
+        ParamLocation::Query => (&params.query, false),
+        ParamLocation::Header => (&params.header, true),
+        ParamLocation::Cookie => (&params.cookie, false),
+        ParamLocation::Path => return None,
+    };
+    defs.iter().find(|def| if any_case { def.name.eq_ignore_ascii_case(name) } else { def.name == name })
+}
+
+/// The type a sent default fails to be, or `None` when `value` is valid for
+/// `param_type`. Types without a parse rule only need a nonempty value.
+fn invalid_sent_default(param_type: &QueryParamType, value: &str) -> Option<&'static str> {
+    let (valid, expected) = match param_type {
+        QueryParamType::Integer => (value.parse::<i64>().is_ok(), "integer"),
+        QueryParamType::Number => (value.parse::<f64>().is_ok_and(f64::is_finite), "finite number"),
+        QueryParamType::Boolean => (matches!(value, "true" | "false"), "boolean (`true` or `false`)"),
+        QueryParamType::Enum(values) => (values.iter().any(|allowed| allowed == value), "value of the declared enum"),
+        _ => (!value.is_empty(), "nonempty value"),
+    };
+    (!valid).then_some(expected)
 }

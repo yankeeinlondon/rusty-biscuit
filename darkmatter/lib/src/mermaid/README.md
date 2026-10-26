@@ -9,7 +9,7 @@ Darkmatter provides a `Mermaid` struct for representing diagrams with theming an
 | `mod.rs` | `Mermaid` struct, builder API, `detect_diagram_type()`, `render_for_terminal()` |
 | `theme.rs` | `MermaidTheme` struct, JSON parsing, built-in theme presets |
 | `feature.rs` | `DarkmatterFeatureResolver`: the inline ESM bootstrap and its `themeVariables` palette — a script-only bundle, the single owner of Mermaid browser assets (no CSS; Mermaid does not read CSS custom properties) |
-| `render_terminal.rs` | Thin wrapper delegating to `biscuit_terminal::components::mermaid` |
+| `render_terminal.rs` | Thin wrapper delegating to `biscuit_visualized::components::mermaid` |
 
 ## Mermaid Struct
 
@@ -81,9 +81,9 @@ All rendering uses the "base" theme with 14 custom CSS variable mappings:
 
 ## Terminal Rendering
 
-Terminal rendering is delegated to `biscuit-terminal`. The `render_terminal.rs` module is a thin wrapper over `biscuit_terminal::components::mermaid::MermaidDiagram::try_render()`. All implementation details (pure-Rust diagram rendering via `biscuit-visualized`, terminal image display, and cached PNG artifacts) live in `biscuit-terminal`.
+Terminal rendering is delegated to `biscuit-visualized`. The `render_terminal.rs` module is a thin wrapper over `biscuit_visualized::components::mermaid::MermaidDiagram::try_render()`. The component renders and caches the diagram; `biscuit-terminal` displays the image.
 
-This module re-exports `MermaidRenderError` from `biscuit-terminal` for API compatibility and provides fallback helpers:
+This module re-exports `MermaidRenderError` from `biscuit-visualized` for API compatibility and provides fallback helpers:
 
 - `fallback_code_block(instructions)` - returns instructions as a fenced mermaid code block string
 - `render_fallback_code_block(instructions)` - prints the fallback code block to stdout

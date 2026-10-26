@@ -19,6 +19,13 @@ pub struct LoginBody {
     /// Dashboard password.
     pub password: String,
 }
+impl schematic_define::Registration for LoginBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("LoginBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Response from the `/login` endpoint.
 ///
@@ -39,6 +46,13 @@ pub struct LoginResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for LoginResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("LoginResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Authentication provider configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -62,6 +76,13 @@ pub struct AuthenticatorInfo {
     #[serde(flatten)]
     pub config: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for AuthenticatorInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("AuthenticatorInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Response for authenticators list.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -69,6 +90,13 @@ pub struct ListAuthenticatorsResponse {
     /// List of configured authenticators.
     pub data: Vec<AuthenticatorInfo>,
 }
+impl schematic_define::Registration for ListAuthenticatorsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListAuthenticatorsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// User in built-in database authentication.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -80,6 +108,13 @@ pub struct AuthUser {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_superuser: Option<bool>,
 }
+impl schematic_define::Registration for AuthUser {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("AuthUser");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Request body for creating an auth user.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -94,6 +129,13 @@ pub struct CreateAuthUserBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_superuser: Option<bool>,
 }
+impl schematic_define::Registration for CreateAuthUserBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CreateAuthUserBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Authorization source configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -110,6 +152,13 @@ pub struct AuthzSourceInfo {
     #[serde(flatten)]
     pub config: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for AuthzSourceInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("AuthzSourceInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Response for authorization sources list.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -117,6 +166,13 @@ pub struct ListAuthzSourcesResponse {
     /// List of authorization sources.
     pub sources: Vec<AuthzSourceInfo>,
 }
+impl schematic_define::Registration for ListAuthzSourcesResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListAuthzSourcesResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

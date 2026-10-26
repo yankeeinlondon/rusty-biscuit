@@ -38,7 +38,10 @@ use darkmatter::markdown::schemas::{
 };
 
 use crate::claudine_schemas::{AC5_GROUPS, BundleFile, SchemaRepo, problems, shipped_bundle};
-use crate::claudine_schemas_matrix::{Origin, Syntax, assert_non_string_trigger_key_errors, column_names, walk_from};
+use crate::claudine_schemas_matrix::{
+    Half, Origin, Syntax, assert_halves_cover_the_shapes, assert_non_string_trigger_key_errors, column_names, controls_from,
+    walk_from,
+};
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
 
@@ -396,13 +399,23 @@ fn embedded_payloads_apply_without_disk_schemas() {
 macro_rules! embedded_matrix_tests {
     ($($test:ident => ($column:literal, $syntax:ident);)*) => {
         $(
-            #[test]
-            fn $test() {
-                walk_from($column, Syntax::$syntax, &shipped_bundle!(), Origin::Embedded);
+            mod $test {
+                use super::*;
+
+                #[test]
+                fn shapes_1_to_4() {
+                    walk_from($column, Syntax::$syntax, Half::First, &shipped_bundle!(), Origin::Embedded);
+                }
+
+                #[test]
+                fn shapes_5_to_8() {
+                    walk_from($column, Syntax::$syntax, Half::Second, &shipped_bundle!(), Origin::Embedded);
+                }
             }
         )*
 
-        /// Every generated test, as `(column, syntax)`.
+        /// Every generated column test, as `(column, syntax)`; each covers
+        /// both halves.
         const EMBEDDED_GENERATED: &[(&str, Syntax)] = &[$(($column, Syntax::$syntax)),*];
     };
 }
@@ -447,7 +460,18 @@ embedded_matrix_tests! {
 }
 
 #[test]
+fn embedded_yaml_controls() {
+    controls_from(Syntax::Yaml, &shipped_bundle!(), Origin::Embedded);
+}
+
+#[test]
+fn embedded_json_controls() {
+    controls_from(Syntax::Json, &shipped_bundle!(), Origin::Embedded);
+}
+
+#[test]
 fn embedded_matrix_tests_cover_the_table() {
+    assert_halves_cover_the_shapes();
     for syntax in [Syntax::Yaml, Syntax::Json] {
         let generated: Vec<&str> = EMBEDDED_GENERATED
             .iter()

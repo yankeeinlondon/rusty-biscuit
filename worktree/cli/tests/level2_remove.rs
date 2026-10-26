@@ -2,12 +2,16 @@
 //! takes focus).
 //!
 //! - Each question starts after exactly one blank line below the report
-//!   (item 1), including the Not safe menu.
+//!   (item 1): the one `Delete it?` question, asked for every worktree, and
+//!   the Not safe menu.
+//! - The question shows each warning (uncommitted and included files, a
+//!   program using the worktree) and defaults to No.
 //! - Move-first removal through the generated bash, zsh, and fish wrappers:
-//!   the prompt works while the wrapper captures stdout, the shell lands in the
-//!   fork parent's worktree or the base repo, and a failed `cd`, an expired
-//!   token, or a changed branch tip between the two runs leaves the worktree
-//!   intact.
+//!   the prompt works while the wrapper captures stdout, and the shell lands
+//!   in the fork parent's worktree or the base repo. A failed `cd` or an
+//!   expired token leaves the worktree intact; a changed branch tip between
+//!   the two runs keeps only the branch, and an included file edited between
+//!   them is deleted with the checkout.
 //!
 //! Each scenario runs a script in the pane and reads its exit code and final
 //! directory from a marker file. A `wt` shim on `PATH` runs
@@ -335,6 +339,15 @@ fn assert_one_blank_line_before(plain: &str, needle: &str) {
     assert!(!lines[at - 2].trim().is_empty(), "more than one blank line before {needle:?}:\n{plain}");
 }
 
+/// The one question about the checkout.
+const QUESTION: &str = "Delete it?";
+
+/// The pane's text as one line: runs of whitespace, line breaks included,
+/// become one space, so a sentence the report wrapped still matches.
+fn unwrapped(plain: &str) -> String {
+    plain.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// A freshly spawned pane. Every scene run gets its own: `clear` does not
 /// reliably empty a tmux pane, so a reused one can still show an earlier
 /// run's prompt or report, which the next run's text checks would match.
@@ -347,7 +360,7 @@ fn fresh_harness() -> TmuxHarness {
 
 #[test]
 #[serial(level2_terminal)]
-fn level2_remove_files_question_follows_one_blank_line() {
+fn level2_remove_delete_question_follows_one_blank_line_and_defaults_to_no() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let scene = Scene::new();
     let wt = scene.add_worktree("feat/x", "feat-x");
@@ -356,22 +369,25 @@ fn level2_remove_files_question_follows_one_blank_line() {
 
     let script = scene.script(Shell::Bash, false, &scene.repo(), "wt remove feat-x", "");
     scene.start(&mut harness, Shell::Bash, &script);
-    let plain = wait_for_text(&mut harness, "Discard the files listed above");
-    assert!(plain.contains("Uncommitted files (1):"), "{plain}");
-    assert!(plain.contains("lib.rs"), "{plain}");
-    assert_one_blank_line_before(&plain, "Discard the files listed above");
+    let plain = wait_for_text(&mut harness, QUESTION);
+    assert!(plain.contains("1 uncommitted file will be lost: lib.rs"), "{plain}");
+    assert!(plain.contains("Files created or changed before deletion finishes are deleted too."), "{plain}");
+    assert!(plain.contains("(y/N)"), "default No: {plain}");
+    assert_one_blank_line_before(&plain, QUESTION);
 
-    // Default No: nothing is removed and the run succeeds.
+    // No: nothing is removed and the run succeeds.
     harness.send_text(b"n\n").unwrap();
     let outcome = scene.wait_outcome();
-    assert_eq!(outcome.code, 0);
+    let plain = harness.capture().unwrap().plain;
+    assert_eq!(outcome.code, 0, "{plain}");
+    assert!(plain.contains("Cancelled. Worktree feat-x was not removed."), "{plain}");
     assert!(wt.join("lib.rs").exists());
     assert!(scene.branch_exists("feat/x"));
 }
 
 #[test]
 #[serial(level2_terminal)]
-fn level2_changed_included_file_defaults_to_no() {
+fn level2_a_changed_included_file_warns_in_the_question_and_defaults_to_no() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let scene = Scene::new();
     let wt = scene.create_included();
@@ -379,9 +395,13 @@ fn level2_changed_included_file_defaults_to_no() {
     let mut harness = fresh_harness();
     let script = scene.script(Shell::Bash, false, &scene.repo(), "wt remove included", "");
     scene.start(&mut harness, Shell::Bash, &script);
-    let plain = wait_for_text(&mut harness, "Discard the files listed above");
-    assert!(plain.contains(".env") && plain.contains("changed"), "{plain}");
-    assert_one_blank_line_before(&plain, "Discard the files listed above");
+    let plain = wait_for_text(&mut harness, QUESTION);
+    let text = unwrapped(&plain);
+    assert!(
+        text.contains("1 included file copied in by .worktreeinclude will be lost: .env (changed since it was copied)"),
+        "{plain}"
+    );
+    assert_one_blank_line_before(&plain, QUESTION);
     harness.send_key("Enter").unwrap();
     assert_eq!(scene.wait_outcome().code, 0);
     assert_eq!(fs::read(wt.join(".env")).unwrap(), b"SECRET=new\n");
@@ -390,7 +410,7 @@ fn level2_changed_included_file_defaults_to_no() {
 
 #[test]
 #[serial(level2_terminal)]
-fn level2_unknown_included_file_defaults_to_no() {
+fn level2_an_uncomparable_included_file_warns_in_the_question_and_defaults_to_no() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let scene = Scene::new();
     let wt = scene.create_included();
@@ -400,8 +420,9 @@ fn level2_unknown_included_file_defaults_to_no() {
     let mut harness = fresh_harness();
     let script = scene.script(Shell::Bash, false, &scene.repo(), "wt remove included", "");
     scene.start(&mut harness, Shell::Bash, &script);
-    let plain = wait_for_text(&mut harness, "Discard the files listed above");
-    assert!(plain.contains(".env") && plain.contains("unknown"), "{plain}");
+    let plain = wait_for_text(&mut harness, QUESTION);
+    let text = unwrapped(&plain);
+    assert!(text.contains("1 included file copied in by .worktreeinclude will be lost: .env (could not be compared: "), "{plain}");
     harness.send_key("Enter").unwrap();
     assert_eq!(scene.wait_outcome().code, 0);
     assert!(wt.join(".env").exists());
@@ -410,24 +431,31 @@ fn level2_unknown_included_file_defaults_to_no() {
 
 #[test]
 #[serial(level2_terminal)]
-fn level2_unchanged_included_copy_removes_without_prompt() {
+fn level2_an_unchanged_included_copy_is_asked_about_without_a_warning() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let scene = Scene::new();
     let wt = scene.create_included();
     let mut harness = fresh_harness();
     let script = scene.script(Shell::Bash, false, &scene.repo(), "wt remove included", "");
     scene.start(&mut harness, Shell::Bash, &script);
+    let plain = wait_for_text(&mut harness, QUESTION);
+    assert!(!plain.contains("will be lost"), "{plain}");
+    assert!(!plain.contains("\u{26a0}"), "no warning item:\n{plain}");
+    assert_one_blank_line_before(&plain, QUESTION);
+    harness.send_text(b"y\n").unwrap();
     let outcome = scene.wait_outcome();
     let plain = harness.capture().unwrap().plain;
     assert_eq!(outcome.code, 0, "{plain}");
-    assert!(!plain.contains("Discard the files listed above"), "{plain}");
+    assert!(plain.contains("Removed included (") && plain.contains("and deleted branch included."), "{plain}");
     assert!(!wt.exists());
     assert!(!scene.branch_exists("included"));
 }
 
+/// The second run compares no content (R18): an included file edited
+/// between the runs is deleted with the checkout.
 #[test]
 #[serial(level2_terminal)]
-fn level2_included_edit_between_handoff_runs_refuses_removal() {
+fn level2_an_included_edit_between_handoff_runs_is_deleted_with_the_checkout() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let scene = Scene::new();
     let wt = scene.create_included();
@@ -435,11 +463,15 @@ fn level2_included_edit_between_handoff_runs_refuses_removal() {
     let mut harness = fresh_harness();
     let script = scene.script(Shell::Bash, true, &wt, "wt remove included", &edit);
     scene.start(&mut harness, Shell::Bash, &script);
+    wait_for_text(&mut harness, QUESTION);
+    harness.send_text(b"y\n").unwrap();
     let outcome = scene.wait_outcome();
     let plain = harness.capture().unwrap().plain;
-    assert_eq!(outcome.code, 3, "{plain}");
-    assert_eq!(fs::read(wt.join(".env")).unwrap(), b"SECRET=new\n");
-    assert!(scene.branch_exists("included"));
+    assert_eq!(outcome.code, 0, "{plain}");
+    assert_eq!(canonical(&outcome.pwd), canonical(&scene.repo()), "{plain}");
+    assert!(plain.contains("Removed included ("), "{plain}");
+    assert!(!wt.exists(), "{plain}");
+    assert!(!scene.branch_exists("included"), "on main, so Safe:\n{plain}");
 }
 
 #[test]
@@ -455,6 +487,8 @@ fn level2_remove_not_safe_menu_defaults_to_keeping_the_branch() {
 
     let script = scene.script(Shell::Bash, false, &scene.repo(), "wt remove feat-y", "");
     scene.start(&mut harness, Shell::Bash, &script);
+    wait_for_text(&mut harness, QUESTION);
+    harness.send_text(b"y\n").unwrap();
     let plain = wait_for_text(&mut harness, "Delete it and lose 1 commit");
     assert!(plain.contains("Keep the branch"), "{plain}");
     assert!(plain.contains("only here"), "the lost commit is listed:\n{plain}");
@@ -497,8 +531,9 @@ fn level2_move_first_through_each_wrapper_lands_in_the_fork_parent() {
         let script = scene.script(shell, true, &inside, "wt remove feat-x", "");
         scene.start(&mut harness, shell, &script);
         // The prompt works while the wrapper captures stdout.
-        let plain = wait_for_text(&mut harness, "Discard the files listed above");
-        assert_one_blank_line_before(&plain, "Discard the files listed above");
+        let plain = wait_for_text(&mut harness, QUESTION);
+        assert!(plain.contains("1 uncommitted file will be lost: notes.txt"), "{shell:?}:\n{plain}");
+        assert_one_blank_line_before(&plain, QUESTION);
         harness.send_text(b"y\n").unwrap();
 
         let outcome = scene.wait_outcome();
@@ -506,7 +541,7 @@ fn level2_move_first_through_each_wrapper_lands_in_the_fork_parent() {
         assert_eq!(outcome.code, 0, "{shell:?}:\n{plain}");
         assert_eq!(canonical(&outcome.pwd), canonical(&parent.join("docs")), "{shell:?}");
         assert!(plain.contains("Moving you to the feat/theme worktree"), "{shell:?}:\n{plain}");
-        assert!(plain.contains("Removed worktree"), "{shell:?}:\n{plain}");
+        assert!(plain.contains("Removed feat-x ("), "{shell:?}:\n{plain}");
         assert!(!wt.exists(), "{shell:?}");
         assert!(!scene.branch_exists("feat/x"), "{shell:?}: on main, so Safe");
     }
@@ -523,6 +558,9 @@ fn level2_move_first_lands_in_the_base_repo_without_a_fork_record() {
 
         let script = scene.script(shell, true, &wt, "wt remove feat-x", "");
         scene.start(&mut harness, shell, &script);
+        // A clean worktree is asked about too.
+        wait_for_text(&mut harness, QUESTION);
+        harness.send_text(b"y\n").unwrap();
         let outcome = scene.wait_outcome();
         let plain = harness.capture().unwrap().plain;
         assert_eq!(outcome.code, 0, "{shell:?}:\n{plain}");
@@ -534,7 +572,7 @@ fn level2_move_first_lands_in_the_base_repo_without_a_fork_record() {
 
 #[test]
 #[serial(level2_terminal)]
-fn level2_move_first_failures_leave_the_worktree_intact() {
+fn level2_move_first_failures_keep_the_worktree_and_a_changed_tip_keeps_the_branch() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     for shell in shells() {
         // A failed `cd`: the landing directory (the fork parent's worktree)
@@ -547,6 +585,8 @@ fn level2_move_first_failures_leave_the_worktree_intact() {
         let mut harness = fresh_harness();
         let script = scene.script(shell, true, &wt, "wt remove feat-x", "");
         scene.start(&mut harness, shell, &script);
+        wait_for_text(&mut harness, QUESTION);
+        harness.send_text(b"y\n").unwrap();
         let outcome = scene.wait_outcome();
         assert_ne!(outcome.code, 0, "{shell:?}: failed cd");
         assert_eq!(canonical(&outcome.pwd), canonical(&wt), "{shell:?}: the shell stays");
@@ -563,13 +603,15 @@ fn level2_move_first_failures_leave_the_worktree_intact() {
         let mut harness = fresh_harness();
         let script = scene.script(shell, true, &wt, "wt remove feat-x", &expire);
         scene.start(&mut harness, shell, &script);
+        wait_for_text(&mut harness, QUESTION);
+        harness.send_text(b"y\n").unwrap();
         let outcome = scene.wait_outcome();
         let plain = harness.capture().unwrap().plain;
-        assert_eq!(outcome.code, 4, "{shell:?}: expired:\n{plain}");
+        assert_eq!(outcome.code, 3, "{shell:?}: expired:\n{plain}");
         assert!(plain.contains("expired"), "{shell:?}:\n{plain}");
         assert!(wt.exists(), "{shell:?}: expired");
 
-        // A changed branch tip.
+        // A changed branch tip: the checkout is deleted, the branch kept.
         let scene = Scene::new();
         let wt = scene.add_worktree("feat/x", "feat-x");
         let commit = format!(
@@ -579,11 +621,15 @@ fn level2_move_first_failures_leave_the_worktree_intact() {
         let mut harness = fresh_harness();
         let script = scene.script(shell, true, &wt, "wt remove feat-x", &commit);
         scene.start(&mut harness, shell, &script);
+        wait_for_text(&mut harness, QUESTION);
+        harness.send_text(b"y\n").unwrap();
         let outcome = scene.wait_outcome();
         let plain = harness.capture().unwrap().plain;
-        assert_eq!(outcome.code, 3, "{shell:?}: changed tip:\n{plain}");
-        assert!(plain.contains("checked-out commit"), "{shell:?}:\n{plain}");
-        assert!(wt.exists(), "{shell:?}: changed tip");
+        let text = unwrapped(&plain);
+        assert_eq!(outcome.code, 1, "{shell:?}: changed tip:\n{plain}");
+        assert!(text.contains("Removed feat-x ("), "{shell:?}:\n{plain}");
+        assert!(text.contains("Branch feat/x was kept: it moved to "), "{shell:?}:\n{plain}");
+        assert!(!wt.exists(), "{shell:?}: changed tip");
         assert!(scene.branch_exists("feat/x"), "{shell:?}");
     }
 }
@@ -600,16 +646,16 @@ fn level2_declining_after_a_repair_keeps_the_restored_link_and_the_files() {
 
     let script = scene.script(Shell::Bash, false, &scene.repo(), "wt remove feat-x", "");
     scene.start(&mut harness, Shell::Bash, &script);
-    let plain = wait_for_text(&mut harness, "Discard the files listed above");
+    let plain = wait_for_text(&mut harness, QUESTION);
     assert!(plain.contains("Its .git file was missing"), "repair precedes the question:\n{plain}");
-    assert!(plain.contains("lib.rs"), "{plain}");
-    assert_one_blank_line_before(&plain, "Discard the files listed above");
+    assert!(plain.contains("1 uncommitted file will be lost: lib.rs"), "{plain}");
+    assert_one_blank_line_before(&plain, QUESTION);
 
     harness.send_text(b"n\n").unwrap();
     let outcome = scene.wait_outcome();
     let plain = harness.capture().unwrap().plain;
     assert_eq!(outcome.code, 0, "cancelling is a choice:\n{plain}");
-    assert!(plain.contains("was left in place"), "{plain}");
+    assert!(plain.contains("Cancelled. Worktree feat-x was not removed."), "{plain}");
     assert!(wt.join(".git").is_file(), "no rollback");
     assert!(wt.join("lib.rs").exists());
     assert!(scene.branch_exists("feat/x"));
@@ -630,7 +676,7 @@ fn level2_a_repaired_worktree_moves_first_through_the_wrapper() {
 
     let script = scene.script(Shell::Bash, true, &wt, "wt remove feat-x", "");
     scene.start(&mut harness, Shell::Bash, &script);
-    let plain = wait_for_text(&mut harness, "Discard the files listed above");
+    let plain = wait_for_text(&mut harness, QUESTION);
     assert!(plain.contains("Its .git file was missing"), "{plain}");
     harness.send_text(b"y\n").unwrap();
 
@@ -639,6 +685,64 @@ fn level2_a_repaired_worktree_moves_first_through_the_wrapper() {
     assert_eq!(outcome.code, 0, "{plain}");
     assert_eq!(canonical(&outcome.pwd), canonical(&scene.repo()));
     assert!(plain.contains("Moving you to the base repo"), "{plain}");
-    assert!(plain.contains("Removed worktree"), "{plain}");
+    assert!(plain.contains("Removed feat-x ("), "{plain}");
     assert!(!wt.exists());
+}
+
+/// A child process standing in a directory; killed and reaped on drop, so a
+/// failed assertion never leaves it running.
+struct Standing(std::process::Child);
+
+impl Standing {
+    fn start(dir: &Path) -> Self {
+        let child = Command::new("sleep")
+            .arg("300")
+            .current_dir(dir)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("start sleep");
+        Self(child)
+    }
+}
+
+impl Drop for Standing {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// R1: a program using the worktree is a warning in the one question, not a
+/// refusal. Answering yes deletes the worktree while the program still
+/// stands in it.
+#[test]
+#[serial(level2_terminal)]
+fn level2_a_process_warning_in_the_question_answered_yes_deletes_the_worktree() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    let scene = Scene::new();
+    let wt = scene.add_worktree("feat/x", "feat-x");
+    let standing = Standing::start(&wt);
+    let pid = standing.0.id();
+    let mut harness = fresh_harness();
+
+    let script = scene.script(Shell::Bash, false, &scene.repo(), "wt remove feat-x", "");
+    scene.start(&mut harness, Shell::Bash, &script);
+    let plain = wait_for_text(&mut harness, QUESTION);
+    let text = unwrapped(&plain);
+    assert!(text.contains("1 program is using files in this worktree:"), "{plain}");
+    assert!(text.contains(&format!("sleep (pid {pid}")), "{plain}");
+    assert!(text.contains("is standing in the worktree"), "{plain}");
+    assert!(text.contains("Deleting now may make them fail."), "{plain}");
+    assert_one_blank_line_before(&plain, QUESTION);
+
+    harness.send_text(b"y\n").unwrap();
+    let outcome = scene.wait_outcome();
+    let plain = harness.capture().unwrap().plain;
+    assert_eq!(outcome.code, 0, "{plain}");
+    assert!(plain.contains("Removed feat-x (") && plain.contains("and deleted branch feat/x."), "{plain}");
+    assert!(!wt.exists(), "{plain}");
+    assert!(!scene.branch_exists("feat/x"), "on main, so Safe:\n{plain}");
+    drop(standing);
 }

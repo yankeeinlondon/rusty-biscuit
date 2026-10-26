@@ -8,13 +8,13 @@ error[E0277]: `schematic_schema::github::ListReleasesRequest` has no resumable c
   = note: the definition for `schematic_schema::github::ListReleasesRequest` does not mark a cursor strategy `resumable`
   = help: the following other types implement trait `ResumeAfter`:
             AdminApiKeysListRequest
-            BetaListInputItemsRequest
             GetChatCompletionMessagesRequest
             GetEvalRunOutputItemsRequest
             GetEvalRunsRequest
             GetHistoryRequest
             ListAuditLogsRequest
             ListBatchesRequest
+            ListChatCompletionsRequest
           and $N others
 note: required by a bound in `Pager::<'a, A, R>::after`
  --> $SCHEMATIC_RUNTIME/src/pager/pages.rs

@@ -42,3 +42,9 @@ pub struct DiscussionList {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<u64>,
 }
+impl schematic_define::Registration for DiscussionList {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("DiscussionList");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}

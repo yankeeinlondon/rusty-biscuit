@@ -85,7 +85,7 @@ COMPLETE=fish bh | source
 
 ### Feature Flags
 
-By default only the `xx_hash` algorithm is included but `blake3` and `argon2id` can be enabled where needed:
+By default only the `xx_hash` algorithm is included but `blake3`, `argon2id`, and `json` (canonical JSON hashing) can be enabled where needed:
 
 ```sh
 cargo add biscuit-hash -F blake3,argon2id
@@ -106,6 +106,19 @@ use biscuit_hash::blake3_hash;
 
 let hash = blake3_hash("hello world");
 // Returns 64-character hex string
+```
+
+### Canonical JSON Hashing
+
+The `json` feature hashes a `serde_json::Value` so that object key order does
+not change the result; array order still does. See
+[docs/json.md](./docs/json.md).
+
+```rust
+use biscuit_hash::xx_hash_json;
+use serde_json::json;
+
+assert_eq!(xx_hash_json(&json!({"a": 1, "b": 2})), xx_hash_json(&json!({"b": 2, "a": 1})));
 ```
 
 ### Password Hashing (Argon2id)

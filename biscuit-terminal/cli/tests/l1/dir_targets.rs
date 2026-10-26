@@ -98,7 +98,7 @@ fn dir_md_and_md_plus_are_mutually_exclusive() {
 fn dir_example_terminal_default_still_works() {
     assert_cmd::Command::cargo_bin("bt")
         .unwrap()
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .args(["dir", "--example"])
         .assert()
         .success()
@@ -131,7 +131,7 @@ fn dir_terminal_default_renders_box_drawing() {
     let temp = build_fixture();
     let output = assert_cmd::Command::cargo_bin("bt")
         .unwrap()
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .args(["dir", "--skip-root"])
         .arg(temp.path())
         .assert()

@@ -9,6 +9,16 @@
       "key": "baseUrl",
       "value": "http://192.168.1.1:8001",
       "description": "Base URL for all requests"
+    },
+    {
+      "key": "path_app_id",
+      "value": "",
+      "description": "Value of the `app_id` path parameter"
+    },
+    {
+      "key": "path_app_name",
+      "value": "",
+      "description": "Value of the `app_name` path parameter"
     }
   ],
   "auth": {
@@ -33,7 +43,21 @@
               ]
             },
             "description": "Canonical Smart View info endpoint for modern Samsung TVs. Returns device identity, model, firmware, and network details. Payload fields vary by model and firmware revision; unknown fields are preserved via flattened extras. For high-frequency polling, prefer conditional requests or payload diffing to reduce repeated owned-string allocations when firmware does not support ETag-style cache validation."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{}"
+            }
+          ]
         },
         {
           "name": "LaunchApplicationById",
@@ -53,12 +77,19 @@
               "variable": [
                 {
                   "key": "app_id",
-                  "value": "<app_id>"
+                  "value": "{{path_app_id}}"
                 }
               ]
             },
             "description": "Launch a Samsung application by its package ID. Firmware-dependent support; use when the Samsung app ID is known. Recommended runtime strategy: attempt this endpoint first, fall back to LaunchApplicationByName."
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "GetAppStatus",
@@ -78,12 +109,26 @@
               "variable": [
                 {
                   "key": "app_id",
-                  "value": "<app_id>"
+                  "value": "{{path_app_id}}"
                 }
               ]
             },
             "description": "Get the running status and metadata of a specific application. Returns visibility, running state, version, and name."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{}"
+            }
+          ]
         },
         {
           "name": "CloseApp",
@@ -103,12 +148,19 @@
               "variable": [
                 {
                   "key": "app_id",
-                  "value": "<app_id>"
+                  "value": "{{path_app_id}}"
                 }
               ]
             },
             "description": "Close a running application by its ID. Sends a DELETE to the application endpoint, which requests the TV terminate the app."
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "InstallApp",
@@ -128,12 +180,19 @@
               "variable": [
                 {
                   "key": "app_id",
-                  "value": "<app_id>"
+                  "value": "{{path_app_id}}"
                 }
               ]
             },
             "description": "Install (or reinstall) an application by its ID. The TV downloads and installs the app from the Samsung app store."
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         }
       ]
     },
@@ -154,7 +213,21 @@
               ]
             },
             "description": "Debug/developer-facing log endpoint. May require developer mode enabled on the TV and can return non-success status when disabled."
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (text/plain)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/plain"
+                }
+              ],
+              "body": "string"
+            }
+          ]
         }
       ]
     },
@@ -178,12 +251,19 @@
               "variable": [
                 {
                   "key": "app_name",
-                  "value": "<app_name>"
+                  "value": "{{path_app_name}}"
                 }
               ]
             },
             "description": "Launch a Samsung application by name. Compatibility fallback for firmware that does not honor /api/v2/applications/{id}."
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         }
       ]
     }

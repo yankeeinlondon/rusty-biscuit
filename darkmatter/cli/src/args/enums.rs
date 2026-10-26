@@ -1,3 +1,4 @@
+use biscuit_visualized::components::MermaidFallbackFeature;
 use clap::ValueEnum;
 
 /// Output format for top-level render mode.
@@ -18,6 +19,43 @@ pub enum OutputFormat {
     /// AST JSON output.
     #[value(alias = "ast")]
     Json,
+}
+
+/// A named opt-in accepted by `md --feature` (the repository's `--feature`
+/// convention: repeatable, comma-separated, case-insensitive).
+///
+/// Adding a feature is one variant here plus its lowering in
+/// [`apply_features`](crate::render::apply_features).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, ValueEnum)]
+pub enum Feature {
+    /// Embed the font static-SVG Mermaid diagrams were measured with in HTML
+    /// output. Has no effect on Mermaid rendered any other way.
+    EmbedMermaidFont,
+    /// With `--mermaid`, never draw a diagram as text; show its source.
+    NoMermaidFallbacks,
+    /// With `--mermaid`, never draw a partial text diagram; show its source.
+    NoMermaidPartialFallbacks,
+    /// With `--mermaid`, hide the note that follows a partial text diagram.
+    NoMermaidPartialWarning,
+    /// Keep every Mermaid fence a code block in every output, overriding
+    /// `--mermaid` and `embed-mermaid-font`.
+    NoMermaidRendering,
+}
+
+impl Feature {
+    /// The shared fallback-policy name this feature repeats, if any.
+    ///
+    /// `md` declares the three names itself, because a clap value enum cannot
+    /// include another enum's values; biscuit-visualized owns their meaning
+    /// and the fold that combines them.
+    pub fn mermaid_fallback(self) -> Option<MermaidFallbackFeature> {
+        match self {
+            Self::NoMermaidFallbacks => Some(MermaidFallbackFeature::NoMermaidFallbacks),
+            Self::NoMermaidPartialFallbacks => Some(MermaidFallbackFeature::NoMermaidPartialFallbacks),
+            Self::NoMermaidPartialWarning => Some(MermaidFallbackFeature::NoMermaidPartialWarning),
+            Self::EmbedMermaidFont | Self::NoMermaidRendering => None,
+        }
+    }
 }
 
 /// Output format for `md code-block`.

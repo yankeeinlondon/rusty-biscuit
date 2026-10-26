@@ -206,7 +206,13 @@ pub(crate) fn prepare_frontmatter_for_compose(
         if options.inherited_origin.external_state == OverrideOrigin::Data {
             mark_external_leaves(&mut data, &mut Vec::new(), external, &current);
         }
-        let merged = context::effective_state::deep_merge(external, &current);
+        // The document is the base so its authored keys keep their positions;
+        // external-only keys are appended.
+        let merged = context::effective_state::deep_merge(
+            &current,
+            external,
+            context::effective_state::ConflictWinner::Base,
+        );
         if let Value::Object(map) = merged {
             *fm = map.into_iter().collect();
         }

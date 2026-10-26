@@ -85,6 +85,13 @@ pub struct ClientInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mqueue_dropped: Option<u64>,
 }
+impl schematic_define::Registration for ClientInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ClientInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Paginated response for clients list.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -96,6 +103,13 @@ pub struct ListClientsResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<PaginationMeta>,
 }
+impl schematic_define::Registration for ListClientsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListClientsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Request body for creating a subscription for a client.
 ///
@@ -127,4 +141,10 @@ pub struct SubscribeBody {
     /// Retain handling (MQTT 5.0).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rh: Option<u8>,
+}
+impl schematic_define::Registration for SubscribeBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("SubscribeBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }

@@ -1,0 +1,2334 @@
+---
+spec: /Volumes/coding/wt/rusty-biscuit/feat-better-schematics/schematic/features/2026-10-14-schematic-definition-api/spec.md
+plan: schematic/features/2026-10-14-schematic-definition-api/plan.md
+implemented_by: codex/gpt-6.1-sol
+started_phase: 1
+source_files_during_phase_1:
+  - Cargo.lock
+  - schematic/define/src/cross_origin.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/params/mod.rs
+  - schematic/define/src/params/param_def.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/definition_serde.rs
+  - schematic/gen/Cargo.toml
+  - schematic/gen/examples/capture_definition_baseline.rs
+  - schematic/gen/examples/support/definition_snapshot.rs
+  - schematic/gen/tests/l1/artifact_drift.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/justfile
+  - schematic/features/2026-10-14-schematic-definition-api/spike/Cargo.lock
+  - schematic/features/2026-10-14-schematic-definition-api/spike/Cargo.toml
+  - schematic/features/2026-10-14-schematic-definition-api/spike/examples/mismatched_type.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/examples/misspelled_path.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/examples/private_descriptor.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/prove.py
+  - schematic/features/2026-10-14-schematic-definition-api/spike/src/bin/emitted_path_source.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/src/lib.rs
+  - schematic/gen/tests/fixtures/definition-baseline/anthropic.json
+  - schematic/gen/tests/fixtures/definition-baseline/artificial-analysis-critpt.json
+  - schematic/gen/tests/fixtures/definition-baseline/artificial-analysis-data.json
+  - schematic/gen/tests/fixtures/definition-baseline/bitbucket.json
+  - schematic/gen/tests/fixtures/definition-baseline/elevenlabs.json
+  - schematic/gen/tests/fixtures/definition-baseline/emqx-basic.json
+  - schematic/gen/tests/fixtures/definition-baseline/emqx-bearer.json
+  - schematic/gen/tests/fixtures/definition-baseline/eversolo.json
+  - schematic/gen/tests/fixtures/definition-baseline/gitea.json
+  - schematic/gen/tests/fixtures/definition-baseline/github.json
+  - schematic/gen/tests/fixtures/definition-baseline/gitlab.json
+  - schematic/gen/tests/fixtures/definition-baseline/huggingface.json
+  - schematic/gen/tests/fixtures/definition-baseline/lmstudio.json
+  - schematic/gen/tests/fixtures/definition-baseline/ollama-native.json
+  - schematic/gen/tests/fixtures/definition-baseline/ollama-openai.json
+  - schematic/gen/tests/fixtures/definition-baseline/openai.json
+  - schematic/gen/tests/fixtures/definition-baseline/samsung-smart-tv.json
+  - schematic/gen/tests/fixtures/definition-baseline/unfolded-circle-core-rest.json
+docs_updated_during_phase_1:
+  - docs/dependencies.md
+  - schematic/define/README.md
+  - schematic/docs/dependencies.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+docs_created_during_phase_1:
+  - schematic/docs/definition-snapshots.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/inventory.md
+  - schematic/features/2026-10-14-schematic-definition-api/prerequisite-interfaces.md
+  - schematic/features/2026-10-14-schematic-definition-api/reproduction.md
+  - schematic/features/2026-10-14-schematic-definition-api/spike/README.md
+skills_files_updated_during_phase_1:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+packages:
+  - schematic-runtime
+  - schematic-define
+  - schematic-gen
+  - schematic-definitions
+  - schematic-schema
+  - sniff
+source_files_during_phase_2:
+  - Cargo.lock
+  - schematic/define/Cargo.toml
+  - schematic/define/src/lib.rs
+  - schematic/define/src/models/type_ref.rs
+  - schematic/define/src/registration.rs
+  - schematic/define/tests/typed_registration.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/registry/typed.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+docs_updated_during_phase_2:
+  - docs/dependencies.md
+  - schematic/define/README.md
+  - schematic/docs/dependencies.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+docs_created_during_phase_2:
+  - schematic/docs/typed-registration.md
+skills_files_updated_during_phase_2:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+source_files_during_phase_3:
+  - Cargo.lock
+  - schematic/define/Cargo.toml
+  - schematic/define/src/builders.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/prelude.rs
+  - schematic/define/src/schema.rs
+  - schematic/define/src/registration.rs
+  - schematic/define/src/params/mod.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/request_body.rs
+  - schematic/define/src/openapi/export/responses.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/endpoint_literal_surface.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/codegen/api_struct/tests.rs
+  - schematic/gen/src/codegen/module_docs.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+docs_updated_during_phase_3:
+  - docs/dependencies.md
+  - schematic/define/README.md
+  - schematic/docs/dependencies.md
+  - schematic/docs/typed-registration.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+docs_created_during_phase_3:
+  - schematic/docs/definition-builders.md
+skills_files_updated_during_phase_3:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+source_files_during_phase_4:
+  - schematic/define/src/builders.rs
+  - schematic/define/src/cross_origin.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/oauth.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/parameters.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/mappings/parameters.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/params/mod.rs
+  - schematic/define/src/params/param_def.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/definition_forms.rs
+  - schematic/define/tests/definition_serde.rs
+  - schematic/define/tests/endpoint_literal_surface.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/artificial_analysis/mod.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/elevenlabs/endpoints/history.rs
+  - schematic/definitions/src/elevenlabs/endpoints/sound_generation.rs
+  - schematic/definitions/src/elevenlabs/endpoints/speech.rs
+  - schematic/definitions/src/elevenlabs/endpoints/voices.rs
+  - schematic/definitions/src/elevenlabs/endpoints/workspace.rs
+  - schematic/definitions/src/emqx/endpoints/auth_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/banned_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/client_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/messaging_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/monitoring_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/rules_endpoints.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/endpoints/branches.rs
+  - schematic/definitions/src/gitlab/endpoints/issues.rs
+  - schematic/definitions/src/gitlab/endpoints/merge_requests.rs
+  - schematic/definitions/src/gitlab/endpoints/pipelines.rs
+  - schematic/definitions/src/gitlab/endpoints/projects.rs
+  - schematic/definitions/src/gitlab/endpoints/releases.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/api_struct/tests.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/names.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/body.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/named_params.rs
+  - schematic/gen/src/codegen/request_structs/path_params.rs
+  - schematic/gen/src/codegen/request_structs/query_params.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/single.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/collection.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_param_detection.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/origin.rs
+  - schematic/runtime/tests/l1/pager_surface.rs
+  - schematic/runtime/tests/l1/redirects.rs
+docs_updated_during_phase_4:
+  - schematic/define/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/pagination.md
+  - schematic/docs/runtime/building-clients.md
+  - schematic/docs/runtime/origins-and-redirects.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+  - schematic/gen/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/schematic-define/schematic/SKILL.md
+source_files_during_phase_5:
+  - schematic/define/src/builders.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/oauth.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/import.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/query_paths.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/endpoint_pagination.rs
+  - schematic/define/tests/import_normalization.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/artificial_analysis/mod.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/elevenlabs/endpoints/history.rs
+  - schematic/definitions/src/elevenlabs/endpoints/sound_generation.rs
+  - schematic/definitions/src/elevenlabs/endpoints/speech.rs
+  - schematic/definitions/src/elevenlabs/endpoints/voices.rs
+  - schematic/definitions/src/elevenlabs/endpoints/workspace.rs
+  - schematic/definitions/src/emqx/endpoints/auth_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/banned_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/client_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/messaging_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/monitoring_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/rules_endpoints.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/endpoints/branches.rs
+  - schematic/definitions/src/gitlab/endpoints/issues.rs
+  - schematic/definitions/src/gitlab/endpoints/merge_requests.rs
+  - schematic/definitions/src/gitlab/endpoints/pipelines.rs
+  - schematic/definitions/src/gitlab/endpoints/projects.rs
+  - schematic/definitions/src/gitlab/endpoints/releases.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/definitions/src/openai/types.rs
+  - schematic/definitions/src/openai_pagination.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/definitions/tests/pagination_coverage/main.rs
+  - schematic/definitions/tests/pagination_coverage/openai.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/collection.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/import_pipeline.rs
+  - schematic/gen/src/model_gen.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/tests/common/fresh_output.rs
+  - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/import_overlay.rs
+  - schematic/gen/tests/l1/openapi_import_test.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_param_detection.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/openapi/openai.json
+  - schematic/postman/openai.postman_collection.json
+  - schematic/schema/src/openai/mod.rs
+  - schematic/schema/src/openai/requests.rs
+docs_updated_during_phase_5:
+  - schematic/definitions/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/pagination.md
+  - schematic/docs/typed-registration.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/schematic/definitions.md
+source_files_during_phase_6:
+  - schematic/define/src/builders.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/oauth.rs
+  - schematic/define/src/openapi/export/info.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/collection.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/params/mod.rs
+  - schematic/define/src/prelude.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/schema.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/construction_enforcement.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/definition_serde.rs
+  - schematic/define/tests/endpoint_literal_surface.rs
+  - schematic/define/tests/endpoint_pagination.rs
+  - schematic/define/tests/pagination_inventory.rs
+  - schematic/define/tests/pagination_partitions.rs
+  - schematic/define/tests/pagination_serde.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/define/tests/pagination_tables.rs
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/anthropic/types/api.rs
+  - schematic/definitions/src/anthropic/types/messages.rs
+  - schematic/definitions/src/anthropic/types/tools.rs
+  - schematic/definitions/src/artificial_analysis/mod.rs
+  - schematic/definitions/src/artificial_analysis/types.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/bitbucket/types/branches.rs
+  - schematic/definitions/src/bitbucket/types/common.rs
+  - schematic/definitions/src/bitbucket/types/downloads.rs
+  - schematic/definitions/src/bitbucket/types/issues.rs
+  - schematic/definitions/src/bitbucket/types/pull_requests.rs
+  - schematic/definitions/src/bitbucket/types/repos.rs
+  - schematic/definitions/src/bitbucket/types/tags.rs
+  - schematic/definitions/src/elevenlabs/endpoints/history.rs
+  - schematic/definitions/src/elevenlabs/endpoints/sound_generation.rs
+  - schematic/definitions/src/elevenlabs/endpoints/speech.rs
+  - schematic/definitions/src/elevenlabs/endpoints/voices.rs
+  - schematic/definitions/src/elevenlabs/endpoints/workspace.rs
+  - schematic/definitions/src/elevenlabs/mod.rs
+  - schematic/definitions/src/elevenlabs/types/common.rs
+  - schematic/definitions/src/elevenlabs/types/history.rs
+  - schematic/definitions/src/elevenlabs/types/speech.rs
+  - schematic/definitions/src/elevenlabs/types/voices.rs
+  - schematic/definitions/src/elevenlabs/types/workspace.rs
+  - schematic/definitions/src/emqx/endpoints/auth_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/banned_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/client_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/messaging_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/monitoring_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/rules_endpoints.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/emqx/types/auth.rs
+  - schematic/definitions/src/emqx/types/banned.rs
+  - schematic/definitions/src/emqx/types/broker.rs
+  - schematic/definitions/src/emqx/types/clients.rs
+  - schematic/definitions/src/emqx/types/common.rs
+  - schematic/definitions/src/emqx/types/messaging.rs
+  - schematic/definitions/src/emqx/types/rules.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/eversolo/types.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/gitea/types.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/github/types/issues.rs
+  - schematic/definitions/src/github/types/pull_requests.rs
+  - schematic/definitions/src/github/types/releases.rs
+  - schematic/definitions/src/github/types/repos.rs
+  - schematic/definitions/src/github/types/workflow.rs
+  - schematic/definitions/src/gitlab/endpoints/branches.rs
+  - schematic/definitions/src/gitlab/endpoints/issues.rs
+  - schematic/definitions/src/gitlab/endpoints/merge_requests.rs
+  - schematic/definitions/src/gitlab/endpoints/pipelines.rs
+  - schematic/definitions/src/gitlab/endpoints/projects.rs
+  - schematic/definitions/src/gitlab/endpoints/releases.rs
+  - schematic/definitions/src/gitlab/mod.rs
+  - schematic/definitions/src/gitlab/types/branches.rs
+  - schematic/definitions/src/gitlab/types/common.rs
+  - schematic/definitions/src/gitlab/types/issues.rs
+  - schematic/definitions/src/gitlab/types/merge_requests.rs
+  - schematic/definitions/src/gitlab/types/pipelines.rs
+  - schematic/definitions/src/gitlab/types/projects.rs
+  - schematic/definitions/src/gitlab/types/releases.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/huggingface/types/collections.rs
+  - schematic/definitions/src/huggingface/types/common.rs
+  - schematic/definitions/src/huggingface/types/datasets.rs
+  - schematic/definitions/src/huggingface/types/discussions.rs
+  - schematic/definitions/src/huggingface/types/models.rs
+  - schematic/definitions/src/huggingface/types/repos.rs
+  - schematic/definitions/src/huggingface/types/spaces.rs
+  - schematic/definitions/src/huggingface/types/stubs.rs
+  - schematic/definitions/src/huggingface/types/users.rs
+  - schematic/definitions/src/lib.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/lmstudio/types.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/ollama/types/completion.rs
+  - schematic/definitions/src/ollama/types/models.rs
+  - schematic/definitions/src/ollama/types/openai.rs
+  - schematic/definitions/src/prelude.rs
+  - schematic/definitions/src/registry/lookup.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/registry/typed.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/samsung_smart_tv/types.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/types.rs
+  - schematic/definitions/tests/authoring_surface.rs
+  - schematic/definitions/tests/pagination_coverage/forges.rs
+  - schematic/definitions/tests/pagination_coverage/main.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/error.rs
+  - schematic/gen/src/codegen/pagination/mod.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/export/naming.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/collection.rs
+  - schematic/gen/src/export/postman/mod.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+  - schematic/gen/tests/l1/artifact_drift.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_param_detection.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/openapi/anthropic.json
+  - schematic/openapi/artificial_analysis.json
+  - schematic/openapi/bitbucket.json
+  - schematic/openapi/elevenlabs.json
+  - schematic/openapi/emqx.json
+  - schematic/openapi/eversolo.json
+  - schematic/openapi/gitea.json
+  - schematic/openapi/github.json
+  - schematic/openapi/gitlab.json
+  - schematic/openapi/huggingface.json
+  - schematic/openapi/lmstudio.json
+  - schematic/openapi/ollama.json
+  - schematic/openapi/samsung_smart_tv.json
+  - schematic/openapi/unfolded_circle_core_rest.json
+  - schematic/postman/gitea.postman_collection.json
+  - schematic/postman/gitlab.postman_collection.json
+  - schematic/schema/Cargo.lock
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/artificial_analysis.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/emqx/requests.rs
+  - schematic/schema/src/eversolo/requests.rs
+  - schematic/schema/src/gitea/mod.rs
+  - schematic/schema/src/gitea/requests.rs
+  - schematic/schema/src/github/requests.rs
+  - schematic/schema/src/gitlab/requests.rs
+  - schematic/schema/src/huggingface/requests.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+  - schematic/schema/tests/fixtures/compile_fail/after_on_a_page_number_endpoint.stderr
+  - schematic/schema/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.stderr
+  - sniff/lib/src/remote/gitea.rs
+  - sniff/lib/src/remote/gitlab.rs
+docs_updated_during_phase_6:
+  - schematic/README.md
+  - schematic/define/README.md
+  - schematic/definitions/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/definition-snapshots.md
+  - schematic/docs/generation/request-side.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/pagination.md
+  - schematic/docs/typed-registration.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+docs_created_during_phase_6:
+  - schematic/docs/generation/workflow.md
+skills_files_updated_during_phase_6:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/schematic/define.md
+  - .claude/skills/schematic-define/schematic/gen.md
+source_files_during_phase_7:
+  - schematic/gen/build.rs
+  - schematic/gen/tests/l1/artifact_drift.rs
+docs_updated_during_phase_7:
+  - schematic/docs/generation/workflow.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/os/windows.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+source_files_during_phase_8:
+  - schematic/define/src/lib.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/response.rs
+  - schematic/define/src/schema.rs
+  - schematic/define/tests/authoring_guidance.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/registry/typed.rs
+docs_updated_during_phase_8:
+  - .claude/commands/create-schematic-api.md
+  - schematic/README.md
+  - schematic/define/README.md
+  - schematic/definitions/README.md
+  - schematic/gen/README.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/typed-registration.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+  - schematic/docs/research/samsung-design.md
+  - schematic/docs/research/multipart-form-data.md
+  - schematic/docs/research/oauth/integration-with-schematic.md
+docs_created_during_phase_8:
+  - schematic/docs/authoring-examples.md
+  - schematic/docs/generation/generated-clients.md
+skills_files_updated_during_phase_8:
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+source_code:
+  - Cargo.lock
+  - schematic/define/src/cross_origin.rs
+  - schematic/define/src/pagination.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/params/mod.rs
+  - schematic/define/src/params/param_def.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/definition_serde.rs
+  - schematic/gen/Cargo.toml
+  - schematic/gen/examples/capture_definition_baseline.rs
+  - schematic/gen/examples/support/definition_snapshot.rs
+  - schematic/gen/tests/l1/artifact_drift.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/main.rs
+  - schematic/justfile
+  - schematic/features/2026-10-14-schematic-definition-api/spike/Cargo.lock
+  - schematic/features/2026-10-14-schematic-definition-api/spike/Cargo.toml
+  - schematic/features/2026-10-14-schematic-definition-api/spike/examples/mismatched_type.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/examples/misspelled_path.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/examples/private_descriptor.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/prove.py
+  - schematic/features/2026-10-14-schematic-definition-api/spike/src/bin/emitted_path_source.rs
+  - schematic/features/2026-10-14-schematic-definition-api/spike/src/lib.rs
+  - schematic/gen/tests/fixtures/definition-baseline/anthropic.json
+  - schematic/gen/tests/fixtures/definition-baseline/artificial-analysis-critpt.json
+  - schematic/gen/tests/fixtures/definition-baseline/artificial-analysis-data.json
+  - schematic/gen/tests/fixtures/definition-baseline/bitbucket.json
+  - schematic/gen/tests/fixtures/definition-baseline/elevenlabs.json
+  - schematic/gen/tests/fixtures/definition-baseline/emqx-basic.json
+  - schematic/gen/tests/fixtures/definition-baseline/emqx-bearer.json
+  - schematic/gen/tests/fixtures/definition-baseline/eversolo.json
+  - schematic/gen/tests/fixtures/definition-baseline/gitea.json
+  - schematic/gen/tests/fixtures/definition-baseline/github.json
+  - schematic/gen/tests/fixtures/definition-baseline/gitlab.json
+  - schematic/gen/tests/fixtures/definition-baseline/huggingface.json
+  - schematic/gen/tests/fixtures/definition-baseline/lmstudio.json
+  - schematic/gen/tests/fixtures/definition-baseline/ollama-native.json
+  - schematic/gen/tests/fixtures/definition-baseline/ollama-openai.json
+  - schematic/gen/tests/fixtures/definition-baseline/openai.json
+  - schematic/gen/tests/fixtures/definition-baseline/samsung-smart-tv.json
+  - schematic/gen/tests/fixtures/definition-baseline/unfolded-circle-core-rest.json
+  - schematic/define/Cargo.toml
+  - schematic/define/src/lib.rs
+  - schematic/define/src/models/type_ref.rs
+  - schematic/define/src/registration.rs
+  - schematic/define/tests/typed_registration.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/registry/typed.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/define/src/builders.rs
+  - schematic/define/src/prelude.rs
+  - schematic/define/src/schema.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/request_body.rs
+  - schematic/define/src/openapi/export/responses.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/endpoint_literal_surface.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/codegen/api_struct/tests.rs
+  - schematic/gen/src/codegen/module_docs.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/tests/l1/http_client.rs
+  - schematic/define/src/oauth.rs
+  - schematic/define/src/openapi/export/parameters.rs
+  - schematic/define/src/openapi/import/mappings/mod.rs
+  - schematic/define/src/openapi/import/mappings/parameters.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/request.rs
+  - schematic/define/tests/cross_origin_policy.rs
+  - schematic/define/tests/definition_forms.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/artificial_analysis/mod.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/elevenlabs/endpoints/history.rs
+  - schematic/definitions/src/elevenlabs/endpoints/sound_generation.rs
+  - schematic/definitions/src/elevenlabs/endpoints/speech.rs
+  - schematic/definitions/src/elevenlabs/endpoints/voices.rs
+  - schematic/definitions/src/elevenlabs/endpoints/workspace.rs
+  - schematic/definitions/src/emqx/endpoints/auth_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/banned_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/client_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/messaging_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/monitoring_endpoints.rs
+  - schematic/definitions/src/emqx/endpoints/rules_endpoints.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/endpoints/branches.rs
+  - schematic/definitions/src/gitlab/endpoints/issues.rs
+  - schematic/definitions/src/gitlab/endpoints/merge_requests.rs
+  - schematic/definitions/src/gitlab/endpoints/pipelines.rs
+  - schematic/definitions/src/gitlab/endpoints/projects.rs
+  - schematic/definitions/src/gitlab/endpoints/releases.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/gen/src/codegen/api_struct/helpers.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/names.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/body.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/named_params.rs
+  - schematic/gen/src/codegen/request_structs/path_params.rs
+  - schematic/gen/src/codegen/request_structs/query_params.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/single.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/collection.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_param_detection.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/runtime/src/client.rs
+  - schematic/runtime/src/origin.rs
+  - schematic/runtime/tests/l1/pager_surface.rs
+  - schematic/runtime/tests/l1/redirects.rs
+  - schematic/define/src/openapi/import.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/query_paths.rs
+  - schematic/define/tests/endpoint_pagination.rs
+  - schematic/define/tests/import_normalization.rs
+  - schematic/definitions/src/openai/types.rs
+  - schematic/definitions/src/openai_pagination.rs
+  - schematic/definitions/tests/pagination_coverage/main.rs
+  - schematic/definitions/tests/pagination_coverage/openai.rs
+  - schematic/gen/src/import_pipeline.rs
+  - schematic/gen/src/model_gen.rs
+  - schematic/gen/tests/common/fresh_output.rs
+  - schematic/gen/tests/fixtures/wire_baseline/query_request_lines.txt
+  - schematic/gen/tests/l1/import_overlay.rs
+  - schematic/gen/tests/l1/openapi_import_test.rs
+  - schematic/openapi/openai.json
+  - schematic/postman/openai.postman_collection.json
+  - schematic/schema/src/openai/mod.rs
+  - schematic/schema/src/openai/requests.rs
+  - schematic/define/src/openapi/export/info.rs
+  - schematic/define/src/openapi/extensions.rs
+  - schematic/define/src/pagination/collection.rs
+  - schematic/define/tests/construction_enforcement.rs
+  - schematic/define/tests/pagination_inventory.rs
+  - schematic/define/tests/pagination_partitions.rs
+  - schematic/define/tests/pagination_serde.rs
+  - schematic/define/tests/pagination_tables.rs
+  - schematic/definitions/src/anthropic/types/api.rs
+  - schematic/definitions/src/anthropic/types/messages.rs
+  - schematic/definitions/src/anthropic/types/tools.rs
+  - schematic/definitions/src/artificial_analysis/types.rs
+  - schematic/definitions/src/bitbucket/types/branches.rs
+  - schematic/definitions/src/bitbucket/types/common.rs
+  - schematic/definitions/src/bitbucket/types/downloads.rs
+  - schematic/definitions/src/bitbucket/types/issues.rs
+  - schematic/definitions/src/bitbucket/types/pull_requests.rs
+  - schematic/definitions/src/bitbucket/types/repos.rs
+  - schematic/definitions/src/bitbucket/types/tags.rs
+  - schematic/definitions/src/elevenlabs/mod.rs
+  - schematic/definitions/src/elevenlabs/types/common.rs
+  - schematic/definitions/src/elevenlabs/types/history.rs
+  - schematic/definitions/src/elevenlabs/types/speech.rs
+  - schematic/definitions/src/elevenlabs/types/voices.rs
+  - schematic/definitions/src/elevenlabs/types/workspace.rs
+  - schematic/definitions/src/emqx/types/auth.rs
+  - schematic/definitions/src/emqx/types/banned.rs
+  - schematic/definitions/src/emqx/types/broker.rs
+  - schematic/definitions/src/emqx/types/clients.rs
+  - schematic/definitions/src/emqx/types/common.rs
+  - schematic/definitions/src/emqx/types/messaging.rs
+  - schematic/definitions/src/emqx/types/rules.rs
+  - schematic/definitions/src/eversolo/types.rs
+  - schematic/definitions/src/gitea/types.rs
+  - schematic/definitions/src/github/types/issues.rs
+  - schematic/definitions/src/github/types/pull_requests.rs
+  - schematic/definitions/src/github/types/releases.rs
+  - schematic/definitions/src/github/types/repos.rs
+  - schematic/definitions/src/github/types/workflow.rs
+  - schematic/definitions/src/gitlab/mod.rs
+  - schematic/definitions/src/gitlab/types/branches.rs
+  - schematic/definitions/src/gitlab/types/common.rs
+  - schematic/definitions/src/gitlab/types/issues.rs
+  - schematic/definitions/src/gitlab/types/merge_requests.rs
+  - schematic/definitions/src/gitlab/types/pipelines.rs
+  - schematic/definitions/src/gitlab/types/projects.rs
+  - schematic/definitions/src/gitlab/types/releases.rs
+  - schematic/definitions/src/huggingface/types/collections.rs
+  - schematic/definitions/src/huggingface/types/common.rs
+  - schematic/definitions/src/huggingface/types/datasets.rs
+  - schematic/definitions/src/huggingface/types/discussions.rs
+  - schematic/definitions/src/huggingface/types/models.rs
+  - schematic/definitions/src/huggingface/types/repos.rs
+  - schematic/definitions/src/huggingface/types/spaces.rs
+  - schematic/definitions/src/huggingface/types/stubs.rs
+  - schematic/definitions/src/huggingface/types/users.rs
+  - schematic/definitions/src/lib.rs
+  - schematic/definitions/src/lmstudio/types.rs
+  - schematic/definitions/src/ollama/types/completion.rs
+  - schematic/definitions/src/ollama/types/models.rs
+  - schematic/definitions/src/ollama/types/openai.rs
+  - schematic/definitions/src/prelude.rs
+  - schematic/definitions/src/registry/lookup.rs
+  - schematic/definitions/src/samsung_smart_tv/types.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/types.rs
+  - schematic/definitions/tests/authoring_surface.rs
+  - schematic/definitions/tests/pagination_coverage/forges.rs
+  - schematic/gen/src/codegen/error.rs
+  - schematic/gen/src/codegen/pagination/mod.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/export/naming.rs
+  - schematic/gen/src/export/postman/mod.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/openapi/anthropic.json
+  - schematic/openapi/artificial_analysis.json
+  - schematic/openapi/bitbucket.json
+  - schematic/openapi/elevenlabs.json
+  - schematic/openapi/emqx.json
+  - schematic/openapi/eversolo.json
+  - schematic/openapi/gitea.json
+  - schematic/openapi/github.json
+  - schematic/openapi/gitlab.json
+  - schematic/openapi/huggingface.json
+  - schematic/openapi/lmstudio.json
+  - schematic/openapi/ollama.json
+  - schematic/openapi/samsung_smart_tv.json
+  - schematic/openapi/unfolded_circle_core_rest.json
+  - schematic/postman/gitea.postman_collection.json
+  - schematic/postman/gitlab.postman_collection.json
+  - schematic/schema/Cargo.lock
+  - schematic/schema/src/anthropic.rs
+  - schematic/schema/src/artificial_analysis.rs
+  - schematic/schema/src/bitbucket/requests.rs
+  - schematic/schema/src/elevenlabs/requests.rs
+  - schematic/schema/src/emqx/requests.rs
+  - schematic/schema/src/eversolo/requests.rs
+  - schematic/schema/src/gitea/mod.rs
+  - schematic/schema/src/gitea/requests.rs
+  - schematic/schema/src/github/requests.rs
+  - schematic/schema/src/gitlab/requests.rs
+  - schematic/schema/src/huggingface/requests.rs
+  - schematic/schema/src/lmstudio.rs
+  - schematic/schema/src/ollama.rs
+  - schematic/schema/src/samsung_smart_tv.rs
+  - schematic/schema/src/unfolded_circle_core_rest.rs
+  - schematic/schema/tests/fixtures/compile_fail/after_on_a_page_number_endpoint.stderr
+  - schematic/schema/tests/fixtures/compile_fail/pager_on_an_unpaginated_endpoint.stderr
+  - sniff/lib/src/remote/gitea.rs
+  - sniff/lib/src/remote/gitlab.rs
+  - schematic/gen/build.rs
+  - schematic/define/src/response.rs
+  - schematic/define/tests/authoring_guidance.rs
+  - schematic/define/src/components.rs
+  - schematic/define/src/openapi/export/components.rs
+  - schematic/define/src/openapi/export/conversion.rs
+  - schematic/define/src/openapi/import/mappings/responses.rs
+  - schematic/define/src/openapi/import/mappings/schema.rs
+  - schematic/define/src/openapi/mod.rs
+  - schematic/definitions/Cargo.toml
+  - schematic/definitions/src/registry/conversion.rs
+  - schematic/definitions/tests/registry_invariants.rs
+  - schematic/gen/src/codegen/endpoint_methods/mod.rs
+  - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+  - schematic/gen/src/codegen/request_structs/form.rs
+  - schematic/gen/src/export/body.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/tests/common/components.rs
+  - schematic/gen/tests/common/mod.rs
+documentation:
+  - docs/dependencies.md
+  - schematic/define/README.md
+  - schematic/docs/dependencies.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+  - schematic/docs/definition-snapshots.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/inventory.md
+  - schematic/features/2026-10-14-schematic-definition-api/prerequisite-interfaces.md
+  - schematic/features/2026-10-14-schematic-definition-api/reproduction.md
+  - schematic/features/2026-10-14-schematic-definition-api/spike/README.md
+  - schematic/docs/typed-registration.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/pagination.md
+  - schematic/docs/runtime/building-clients.md
+  - schematic/docs/runtime/origins-and-redirects.md
+  - schematic/gen/README.md
+  - schematic/definitions/README.md
+  - schematic/README.md
+  - schematic/docs/generation/request-side.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/generation/workflow.md
+  - .claude/commands/create-schematic-api.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/docs/research/samsung-design.md
+  - schematic/docs/research/multipart-form-data.md
+  - schematic/docs/research/oauth/integration-with-schematic.md
+  - schematic/docs/authoring-examples.md
+  - schematic/docs/generation/generated-clients.md
+  - .claude/skills/schematic-define/SKILL.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/schematic/define.md
+  - .claude/skills/schematic-define/schematic/openapi.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/review-1.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+completed_phase: 9
+implemented: true
+source_files_during_phase_9:
+  - Cargo.lock
+  - schematic/define/src/builders.rs
+  - schematic/define/src/components.rs
+  - schematic/define/src/lib.rs
+  - schematic/define/src/models/type_ref.rs
+  - schematic/define/src/openapi/export/components.rs
+  - schematic/define/src/openapi/export/conversion.rs
+  - schematic/define/src/openapi/export/info.rs
+  - schematic/define/src/openapi/export/mod.rs
+  - schematic/define/src/openapi/export/paths.rs
+  - schematic/define/src/openapi/export/responses.rs
+  - schematic/define/src/openapi/import/builder.rs
+  - schematic/define/src/openapi/import/mappings/responses.rs
+  - schematic/define/src/openapi/import/mappings/schema.rs
+  - schematic/define/src/openapi/mod.rs
+  - schematic/define/src/pagination/resolve.rs
+  - schematic/define/src/pagination/validate.rs
+  - schematic/define/src/registration.rs
+  - schematic/define/src/request.rs
+  - schematic/define/src/response.rs
+  - schematic/define/src/schema.rs
+  - schematic/define/src/types.rs
+  - schematic/define/tests/authoring_guidance.rs
+  - schematic/define/tests/builders.rs
+  - schematic/define/tests/pagination_inventory.rs
+  - schematic/define/tests/pagination_support/mod.rs
+  - schematic/define/tests/pagination_tables.rs
+  - schematic/define/tests/typed_registration.rs
+  - schematic/definitions/Cargo.toml
+  - schematic/definitions/src/anthropic/mod.rs
+  - schematic/definitions/src/artificial_analysis/mod.rs
+  - schematic/definitions/src/artificial_analysis/types.rs
+  - schematic/definitions/src/bitbucket/mod.rs
+  - schematic/definitions/src/elevenlabs/mod.rs
+  - schematic/definitions/src/emqx/mod.rs
+  - schematic/definitions/src/eversolo/mod.rs
+  - schematic/definitions/src/gitea/mod.rs
+  - schematic/definitions/src/github/mod.rs
+  - schematic/definitions/src/gitlab/mod.rs
+  - schematic/definitions/src/huggingface/mod.rs
+  - schematic/definitions/src/lib.rs
+  - schematic/definitions/src/lmstudio/mod.rs
+  - schematic/definitions/src/ollama/mod.rs
+  - schematic/definitions/src/openai/mod.rs
+  - schematic/definitions/src/registry/conversion.rs
+  - schematic/definitions/src/registry/lookup.rs
+  - schematic/definitions/src/registry/mod.rs
+  - schematic/definitions/src/registry/typed.rs
+  - schematic/definitions/src/samsung_smart_tv/mod.rs
+  - schematic/definitions/src/unfolded_circle/core_rest/mod.rs
+  - schematic/definitions/tests/registry_invariants.rs
+  - schematic/gen/examples/support/definition_snapshot.rs
+  - schematic/gen/src/codegen/client/tests.rs
+  - schematic/gen/src/codegen/endpoint_methods/mod.rs
+  - schematic/gen/src/codegen/endpoint_methods/tests.rs
+  - schematic/gen/src/codegen/pagination/tests.rs
+  - schematic/gen/src/codegen/request_enum.rs
+  - schematic/gen/src/codegen/request_structs/body.rs
+  - schematic/gen/src/codegen/request_structs/endpoint_spec.rs
+  - schematic/gen/src/codegen/request_structs/form.rs
+  - schematic/gen/src/codegen/request_structs/mod.rs
+  - schematic/gen/src/codegen/request_structs/shared.rs
+  - schematic/gen/src/codegen/request_structs/tests.rs
+  - schematic/gen/src/definition_gen.rs
+  - schematic/gen/src/diagnostics.rs
+  - schematic/gen/src/export/body.rs
+  - schematic/gen/src/export/openapi.rs
+  - schematic/gen/src/export/postman/tests.rs
+  - schematic/gen/src/import_pipeline.rs
+  - schematic/gen/src/lib.rs
+  - schematic/gen/src/model_gen.rs
+  - schematic/gen/src/output/assemble/api.rs
+  - schematic/gen/src/output/mod.rs
+  - schematic/gen/src/pipeline.rs
+  - schematic/gen/src/test_utils.rs
+  - schematic/gen/src/validation.rs
+  - schematic/gen/tests/common/components.rs
+  - schematic/gen/tests/common/mod.rs
+  - schematic/gen/tests/fixtures/definition-baseline/anthropic.json
+  - schematic/gen/tests/fixtures/definition-baseline/artificial-analysis-critpt.json
+  - schematic/gen/tests/fixtures/definition-baseline/artificial-analysis-data.json
+  - schematic/gen/tests/fixtures/definition-baseline/bitbucket.json
+  - schematic/gen/tests/fixtures/definition-baseline/elevenlabs.json
+  - schematic/gen/tests/fixtures/definition-baseline/emqx-basic.json
+  - schematic/gen/tests/fixtures/definition-baseline/emqx-bearer.json
+  - schematic/gen/tests/fixtures/definition-baseline/eversolo.json
+  - schematic/gen/tests/fixtures/definition-baseline/gitea.json
+  - schematic/gen/tests/fixtures/definition-baseline/github.json
+  - schematic/gen/tests/fixtures/definition-baseline/gitlab.json
+  - schematic/gen/tests/fixtures/definition-baseline/huggingface.json
+  - schematic/gen/tests/fixtures/definition-baseline/lmstudio.json
+  - schematic/gen/tests/fixtures/definition-baseline/ollama-native.json
+  - schematic/gen/tests/fixtures/definition-baseline/ollama-openai.json
+  - schematic/gen/tests/fixtures/definition-baseline/openai.json
+  - schematic/gen/tests/fixtures/definition-baseline/samsung-smart-tv.json
+  - schematic/gen/tests/fixtures/definition-baseline/unfolded-circle-core-rest.json
+  - schematic/gen/tests/l1/artifact_drift.rs
+  - schematic/gen/tests/l1/definition_baseline.rs
+  - schematic/gen/tests/l1/e2e_generation.rs
+  - schematic/gen/tests/l1/fresh_output_compile.rs
+  - schematic/gen/tests/l1/import_overlay.rs
+  - schematic/gen/tests/l1/openapi_strict_completeness.rs
+  - schematic/gen/tests/l1/output_validation.rs
+  - schematic/gen/tests/l1/pagination_validation.rs
+  - schematic/gen/tests/l1/partial_generation.rs
+  - schematic/gen/tests/l1/path_substitution.rs
+  - schematic/gen/tests/l1/postman_golden.rs
+  - schematic/gen/tests/l1/query_params_codegen.rs
+  - schematic/openapi/anthropic.json
+  - schematic/openapi/artificial_analysis.json
+  - schematic/openapi/bitbucket.json
+  - schematic/openapi/elevenlabs.json
+  - schematic/openapi/emqx.json
+  - schematic/openapi/eversolo.json
+  - schematic/openapi/gitea.json
+  - schematic/openapi/github.json
+  - schematic/openapi/gitlab.json
+  - schematic/openapi/huggingface.json
+  - schematic/openapi/lmstudio.json
+  - schematic/openapi/ollama.json
+  - schematic/openapi/openai.json
+  - schematic/openapi/samsung_smart_tv.json
+  - schematic/openapi/unfolded_circle_core_rest.json
+  - schematic/schema/Cargo.lock
+docs_updated_during_phase_9:
+  - schematic/definitions/README.md
+  - schematic/docs/authoring-examples.md
+  - schematic/docs/definition-builders.md
+  - schematic/docs/definition-snapshots.md
+  - schematic/docs/dependencies.md
+  - schematic/docs/generation/generated-clients.md
+  - schematic/docs/generation/validation.md
+  - schematic/docs/io/export-openapi.md
+  - schematic/docs/io/export-postman.md
+  - schematic/docs/io/import-openapi.md
+  - schematic/docs/io/openapi-extensions.md
+  - schematic/docs/typed-registration.md
+  - schematic/features/2026-10-14-schematic-definition-api/implementation-log.md
+  - schematic/features/2026-10-14-schematic-definition-api/plan.md
+  - schematic/features/2026-10-14-schematic-definition-api/review-1.md
+  - schematic/features/2026-10-14-schematic-definition-api/spec.md
+skills_files_updated_during_phase_9:
+  - .claude/commands/create-schematic-api.md
+  - .claude/skills/schematic-define/schematic/define.md
+  - .claude/skills/schematic-define/schematic/openapi.md
+  - .claude/skills/schematic-define/schematic/SKILL.md
+  - .claude/skills/schematic-define/SKILL.md
+docs_created_during_phase_9: []
+human_review: false
+implementation_1: "2026-10-20T08:11:36-07:00"
+---
+
+# Implementation Log for 2026-10-14-schematic-definition-api (8 phases)
+
+## Phase 1
+
+### Scope and initial state
+
+Implement contracts and safety nets only; do not rewrite shipped definitions. Preserve the preexisting pagination review changes and plan/spec edits. No staging, commits, formatting, CI scope changes, or interactive/focus-stealing tools. Parallel bounded inventory, interface refresh, registration spike, and reproduction work follows the plan's explicitly parallel waves; the coordinator owns serialization, capture, and final gates.
+
+### Requirement-to-test map (before implementation)
+
+| Changed behavior or contract | Concrete evidence planned | Boundary / fidelity / tier |
+| --- | --- | --- |
+| R17 plain serde on REST definitions and parameters, including runtime policy and legacy pagination | `definition_baseline::shipped_definitions_round_trip` walks every shipped API and endpoint, with repeated JSON encode/decode and equal resolved pagination and caller controls; `definition_serde` exercises parameter variants and malformed representations | Public serde data interchange and downstream resolver; F1, L1 |
+| Historical definitions and ordered registry schemas remain unchanged | `definition_baseline` compares canonical JSON values to per-API shipped fixtures before typed deserialization; named differences only; description mutation must be detected | Definitions crate → generator and persisted fixtures; F2, L1 |
+| All current lists, legacy declarations, inferred GET arrays and authored POST/alias lists survive | Capture every endpoint's resolution, caller knobs and parameter adoption beside unchanged definitions; retain pagination coverage/table tests | Public definition resolver → generated controls; F2, L1 |
+| Rust clients, OpenAPI, Postman regenerate without drift | Existing artifact tests plus new complete Rust output file/byte comparison; `migration-check` combines historical and generated comparisons | Generator → shipped filesystem artifacts; F2, L1; normal CLI reproduction also exercised |
+| Stable typed registration design | Isolated spike positive cases and rustc negative cases for paths/type identity/private descriptors, collisions, wrappers and destination validation | Stable compiler and schemars; F2, executable proof |
+| Reproduction and prerequisites | Unchanged OpenAI import bytes; full three-output reproduction; concrete inventory and frozen-test map | Shipped OpenAPI → importer → definitions → generator; F2, L1/one-shot proof |
+
+Serde here is an additive data-transfer contract, not a configuration loader. Required collection fields reject absence/null/wrong types; optional fields intentionally define absent and null as None. No permissive defaults, filtering or new configuration formats are introduced. JSON is the persisted baseline format; malformed JSON, duplicate typed fields and trailing content receive targeted negative coverage. Input outcomes will be recorded with tests before final verification.
+
+### Adopted planning rules
+
+Adopt Phase 1's Necessary Rules table: PD1 recursive containers and supported map keys; PD2 structured aggregate collisions; PD3–5 existing request-id/redaction/origin policy; PD6 retain EndpointParams Default and audit the remaining allow-list; PD7–8 required-fact typestate builders and reserved vocabulary; R12 non-exhaustive only after consumer migration; PD17 retain auth_policy and remove oauth_scopes only after a fresh scan; PD19 emitter-first OpenAI then ascending-size batches; PD20 canonical object keys, ordered arrays/registries, 5 MB threshold; PD21 remove REST Schema.module_path only after semantic reader audit. Fallible module-group assembly stays provider-neutral, paths never come from parsing type_name, and reserved structure remains None. These are design commitments for later phases, not shipped builder behavior.
+
+### Reproduction and first targeted proof
+
+`reproduction.md` records two independent normal CLI imports and full generations: both OpenAI files, 42 Rust source files plus Cargo.toml, 15 OpenAPI files and 15 Postman files are byte-identical to shipped artifacts and to each other. No transformation or exemption was needed. Preserved the handwritten overlay and known nine query-path warnings.
+
+Before implementation, `definition_serde` failed compilation with E0277 because EndpointParams did not implement Serialize/Deserialize. Added plain derives to RestApi, Endpoint, EndpointParams, ParamDef, QueryParamType, ParamStyle, CrossOrigin, PaginationStyle, and the public pagination resolution/knob/adoption DTOs needed for captured downstream evidence. The two targeted parameter tests then passed (0.008–0.009 s). No definition factory changed. Existing literals/constructors remain valid.
+
+`artifact_drift::generated_rust_artifacts_are_up_to_date` exercises public batch generation and compares the complete recursive source file set and manifest bytes; all seven artifact drift tests pass, new Rust guard 1.528 s. No permanent artifact allow-list exists.
+
+Raw canonical pretty-JSON capture measured **8,449,975 bytes**, exceeding PD20's 5 MB limit. Adopted biscuit-hash BLAKE3 over compact recursively key-sorted JSON (array order retained), separately for API metadata, each endpoint, and each ordered registry entry's full schema content. Keep readable definition and pagination JSON alongside fingerprints for field-specific historical comparisons; registry entries retain their names and insertion order. This makes the baseline reviewable while avoiding repeated deeply nested schema text. `capture_definition_baseline` is an explicit one-shot example; normal tests and migration-check never write fixtures.
+
+### Interface/inventory checkpoint and registration design
+
+Wave 1 completed without a prerequisite hold. See `prerequisite-interfaces.md` for actual validator/diagnostic/isolated-compile interfaces, EndpointSpec and ABI 4, exact CrossOrigin constructors, overlay, adoption/resolution, all six R27 entries, and the retained no-GraphQL assertion. The three pagination author rulings remain invariants: separately opened partition sessions only, global-only JSON paging callback, and explicit optional retry retaining failed-position evidence without redelivery. No frozen test was retired in this phase.
+
+`inventory.md` independently verifies 18 APIs, ordered endpoint IDs and registries, 547 assembled endpoints / 511 literals, 265 OpenAI, 36 container components, 35 legacy declarations, 94 pagers, 32 verification-task endpoints, nine query paths, five WebSocket definitions, Basic users Bitbucket/EmqxBasic, default allow-list, external literals and generated-client consumers. All shipped oauth_scopes/auth_policy values are None; their real readers are recorded before later removal. No shipped GET has a body. `Schema::full_path` has a semantic WebSocket reader in ws_codegen/plan.rs; preserve it when retiring REST module_path usage. No estimates needed correction.
+
+The stable registration proof (`spike/README.md`) passed five nextest tests, a real separate consumer compiling six emitted nominal/alias/reexport/container/foreign/generic paths, three expected rustc failures, and clippy. Selected `Registration: JsonSchema + 'static` with local nominal implementations emitted beside type declarations and disjoint container/native implementations; no blanket overlap or second provider registration list. `register<T: Registration>()` and `register_as<T: Registration>(RustPath<T>)` return fallible private descriptors; the latter rejects containers. `rust_path!` carries actual T identity and supports concrete generic paths. Type names are diagnostic-only. First canonical registration fixes spelling/order; overrides must precede implicit discovery. Separate recursive wrapper metadata leaves reserved structure None. The prototype uses Option<Value> for the reserved field solely for isolation; production must use existing Option<TypeRef>.
+
+Rust's orphan rules require foreign-type adapters in the trait-owning crate (proven Duration and Range<u64> adapters), rather than allowing provider crates to implement the trait for arbitrary foreign types. This is an explicit additional registration bound allowed by R1, not a claim of blanket foreign JsonSchema support. Carry that constraint and complete primitive/integer-map-key coverage into Phase 2. No human decision is needed before proceeding.
+
+### Captured safety nets
+
+Compact fixtures total **1,270,391 bytes**, one file per API. They preserve every definition, endpoint order, list resolution/origin, caller knob, adoption result, and ordered registry schema fingerprint, including binary Bitbucket GetSource as NotAList and all 35 inert legacy declarations. Historical comparisons occur on JSON Values before current-model deserialization. Exact exception paths include API, array index, endpoint ID/registry name, and field, with required nonempty causes; wildcard/stale exceptions fail. The source-maintained exception list is empty. Current Rust/OpenAPI/Postman artifacts never allow exceptions.
+
+`just migration-check` passed all 32 selected tests (207 other tests correctly filtered), including 18 per-API baseline tests, catalog guard, changed-description control, exact-exception controls, field matrix, repeated filesystem write/read/write/read with equal downstream state, and seven artifact drift tests. Every new baseline test spells its repository fixture in a literal include_str! inside its own #[test], so CI can index the read. The test module is explicitly declared in gen/tests/l1/main.rs; define's ordinary integration target is auto-discovered. All new ordinary tests remain L1 and ran below 2 s locally. The shipped field matrix covers every new struct field's absent/null/wrong/empty/duplicate/trailing outcomes; native booleans versus quoted strings and mixed/all-invalid arrays are included. The documentation records a column per field. Optional missing/null equivalence is intentional DTO semantics, not a new config fallback. Preexisting inner AuthPolicy/EnvMapping serde defaults are unchanged.
+
+### Exact targeted tests added
+
+All tests below are compiled by a live target and selected in L1. No feature gate or tier marker suppresses them.
+
+- `schematic-define::definition_serde::parameter_variants_round_trip_twice`
+- `schematic-define::definition_serde::parameter_collections_reject_malformed_json_matrix`
+- `schematic-define::definition_serde::legacy_pagination_and_origin_policy_variants_round_trip` (all origin policies, all legacy styles, missing/present cursor limit, zero/u32::MAX, quoted/negative/overflow numeric failures, dependent query outputs)
+- `schematic-gen::l1::artifact_drift::generated_rust_artifacts_are_up_to_date`
+- `schematic-gen::l1::definition_baseline::{anthropic, artificial_analysis_critpt, artificial_analysis_data, bitbucket, elevenlabs, emqx_basic, emqx_bearer, eversolo, gitea, github, gitlab, huggingface, lmstudio, ollama_native, ollama_openai, openai, samsung_smart_tv, unfolded_circle_core_rest}` — one exact test for each named API and fixture
+- `schematic-gen::l1::definition_baseline::baseline_catalog_matches_shipped_apis`
+- `schematic-gen::l1::definition_baseline::shipped_definitions_round_trip`
+- `schematic-gen::l1::definition_baseline::changed_description_is_detected_at_its_exact_field`
+- `schematic-gen::l1::definition_baseline::shipped_json_field_matrix_preserves_required_and_optional_shapes`
+- `schematic-gen::l1::definition_baseline::historical_exceptions_only_accept_the_exact_leaf_with_a_cause`
+- `schematic-gen::l1::definition_baseline::historical_exception_requires_a_cause`
+- `schematic-gen::l1::definition_baseline::historical_exception_rejects_wildcards`
+
+The spike's five exact tests and three negative compiler examples are mapped in `spike/README.md`; the explicit proof runner also compiles actual emitted paths in a separate temporary consumer. Runtime context logic is F1/L1; the real compiler, Serde, shipped corpus and generator consumers supply F2 evidence across crate/persistence boundaries. No terminal/browser/device boundary is involved.
+
+### Final verification and skipped coverage
+
+All local evidence is on macOS. No Windows, Linux, or WSL2 host was exercised: this phase adds portable derives, canonical JSON/hash comparisons and temporary-file tests, with no OS-conditional code or path-normalization change. Cross-platform CI scope is unchanged.
+
+- Final `just test`: **2,259/2,259** selected ordinary L1 tests passed; all six existing fresh-output/compile guards passed, then the runtime compile-fail guard passed. This includes unchanged OpenAI overlay re-import and original pagination coverage/resolutions. Full command exited 0.
+- `just lint`: all five area packages passed; rerun after the final example/test edits, exited 0. No formatting command ran.
+- `just doctest`: define 174, definitions 63, gen 18, oauth 3, runtime 1 passed (**259 passed** total); two preexisting ignored WebSocket documentation examples stayed ignored (core_ws and integration_ws module docs, both line 7).
+- `just migration-check`: **32/32** selected tests passed; 207 unrelated tests filtered. Fixture-specific include_str! reads now sit directly inside each test, not inside a macro/helper. No accepted historical differences or artifact exemptions.
+- `just test-schema`: **55/55** passed, including real shipped generated paging and compile-fail contracts; no skipped tests. Its preexisting trybuild compiler guard took 75.855 s and was reported SLOW. The area's existing six compiler guards also exceed the ordinary 5 s test budget in some runs; this phase adds no slow test or timeout override.
+- `just check-tier-coverage schematic`: passed, **zero stranded tests**.
+- Two preexisting tests named `openapi_strict_completeness::{real_registries_still_pass_strict_completeness, real_module_registries_still_pass_strict_completeness}` are excluded by the normal L1 name filter despite using local fixtures. Ran both explicitly: **2/2 passed**, 0.109–0.111 s. Kept their existing names/scope unchanged.
+- Of the normal L1 run's 12 excluded tests, seven are the compiler guards subsequently run by `just test`, two are the strict-completeness tests explicitly run above, and three remain preexisting ignored tests: `e2e_generation::{generated_code_compiles, generated_code_passes_clippy, multiple_apis_compile}`. Their existing ignore reasons are slow Cargo compile/clippy work; the active fresh-output guards and generated-schema suite supply compilation evidence. No new ignored test was added. Counts of 233/339 tests filtered in the dedicated compiler runs are ordinary selection, not failures.
+- The explicit capture example produced a second temporary capture matching all 18 committed fixtures byte for byte; invoking it again on the existing destination failed as intended and left all bytes unchanged. Capture now refuses to overwrite existing evidence.
+- `git diff --check` passed. No preexisting or new test/lint failure remains. No test was deleted or replaced.
+
+### Closing state
+
+Phase 1's five GFM work items are checked as completed; all later-phase work items remain unchecked. Both plan and log carry complete source/test-input, documentation, skill and package inventories; spec has `human_review: false` and a fresh Phase 2 handoff. Updated the current serialization/migration topic, README link, dependency records and both Schematic skill entry points; corrected the skill's stale “no serde” statement. Adopted planning rules remain decisions for later phases, not a claim that builders have landed.
+
+The preexisting pagination edits and the author's concurrent lifecycle move were preserved; this implementation did not move any feature or invoke `just complete`. No shipped API factory, generated Rust/OpenAPI/Postman output, public request Default, runtime behavior, or CI scope was rewritten. No staging, commits, cargo fmt, focus changes, unanswered prompts, or abandoned agent work. **Phase 1 implementation complete, ready for review.**
+
+## Phase 2
+
+### Behavior-to-test map (before implementation)
+
+This phase is additive. Existing factories, importer output, request defaults, pagination, and generated artifacts remain the baseline. Success is typed registration plus a neutral ordered registry adapter and a module-group assembly seam, verified through public results.
+
+| Behavior / boundary | Concrete test planned | Fidelity / tier |
+| --- | --- | --- |
+| Canonical registration, schema/Rust-name separation, aliases, renamed types, collision aggregation, explicit unused types | define `typed_registration` nominal/order/alias/collision tests; definitions adapter compares existing registries | F1 L1; schemars/registry consumer F2 L1 |
+| Vec/Option/HashMap recurse; all primitives and Value remain inline; unsupported keys fail without registering values | define `typed_registration` wrapper/primitive/key tests with nested aliases and error context | F1 L1 |
+| Private descriptors and typed paths cannot be constructed with strings, structural setters, misspellings, or mismatched types | compile-fail doctests compiled by `just doctest` using the real compiler | F2 L1 compiler gate |
+| Descriptor Serde, destination name/path/wrapper checks, unsupported reserved TypeRef rejection | define `typed_registration` descriptor matrix and repeated JSON round trips; errors include API/endpoint/type | F2 L1 Serde boundary |
+| Shared module groups retain ordered entries, nested extraction and unused components; isolated groups do not collide | definitions `typed_registry` fixtures including shipped Ollama, EMQX, HuggingFace aliases | F2 L1 cross-crate |
+| Fully qualified typed fixture paths compile in generated clients | extend existing fresh-output fixture/isolated compiler guard | F2 existing compiler gate |
+| All shipped definition/registry artifacts remain unchanged | existing definition_baseline corpus, artifact_drift, import_overlay; `just migration-check` and `just test` | F2 L1 shipped corpus and normal generation |
+
+Descriptors are transfer data rather than configuration. The plan explicitly requires the descriptor JSON matrix, which covers missing/null/wrong/empty/duplicate/trailing data and semantic forgery through the public validation result. No persisted storage is introduced; repeated Serde round trips cover the transfer boundary. No terminal, browser, device or platform-specific behavior is added.
+
+### Wave 4 complete
+
+Added the disjoint registration dispatcher, typed rust_path token, private serde descriptor with reserved Option<TypeRef>, ordered neutral registrations, and contextual DefinitionError. Ordinary nominal declarations use definition_type!; the type's schema name remains independent from its proved Rust identifier. No type_name parsing occurs. Foreign adapters for Duration and Range<u64> live in the trait-owning crate. All 12 integer widths, String, bool, char, floats, unit and free-form Value stay inline; containers recurse, and maps check keys before registering values. Nullable wrappers start with an anyOf null alternative and run the existing OpenAPI 3.0 schemars transforms, preserving the same nullable/enum-null encoding as the registry.
+
+The first canonical registration retains its name/path/order. Distinct schema-name conflicts immediately return an error and are collected for finish(); rejected duplicates never replace a schema. Destination validation matches complete previously registered shapes; matching imported data passes with no serialized context identity. Structure is reserved and any non-null structural value fails validation. Descriptor accessors expose transfer data, so later API builders must invoke validate_reference before lowering.
+
+Initial targeted compilation exposed one missing test import; fixed it. All nine typed_registration tests now pass (0.011 s each). Build Context is checked off.
+
+### Wave 5 adapter and compiler boundary
+
+Added SchemaRegistry::from_context and assemble_module_group in schematic-definitions. Both reject collected collisions, preserve ordered neutral schemas, retain existing recursive nested-def extraction, and return explicit registrations even for an empty endpoint inventory. The callback owns the APIs, so no second catalog or reverse dependency is introduced. The four adapter tests pass, covering real HuggingFace Commit/CommitInfo identity, the Ollama progress-alias pattern, shared Ollama and EMQX factory groups, isolated same-name types, collisions, order, nested schemas and unused components. Adapt Registry is checked off.
+
+Discovered that shipped PullModelProgress/PushModelProgress lack JsonSchema. The plan calls for small fixtures before converting those APIs, so the progress-alias case uses a small nominal fixture instead of changing shipped schemas; the real HuggingFace type is exercised directly with a test-only adaptation. The actual Ollama/EMQX factories run through the additive assembly seam with fixture registrations, not through migrated builders. Later migration must add the missing progress derive as appropriate.
+
+Extended the existing isolated fresh-output compiler/runtime guard with a registered Option<Vec<HashMap<String, Duration>>> response. Its generated endpoint compiles outside the checkout and decodes both a nested duration and null through the real runtime against wiremock. The initial guard passed in 62.676 s (the existing slow compiler tier); no new compiler suite or timeout was added.
+
+Compile-fail coverage is in define module doctests and, with exact expected error codes and diagnostic names, the existing generated-crate misuse guard. This departs from the spec's suggested separate trybuild case: the predecessor already batches diagnostic-checked invalid cases into one isolated Cargo invocation with a compiling positive control, so reusing it avoids a new slow suite/dependency and still proves the same compiler boundary. No test or coverage obligation was dropped.
+
+### Final review and gate correction
+
+Expanded declaration coverage to named/tuple/unit structs and enums, including a nominal collection wrapper that remains a component. Expanded the descriptor matrix with genuine context-produced named, inline String/Value, map, Vec and Option controls; required nested identities, native versus quoted wrong scalar types, mixed/all-invalid arrays, duplicates (including reserved structure), missing/null, empty, trailing input and valid-but-unsupported structural combinators all go through public destination validation. Repeated read/write/read preserves Rust paths and wire schemas. The documentation table names every load-bearing descriptor field; registration has no defaulted identity fields or error-swallowing parser fallbacks.
+
+Added DefinitionError::diagnostics(api) with the planned exact one-line-per-collision wording. The original full L1 gate passed 2,273 tests; its compiler misuse guard correctly rejected the misspelled path but exposed a test expectation mismatch (actual E0425, expected E0412). Corrected the expected code, retaining the exact failing input and diagnostic-name assertion. The guard's fail-fast left three subsequent generated compiler tests and the runtime guard unrun in that attempt; the final complete run will execute them. A temporary mutability compile error while applying the existing schema transforms was also corrected before targeted tests passed.
+
+Two verification commands were accidentally invoked from the repository root (lint and doctest). Each was stopped, including its descendant processes, while waiting on build locks; neither is counted as evidence. Verification uses the explicit schematic justfile thereafter. No unrelated source was changed.
+
+### Requirement-to-test results and exact targets
+
+| Requirement | Public observable evidence | Boundary / fidelity / tier |
+| --- | --- | --- |
+| R1/R4: nominal registration and complete explicit component inventory | Separate schema/Rust names, ordered idempotent entries, nominal tuple/unit/enum models, nested-def extraction, explicit unused types | Real schemars and definitions adapter, F2 L1 |
+| R2/R7: transfer data with destination validation | Descriptor JSON matrix; exact names/paths/wrappers/inline schemas; foreign and forged data rejected; matching data and repeated round trips accepted; Some(TypeRef) rejected | Real Serde plus public reference validation, F2 L1 |
+| R3: inline wrappers and primitives | All primitive widths; Vec/Option/String-key map around each; integer-key nesting; nullable Value and nominal leaves; unsupported keys leave no registered values | Public wire schema/Rust path/registry state, F1 L1; runtime/compiler fixture F2 |
+| R5: aliases and collisions | Renames, aliases/re-exports, foreign/concrete generic paths, distinct same-named types, collected collision order and contextual diagnostic wording | Public registration and actual registry consumers, F2 L1 |
+| R6 additive module-group seam (migration remains later) | Shared Ollama/EMQX callbacks and isolated groups, original legacy factories/catalog untouched | Cross-crate adapter and shipped factory boundary, F2 L1 |
+| Compiler guarantees | No string constructor/structural setter; unresolvable and mismatched typed paths fail with intended diagnostics; generated nullable nested endpoint compiles and sends | Real compiler/isolated generated crate/runtime, existing compiler gates |
+| Historical equivalence | Existing definition_baseline corpus, import_overlay re-import and artifact_drift selected by full just test | Shipped artifacts and normal generator path, F2 L1 |
+
+New ordinary tests, all compiled by live targets and selected in L1:
+
+- `schematic-define::typed_registration::tests::nominal_renamed_alias_reexport_foreign_and_generic_paths`
+- `schematic-define::typed_registration::tests::wrappers_inline_shape_nullability_and_order_reuse_leaf`
+- `schematic-define::typed_registration::tests::primitives_value_and_integer_map_keys_create_no_components`
+- `schematic-define::typed_registration::tests::collision_aggregation_is_ordered_and_never_merges_distinct_types`
+- `schematic-define::typed_registration::tests::destination_checks_named_paths_wrappers_inline_and_reserved_structure`
+- `schematic-define::typed_registration::every_primitive_and_map_integer_key_stays_inline`
+- `schematic-define::typed_registration::destination_rejects_changed_wrapper_shape_even_with_matching_leaf`
+- `schematic-define::typed_registration::descriptor_json_matrix_uses_public_destination_validation`
+- `schematic-define::typed_registration::string_newtype_key_requires_explicit_contract`
+- `schematic-define::typed_registration::same_names_in_different_modules_collide_and_nominal_containers_stay_components`
+- `schematic-definitions::registry::typed::tests::aliases_preserve_shipped_huggingface_and_ollama_type_identity`
+- `schematic-definitions::registry::typed::tests::shared_ollama_and_emqx_assemblies_reuse_one_ordered_context`
+- `schematic-definitions::registry::typed::tests::adapter_preserves_order_nested_extraction_and_unused_types`
+- `schematic-definitions::registry::typed::tests::isolated_groups_can_reuse_names_but_shared_collisions_fail_assembly`
+
+`schematic-define` auto-discovers the new integration test file; the definitions tests are unit tests in the declared library module. None has a suppressing tier marker or feature gate. The new child test `typed_registration_paths_preserve_nullable_nested_wire_shape` is added to the existing `REQUEST_SIDE_TESTS` registration guard and executed by `fresh_output_compile::slow_fixture_apis_compile_and_send_offline`. Four new `MISUSES` rows are checked by `fresh_output_compile::slow_generated_types_reject_misuse_at_compile_time` with a positive compilation control. Four corresponding `registration` module compile-fail doctests execute under `just doctest`. The 14 new ordinary tests took 0.020–0.048 s in the final broad run.
+
+Test Registration is checked off: all ten descriptor tests, all four adapter tests, the nullable runtime/compiler fixture, and all four compile-fail doctests have passed. The diagnostic-code correction is in the final full gate. The shared Verify Input Matrices task later in the plan remains unchecked because its JSON/YAML import portion belongs to Phase 5; this phase's descriptor JSON portion is complete.
+
+### Final verification and skipped coverage
+
+All final gates exited 0 on macOS:
+
+- `just -f schematic/justfile test`: **2,273/2,273 ordinary L1 tests passed**, including all 14 new ordinary tests, the original definition/pagination/ordered-registry baseline corpus, artifact comparisons, OpenAI overlay re-import, and existing pagination coverage. All **six generated-crate compiler guards passed**, followed by the **runtime compiler guard**. The corrected misuse guard passed in 31.448 s; the nullable nested runtime fixture passed in 49.426 s. These are the existing compiler gates, not newly slow ordinary tests.
+- `just -f schematic/justfile lint`: **all five schematic packages passed**. The final run includes the completed tuple/unit macro coverage, diagnostic rendering, and matrix edits. No formatting command was run.
+- `just -f schematic/justfile doctest`: **263 passed**, including the four new compile-fail examples; two preexisting ignored WebSocket documentation examples remain ignored (`core_ws` and `integration_ws` module docs).
+- `just check-tier-coverage schematic`: **zero stranded tests**. The definition integration target is auto-discovered; unit modules are reachable; the generated child-test list guard includes the new child test. No new cfg, ignored test, required-feature gate, or tier marker hides coverage.
+- Serial follow-up with nextest (`-j 1`) passed all four selected tests: `artifact_drift::generated_rust_artifacts_are_up_to_date` **1.706 s**, `fresh_output_compile::generated_rest_code_references_the_runtime_and_defines_none_of_it` **1.975 s**, and the two preexisting `openapi_strict_completeness::real_*` local-registry tests **0.126/0.115 s**. The first two had taken 5.183/5.119 s during the broad run while doctests were compiling; the serial rerun resolved that contention concern without changing tests, dropping cases, raising timeouts, or adding a slow marker.
+- The broad run's **12 excluded tests** comprise seven compiler guards subsequently executed by `just test`, two strict-completeness cases explicitly executed above, and three preexisting ignored generator cases: `e2e_generation::{generated_code_compiles, generated_code_passes_clippy, multiple_apis_compile}`. The active fresh-output guards exercise current generated compilation. No new ignored case was added, and no test was deleted.
+- `git diff --check` passed. Frontmatter checks found each required key exactly once in plan/log/spec, and all three Phase 2 GFM tasks are complete. No historical exception or generated-artifact drift exemption was introduced.
+
+No Linux, native Windows, or WSL2 run was added: this phase changes portable build-time type/schema dispatch and Serde data, with no OS-conditional code, filesystem path comparison, terminal, or browser behavior. Cross-platform CI remains unchanged. No live provider/API integration or L2 terminal behavior is claimed; neither is needed for these boundaries. The generated-schema crate was not separately rerun because its committed source and manifest did not change; the existing isolated real-API guard compiled all current generated Rust, including WebSocket modules.
+
+### Closing state
+
+Phase 2 implementation is complete, ready for review. The plan and log frontmatter list all nine changed source/manifest/lock files, six updated documentation files, one new topic page, two updated skill files, and the accumulated packages (`schematic-define`, `schematic-gen`, `schematic-definitions`). Spec frontmatter has `human_review: false` and a fresh handoff explaining destination-shape validation, collision propagation, the additive group seam, and the missing Ollama progress JsonSchema derive. Later phases and the import half of the shared input-matrix task remain pending as intended.
+
+Current authoring behavior is documented in `schematic/docs/typed-registration.md`, with README/dependency/skill updates. Existing shipped REST factories, registries, generated Rust/OpenAPI/Postman files, runtime ABI, request defaults, pagination and WebSocket behavior are unchanged. No staging, commits, cargo fmt, feature-lifecycle move, focus changes, prompts, or abandoned agent work occurred. All started verification processes finished or were explicitly stopped; no verification is pending.
+
+## Phase 3
+
+### Behavior-to-test map before implementation
+
+| Requirement / changed behavior | Concrete public test | Boundary / fidelity / tier |
+| --- | --- | --- |
+| R8/R9 required facts and no Default | compile-fail builder doctests for missing description/success/auth and Default; `builders` integration tests | Rust compiler F2; ordinary F1 L1 |
+| R10/R13 all verbs, success/request forms, repeated success rejection | `builders::verbs_success_and_request_forms_preserve_literals`, `repeated_success_and_invalid_facts_fail` | stored public Endpoint F1 L1; existing generator output/HTTP fixtures F2 L1 |
+| R7 destination descriptor validation, wrappers and forgery | `builders::api_checks_transferred_descriptors_and_collisions` | public API assembly and Serde transfer F2 L1 |
+| R11 auth coherence independent of call order and multi-method policy | `builders::authentication_mapping_conflicts_are_order_independent` | public RestApi/effective mapping F1 L1; HTTP generation F2 L1 |
+| R8 Default allow-list and EndpointParams::new | `builders::default_allow_list_matches_public_source` and updated literal-surface coverage | CI-indexable shipped source corpus F2 L1 |
+| R10 unchanged shipped artifacts and emitter | existing definition_baseline, artifact_drift, import_overlay corpus; normal `just test` | shipped definition/export/import/compiler F2 L1 |
+
+These builders write definitions rather than read configuration, so the input robustness matrix does not apply. Transferred descriptors remain untrusted and need complete shape checks at API build. No persistence or OS-specific behavior is introduced. Existing legacy pagination tests stay until Phase 6. Wave 7 permits parallel ownership; one bounded fixture agent handles only the six named generator fixture files and is joined before completion. All work is non-interactive.
+
+### Builder implementation and lowering
+
+Added all seven verb constructors, independent description/success typestate, four Success forms and their shorthands, private ErrorSet::none, and all five stored request families. API build enforces description/auth typestate, records repeated auth choices, checks explicit environment conflicts independent of order, and preserves explicit multi-method policy authority. URL validation uses the existing workspace `url` crate as a new direct define dependency; dependency docs updated.
+
+A required R7 coupling was absent from the old stored model: lowering only to a Rust string would lose schema-name/wrapper evidence before destination assembly. Added optional `Schema::descriptor` evidence, omitted on legacy serialized schemas, and Eq on descriptors. API build validates complete descriptor identity/shape and its agreement with the lowered Rust path, including JSON form fields. This is additive to the existing model rather than a process-local registry or hidden global state. Existing constructors leave evidence None. All legacy shipped baselines must remain exact; typed-built schemas intentionally carry evidence. Typed OpenAPI body export now consumes the wire schema through fallible conversion, retaining component names and wrapper/nullability instead of treating fully qualified Rust paths as free-form JSON. This is necessary to keep the new builder's ordinary output correct.
+
+Initial compilation exposed struct-shaped stored request variants and a missing direct URL dependency; corrected both before tests. No formatter ran. Compiler tests reuse the existing diagnostic-checked isolated misuse suite, adding exact E0599/name assertions for all seven required-fact/error-placeholder failures, alongside seven compile-fail doctests.
+
+> **Departure (2026-10-20):** superseded by author review 1, item 1. Stored REST references are `TypeRef` names plus wrappers, and `RestApi::schemas` carries the registry; `Schema::descriptor` and the descriptor agreement checks were removed. See Phase 9.
+
+### Pagination boundary discovered before migration
+
+The frozen literal-surface fixture exposed that old pagination recognition intentionally accepts only the unqualified string `Vec<T>`, while typed descriptors emit `::std::vec::Vec<T>`. Simply migrating the fixture would silently lose its list result. Added a narrow descriptor-aware root-Vec branch to `root_array_item_type`; legacy string rules remain unchanged, and Option/nominal wrapper/non-GET cases still require explicit authorship. The new targeted matrix names these boundaries and checks public resolution/item path/caller controls. This brings forward the additive recognition portion needed by R21 without migrating any provider or pagination table. The comment was corrected to describe both authoring representations.
+
+The Default audit found 20 public default types, including multiline derives for FrameFormat and RequestIdType missed by the preliminary single-line scan. Every existing default represents a valid empty value or complete protocol/tooling default; retained all 20 with explicit reasons in the current authoring topic. The corpus test uses literal include_str! reads of shipped source and compares the exact allow-list. Endpoint/RestApi and their builders remain outside the allow-list; generated request defaults are untouched.
+
+### Waves 6 and 7 progress
+
+The 15 new builder integration tests plus the revised frozen pagination test pass (16/16, maximum 0.016 s). They cover public literal/JSON equivalence, all auth/success/request families, custom content types, both setter orders for bearer/Basic/key mapping conflicts, both orders of username overwrite, multi-method policy, complete destination shapes, missing JSON/form references, schema/name/path/wrapper/structure forgeries, repeated whole-API read/write/read plus destination rebuild, collisions, primitive/free-form inline behavior, metadata order and typed list inference boundaries. Build Endpoints and Build APIs are checked off.
+
+The six assigned generator fixture files now build valid required-fact bases. Tests that intentionally supply legacy string schemas or invalid model states mutate those stored fields afterward, preserving the exact diagnostic inputs rather than adding a public untyped builder escape hatch. Production emitter/provider definitions remain unchanged. All 412 generator library tests passed, followed by the new typed Rust/OpenAPI/Postman normal-output fixture (0.015 s), and cargo check of generator test targets. Migrate Fixtures is checked off. Refreshed the validation documentation example; pagination table/legacy-presence and no-GraphQL tests remain.
+
+The existing fresh-output nested nullable duration fixture now authors its endpoint and API through builders before compiling/sending against wiremock. Its existing child registration and assertions remain unchanged. The compiler misuse matrix gains seven required-fact cases with explicit codes/names; it must pass before Prove Typestate is checked off.
+
+The initial broad gate stopped on the two new exporter test assertions already found by targeted testing; 2,090 later ordinary tests and the compiler guards did not run in that attempt. Fixed the anyOf expectation, used a wrong whole-field type for the malformed wire-schema case, and corrected its empty-endpoint fixture setup. The first lint found Clippy's new_ret_no_self rule on the deliberate typestate constructor; a narrowly scoped allowance documents why Endpoint::new returns a required-fact builder. Final complete gates will rerun; no failure is being accepted.
+
+### Scope and audit review
+
+The WebSocketEndpoint Default is a retained scope exception for existing incremental WebSocket construction, not a claim that an empty id is a complete generated endpoint. The docs state that distinction; this REST-only phase does not break the five WebSocket APIs or their fixture construction. The other defaults represent valid empty metadata or complete protocol/tooling choices. Corrected the preliminary prose for RequestIdType to its actual u64 default (FrameFormat is JSON text).
+
+Endpoint-stage build errors identify the endpoint while the API is not yet known; API assembly/reference and auth errors identify the destination API. Collected collision errors retain DefinitionError::diagnostics(api) from Phase 2 to render one contextual line per collision. No new global context identity or provider registry is introduced. Missing environment fallback credentials stay legal because the established runtime may send anonymously; explicit mappings are checked for contradictions with declared values rather than inventing a new required-credential rule.
+
+### Final reference review
+
+Added negative checks that delayed request/response registration errors cannot be hidden by a later valid setter, and that changing a lowered Rust path fails API assembly. Review also found that accepting a JSON schema with no evidence in the API builder could conceal a stripped descriptor. The API builder now rejects missing JSON descriptor evidence as well as forged evidence. Legacy direct construction/export stays available for the additive migration, while the new authoring boundary is strict. The isolated fixture API validates its typed duration endpoint before inserting its explicitly legacy test endpoints afterward. Added the original stripped-evidence case to the public destination test; no new untyped builder method or hidden registry was introduced.
+
+Schema descriptors are definition transfer data, not configuration. Existing plain Serde remains unchanged for legacy schemas (absence/null means no evidence); the public API builder rejects either missing-evidence representation. This phase's additional tests assert API assembly, not merely deserializer results. Descriptor syntax/field robustness remains covered by the Phase 2 JSON matrix selected by the broad suite. There is no YAML configuration parser, persistence loader or file-writing workflow in this phase.
+
+### Requirement-to-test evidence and exact new targets
+
+Prove Typestate is checked off: all required-fact and placeholder failures passed the real compiler with exact E0599/name diagnostics in `fresh_output_compile::slow_generated_types_reject_misuse_at_compile_time`; the seven corresponding builders module doctests passed. The positive nested-duration fixture compiled and sent through the real generated runtime. No separate slow compiler suite, ignore, timeout override, deleted test, or tier rename was added.
+
+The source/test inventories in plan/log list all 22 source/manifest/lock files touched by this phase. All tests below compile in live targets and run in L1; the isolated compiler children run through the existing live compiler recipe. No L2 resources are needed. The updated literal-surface test replaces only the old Endpoint-literal surface assertion, retaining empty EndpointParams/Default and public unpaginated-list behavior; all legacy pagination table and no-GraphQL coverage remains.
+
+- R8/R9/R13, F2 external authoring boundary L1: `builders::{every_verb_preserves_required_facts_and_empty_parameters, accepted_successes_and_requests_preserve_stored_wire_shapes, repeated_success_and_invalid_required_facts_report_errors, custom_body_content_types_survive_api_assembly}` plus the seven diagnostic-checked compile-fail cases/doctests.
+- R10, F2 external stored definition/Serde L1: `builders::{endpoint_builder_equals_legacy_literal_without_normalization, api_builder_preserves_legacy_literal_metadata_and_authoring_order}`. No JSON field normalization is used in those equivalent fixtures.
+- R11, F2 external authoring L1: `builders::{auth_forms_preserve_fields_and_explicit_mapping_conflicts_in_both_orders, explicit_multi_method_policy_preserves_authoritative_fallback, basic_and_key_mapping_conflicts_fail_independent_of_setter_order}`. Includes both orders of contradictory username declarations and all supplied key/header/password/user mapping conflicts.
+- R7/R3, F2 destination/Serde boundary L1 (synthetic malformed cases F1): `builders::{destination_context_checks_transfers_roundtrips_and_forged_wrappers, missing_destination_references_fail_in_both_form_encodings, api_build_reports_every_registration_collision, primitive_and_free_form_json_successes_remain_component_free}`. Covers original missing/stripped/forged inputs exactly; positive matching controls, two full API roundtrips, request/form downstream checks, stable registry state, delayed errors and changed lowered paths.
+- R8 passive shipped source corpus, F2 L1: `builders::public_default_set_equals_documented_allow_list` checks all 62 shipped source modules and all 20 documented Defaults through CI-indexable literals.
+- R21/R27 public resolution, F2 L1: `builders::typed_list_recognition_respects_root_array_and_get_boundaries` and revised `endpoint_literal_surface::endpoint_builder_and_parameter_default_preserve_unpaginated_behavior`. Positive GET Vec and negative Option/nominal/non-GET cases preserve item Rust path and caller controls.
+- Typed output/normal generation, F2 L1: `schematic-gen::output::tests::typed_builder_fixture_reaches_rust_openapi_and_postman` and `schematic-define::openapi::export::tests::{typed_builder_exports_named_wrapped_request_response_and_form_schemas, malformed_typed_wire_schema_returns_export_error}`. Asserts named references, nullable anyOf, maps, typed form arrays/optionality and missing-component error; malformed whole-field type returns export error without panic. The existing generated nested-duration compiler/runtime child now runs builder-authored source against wiremock and checks decoded nested values and null.
+- R10/R24 passive shipped artifacts plus real normal invocation, F2 L1: existing `definition_baseline`, `artifact_drift`, `import_overlay`, strict completeness and fresh-output suites, selected by the full area gate. Historical JSON, ordered registries, generated Rust/OpenAPI/Postman file sets/bytes and OpenAI re-import remain exact.
+
+### Final verification and skipped coverage
+
+Final checks passed on macOS:
+
+- `just -f schematic/justfile test`: **2,291/2,291 ordinary L1 tests passed** (6.389 s total run time), followed by **6/6 generated-crate guards** and **1/1 runtime compile-fail guard**; recipe exited 0. The final diagnostic misuse guard passed in 27.271 s, builder-authored nested-duration compile/send in 35.482 s, query-wire baseline in 11.430 s, and all shipped generated APIs in 7.223 s. These are existing compiler guards, with no new slow test/tier or timeout policy. No ordinary test was reported SLOW.
+- `just -f schematic/justfile lint`: **all five packages passed**, exited 0 after the final implementation/test edits. No formatting command ran.
+- `just -f schematic/justfile doctest`: **270 passed**, including seven new builder compile-fail examples (define: 174 ordinary + 11 compile-fail; definitions: 63; gen: 18; oauth: 3; runtime: 1). Two preexisting ignored WebSocket module examples remain ignored (`core_ws` and `integration_ws`).
+- Final targeted builder/frozen-fixture run: **16/16 passed**, no skips, longest 0.016 s. Final ordinary gate also includes both added exporter tests and the typed Rust/OpenAPI/Postman generator fixture. Expanded delayed-error/changed-lowering/stripped-evidence cases passed through public API assembly.
+- `just check-tier-coverage schematic`: **zero stranded tests**. Define integration tests are auto-discovered in declared Cargo targets; generator unit fixtures live in their declared library and the compiler cases in the existing declared l1 binary. No new feature gate or tier marker hides tests.
+- Two preexisting strict-completeness tests excluded by their `real_` names ran explicitly with nextest: **2/2 passed**, 0.119/0.109 s (`openapi_strict_completeness::{real_module_registries_still_pass_strict_completeness, real_registries_still_pass_strict_completeness}`).
+- The ordinary gate's **12 excluded tests** are the seven compiler guards subsequently executed by the recipe, those two strict-completeness cases explicitly run above, and three preexisting ignored generator cases: `e2e_generation::{generated_code_compiles, generated_code_passes_clippy, multiple_apis_compile}`. Their existing reasons are slow Cargo compilation/clippy; active fresh-output guards prove current generated code. No new ignored case, removed test, retry, timeout override or artifact exemption was added. The dedicated compiler runs' 233/339 filtered tests are ordinary selection.
+- `git diff --check` passed. All four Phase 3 GFM tasks are checked; later-phase tasks remain pending. Required frontmatter keys occur exactly once and all 22 inventoried source/manifest/lock files exist. No external schematic_define::Schema literal/import use was found by the final concrete-symbol search outside schematic.
+
+The two earlier failed exporter assertions/setup and the initial constructor Clippy finding were corrected, rerun, and pass. There is no remaining test or lint failure. Repeated final gates were justified by the last missing-evidence validation fix; no passing test repetition was used to conceal a failure.
+
+No Linux/native Windows/WSL2 run was added: changes are portable Rust type/schema dispatch, definition data, URL validation and generator fixtures, with no OS conditionals, path comparisons, terminal/browser resources or host discovery. CI scope is unchanged. L2 is unnecessary for these boundaries. The excluded generated-schema crate was not separately rerun because committed generated source/manifest are unchanged and the area isolated guard compiles all shipped APIs. No live provider calls, focus changes or unanswered prompts occurred.
+
+### Closing state
+
+**Phase 3 implementation complete, ready for review.** Plan/log frontmatter lists the complete source, docs and skills inventories; accumulated packages remain schematic-define, schematic-gen and schematic-definitions. Spec frontmatter has human_review false and a fresh Phase 4 handoff. Current behavior is recorded in the new definition-builders topic, linked from README/typed registration, with dependency records and both Schematic skills updated.
+
+Providers, production import emitter, WebSocket definitions, committed generated Rust/OpenAPI/Postman artifacts, request defaults, runtime ABI 4, legacy pagination contracts and prior-phase work are preserved. Literal prohibition, provider/emitter migration and definition-side runtime/query forms remain later-phase work. No feature lifecycle move, cargo fmt, staging or commits occurred. All delegated tasks returned in this turn, and all final verification processes finished; nothing is left waiting.
+
+## Phase 4
+
+### Behavior-to-test map before implementation
+
+| Changed behavior | Concrete coverage | Boundary / fidelity / tier |
+| --- | --- | --- |
+| Endpoint origin replacement, invalid origins, caller tightening | definition_forms policy matrix; generated fixture with two loopback origins and sibling refusal | authoring F1 L1; generated compiler/runtime/HTTP F2 L1 |
+| Request-id normalization, secret sugar, explicit auth policy | definition_forms metadata validation plus generator emission assertions and generated fixture | authoring F1 L1; generated consumer F2 L1 |
+| Explicit parameter locations, wire ref / Rust git_ref, optional beta/recursive | definition_forms stored location tests; generator tests and generated wire fixture | F1 L1; Rust/compiler/HTTP F2 L1 |
+| Serialized pager marker, matched control, required default, unmatched rejection | definition_forms adoption matrix, two JSON read/write/read cycles and public API build | definition transfer / resolved strategy F2 L1 |
+| GET body rejection, retained path-query warning | definition_forms all request families and methods, existing shipped baseline and diagnostic corpus | F1 L1 plus passive shipped corpus F2 L1 |
+
+The phase writes definition data and adds builder APIs, not a configuration reader; the configuration robustness matrix does not apply. Existing plain Serde compatibility remains, and marker transfer is tested through downstream API assembly. Existing artifact_drift, definition_baseline and normal generated fixture paths cover shipped artifacts. Provider migrations, OAuth scope removal and the hard path-query switch remain in their scheduled later phases. Wave 8 explicitly permits bounded parallel work; generator/runtime emission and generated fixture tests have separate ownership and are collected before closure. All work is non-interactive.
+
+### Definition forms and compatibility
+
+Added serializable endpoint origin replacement plus per-parameter Rust alias, secret and pager-adoption flags. All unused additions omit from JSON. The mechanical source-literal additions are necessary while providers and importer remain on the legacy model; no provider endpoint or parameter behavior was migrated. The generator's literal emitter must carry these fields until its scheduled builder conversion. The existing path-query severity constant already provides the hard-error switch; it stays Warning.
+
+`ParamDef::new` defaults to optional; query/header_param/cookie state location, and path placeholders/body methods retain their existing locations. API request-id and secret-header sugar normalize lowercase and validate HTTP token syntax. `auth_policy` was already wired by Phase 3 and is retained with its generated-execution coverage. API build reuses resolved pagination validation; markers without matching location/name/control fail, including unpaginated endpoints. Required adopted inputs use the existing PagerManagedRequiredWithoutDefault. GET rejects all five body forms at endpoint build; destination API build catches transferred bodies with API/endpoint/GET context. Endpoint build reports the existing `<endpoint>` placeholder because no destination API exists yet. HEAD remains allowed, a deliberate preservation of existing behavior.
+
+The initial targeted definition run passed 8/8; expanded tests additionally cover forged transferred GET bodies, all unmatched marker locations and invalid Rust aliases. JSON read/write/read is repeated twice and destination build rechecks downstream fields. Existing defaults are compatibility semantics, not silent conversion of required collections. No configuration reader was introduced.
+
+The first broad attempt found one compact Endpoint literal lacking its new field; corrected it. The initial linter caught new implementation ordering, collapsible conditions and a first-diagnostic loop; corrected them without formatting. Temporary mechanical edits to extension-only OAuth fields and function return signatures were identified and corrected before verification. These are development failures to rerun, not accepted gaps.
+
+### Runtime wiring and targeted evidence
+
+The generated definition emits per-endpoint policies through additive `ApiDefinition::endpoint_cross_origin(id, policy)`. Runtime selects the effective policy by EndpointSpec::ENDPOINT_ID for first-hop preparation, redirects and check_link, so pagination's absolute follow-up requests use the same replacement. Caller settings validate against the default and every endpoint policy and can only tighten. No runtime ABI bump or redaction implementation was introduced. Parameter secret wire names are unioned into existing SecretNames metadata, including adopted parameters (the original definition, not the pager-filtered request view, supplies metadata).
+
+Rust aliases are separate from wire names through request fields, constructors, setters, default initialization, parameter encoding, generated call names and collision validation. Explicit aliases preserve spelling; inferred names retain existing sanitation. Exports keep the wire name. Empty allow-origin lists emit a typed empty vector so generated Rust has no unconstrained generic element type. Existing Some(AuthPolicy) emission/execution tests remain active.
+
+The JSON matrix adds explicit definition-transfer reader coverage beyond the initial writer-focused assessment: all four new load-bearing fields (`cross_origin`, `rust_name`, `secret`, `pager_managed`) have documented absent/null/wrong-type/element/empty/duplicate/trailing outcomes. The positive control is real builder-produced serialized data with a required adopted limit and sent default. Every edit reaches public API assembly, not just a deserializer return. Optional absence/null is explicitly defined as no policy/alias; absent Boolean flags mean false and null fails. Read/write/read is repeated in the other transfer tests.
+
+The first completed ordinary gate ran 2,199/2,304 tests before stopping on the OpenAI source reproduction check (2,198 passed, one failed; 105 not run, 12 excluded). The mechanical inline additions compiled but differed from the emitter's own exact source layout. Ran the existing `just import-openai` invocation to reproduce the model's new fields; it still reports 265 endpoints, 1,394 models, three existing warnings and no errors. No endpoint merge, parameter move, schema choice or provider behavior change occurred. OpenAI types.rs stayed byte-identical. The artifact tests already passed against historical generated Rust/OpenAPI/Postman. This run's two preexisting whole-corpus generator tests were flagged slow under concurrent compile/lint load; the final gate will run after targeted compiler work settles.
+
+### Requirement-to-test mapping and exact targets
+
+All new ordinary tests are compiled by auto-discovered define integration targets or the generator/runtime's existing declared L1 targets. The generated child names are checked against REQUEST_SIDE_TESTS, preventing silent orphaning. `just check-tier-coverage schematic` reports zero stranded tests. No new tier marker, feature gate, timeout, retry, ignore or test dependency was added.
+
+- R14, F1 authoring and F2 runtime/HTTP L1: `definition_forms::{locations_markers_and_policy_survive_repeated_transfer, metadata_normalizes_header_names_and_rejects_invalid_origins_and_names}`; `redirects::{endpoint_origin_replacement_controls_redirects_links_and_caller_tightening, endpoint_origin_replacement_validates_exact_origins}`; `pager_surface::endpoint_origin_override_reaches_followed_page_and_caller_can_tighten_it`; child tests `endpoint_origin_override_allows_redirects_and_caller_can_tighten_it` and `endpoint_origin_override_governs_followed_pagination_links`. Parent second-origin recordings are exactly `/page-allowed` and `/redirect-allowed`; siblings and tightened callers add no requests. Negative link assertions name CrossOriginRejected.
+- R15/R16, F1 emission and F2 generated runtime L1: `codegen::api_struct::tests::endpoint_origin_replacement_and_parameter_secrets_use_runtime_metadata`, `definition_gen::tests::emits_endpoint_policy_and_serializable_parameter_markers`, plus existing `an_explicit_policy_wins_over_the_legacy_strategy`, `the_translated_policy_is_emitted_in_runtime_terms` and generated `request_id_secret_names_and_cross_origin_policy_come_from_the_definition`. Parameter secret markers now drive that generated fixture's existing metadata checks; predecessor redaction logic is unchanged.
+- R29/R31, F1 syntax and F2 compiler/HTTP L1: `codegen::request_structs::tests::explicit_rust_parameter_name_preserves_wire_query_and_ordinary_setters`, `validation::tests::rust_parameter_aliases_are_validated_and_collide_by_rust_name_only`, generated `optional_query_alias_and_booleans_encode_once_under_wire_names`. Exact values `feature/x y+z` and `feature/a b%&=ü` retain the wire name ref with Rust git_ref, absent optionals, beta/recursive true and false, one encoding pass, and decoded query checks. Existing required-adopted default/caller replacement and credential repeated-key conflict tests remain.
+- R30, F2 definition transfer/resolver L1: `definition_forms::{pager_marker_requires_matching_strategy_and_authored_required_default, unmatched_markers_and_invalid_aliases_cannot_hide_inputs, json_definition_forms_matrix_reaches_public_assembly}`. Covers optional/required × matched/unmatched × absent/present sent default, all three declared locations, no resolved strategy, malformed aliases and two read/write/read cycles. The matrix's public positive control proves all four new fields load-bearing; empty wrong whole shapes and empty valid allow-lists stay distinct.
+- R31, F1 authoring and transferred-definition boundary L1: `definition_forms::{every_get_body_family_is_rejected_and_post_is_accepted, transferred_get_body_reports_destination_api_endpoint_and_method}`. JSON/text/binary/multipart/urlencoded GET failures, corresponding POST successes, preserved HEAD behavior, API/endpoint/method diagnostics.
+- R27 replaced only its obsolete half: `cross_origin_policy::endpoints_support_cross_origin_override_and_no_graphql_export` retains the no-GraphQL assertion.
+- R24, passive shipped corpus and normal real-artifact path F2 L1: existing definition_baseline/artifact_drift/import_overlay and fresh-output guards compare all shipped historical definition data, ordered schemas, generated Rust/OpenAPI/Postman and exact re-imported OpenAI source. The existing `slow_fixture_apis_compile_and_send_offline` owns the new generated child tests (31 child tests, final targeted run passed). Existing shipped-API compiler guard remains selected by `just test`.
+
+Targeted generator/runtime task reports seven passing tests; the separate generated fixture reports three passing parent/coverage guards, including all 31 child tests. Its intermediate wrong PagerError import was corrected to the public pager module path and the final exact-source rerun passed. The doctest gate exposed a missed ParamDef doc literal; updated it and the other live README/import/skill literal examples with the new required source fields. No cargo formatter ran.
+
+### Workspace observation
+
+During final metadata collection the index changed externally: Phase 4 files became staged even though this implementation issued no git add, git stage, git commit or index mutation command. HEAD remained unchanged. Left that index state untouched and collected the complete source inventory with `git diff HEAD --name-only` so external staging cannot erase the inventory. Final log/plan edits remain ordinary working-tree edits. This observation does not affect source bytes or verification.
+
+### Final ordinary gate and performance resolution
+
+All three Phase 4 plan tasks are checked as their evidence completed; later-phase tasks remain pending. The final ordinary area run passed **2,305/2,305** in **5.436 s**, with **no SLOW tests**. Its seven new define tests include final explicit downstream assertions for the adopted query name/location and exposed PageSize caller knob, in addition to API success. The seven earlier slow reports were concurrent verification build pressure, not a new production bottleneck; running without competing verification builds resolved them without changing tests, omitting cases, changing tiers or adding timeouts. The initial full area run had already passed all six generated-crate guards and the runtime compile-fail guard; the final complete recipe is finishing those guards again on final source.
+
+`just doctest` now passes **270 tests**: define 174 ordinary plus 11 compile-fail, definitions 63, generator 18, OAuth 3 and runtime 1. The two preexisting ignored WebSocket module examples remain ignored. The stale validation example was corrected to build valid facts before explicitly corrupting stored API data; this documents the actual strict builder behavior rather than weakening code to satisfy the old example. No implementation behavior changed for that correction.
+
+### Final verification ledger
+
+- Final `just -f schematic/justfile test`: **2,305/2,305 ordinary L1 tests passed**, **no SLOW ordinary tests**, 5.436 s; **6/6 generated-crate guards passed**, 22.677 s; **1/1 runtime compile-fail guard passed**, 1.173 s. The generated fixture compiled and sent all 31 child tests in 5.684 s. ABI guard, exact compiler misuse diagnostics, real shipped APIs, negative compiler control and query-wire baseline all pass. Existing compiler guards necessarily invoke Cargo and retain their established separate recipe; no new slow suite was added.
+- The artifact tests pass without baseline exemptions: OpenAI exact re-import 1.788 s; complete generated Rust drift 2.430 s; no-runtime-duplication source corpus 2.577 s. Historical JSON and ordered-registry tests pass. Committed schema/OpenAPI/Postman artifact files and OpenAI types.rs are unchanged.
+- `just doctest`: **270 passed**, two preexisting ignored WebSocket module examples (`core_ws`, `integration_ws`). All documentation compile/runtime failures found during this phase were fixed and rerun successfully.
+- Explicit strict-completeness nextest selection: **2/2 passed**, 0.117 s each. Their preexisting `real_` names exclude them from the ordinary L1 filter, so they were executed directly.
+- The ordinary suite's 12 exclusions are six generator compiler guards and one runtime compiler guard subsequently run by `just test`, two strict-completeness cases explicitly run above, and three preexisting ignored generator tests (`e2e_generation::{generated_code_compiles, generated_code_passes_clippy, multiple_apis_compile}`). Their existing reason is expensive nested Cargo/clippy; active isolated compiler guards cover generated code. No new ignored test or unreported exclusion was introduced. The dedicated guard selections' 233/342 filtered tests and strict selection's 237 filters are ordinary scope selection, not failures.
+- `just check-tier-coverage schematic`: **zero stranded tests**. Test placement and CI-visible repository reads remain intact.
+- Shipped frozen definition inventory confirms **18 APIs, 547 endpoints, zero GET request bodies and the same nine query-bearing paths** (Gitea GetGitTreeRecursive, GitLab GetRepositoryFile and seven OpenAI Beta response endpoints). This is the passive real-artifact corpus covered by the baseline tests; no hard path-query error was enabled prematurely.
+- No Linux/native Windows/WSL2 run was required for this change: portable Rust definition data, URL/header validation and runtime policy selection introduce no OS conditionals, path comparisons or terminal/browser behavior. Cross-platform CI scope is unchanged. No live provider request, focus change or terminal/browser window occurred. L2 adds no relevant boundary coverage here.
+
+The initial compiler/lint failures, OpenAI reproduction mismatch, missed doc literal, stale validation doctest and generated-child import error were corrected. No failing test is accepted. Full passing evidence is on macOS; no entire-monorepo run was attempted.
+
+### Closing state
+
+**Phase 4 implementation complete, ready for review.** Final `just lint` passed all five schematic packages after the final source/test edits. Plan/log frontmatter inventories are verified against all 87 changed source files, 10 updated documentation files, no created documentation files and one updated skill file; packages accumulate schematic-define, schematic-gen, schematic-definitions and schematic-runtime. Each required key occurs once. Spec keeps human_review false with a current next-phase handoff. `git diff HEAD --check` passes, including externally staged content.
+
+All three Phase 4 tasks are checked; later-phase migration and shared import matrix tasks remain scheduled. No cargo fmt, commit, staging command, lifecycle move, new dependency, runtime ABI change or artifact baseline exemption occurred. The external index change is documented above and was left untouched. All delegated tasks returned and all final verification processes completed; nothing is waiting.
+
+## Phase 5
+
+### Behavior-to-test map before implementation
+
+| Requirement / behavior | Concrete test coverage | Boundary, fidelity, tier |
+| --- | --- | --- |
+| R22 typed fallible emitted builders, ordered nominal registration and generic overlay | definition_gen tests; import_overlay repeated imports and compiled/evaluated small emitted fixture | Source/compiler/crate boundary F2 L1 through established compiler guard |
+| R29 shared path normalization, constant and placeholder controls, twin reconciliation, invalid input | Public OpenApiImport JSON/YAML matrix and nine original path fixtures; shipped seven-pair schema gate | Deserialization/definition F2 L1 |
+| R31 imported GET request bodies fail with endpoint context | Public import negative fixture | Import/validation F2 L1 |
+| R19/R22 OpenAI context assembly and overlay retention | Exact reimport, pagination_coverage, unknown overlay endpoint rejection | Shipped artifact/import/registry F2 L1 |
+| R10/R24 preserve order, component schemas, pagination and wire URLs except seven explained merges | Historical definition baseline with exact explained transformations, artifact_drift, fresh-output generated compiler/runtime guard | Shipped artifacts and generated consumers F2 L1 |
+
+The plan permits bounded delegation; shared importer normalization and its input matrix have isolated define source/test ownership. Emitter, OpenAI assembly, artifact integration, docs and closure remain with the coordinator. All work is non-interactive; delegated results will be collected before closure. Existing staged and unstaged earlier-phase files are preserved. A start-of-phase byte copy is retained outside the repository to inventory only this phase.
+
+### Builder emitter and schema gate checkpoint
+
+The targeted emitter regression failed against the old literal form before implementation, then all 30 emitter/model-generation tests passed. Emission now uses typed request/response/form registrations and fallible Endpoint/RestApi builders; `module_group()` produces API and ordered schemas from one context, with existing infallible catalog wrappers. Generic overlays run after builder validation, and their files remain outside output ownership. Empty typed vectors avoid inference failures. Source-level tests formerly requiring literal tails were replaced with builder/overlay contracts rather than retaining obsolete expectations.
+
+Nominal generated declarations implement Registration beside the declaration; true aliases reuse the underlying registration. This exposes historical alias components that were previously registered as independent names for Vec, String, bool and serde_json::Value; their exact inventory and downstream differences will be recorded at the artifact checkpoint. No provider-specific emitter branch or manual OpenAI transform was introduced. The shared import schema gate passed all seven shipped beta pairs before the normal `just import-openai` regeneration was started. Phase 1 and Phase 4 already proved byte reproduction by the unchanged emitter on the then-current source.
+
+Endpoint Collection support is additive for this phase: explicit endpoint pagination takes precedence, while the legacy table remains available for the remaining providers until Phase 6. The historical Exception origin is retained as an interim compatibility representation. OpenAI's overlay assigns endpoint collections and rejects unknown IDs.
+
+Intermediate compile runs overlapped structural edits and briefly reported a missing Endpoint field despite source presence. A direct all-features check and a fresh target selection passed; kache doctor reported healthy wiring. No cache purge, Cargo clean, wrapper change or formatting was used. The importer matrices exposed two test assumptions during its full define run; they are being fixed, not accepted as gaps.
+
+### Seven beta pairs and historical accounting
+
+The pre-regeneration gate resolves references and flattens compositions before comparing both sides. The beta/candidate type is selected on both equal and superset outcomes:
+
+| Removed endpoint | Surviving endpoint | Path | Request gate | Response gate |
+| --- | --- | --- | --- | --- |
+| BetaCreateResponse | CreateResponse | /responses | superset | superset |
+| BetaGetResponse | GetResponse | /responses/{response_id} | equal (no body) | superset |
+| BetaDeleteResponse | DeleteResponse | /responses/{response_id} | equal (no body) | equal |
+| BetaCancelResponse | CancelResponse | /responses/{response_id}/cancel | equal (no body) | superset |
+| BetaCompactconversation | Compactconversation | /responses/compact | superset | superset |
+| BetaListInputItems | ListInputItems | /responses/{response_id}/input_items | equal (no body) | superset |
+| BetaGetinputtokencounts | Getinputtokencounts | /responses/input_tokens | superset | equal |
+
+Each survivor's omitted beta control uses its ordinary path with no beta pair; beta=true uses the same method/path plus ?beta=true, reproducing the removed endpoint URL. False is an ordinary caller value, not a fixed-value endpoint selector. The generated wire guard now records all seven methods/paths with omitted, true and false controls and checks dependent RequestParts. Generated Rust changes remove seven request/call/client-method families, add beta setters to survivors and select compatible beta body/success types. OpenAPI and Postman remove seven query-bearing paths/operation IDs, add optional Boolean beta query parameters and select the same beta schemas. Existing beta header parameters and compatible declared query fields are retained.
+
+Historical registry comparison preserves every remaining nominal name, schema fingerprint and registration order. The following 21 old alias entries now reuse underlying typed registration and stay inline under R3/R6 (the comparison pins this exact list): ChatCompletionMessageToolCalls, ChunkingStrategyRequestParam, ComputerActionList, CreateEvalItem, EvalGraderLabelModel, EvalGraderPython, EvalGraderScoreModel, EvalGraderStringCheck, EvalGraderTextSimilarity, EvalItemContentArray, EvalItemContentText, FineTuneChatCompletionRequestAssistantMessage, InputMessageContentList, Item, ParallelToolCalls, ToolsArray, TranscriptionChunkingStrategy, BetaItem, BetaComputerActionList, BetaInputMessageContentList, BetaToolsArray. This includes primitive/Value aliases as required by the same no-invented-component rule, not just Vec aliases. All 1,394 generated declarations remain; the registry contains 1,373 nominal components. Definitions retain 258 of the original 265 endpoint IDs in order, dropping exactly the seven rows above. Explicit endpoint collections replace OpenAI's exception rows; ListInputItems uses BetaItemResource, and every other pagination resolution must compare exactly.
+
+The first integrated compiler attempt exposed a large debug stack frame. Per-endpoint helper functions alone were insufficient; bounded batches of 32 typed registrations also proved necessary. With both changes the historical test runs on nextest's default stack (0.772s), rather than aborting. No stack-size override was added. Its only remaining semantic discrepancy was the unrelated CreateRealtimeCall multipart body: round-tripping every path through a sorted Value changed fallback media ordering. That discrepancy is being corrected in the shared normalizer and will not be exempted. The initial isolated importer fixture also exposed missing serde_json in its stand-in manifest, now corrected. These are development failures to rerun.
+
+### Matrix, execution coverage and integration corrections
+
+The JSON and YAML import matrices independently start from the shipped `/responses/{response_id}/input_items?beta=true` operation. The plan now records every consumed field: paths, parameters, parameter name/location, required, schema/schema.type, and GET requestBody. Native versus quoted YAML type names agree; quoted Boolean required values fail. Absent parameter collections explicitly mean zero declarations; null rejects. Unconstrained schema objects/types produce Json only where explicitly defined. Duplicate authored keys are detected before map collection, and trailing content rejects. GET body presence, including null, fails with API/endpoint/GET context. Empty foundation metadata imports remain supported, but the public run_import invocation rejects both JSON and YAML APIs with no usable endpoints before writing.
+
+Exact tests: import_normalization::{json_import_normalization_matrix, yaml_import_normalization_matrix, query_expressions_reject_ambiguity_and_get_bodies, placeholder_moves_to_query_and_preserves_rust_name, twins_merge_only_with_compatible_schemas_and_parameters, shipped_openai_query_schema_gate_and_reimports, flattened_schema_gate_selects_superset_and_blocks_incompatible_twins, declaration_duplicates_null_operations_and_query_conflicts_are_rejected, shipped_unfolded_circle_import_corpus, gitea_recursive_twin_becomes_optional_caller_control, schema_gate_rejects_new_restrictions, referenced_query_declarations_require_resolvable_parameter_objects}. Final delegated targeted evidence: 12/12 passed, 2.323s total, including the actual shipped multipart/media-order regression. Its full define run before that final correction passed 686/686; its final define all-features library Clippy passed.
+
+Endpoint tests: endpoint_pagination::{endpoint_collection_precedes_legacy_row_and_preserves_inheritance, endpoint_collection_and_strategy_errors_reach_api_build, endpoint_collection_serde_optional_shape_and_repeated_round_trip, endpoint_explicit_collection_drives_public_pager_knobs}; overlay negative: openai_pagination::tests::overlay_rejects_unknown_endpoint_id. Optional endpoint Collection defines absent/null as no assignment, rejects scalar/mixed-array/all-malformed-array/empty-object representations, duplicate keys and trailing data. Two round trips re-enter public API build and verify item type and resolved unpaginated state. These are ordinary auto-discovered L1 tests; endpoint builder/transfer tests are F1, with shipped definition consumers and generated execution providing F2. Shipped provider documents supply F3 evidence of their recorded input format, without live network calls.
+
+Integration tests in the declared generator l1 target cover typed emission, query/cookie/OAuth authentication retention, API runtime/parameter forms, generic overlays remaining byte-identical outside importer ownership, normal empty-import errors, and exact OpenAI reimports. The new slow_imported_builders_compile_and_match_public_import uses the established offline FreshCrate harness and live test-fresh-output recipe. It compiles/evaluates the normal petstore import output, compares public API data after the documented typed-evidence lowering and checks registry order/completeness and the generated client call. Its initial expected registry spelling was corrected to the importer's existing deconflicted CreatePetRequest2. Added stand-in dependencies support the generated model implementations; shipped manifests/dependencies are unchanged.
+
+The ordinary full area run first stopped after 1,145/2,320 tests (1,143 passed, two failed) on the registry's legacy rule that skipped fully qualified schema names. The new typed wrapper regression exposed that rule, and completeness now follows descriptor wire-schema component references rather than skipping typed paths. The existing incomplete-registry regression remains active. The first area lint found redundant Ok(builder.build()?) in emitted endpoint helpers; emission now returns builder.build() directly. Regenerated definition source carries that fix. Neither failure is accepted; final gates must pass below. No formatting, signature bypass, timeout extension or ignored test was added.
+
+### Final review of generated documentation and test expectations
+
+The next ordinary run exposed the aggregate pagination-count assertion still counting the removed BetaListInputItems pager. OpenAI now has 57 pagers and the shipped total is 93; exhaustive per-endpoint resolution already passed. The importer request-id assertion still expected a literal field and now checks the equivalent builder setter. The output-warning corpus now derives counts from its exact two remaining query-bearing provider rows (Gitea/GitLab), rather than retaining independent nine/27 constants. These are changed migration expectations, not removed coverage. The following ordinary run passed all 2,320 tests, including historical OpenAI, registry order/fingerprints, exact reimport and artifact drift.
+
+That run reported ten ordinary tests above five seconds under concurrent verification load, so it is not the final performance evidence. The final ordinary gate will run with four nextest workers, matching the repository's stated 2–4-core runner capacity, after source/artifact edits settle. This changes concurrency only: no test, case, tier, retry or timeout is removed or changed.
+
+Review of generated public examples found a new typed-path interaction: a fully qualified body type had been placed inside a grouped schematic_schema import, producing invalid Rust examples (the historical text fence hid it from rustdoc). Added codegen::request_structs::tests::qualified_and_container_body_examples_are_valid_rust first; it failed on the exact emitted ::schematic_definitions::openai::BetaCreateResponse input. The fix imports the request alone and declares a typed default body for fully qualified nominal/Value/container paths. The targeted test passes and the affected OpenAI client artifacts are regenerated. Legacy provider examples are preserved. This is part of the migration's documentation correctness, not an unrelated format cleanup.
+
+### Final test and artifact evidence
+
+Final required test invocation: `NEXTEST_TEST_THREADS=4 just -f schematic/justfile test` passed **2,321/2,321 ordinary tests**, **zero SLOW ordinary tests**, in **17.578s**. All **7/7** generated-crate guards passed in **34.154s**, including the new compiled/evaluated importer output, all 18 shipped APIs, real-client wire capture, misuse diagnostics, ABI rejection, and compiler negative control. The runtime compile-fail guard passed **1/1** in **2.517s**. Compiler guards retain their established separate recipe and time budget because they invoke nested Cargo; no ordinary behavioral test was moved there to hide slowness.
+
+The wire fixture's initial child compilation lacked imports for the six newly exercised request types; those imports are fixed, and the final guard passes all 21 added ordinary/true/false endpoint URL recordings plus the existing reserved/Unicode/empty/repeated query cases. The historical wire row for ListInputItems keeps the same decoded query and URL meaning, with beta moved after its declared include input; this is the sole changed historical row. Gitea and GitLab retain their pre-migration wire bytes. Both initial omitted imports and the earlier literal/count assertion failures were corrected and rerun; no failure is accepted.
+
+Historical OpenAI comparison passes with the exact seven merges, endpoint collection relocation, BetaItemResource item type, typed-evidence lowering and exact 21 inline alias removals. It still compares every remaining nominal registry name/schema fingerprint/order and every other definition/pagination field. All other 17 historical definition baselines pass unchanged. Current generated Rust file-set/bytes/manifest, OpenAPI and Postman drift tests pass with no artifact exemptions. Exact vendored OpenAI reimport passes (both mod.rs and types.rs; two imports are byte-identical). Vendored source bytes are unchanged. No OpenAI-specific emitter branch or recorded provider transform was needed.
+
+`just check-tier-coverage schematic` reports **zero stranded tests**. New define tests are auto-discovered, openapi-gated tests use CI's declared all-features setting, and the new compiler test belongs to the existing declared generator l1 binary with the live test-fresh-output recipe. Repository source literals remain in tests or the established visible fixture paths.
+
+### Final verification ledger and closing state
+
+- `just -f schematic/justfile lint`: **passed all five packages**, with warnings denied. This recipe runs Clippy and did not invoke cargo fmt.
+- `just -f schematic/justfile doctest`: **270 passed**, zero failures; two preexisting ignored WebSocket module examples remain (`unfolded_circle::core_ws`, `unfolded_circle::integration_ws`).
+- Explicit strict-completeness nextest selection: **2/2 passed** (0.428s and 4.040s). Their existing real_ names exclude them from the ordinary L1 filter, so they were executed directly.
+- The ordinary gate's **13 exclusions** are seven generator compiler guards and one runtime compiler guard subsequently executed by just test, those two strict-completeness cases explicitly executed above, and three preexisting ignored expensive generator tests (`e2e_generation::{generated_code_compiles, generated_code_passes_clippy, multiple_apis_compile}`). Active isolated compiler guards cover current generated output. No new ignore or skipped case was added. The compiler selections' 234/342 filters and strict selection's 239 filters are ordinary scope selection.
+- No final test or lint failure remains. The initial regression failures, multipart ordering defect, debug-stack overflow, incomplete typed-reference checking, obsolete count/literal expectations, redundant emitted Ok/question-mark lint and omitted wire-child imports were corrected and rerun successfully. Four-worker ordinary execution resolved the measured load concern without changing test cases or deadlines.
+- Current emitted changes are confined to `schematic/definitions/src/openai/mod.rs` (typed builders, ordered assembly, seven merges), `schematic/definitions/src/openai/types.rs` (nominal Registration implementations alongside unchanged model declarations), `schematic/schema/src/openai/mod.rs` (258-endpoint overview), `schematic/schema/src/openai/requests.rs` (typed paths, surviving beta request/call/method forms, valid qualified-body examples), `schematic/openapi/openai.json` (merged operations, optional beta inputs, compatible schemas and inline alias removals), and `schematic/postman/openai.postman_collection.json` (merged operations and caller beta inputs). Every other generated module/export/manifest stays byte-identical. Historical fixtures remain unchanged.
+- Evidence is local macOS. Linux, native Windows and WSL2 were not separately executed: this phase changes portable Rust data, Serde/import normalization, builder emission and hermetic compile/loopback fixtures, with no OS conditional or path-comparison changes. CI coverage remains unchanged. No terminal/browser/device resource is needed, and no focus-changing test or live provider request ran.
+
+**Phase 5 implementation complete, ready for review.** All three Phase 5 plan tasks and the shared input-matrix task are checked; later-phase tasks remain pending. Required plan/log frontmatter inventories contain **84 source/artifact files, eight updated documentation files, no created documentation files and three updated skill files**. The complete file inventory is the frontmatter source_files_during_phase_5 list above; most non-OpenAI provider/test edits only initialize the additive Endpoint.pagination field while their migration remains scheduled. Accumulated packages retain schematic-define, schematic-definitions, schematic-gen and schematic-runtime. Spec frontmatter has human_review false and a fresh Phase 6 handoff. Metadata keys are unique.
+
+No feature lifecycle move, cargo fmt, staging command or commit occurred. Earlier staged/unstaged work was preserved. All delegated tasks and verification processes finished in this turn; nothing is left waiting.
+
+## Phase 6
+
+### Test map before implementation
+
+| Behavior | Concrete test | Boundary / fidelity / tier |
+| --- | --- | --- |
+| Provider builders and shared ordered contexts preserve definitions, IDs, schemas and pagers | definition_baseline (all 18 APIs), pagination_coverage, api_policy; fresh_output_compile | Public crate/registry/generation F2 L1, isolated compiler guard |
+| Gitea recursive merge and GitLab ref query | definition_baseline::{gitea,gitlab}, fresh_output_compile real-client wire fixture with omitted/false/true and reserved/Unicode values | Generated client/HTTP loopback F2 L1 compiler guard |
+| Legacy removal and source enforcement | definition_surface, source corpus and fresh_output_compile compile-fail cases | Public API/source/compiler F2 L1 |
+| Path query hard rejection | public builder and output_validation negative tests with original query paths | Public builder/generator F2 L1 |
+| Context destination validation and strict completeness | typed_registration, registry tests, strict completeness and artifact_drift | Cross-crate/artifact F2 L1 |
+
+Existing historical JSON fixtures remain immutable. This phase changes authored Rust data and construction, not a configuration reader; the input robustness matrix does not apply to that migration. Existing JSON/YAML import normalization matrices remain active. Bounded independent provider implementation assignments are collected in this same run; coordinator owns shared removal, integrations, generated artifacts and closing metadata. No formatting, staging or commits.
+
+### Provider integration checkpoint
+
+All remaining provider sources now use typed builders and module-group assembly. Independent source ownership was used for bounded implementation work; integration checks remain serial, with original frozen baselines retained. Targeted larger-provider evidence passed 176/176 tests including preserved ElevenLabs WebSocket and model stored forms. Earlier targeted forge/small runs found shared test-fixture literal errors during non-exhaustive enforcement, subsequently migrated; no failures are accepted as gaps.
+
+Gitea has 15 endpoints after dropping exactly GetGitTreeRecursive. Its surviving GetGitTree exposes optional recursive and sniff now sets recursive(true). GitLab GetRepositoryFile retains the git_ref Rust spelling as a declared ref query value; the generated constructor now takes the two path arguments and exposes git_ref through an ordinary setter. Wire capture adds omitted/false recursion and Unicode/empty ref while preserving the original true/ref request lines.
+
+A migration exposed LM Studio's existing Some(EnvMapping::default()) alongside LM_API_TOKEN in env_auth. A targeted new public builder regression first failed on the empty mapping. Empty mapping fields declare no environment credential name; only two present, conflicting names are contradictions. Builder validation now preserves that distinction independent of setter order; all existing nonempty conflict tests remain. LM Studio authors the mapping directly through its builder, without post-build restoration. Its existing effective empty mapping and generated lack of env fallback remain unchanged. This preserves R11 output rather than silently correcting the separately deferred auth dual-source issue.
+
+### Historical registry and pagination accounting
+
+The first integrated selection passed all 17 provider comparisons it reached; Core REST was not reached after the deliberate-description negative control failed on raw old/current representations. That control was aligned to the same explained lowering. The later Core REST comparison exposed the two expected container-alias response spellings, now explicitly expanded for comparison; the final gate must pass all 18. No nominal fingerprint changed. The following exact old component names retire as inline containers:
+
+- GitHub: Vec<PullRequestSummary>, Vec<PullRequestFile>, Vec<IssueSummary>, Vec<IssueComment>, Vec<TimelineEvent>, Vec<RepoTag>, Vec<Release>, Vec<RepositoryInfo>.
+- Gitea: the same eight names plus Vec<GitRef>.
+- GitLab: Vec<TreeItem>, Vec<MergeRequest>, Vec<Commit>, Vec<Issue>, Vec<Note>, Vec<User>, Vec<Tag>, Vec<Release>, Vec<Project>, Vec<Pipeline>.
+- EMQX (both API views share one registry): Vec<AuthUser>.
+- ElevenLabs: Vec<ModelInfo>.
+- HuggingFace: Vec<ModelInfo>, Vec<RepoFile>, Vec<Commit>, Vec<DatasetInfo>, Vec<SpaceInfo>, Vec<RepoInfo>, Vec<Collection>.
+- Unfolded Circle Core REST: BackupRestoreReportItems and ResourceItems (Vec aliases).
+
+Seven nominal leaves become explicit at their former container registration positions: ElevenLabs ModelInfo; HuggingFace RepoFile, Commit, RepoInfo, Collection; Core REST BackupRestoreReportItem and ResourceItem. The baseline pins their exact names, positions and fingerprints rather than allowing arbitrary registry differences. Existing retained nominal schemas and order remain exact. HuggingFace Commit retains the public alias spelling through register_as and schema_name; Bitbucket's generic nominal PaginatedResponse<T> wrappers remain components. Other modules have no container removals. OpenAI's Phase 5 exact 21 alias removals remain unchanged.
+
+Every authored pager remains: 93 after Phase 5's already-accounted beta merge, not the spec snapshot's pre-merge 94. Gitea's removed recursive tree was unpaginated and its survivor remains explicitly unpaginated. Bitbucket GetSource remains binary NotAList with its previously materialized query fields. Pagination item paths are now qualified for inferred typed roots; historical comparison lowers that spelling and the exhaustive current table asserts the exact new qualified path. Strategies, selectors, controls, adoption and origins otherwise compare unchanged. ResolutionOrigin::Exception and the diagnostic Feature::PaginationException retain serialized category spellings for endpoint collections; neither is a removed exception-table type.
+
+### Legacy removal checkpoint
+
+Removed PaginationException, PaginationStyle, PaginationResponse, with_pagination and response-hint methods, RestApi.pagination_exceptions and both legacy EndpointParams fields. Endpoint.oauth_scopes is removed from model, operation extension, importer/emitter and tests; auth_policy remains, with explicit multi-method builder coverage. Shared Schema.module_path remains for the WebSocket full_path reader; REST importer emission now consumes type_name, and typed REST builders require module_path None. Provider, shared emitter and live-consumer scans found no old pagination-type consumers; only historical snapshot keys and retained diagnostic category names remain.
+
+The normal generation CLI successfully published all module groups (43 Rust files and 15 each OpenAPI/Postman artifacts). No vendored spec or historical baseline file was changed. The complete ordinary drift/compiled-output gate is in progress. The first ordinary integration run passed 1,244 tests before two exhaustive pagination-table assertions exposed the removed Gitea row and typed item qualification; both expectations were updated without dropping surviving list coverage.
+
+### R27 retirement ledger
+
+| Frozen contract | Replacement / retained behavior |
+| --- | --- |
+| No endpoint origin override / no GraphQL | cross_origin_policy::endpoints_support_cross_origin_override_and_no_graphql_export retains the no-GraphQL source assertion and checks the builder override. Runtime override/tighten-only coverage remains active. |
+| Endpoint literal surface | builders required-fact tests replace the old literal compile test. Fresh-crate misuse cases assert E0639 for external Endpoint and RestApi literals. |
+| EndpointParams literal surface | endpoint_literal_surface::endpoint_builder_and_parameter_default_preserve_unpaginated_behavior asserts the exhaustive query/header/cookie shape and its allow-listed empty Default. |
+| No endpoint-literal edits during pagination | Immutable definition_baseline, provider exact ordered-ID tests, and current artifact_drift replace the prior development constraint. |
+| Inert legacy metadata | Retired define/tests/pagination_tables legacy_pagination_metadata_does_not_change_resolution, gen/codegen/pagination legacy_pagination_metadata_does_not_change_the_output, and e2e_generation legacy_pagination_metadata_emits_no_pager: their inputs no longer exist. Concrete query fields and unpaginated/binary resolutions remain in provider, generator doc, and exhaustive pagination tests. Removed legacy enum storage/constructor-only tests have no surviving behavior to assert. |
+| Table rules and exhaustive resolution | All meaningful collection/strategy/parameter/session/partition tests now attach Collection directly to endpoints. Unknown/duplicate table-row-id mechanics are retired because the table no longer exists. OpenAI's external overlay still rejects unknown endpoint IDs. Exhaustive pagination_coverage retains every surviving list, exact controls, adoption, unverified inventory and non-list checks. |
+
+Generator pagination unit verification passed 20/20 and its public validator/pipeline selection passed 7/7 after updating obsolete invalid-selector diagnostic expectations and a stored-form fixture to share a typed context. The invalid input Collection::at("") is preserved. The old unknown-row example is replaced with an invalid endpoint collection; all rule-group outputs remain asserted.
+
+Construction is now non-exhaustive for Endpoint and RestApi after live source migration. Invalid stored data still uses ordinary builders as fixture seeds and then mutates public transfer fields; no fixture-only construction API was added. Provider source corpus checks and typed builder validation enforce authoring; underlying Serde transfer models remain available. Strict export completeness follows descriptor wire references and rejects same-spelled untyped strings; JSON form metadata participates too. The auth-policy reader and WebSocket Schema.full_path reader remain live and covered.
+
+### Concrete generic path and generated-consumer checks
+
+A fresh-context test of the actual Bitbucket PaginatedResponse<Repository> input failed before the fix: the generic Registration implementation emitted PaginatedResponse<T>, leaking an unbound type parameter. Nine concrete typed Registration implementations now sit beside that nominal declaration, using checked public paths and the existing component names; module-group registration order is unchanged. registry::typed::generic_paths::bitbucket_nominal_wrapper_retains_its_concrete_public_type_path and the Bitbucket module-group inventory passed 2/2 after the correction. One old provider assertion still matched the short Rust spelling and was changed to assert the descriptor's exact component reference. This is not a JSON schema change.
+
+Qualified typed schemas made five split-module response imports unused. The generator now emits that import only when stored-form schemas or unqualified paginated item types need it; raw fixtures and wrapper pagers retain the import. artifact_drift::qualified_typed_split_modules_need_no_unused_response_imports pins the normal EMQX output; compiled generated consumers provide the downstream check. Current OpenAI definitions and generated artifacts stay byte-identical to Phase 5.
+
+The first test-schema execution passed 54/55 tests; its only failure was two trybuild expected-output files still naming BetaListInputItemsRequest from before Phase 5. Reviewed changes remove that old suggested implementor and add ListChatCompletionsRequest as the eighth suggestion. Error codes, rejected calls, explanatory messages and all 14 compiler cases remain unchanged. The compiler suite will be rerun.
+
+The test/lint development failures were expected migration feedback, not accepted gaps: remaining table expectations, invalid fixture construction, generic path, temporary collection vectors/single-element loops and redundant EndpointParams Default updates were corrected. Final settled-source gates follow below.
+
+### Dependent boundary correction
+
+The first sniff selection compiled without its remote feature and selected zero tests; it is not counted as verification. Enabling remote exposed the actual GitLab source break: existing query parameters are generated as optional setters even when their definition metadata says required (general required-query fidelity belongs to the vocabulary work). The original three-argument get_repository_file call therefore became two path arguments plus git_ref("HEAD".to_string()). sniff's production caller and the real generated wire fixtures now use that form. This is the unavoidable R29 source change; no provider wire value was dropped, and general required-parameter generation was not expanded in this phase. Gitea's caller already uses recursive(true). Documentation and handoff metadata describe the setter rather than claiming a retained constructor argument.
+
+Strict-completeness fixtures that formerly used matching strings as positive evidence now construct their valid member through typed registration; their missing-member and malformed-spelling inputs and downstream publication assertions remain. The public output-isolation fixtures use an inline Value descriptor before deliberately mutating stored Rust spelling, preserving the distinction between invalid Rust and valid export data without restoring string-based authoring.
+
+### Provider batch gate and documentation checkpoint
+
+All 18 provider historical comparisons now pass, including Core REST's exact two alias expansions; every retained nominal schema fingerprint and endpoint order remains checked. Current full Rust artifact drift passed, and the regenerated schema suite passed 55/55 (including the established slow compiler guard), with no final schema compiler warnings. The last integrated provider is Core REST; all remaining provider factories and lookup paths use module-group assembly, so the Convert Providers task is checked. No provider batch remains unstarted.
+
+Affected-dependent verification with the remote feature passed 14/14 Gitea/GitLab sniff tests and compiled its production callers against the regenerated crate. Local macOS is the executed environment. The new code is portable Rust definitions, code generation, Serde/model and loopback behavior; no OS conditional, canonical-path comparison or terminal/browser behavior changed. Other OS rigs were not invoked; their normal CI coverage is unchanged.
+
+The area README had become a stale reference (including OpenAI=3 and Gitea=16). It is now an overview with install/build instructions, client examples and topic links. Its catalog and generation/verification/module-sharing reference now live in docs/generation/workflow.md with the actual 18 current API counts. All current authoring topics and four skill files describe typed context assembly, builder enforcement, inline containers, query controls and retained WebSocket schema compatibility. No current doc links to a moving feature/fix snapshot.
+
+The provider source corpus guard lives in schematic-definitions/tests/authoring_surface.rs, an automatically discovered L1 target reading its own package source via CARGO_MANIFEST_DIR. This keeps its source ownership local; no cross-package test-input declaration or CI-scope change is needed. All generator tests remain in their declared l1 binary; the isolated compiler misuse additions use its established live compiler recipe.
+
+The latest pre-final lint recipe passed all five packages. Subsequent changes are typed test-fixture corrections and the corpus-test relocation; the final lint/test executions below cover the settled tree. The ordinary test run now uses --no-fail-fast so it reports the full remaining inventory rather than hiding later fixture issues after an early failure.
+
+### Final requirement-to-test ledger
+
+| Requirement | Exact targeted/current coverage | Boundary / fidelity / tier |
+| --- | --- | --- |
+| R6/R7/R10/R18/R23/R24 typed provider/registry migration | definition_baseline::{anthropic, artificial_analysis_critpt, artificial_analysis_data, bitbucket, elevenlabs, emqx_basic, emqx_bearer, eversolo, gitea, github, gitlab, huggingface, lmstudio, ollama_native, ollama_openai, openai, samsung_smart_tv, unfolded_circle_core_rest}; changed_description_is_detected_at_its_exact_field; all three artifact_drift artifact comparisons | Crate/registry/generated-artifact F2 L1 |
+| Provider exact inventory (14 new tests) | {samsung_smart_tv,artificial_analysis,anthropic,lmstudio,ollama,bitbucket}::tests::module_group_preserves_endpoint_and_registry_inventory; {github,gitea,gitlab}::tests::typed_module_group_preserves_endpoint_order_and_completeness; {emqx,elevenlabs,eversolo,huggingface,unfolded_circle::core_rest}::tests::typed_module_group_preserves_endpoint_order_and_inline_components | Public factory/context F2 L1 |
+| R5 concrete nominal generic path | registry::typed::generic_paths::bitbucket_nominal_wrapper_retains_its_concrete_public_type_path (failed first on literal PaginatedResponse<T>, passed after concrete checked paths); existing alias/shared-context tests | Registration/public model crate F2 L1 |
+| R11 empty explicit env mapping / conflicting present names | builders::explicit_empty_mapping_preserves_the_absence_of_environment_credentials (failed first); existing bearer/basic/key conflict-order and explicit multi-method-policy tests | Public builder/default mapping F1 L1 |
+| R6 strict typed export evidence | registry::typed_completeness::{same_spelling_cannot_replace_typed_registration_evidence, form_json_metadata_requires_its_typed_components_too}; openapi_strict_completeness including explicitly selected real_* pair | Define/registry/export F2 L1 |
+| R12/R16/R20/R21 authoring enforcement and removals | authoring_surface::provider_authoring_uses_builders_and_typed_registrations; two new MISUSES entries “external Endpoint literal” and “external RestApi literal” in fresh_output_compile::slow_generated_types_reject_misuse_at_compile_time, asserting E0639; existing Default allow-list and WebSocket schema full_path tests; final live-reader scan | Source corpus/compiler/API boundary F2 L1; compiler cases use existing separate slow guard |
+| R19/R27 surviving pager behavior and retirement | pagination_coverage::{every_list_endpoint_of_every_api_resolves_as_authored,every_row_names_one_endpoint_of_a_shipped_api,every_unverified_list_names_its_recalled_strategy_and_needed_source}; migrated pagination_tables/inventory/partitions/serde tests; generated schema pagination and trybuild | Cross-crate resolver plus HTTP/compiler F2 L1; six-entry retirement ledger above |
+| R28/R29/R31 shared path/body boundaries and real wire values | construction_enforcement::query_bearing_paths_fail_endpoint_and_destination_api_build (failed first; exact original Gitea/GitLab/OpenAI paths); validation::tests::query_in_path_is_one_error_per_output; existing import_normalization JSON/YAML matrices; fresh_output_compile::slow_query_wire_matches_pre_split_baseline | Builder/import/generator F1/F2 L1; generated-client HTTP loopback F2 through established compiler guard |
+| Qualified generated code without unused imports | artifact_drift::qualified_typed_split_modules_need_no_unused_response_imports; compiled actual generated crate | Generator output/compiler F2 L1 |
+| Affected production consumers | sniff remote::gitea and remote::gitlab unit/auth/mock selection with --features remote | Generated crate/consumer/loopback F2 L1 |
+
+Wire additions retain the original true/ordinary request lines and assert dependent RequestParts and captured HTTP bytes. Gitea covers omitted/true/false recursive. GitLab covers original feature/x y+z, omitted ref, empty ref, and ünï+%&=/?# as one decoded query value; required-query constructor fidelity is explicitly outside this migration. The OpenAI seven-pair ordinary/true/false recordings remain. Definition-data persistence still reads/writes/reads twice and asserts dependent snapshots; no new configuration parser or load-bearing file field was introduced, so no new robustness-matrix table is required. Existing supported-format import/Serde matrices remain passing.
+
+### Final verification results
+
+- `NEXTEST_TEST_THREADS=4 just -f schematic/justfile test --no-fail-fast`: **2,305/2,305 ordinary tests passed**, **zero ordinary SLOW tests**, **17.487s**; then **7/7** isolated generated-crate guards passed (**188.862s**, one established compiler guard reported SLOW), then **1/1** runtime compiler guard passed (**2.487s**). The same invocation completed all three stages. Generated fixture execution, all 18 shipped APIs, the real wire capture, importer compilation, misuse diagnostic checks, ABI rejection and negative control all passed.
+- `just -f schematic/justfile lint`: **all five Schematic packages passed** on the settled source tree, with warnings denied. No formatter ran.
+- `NEXTEST_TEST_THREADS=4 just -f schematic/justfile test-schema`: **55/55 passed**, **zero skips**, **120.025s**; its existing trybuild/compiler case accounts for the slow report. No schema compiler warning remained after conditional imports.
+- `cargo nextest run -p sniff --features remote --lib -E 'test(remote::gitea) | test(remote::gitlab)'`: **14/14 passed**, **0.159s** execution; actual changed production callers compiled. The 1,926 excluded tests are outside this narrow affected-consumer selection.
+- Explicit strict-completeness selection `test(/openapi_strict_completeness::real_/)`: **2/2 passed**, **0.611s**. Their preexisting real_ names exclude them from ordinary L1, so this run supplies the missing direct evidence.
+- The query-path regression was rerun after correcting its GitLab spelling to the exact original `/projects/{id}/repository/files/{file_path}?ref={git_ref}` input: **1/1 passed**, **0.009s**. This was a test-input correction only after the full ordinary gate; production code did not change.
+- Ordinary L1's 13 exclusions are the seven generator compiler guards and one runtime compiler guard executed by that same recipe, the two strict-completeness tests explicitly executed above, and three preexisting ignored expensive generator tests (`e2e_generation::{generated_code_compiles,generated_code_passes_clippy,multiple_apis_compile}`). Active isolated compiler guards compile the current generated clients. No new ignore, retry, timeout extension, tier hiding or omitted matrix row was introduced. Compiler selections' 234/342 and strict selection's 239 filters are scope selection, not missing execution.
+- Development failures recorded above were corrected and rerun; none is accepted as a remaining failure. No live provider requests, terminal/browser windows, OS focus changes, cargo fmt, staging or commits occurred.
+
+The full area doctest recipe found two stale Gitea count assertions in schematic-definitions' root/prelude examples (16 instead of the surviving 15). Both comment-only assertions were corrected to match the code, and the full doctest recipe is rerunning. The root source snapshot and provider tests already assert that exact 15-endpoint inventory.
+
+### Exact generated-artifact disposition
+
+All changed generated Rust files below replace stored short model spellings with the context-checked qualified paths (including valid qualified-body examples). Gitea additionally removes GetGitTreeRecursive request/call/method and adds recursive to GetGitTree; GitLab moves git_ref to its query setter and removes it from constructor arguments. Core REST expands its two Vec aliases. These are the complete Rust files changed; every other generated Rust file, including OpenAI, is byte-identical:
+
+- schematic/schema/src/anthropic.rs
+- schematic/schema/src/artificial_analysis.rs
+- schematic/schema/src/bitbucket/requests.rs
+- schematic/schema/src/elevenlabs/requests.rs
+- schematic/schema/src/emqx/requests.rs
+- schematic/schema/src/eversolo/requests.rs
+- schematic/schema/src/gitea/mod.rs
+- schematic/schema/src/gitea/requests.rs
+- schematic/schema/src/github/requests.rs
+- schematic/schema/src/gitlab/requests.rs
+- schematic/schema/src/huggingface/requests.rs
+- schematic/schema/src/lmstudio.rs
+- schematic/schema/src/ollama.rs
+- schematic/schema/src/samsung_smart_tv.rs
+- schematic/schema/src/unfolded_circle_core_rest.rs
+
+The fourteen changed OpenAPI module documents are the remaining provider modules: their x-schematic typed descriptors/qualified paths replace old untyped references, named container components retire as listed above, and endpoint wire schemas use inline arrays. Gitea additionally drops the duplicate recursive operation and declares recursive; GitLab declares ref. Retained nominal fingerprints, auth, URLs, headers and all unaffected endpoint data compare exactly. OpenAI OpenAPI stays unchanged. The only changed Postman documents are gitea.postman_collection.json and gitlab.postman_collection.json, for those query migrations; every other Postman file is byte-identical. Vendored source documents and historical baseline files remain byte-identical.
+
+The now-unneeded response globs were omitted from these split request modules (their type and pager references are already qualified): schematic/schema/src/emqx/requests.rs, schematic/schema/src/eversolo/requests.rs, schematic/schema/src/gitea/requests.rs, schematic/schema/src/gitlab/requests.rs, schematic/schema/src/huggingface/requests.rs.
+
+The two reviewed schema .stderr changes affect only compiler suggested-implementor lists, as described above. No Cargo manifest or dependency changed.
+
+### Closing verification and handoff
+
+- Final `just -f schematic/justfile doctest`: **258 passed, zero failures**. The two preexisting ignored examples remain unfolded_circle::core_ws and unfolded_circle::integration_ws; neither was changed to hide a failure. Both stale Gitea count assertions found on the first attempt passed after their comment-only correction.
+- Final `just check-tier-coverage schematic`: **zero stranded tests**. Both new standalone test files are auto-discovered; generator additions belong to its declared l1 binary and existing compiler recipe.
+- The wire corpus contains **34 exact HTTP request lines**; its compiled execution passed. All required positive, omitted, empty, false, reserved-character and Unicode variants execute through the actual generated client. The source corpus guard and all 18 historical/current artifact checks passed in the ordinary 2,305-test run.
+- `git diff --check` passes. Plan/log frontmatter inventories list **187 source/artifact files, 14 updated documentation files, one created documentation file, and four updated skill files**. The created page is schematic/docs/generation/workflow.md. Their complete source inventories are the source_files_during_phase_6 lists above; generated-file causes and all dropped/added registry entries are enumerated in this section. Cumulative packages retain earlier packages and add schematic-schema and sniff. Metadata keys are unique and all inventoried paths exist.
+- All three Phase 6 tasks are checked. Phase 7 and Phase 8 tasks remain pending, and the feature stays in its active lifecycle directory. Spec frontmatter has human_review false and a fresh handoff covering GitLab setters, concrete generic paths, empty mappings, the 93-pager count and retained diagnostic/WebSocket names.
+- No final test/lint failure or running compiler/test/agent remains. Earlier development failures and preexisting exclusions are accounted for above. Linux, native Windows, and WSL2 were not executed locally; complete dependent/platform work belongs to the next planned phase. No formatter, staging, commit, signing bypass or lifecycle move occurred.
+
+**Phase 6 implementation complete, ready for review.**
+
+## Phase 7
+
+### Scope and pre-implementation test map
+
+Phase 7 integrates and verifies the existing migration. Preserve the dirty Phase 6 tree, regenerate all shipped artifacts through the normal generator, and change executable code only for demonstrated migration failures. No new parser/configuration behavior is planned; the input robustness matrix remains covered by prior descriptor/import tests.
+
+| Requirement | Concrete coverage | Boundary / fidelity / tier |
+| --- | --- | --- |
+| Complete Rust/OpenAPI/Postman output and no drift allow-list | artifact_drift::{generated_rust_artifacts_are_up_to_date,generated_openapi_artifacts_are_up_to_date,generated_postman_artifacts_are_up_to_date}; definition_baseline provider corpus | Generated filesystem artifacts / F2 / L1 |
+| Generated paths, temporary output, query encoding, external API misuse | fresh_output_compile::slow_*; schematic-schema request/pager/trybuild suites; runtime compile-fail guard | Actual Rust compiler and generated-client HTTP / F2 / existing compiler L1 recipe |
+| OAuth and all five WebSocket definitions remain valid | Full schematic area test/lint/doctest plus definition WebSocket inventory | Definition/runtime crates / F2 / L1 |
+| Actual consumers remain compatible | Root just test selections for all eight direct consumers; feature-enabled sniff remote; all-target compiler and corresponding lint | Crate and binary consumers / F2 / L1 |
+| macOS/Linux/native Windows/WSL2 | Local area/dependent gates, then documented cross-check runs; report exact host coverage and blockers | Native OS/compiler/filesystem / F2 / L1, relevant terminal L2 only via no-focus recipe |
+
+Existing tests will be identified before any fix; a new regression is required if existing assertions do not expose the failing input. Final artifact changes are compared with the Phase 7 starting tree and the preserved historical Phase 1 corpus. Phase 8 tasks remain out of scope.
+
+### Regeneration and initial local evidence
+
+- Executed normal CLI generation from schematic: `cargo run --color=never -p schematic-gen -- generate --api all --output schema/src --openapi-out openapi --postman-out postman -v`. It published 43 Rust files and 15 files in each export tree. Every output is byte-identical to the Phase 7 starting tree. No generated artifact was hand-edited. The Phase 6 Exact generated-artifact disposition and Historical registry and pagination accounting above remain the exact per-file/API/entry account against Phase 1; no new difference is authorized by this phase.
+- Initial ordinary `NEXTEST_TEST_THREADS=4 just test` stage: 2,305/2,305 passed in 22.849 s. Its compiler stages remain pending, so this is not yet the completed area gate.
+- Package inventory was resolved with sniff and confirmed against manifests. Direct external consumers are sniff, biscuit-speaks, model-citizen, homelab, eversolo-integration, arcam-amp-integration, sony-receiver-integration, unfolded-integration-helper. Their CLI/server reverse dependencies are included too.
+- BUILD_LINUX was declared as build-linux. BUILD_WIN and BUILD_WSL were initially unset; the user-provided rigs and SSH config identify build-win-native as native Windows/PowerShell and build-win as WSL2. All three answered `ssh -o BatchMode=yes -o ConnectTimeout=10` probes. Remote invocations explicitly supply the missing BUILD values, use cross-check standing clone isolation, and preserve Windows target placement. No qualifying existing receipt for this dirty tree was found or claimed.
+- Native-mode cross-check runs include all five Schematic workspace crates, eight direct consumers, and five CLI/server consumers, with `schematic-define/openapi,schematic-gen/terminal-tests,sniff/remote,biscuit-speaks/playa`. Filter `!test(/(^|::)(level2_|level3_|browser_|real_)/) | test(/openapi_strict_completeness::real_/)` includes slow compiler guards and explicitly restores the two preexisting misnamed strict-completeness tests while excluding real-device and terminal resources. Native mode is necessary for nested Cargo compiler guards; it publishes no CI receipt. Separate schema/archive evidence remains to be collected.
+
+### Consumer checkpoint
+
+Root invocation `NEXTEST_TEST_THREADS=4 just test sniff/lib biscuit-speaks/lib model-citizen/lib homelab/lib eversolo-integration arcam-amp-integration sony-receiver-integration unfolded-integration-helper sniff-cli biscuit-speaks-cli model-citizen-cli homelab-cli homelab-server` passed **4,382/4,382** in **42.770 s**, with 60 existing tier/filter exclusions. Features follow the root runner metadata, including sniff remote and biscuit-speaks playa. All eight direct consumers and five relevant CLI/server reverse dependencies compiled and executed. No call-site failure or source edit occurred. Corresponding lint and explicit all-target checks remain pending, so Verify Dependents is not yet checked.
+
+Five shipped WebSocket definitions execute in the full schematic-definitions suite: ElevenLabs TTS, Samsung Smart TV Remote, Unfolded Circle Core, Dock, and Integration. Their current construction/model tests passed in the ordinary area stage; OAuth is likewise included in the five-package area gate. No live hardware/provider call is implied.
+
+### Local compiler and terminal checkpoint
+
+- The seven generator compiler/import guards passed **7/7** in **123.830 s**. This explicitly runs the isolated slow Cargo-dependent tests excluded from ordinary L1. Runtime trybuild remains the third stage of the same area recipe.
+- Explicit strict export selection `cargo nextest run -p schematic-gen --test l1 -E 'test(/openapi_strict_completeness::real_/)'` passed **2/2** in **0.289 s**, covering the existing names excluded by ordinary tier selection.
+- `BISCUIT_TEST_REQUIRED_BACKENDS=tmux NEXTEST_TEST_THREADS=4 just test-l2` in schematic passed **3/3** in **5.351 s**. The backend was required; no silent missing-backend pass is counted. The existing detached tmux sessions never open/focus a GUI window. One existing L2 dry-run test exceeded five seconds; the ordinary L1 suite reported no slow tests.
+- `just check-tier-coverage schematic`: **zero stranded tests**. No new/renamed/feature-gated test was added in this phase.
+- Linux native combined selection exposed an existing OpenAI reimport timing above five seconds under unrestricted cross-package scheduling. Functional result and a targeted bounded-concurrency timing check remain pending; this is not silently waived.
+
+### Drift guard coverage gap and test mapping before edit
+
+Review found that Postman drift compares bytes for every expected module but never checks for unexpected files; OpenAPI and Rust already check their complete file sets. Phase 7 therefore strengthens `artifact_drift::generated_postman_artifacts_are_up_to_date` to compare the entire committed/generated Postman file sets, with no extension filter or allow-list. Boundary: shipped filesystem corpus and real exporter, F2 L1. Original negative-control input is an additional `retired.postman_collection.json` alongside the shipped corpus; the current assertion would ignore it. Existing positive coverage exercises every shipped provider, and the negative control must fail after the assertion is added. No parser/configuration behavior changes, and no production code change is required. The test remains in the declared generator l1 binary.
+
+### Native Windows regression and pre-fix mapping
+
+The native Windows full run failed three existing public CLI regressions with `thread main has overflowed its stack` / `STATUS_STACK_OVERFLOW` (-1073741571): `output_validation::cli_migrated_provider_generates_all_outputs_without_warnings` (literal `generate --api gitea` with Rust/OpenAPI/Postman roots); `output_validation::cli_reports_each_output_and_exits_nonzero_when_one_fails` (same call, OpenAPI root is an existing regular file); and `partial_generation::cli_refuses_an_unsafe_partial_run_and_claims_no_update` (literal `generate --api ollama-native --no-openapi --no-postman --output <existing hand-written crate>`). These are F2 L1 subprocess/filesystem tests, already failing before the production fix. They assert exit status, diagnostics, each output disposition, and published/unchanged trees, so no implementation-only linker assertion is needed.
+
+The os skill documents Windows main-thread stacks at 1 MiB and this repository's CLI-specific 8 MiB linker reservation. Apply that existing target-aware build-script pattern to schematic-gen (MSVC and GNU), covering the migrated catalog's debug assembly without changing provider/generator semantics, test timeouts, or spawned Rust thread stacks. Existing tests retain all original command arguments and negative inputs. Additional platform/compiler checks and relevant current docs/skills will cover the build change. Separate unrelated Sniff/model-citizen Windows warnings and high-concurrency timing observations are recorded rather than fixed as part of this migration.
+
+The Postman negative control failed exactly with `Postman artifact file-set drift` in 0.168 s; after deleting the injected retired.postman_collection.json, the same test passed in 0.163 s. No fixture remains in the shipped tree.
+
+### Integrated evidence checkpoint
+
+- Final Postman-assertion area run passed **2,305/2,305 ordinary tests** (16.041 s), **7/7 generator guards** (32.209 s), **1/1 runtime compiler guard** (1.954 s). The Windows build script was added during this run; compiler stages rebuilt it, and explicit CLI/artifact runs below check the updated executable on each platform.
+- Full schematic doctests: **258 passed**, **zero failures**, two preexisting ignored WebSocket examples. No doctest was disabled.
+- Linux on build-linux: combined 18-package native run **6,663/6,663 passed** (179.036 s, 64 tier/ignore exclusions), including all five WebSocket inventories, OAuth, current baseline/drift, query wire fixtures, compiler misuse cases, and every affected consumer. Generated schema: **55/55 passed**, zero skips (107.715 s; established compiler test accounts for the slow report).
+- Linux updated CLI/artifact selection passed **11/11** (2.316 s), including all three exact Windows-failing inputs against the new build-script tree, all artifact drift tests, and the new Postman file-set assertion. A separate two-test timing/updated-guard selection passed **2/2** (2.413 s); the formerly 6.431 s OpenAI reimport took **2.412 s** with four test threads. No performance code change, retry, timeout, or tier change was needed; the broad unbounded run oversubscribed the host.
+- Native Windows broad tests continue on the original pre-fix snapshot; their three known stack failures are intentionally retained as regression evidence. The updated build-script CLI selection is separately queued against a new snapshot and must pass before those failures count as resolved. Windows, WSL2, and archived WSL2 acceptance remain pending.
+
+### Regenerate Artifacts complete
+
+All required local artifact gates have passed: `just test` (ordinary plus compiler stages, detailed above), `just lint` (all five packages), `just doctest` (258 passing, two existing ignored examples), `just test-schema` (**55/55**, zero skips, 94.974 s including its existing compiler guard), and `just lint-schema` (all generated targets, warnings denied). The final lint invocation includes the new generator build script and updated drift guard. No fmt invocation occurred.
+
+The Regenerate Artifacts checklist item is now checked. Complete output remains byte-identical to the Phase 7 starting tree. The surviving Phase 1 normalization and Phase 6 per-file/API/registry difference ledger remain unchanged; no baseline, vendored specification, generated Rust/OpenAPI/Postman file, schema manifest, or schema lockfile was rewritten by hand. The only new output acceptance rule rejects extra Postman files and uses no allow-list.
+
+### Verify Dependents complete
+
+- Root direct/reverse-dependent L1: 4,382/4,382 passed as recorded above. No consumer source file needed another migration edit in Phase 7.
+- Corresponding area lint recipes all exited 0: `just -f sniff/justfile lint -D warnings`, `just -f biscuit-speaks/justfile lint`, `just -f model-citizen/justfile lint`, `just -f homelab/justfile lint`. All relevant Rust library/CLI/server/integration packages passed; Homelab frontend oxlint also ran and reported zero warnings/errors.
+- Explicit compilation exited 0 (1m29s): `cargo check --color=never --all-targets -p sniff -p sniff-cli -p biscuit-speaks -p biscuit-speaks-cli -p model-citizen -p model-citizen-cli -p homelab -p homelab-cli -p homelab-server -p eversolo-integration -p arcam-amp-integration -p sony-receiver-integration -p unfolded-integration-helper --features sniff/remote,sniff/bench-internals,sniff-cli/test-fixtures,biscuit-speaks/playa`. This includes lib/bin/test plus declared examples/benches, including sniff perf, and feature-gated helper targets.
+- Updated macOS CLI/artifact selection (the full artifact_drift module, output_validation::cli_ pair, and unsafe-partial-generation regression) passed **11/11** in **2.430 s** after adding the build script. Every changed behavior now has an executed local public-result test.
+- Documentation drift detected while following the OS skill: its nearby example implied sniff reserves 8 MiB, but sniff/cli/build.rs reserves 32 MiB. Corrected that documentation to match the existing code while adding the generator's 8 MiB case. No Sniff behavior changed.
+
+Verify Dependents is checked. Platform-specific completion remains a separate pending task; the local pass is not counted as remote evidence.
+
+### Native Windows fix verified; WSL2 broad suite complete
+
+- Native Windows original combined suite completed **6,597 passed / 3 failed / 6,600 executed**, 61 exclusions, 474.506 s. The only functional failures were the three recorded generator CLI stack overflows; every affected consumer, library/model, wire, and compiler guard passed. Existing compiler tests and unrestricted cross-package scheduling yielded 35 slow reports, discussed in the exclusions ledger; none was hidden or given a longer timeout. Existing non-migration Windows warnings remain in Sniff/model-citizen tests (unused imports/variables/helpers), rather than being swept into this change.
+- Updated build-script snapshot on build-win-native passed **12/12** CLI/artifact/reimport checks in **3.645 s**, zero slow reports. Exact previously failing commands now pass: Gitea all-output success **0.868 s**, Gitea partial-output failure **0.733 s**, unsafe Ollama partial-output rejection **0.288 s**. The new Postman corpus guard took **0.353 s**, complete Rust drift **2.828 s**, and vendored OpenAI reimport **3.144 s**. This is the public native-Windows proof of the fix, using MSVC. The GNU linker spelling is implemented following the established repo build-script pattern but no separate Windows-GNU environment was executed. Passing unaffected tests are retained from the broad run; no reason exists to repeat all consumer tests for a generator-binary-only linker setting.
+- WSL2 on build-win completed the combined **6,663/6,663 passing** suite in **406.334 s**, 64 exclusions, 15 existing slow reports under unrestricted scheduling. Its complete source/runtime/generated-consumer wire and compiler behavior passed; generated-schema, updated CLI/guard, and relocated archive evidence remain pending separately.
+
+### Explicit exclusion inventory
+
+A non-executing Nextest JSON listing of the same 18-package native selection on macOS enumerated the existing exclusions below. These are preexisting helper children (executed by parent tests), external provider/device tests, separate resource tiers, and the three superseded expensive generator compiler tests. The ordinary area's 13 exclusions additionally include the eight isolated Cargo guards and two strict tests explicitly executed elsewhere; native-mode selections restore both groups. No test was newly ignored or renamed. Platform-gated inventories differ by OS; native Windows also retains the documented four ignored aws-lc jitter-sensitive loopback TLS tests. These existing gaps are not claimed fixed by this migration.
+
+| Binary | Excluded test | Listing reason |
+| --- | --- | --- |
+| arcam-amp-integration::bin/arcam-amp-integration | dispatch::tests::destructive_real_device_mute_command_roundtrips | ignored |
+| arcam-amp-integration::bin/arcam-amp-integration | dispatch::tests::real_device_fetch_snapshot_returns_power_and_mute | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_debug_voice_deserialization | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_default_voice_any_returns_rachel | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_default_voice_female | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_default_voice_male | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_generate_audio_integration | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_list_models_integration | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_list_voices_raw_integration | ignored |
+| biscuit-speaks | providers::cloud::elevenlabs::tests::test_tts_voice_inventory_list_voices_integration | ignored |
+| biscuit-speaks | providers::host::echogarden::tests::real_echogarden_lists_installed_voices | expression |
+| biscuit-speaks | providers::host::echogarden::tests::real_echogarden_speaks_muted | expression |
+| biscuit-speaks | providers::host::echogarden::tests::real_echogarden_speaks_muted_with_requested_voice | expression |
+| biscuit-speaks | providers::host::espeak::tests::test_list_voices_integration | ignored |
+| biscuit-speaks | providers::host::gtts::tests::real_gtts_lists_installed_voices | expression |
+| biscuit-speaks | providers::host::gtts::tests::real_gtts_reports_reachable_network | expression |
+| biscuit-speaks | providers::host::gtts::tests::real_gtts_speaks_muted | expression |
+| biscuit-speaks | providers::host::kokoro::tests::test_speak_integration | ignored |
+| biscuit-speaks | providers::host::say::tests::real_say_provider_speaks_muted | expression |
+| biscuit-speaks::real_detached_phase4 | real_kokoro_provider_reports_muted_native_complete | expression |
+| biscuit-speaks-cli::cli_test | real_cli_speaks_with_kokoro_provider | expression |
+| eversolo-integration::bin/eversolo-integration | dispatch::tests::destructive_real_device_source_switch_roundtrips | ignored |
+| eversolo-integration::bin/eversolo-integration | dispatch::tests::destructive_real_device_volume_command_roundtrips | ignored |
+| eversolo-integration::bin/eversolo-integration | dispatch::tests::real_device_fetch_snapshot_returns_catalog_and_player_state | ignored |
+| schematic-gen::l1 | e2e_generation::generated_code_compiles | ignored |
+| schematic-gen::l1 | e2e_generation::generated_code_passes_clippy | ignored |
+| schematic-gen::l1 | e2e_generation::multiple_apis_compile | ignored |
+| schematic-gen::level2 | terminal_capture::level2_generate_dry_run_emits_module_grouped_filenames | expression |
+| schematic-gen::level2 | terminal_capture::level2_validate_emits_ansi_styled_ok_on_success | expression |
+| schematic-gen::level2 | terminal_capture::level2_validate_unknown_api_emits_red_error | expression |
+| sniff | filesystem::git::remote_refresh::tests::refresh_timeout_child | ignored |
+| sniff | filesystem::query::macos_tests::live::usage_child | ignored |
+| sniff | filesystem::repo::nested::tests::git_ignore_rules_child | ignored |
+| sniff | network::gateway::darwin::tests::real_native_gateways_match_route_get | expression |
+| sniff | network::gateway::tests::real_detect_default_gateways_reads_the_host_table | expression |
+| sniff | package::network::tests::real_cargo_network_find_package | expression |
+| sniff | package::network::tests::real_cargo_network_latest_version | expression |
+| sniff | package::network::tests::real_cargo_network_nonexistent_package | expression |
+| sniff | package::network::tests::real_enrich_dependency_cargo | expression |
+| sniff | package::network::tests::real_enrich_dependency_npm | expression |
+| sniff | package::network::tests::real_npm_network_find_package | expression |
+| sniff | package::network::tests::real_npm_network_latest_version | expression |
+| sniff | package::network::tests::real_npm_network_nonexistent_package | expression |
+| sniff | process::tests::between_samples_descendant | ignored |
+| sniff | process::tests::child_detaches_between_samples | ignored |
+| sniff | process::tests::child_detaches_descendant_then_exits | ignored |
+| sniff | process::tests::child_sleeps | ignored |
+| sniff | process::tests::child_spawns_detached_pipe_holding_descendant | ignored |
+| sniff | process::tests::child_spawns_pipe_holding_descendant | ignored |
+| sniff | process::tests::child_spawns_quiet_detached_descendant | ignored |
+| sniff | process::tests::child_writes_large_output | ignored |
+| sniff | process::tests::configured_child | ignored |
+| sniff | process::tests::detached_pipe_holding_descendant | ignored |
+| sniff | process::tests::pipe_holding_descendant | ignored |
+| sniff | process::tests::quiet_detached_descendant | ignored |
+| sniff | programs::enums::metadata::burnttoast_tests::child_sleeps | ignored |
+| sniff | programs::install::execute::tests::install_timeout_child | ignored |
+| sniff::l1 | network_primitives::real_default_gateways_are_readable_and_well_formed | expression |
+| sniff::l1 | network_primitives::real_icmp_ipv4_loopback_replies | expression |
+| sniff::l1 | network_primitives::real_icmp_ipv6_loopback_replies | expression |
+| sniff::l1 | network_primitives::real_icmp_unanswered_target_is_no_reply_within_the_bound | expression |
+| sniff::l1 | network_primitives::real_icmp_unknown_scope_fails_before_sending | expression |
+| sniff-cli::l1 | cli_process_fixture::real_sniff_command_observes_the_fixture_launch_context | expression |
+| sony-receiver-integration::bin/sony-receiver-integration | dispatch::tests::destructive_real_device_source_switch_roundtrips | ignored |
+| sony-receiver-integration::bin/sony-receiver-integration | dispatch::tests::destructive_real_device_volume_command_roundtrips | ignored |
+| sony-receiver-integration::bin/sony-receiver-integration | dispatch::tests::real_device_fetch_receiver_state_returns_full_snapshot | ignored |
+
+The four existing Windows-only ignored runtime tests are `builder::{an_added_pem_root_lets_the_client_reach_a_server_it_signed,an_added_der_root_lets_the_client_reach_a_server_it_signed,without_the_added_root_the_handshake_fails_as_a_tls_error,accepting_invalid_certificates_reaches_a_self_signed_server_that_the_default_rejects}`. Their existing ignore reason is aws-lc CPU-jitter entropy abort under parallel load; all four execute on macOS/Linux/WSL2. Phase 7 neither changes nor claims to fix that existing native-Windows gap.
+
+### Platform command ledger
+
+All commands run from the repository root unless an area recipe is specified above. `GIT_TERMINAL_PROMPT=0` was set for cross-check invocations. BUILD_LINUX was already build-linux; Windows/WSL calls explicitly set BUILD_WIN=build-win-native and BUILD_WSL=build-win. Direct invocation of the documented cross-check script preserves quoted filter expressions that the Just argument re-splitting cannot carry; it is the same standing-clone/lock/snapshot mechanism as `just cross-check`.
+
+The complete native selection was executed separately with `--os linux`, `--os windows`, and `--os wsl`:
+
+```sh
+./scripts/cross-check.sh schematic-define --os OS \
+  --features schematic-define/openapi,schematic-gen/terminal-tests,sniff/remote,biscuit-speaks/playa \
+  -p schematic-definitions -p schematic-gen -p schematic-runtime -p schematic-oauth \
+  -p sniff -p biscuit-speaks -p model-citizen -p homelab \
+  -p eversolo-integration -p arcam-amp-integration -p sony-receiver-integration \
+  -p unfolded-integration-helper -p sniff-cli -p biscuit-speaks-cli \
+  -p model-citizen-cli -p homelab-cli -p homelab-server \
+  -E '!test(/(^|::)(level2_|level3_|browser_|real_)/) | test(/openapi_strict_completeness::real_/)'
+```
+
+Each remote OS separately runs the committed generated crate:
+
+```sh
+./scripts/cross-check.sh schematic-schema --os OS --all-features \
+  --manifest-path schematic/schema/Cargo.toml
+```
+
+Updated generator executable/artifact verification uses the same native script with `schematic-gen --os OS --features terminal-tests --test l1 --test-threads 4 output_validation::cli_ cli_refuses_an_unsafe_partial_run_and_claims_no_update artifact_drift::`. Windows additionally selects `reimporting_the_vendored_openai_document_reproduces_the_committed_definition` (12 tests rather than 11). The separate Linux timing/updated-Postman selection uses `generated_postman_artifacts_are_up_to_date reimporting_the_vendored_openai_document_reproduces_the_committed_definition`; Windows and WSL updated-Postman-only runs select the former.
+
+WSL2 relocation is checked independently with `BUILD_WSL=build-win ./scripts/cross-check.sh schematic-gen --os wsl`, without build flags. It must produce an ubuntu-latest archive, hide the builder target directory, and execute the verified archive from the consumer worktree as wsl2-ubuntu. Compiler guards are deliberately native-mode evidence, because an archive consumer has no Cargo. Native-mode runs publish no receipt. A dirty-tree/synthetic snapshot cannot be called qualifying committed-tree evidence; the exact host results here remain implementation verification, not claimed CI receipt publication.
+
+All three rigs use their own cross-check standing clone/target placement; concurrent requests for one rig serialize on its clone lock. No shared checkout was reset during another test, no Windows target directory was overridden, and no credentials/signing procedure was invoked. macOS is the local host; Linux is build-linux; native Windows/MSVC is build-win-native; WSL2 is build-win. The local tmux suite is the only terminal-resource execution because this phase changes no terminal rendering or interaction behavior; no remote L2/browser/live-provider result is claimed.
+
+### Broad-run timing observations
+
+The following existing tests exceeded five seconds during the combined native runs (unrestricted Nextest scheduling, with native Windows and WSL sharing a physical host). Compiler guards deliberately invoke Cargo and are the preexisting separate slow checks the plan requires; they are listed explicitly rather than represented as fast unit tests. Untouched Sniff/consumer timings are outside the migration fix scope. The three Windows CLI failures were fixed and verified below five seconds as recorded above. Targeted updated generator checks on macOS/Linux/Windows use four threads and have no slow reports. No test was renamed, retried, ignored, or granted a timeout increase to suppress a timing observation. These are preserved limitations of the broad runs, not claims that every preexisting test meets the five-second budget.
+
+| Environment | Test | Broad-run seconds |
+| --- | --- | --- |
+| linux | schematic-gen::l1 import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition | 6.431 |
+| linux | schematic-runtime::l1 compile_fail::slow_compile_fail_cases_report_their_intended_diagnostic | 28.083 |
+| linux | schematic-gen::l1 fresh_output_compile::slow_a_runtime_of_another_abi_fails_the_build_with_a_readable_message | 50.406 |
+| linux | schematic-gen::l1 fresh_output_compile::slow_fixture_apis_compile_and_send_offline | 54.845 |
+| linux | schematic-gen::l1 fresh_output_compile::slow_generated_types_reject_misuse_at_compile_time | 39.153 |
+| linux | schematic-gen::l1 fresh_output_compile::slow_query_wire_matches_pre_split_baseline | 16.532 |
+| linux | schematic-gen::l1 fresh_output_compile::slow_real_apis_compile_offline | 10.222 |
+| windows | schematic-gen::l1 artifact_drift::generated_rust_artifacts_are_up_to_date | 5.971 |
+| windows | schematic-gen::l1 fresh_output_compile::generated_rest_code_references_the_runtime_and_defines_none_of_it | 5.371 |
+| windows | schematic-gen::l1 import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition | 8.907 |
+| windows | sniff executable_index::tests::test_eager_lookup_returns_path_source | 5.340 |
+| windows | sniff executable_index::tests::eager_path_is_traversed_once_per_process | 5.894 |
+| windows | sniff executable_index::tests::eager_path_only_index_has_no_fallback_layers | 5.958 |
+| windows | sniff executable_index::tests::test_build_eager_path_returns_consistent_results | 7.424 |
+| windows | sniff filesystem::git::changed_paths_tests::file_type_replacements_agree_across_status_readers_and_commit_phases | 15.488 |
+| windows | sniff filesystem::git::changed_paths_tests::index_reads::linked_indexes_contain_cache_and_status_failures_with_absence_and_empty_controls | 15.622 |
+| windows | sniff filesystem::git::changed_paths_tests::index_reads::truncated_indexes_are_typed_errors_across_readers_and_cache_consumers | 19.254 |
+| windows | sniff filesystem::query::win32_tests::live::a_controlled_child_is_found_by_its_loaded_executable | 18.164 |
+| windows | sniff filesystem::query::win32_tests::live::handle_owners_are_found_while_a_child_waits_in_lock_file_ex | 18.602 |
+| windows | sniff filesystem::query::win32_tests::live::a_controlled_child_is_found_by_its_open_file_and_directory | 23.351 |
+| windows | sniff filesystem::repo::nested::tests::wide_tree_parity_holds_across_repeats_and_worker_counts | 12.418 |
+| windows | sniff programs::install::interview::runner_tests::remote_bash_preapproved_skips_consent | 5.002 |
+| windows | sniff::l1 bench_fixtures::fixture_builders_are_idempotent_over_fresh_dirs | 5.417 |
+| windows | sniff tests::test_detect_returns_result | 8.116 |
+| windows | sniff::l1 bench_fixtures::large_monorepo_dirty_files_are_rust_and_js | 8.528 |
+| windows | sniff::l1 benchmark_workloads::mixed_structure_workload_preserves_its_requested_cardinality | 10.763 |
+| windows | sniff::l1 bench_fixtures::large_monorepo_has_expected_shape | 13.390 |
+| windows | sniff::l1 git_parity::commit_by_sha_at_surfaces_ambiguous_prefix | 5.879 |
+| windows | sniff::l1 integration::test_git_full_reports_conflicted_files | 5.393 |
+| windows | sniff::l1 integration::test_detect_completes_in_reasonable_time | 8.299 |
+| windows | sniff::l1 lockfile_fixtures::bun_tool_fixtures_report_the_accepted_version_matrix | 5.587 |
+| windows | sniff::l1 lockfile_fixtures::invalid_workspace_member_entries_are_incomplete_manifest_discovery | 6.542 |
+| windows | sniff::l1 lockfile_fixtures::yarn_tool_fixtures_report_the_accepted_version_matrix | 6.560 |
+| windows | sniff::l1 lockfile_provenance::declining_requests_report_manifest_provenance_and_read_no_lockfile | 6.472 |
+| windows | sniff::l1 lockfile_provenance::corroborating_requests_report_hand_written_provenance_for_every_lockfile_state | 6.594 |
+| windows | sniff::l1 lockfile_provenance::every_other_authority_reports_its_complete_repository_result | 7.204 |
+| windows | sniff::l1 merge_conflict_prediction::unsafe_merge_configuration_is_rejected_when_the_builtin_merge_is_clean | 6.944 |
+| windows | sniff::l1 merge_conflict_prediction::structural_fixtures_match_canonical_git_when_available | 7.613 |
+| windows | schematic-runtime::l1 compile_fail::slow_compile_fail_cases_report_their_intended_diagnostic | 191.855 |
+| windows | sniff-cli::l1 cli::files_association_is_stable_inside_a_large_monorepo | 25.690 |
+| windows | sniff-cli::l1 cli::test_repo_subcommand_json_shapes_are_distinct | 6.073 |
+| windows | schematic-gen::l1 fresh_output_compile::slow_a_runtime_of_another_abi_fails_the_build_with_a_readable_message | 249.626 |
+| windows | schematic-gen::l1 fresh_output_compile::slow_fixture_apis_compile_and_send_offline | 104.650 |
+| windows | schematic-gen::l1 fresh_output_compile::slow_generated_types_reject_misuse_at_compile_time | 49.399 |
+| windows | schematic-gen::l1 fresh_output_compile::slow_query_wire_matches_pre_split_baseline | 25.330 |
+| windows | schematic-gen::l1 fresh_output_compile::slow_real_apis_compile_offline | 12.601 |
+| windows | schematic-gen::l1 import_overlay::slow_imported_builders_compile_and_match_public_import | 7.893 |
+| wsl | model-citizen-cli::integration_test test_list_json | 5.113 |
+| wsl | schematic-define::import_normalization shipped_openai_query_schema_gate_and_reimports | 5.576 |
+| wsl | schematic-gen::l1 e2e_generation::multiple_apis_generate_together | 6.166 |
+| wsl | schematic-gen::l1 artifact_drift::generated_rust_artifacts_are_up_to_date | 10.467 |
+| wsl | schematic-gen::l1 fresh_output_compile::generated_rest_code_references_the_runtime_and_defines_none_of_it | 9.436 |
+| wsl | schematic-gen::l1 import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition | 10.847 |
+| wsl | schematic-gen::l1 partial_generation::owned_stale_files_in_a_regenerated_group_go_and_hand_written_content_stays | 5.001 |
+| wsl | sniff filesystem::blast_radius::tests::changed_path_collection::source_code_filter_excludes_non_source | 5.761 |
+| wsl | sniff filesystem::blast_radius::tests::changed_path_collection::collect_dirty_returns_paths_in_real_repo | 6.250 |
+| wsl | sniff filesystem::blast_radius::tests::changed_path_collection::substring_filter_or_logic | 6.379 |
+| wsl | sniff filesystem::git::changed_paths_tests::index_reads::truncated_indexes_are_typed_errors_across_readers_and_cache_consumers | 5.962 |
+| wsl | sniff filesystem::repo::nested::tests::wide_tree_parity_holds_across_repeats_and_worker_counts | 5.051 |
+| wsl | sniff-cli::l1 cli::files_verbose_link_destinations_match_native_absolute_paths | 5.641 |
+| wsl | schematic-runtime::l1 compile_fail::slow_compile_fail_cases_report_their_intended_diagnostic | 128.245 |
+| wsl | schematic-gen::l1 fresh_output_compile::slow_a_runtime_of_another_abi_fails_the_build_with_a_readable_message | 193.711 |
+| wsl | schematic-gen::l1 fresh_output_compile::slow_fixture_apis_compile_and_send_offline | 88.684 |
+| wsl | schematic-gen::l1 fresh_output_compile::slow_generated_types_reject_misuse_at_compile_time | 53.176 |
+| wsl | schematic-gen::l1 fresh_output_compile::slow_query_wire_matches_pre_split_baseline | 28.819 |
+| wsl | schematic-gen::l1 fresh_output_compile::slow_real_apis_compile_offline | 12.360 |
+| wsl | schematic-gen::l1 import_overlay::slow_imported_builders_compile_and_match_public_import | 5.788 |
+
+### Four-environment generated schema evidence
+
+The generated crate's complete suite, including pager compiler misuse diagnostics, passed **55/55 with zero skips on every required environment**: macOS 94.974 s; Linux/build-linux 107.715 s; native Windows/MSVC/build-win-native 188.352 s; WSL2/build-win 209.926 s. Each ran the actual generated schema manifest via the commands above. Its existing compiler case accounts for each slow report. WSL2 updated CLI/drift and archived relocation remain pending, so Verify Platforms remains unchecked at this checkpoint.
+
+### Final native source snapshots
+
+Cross-check's initial complete snapshots (relative to origin/main 5410c31cb) were Linux 8f045fb82, native Windows 65d4fe9eb, and WSL2 107731fd4. Updated generator build-script/artifact snapshots were Linux de0dc3afd, native Windows 5587563ed, and WSL2 561a5a651. These are throwaway cross-check objects, not commits on the user's branch. They contain earlier-phase work as well as Phase 7, explaining the 1,174/1,175-file bundle inventory; Phase 7's own source inventory remains exactly the two frontmatter paths.
+
+Updated WSL2 CLI/artifact proof passed **11/11** in **2.365 s**, zero slow reports; updated Postman-only proof passed **1/1** in **0.273 s**. Generated Rust file-set/byte comparison took 2.266 s. All four environments have now executed the updated guard and generator CLI after the fix; the standalone schema suites also all passed. The WSL2 archive a52293f57 / planned key 9d56647417fe6ff2 is the only remaining check at this checkpoint.
+
+### Verify Platforms complete
+
+The relocated WSL2 archive run passed **641/641** in **5.143 s**, with 15 existing tier/ignore exclusions. Full cross-check duration was **130 s**. It reported a clean consumer (`cross-check-dirty: 0`), successful expected-test manifest (`cross-check-manifest-exit: 0`), and test exit **0** with the builder target directory hidden. Planned key **9d56647417fe6ff2**, realized digest **685ebce5fdbd8c93**, tested tree **3e4e10981a64b8bce7b9e9e21fec06b1b56a5fd2**. Cross-check correctly published **no** wsl2-ubuntu observation because this synthetic uncommitted tested tree differs from HEAD; no receipt or four-host reuse claim is fabricated.
+
+| Environment / host | Workspace/consumer behavior | Updated CLI/artifact behavior | Generated schema | Relocated archive |
+| --- | --- | --- | --- | --- |
+| macOS / local | 2,305 ordinary + 7 generator + 1 runtime compiler checks; 4,382 consumers; area/dependent lint and all-target checks; 258 doctests; 3 tmux tests | 11/11 pass, Postman stale-file negative control fails then restored control passes | 55/55 pass, lint-schema pass | Not needed for this host; WSL2 archive supplies the required relocation boundary |
+| Linux / build-linux | 6,663/6,663 pass, including consumers and compiler/wire checks | 11/11 pass; 2/2 updated guard/reimport timing pass | 55/55 pass | Native evidence, not claimed as an archive run |
+| Native Windows / build-win-native (MSVC) | Original 6,597 pass + 3 generator stack failures; exact failed cases fixed and rerun; all unaffected passing coverage retained | 12/12 pass after stack fix, zero slow tests; standalone updated Postman guard 1/1 pass | 55/55 pass | Native evidence, not claimed as an archive run |
+| WSL2 / build-win | 6,663/6,663 pass including consumers and compiler/wire checks | 11/11 pass, zero slow tests; standalone updated Postman guard 1/1 pass | 55/55 pass | 641/641 pass, manifest verification pass, builder target hidden |
+
+Verify Platforms is now checked. Full four-environment functional evidence exists for this migration, with the existing excluded resources/tests, Windows warnings, and historical slow observations explicitly recorded above. No new ignore, timeout exemption, retry, test tier change, CI cell, or gate was introduced. The native-Windows broad run is not falsely relabeled green: its only three failures have direct subsequent public-result proof of repair.
+
+### Final requirement-to-test mapping and disposition
+
+| Phase 7 behavior/requirement | Exact evidence | Result |
+| --- | --- | --- |
+| Complete regeneration with preserved historical data | Normal all-API generation; definition_baseline provider corpus; artifact_drift complete outputs | No Phase 7 artifact byte/file difference; historical normalization unchanged |
+| Detect stale Postman files | Strengthened artifact_drift::generated_postman_artifacts_are_up_to_date, F2 L1; injected retired.postman_collection.json negative control | Positive shipped corpus passes on all four environments; stale-file input fails with the file-set diagnostic, restored input passes |
+| Windows main-stack compatibility | Existing output_validation::{cli_migrated_provider_generates_all_outputs_without_warnings,cli_reports_each_output_and_exits_nonzero_when_one_fails} and partial_generation::cli_refuses_an_unsafe_partial_run_and_claims_no_update, F2 L1 | Original exact Gitea success/failure and unsafe Ollama inputs fail before build-script fix and pass afterward; exit/output/filesystem assertions retained |
+| Generated paths, temporary trees, query encoding and API misuse | fresh_output_compile::slow_{fixture_apis_compile_and_send_offline,real_apis_compile_offline,generated_types_reject_misuse_at_compile_time,a_runtime_of_another_abi_fails_the_build_with_a_readable_message,negative_control_reports_compiler_error,query_wire_matches_pre_split_baseline}; import_overlay::slow_imported_builders_compile_and_match_public_import; runtime and generated-schema compiler tests | Executed on each required native environment; four 55-test generated-schema suites pass; existing 34-request wire corpus retained |
+| OAuth and five WebSocket definitions; direct and reverse consumers | Five-package area gates, 18-package native selections, root 13-consumer selection, explicit --all-targets compiler, four consumer-area lint recipes | All migration behavior passes; zero consumer source edits required in Phase 7 |
+| Archive/relocation boundary | Normal unfiltered cross-check schematic-gen --os wsl, verified CI archive and manifest | 641/641 pass with hidden builder target and relocated consumer |
+
+Only two source files changed during Phase 7: **schematic/gen/build.rs** (created) and **schematic/gen/tests/l1/artifact_drift.rs** (updated). There is no new test name or undeclared test file: the strengthened test remains compiled in the existing declared l1 target and ordinary L1 tier; existing CLI regressions cover the build-script behavior. All new/changed ordinary behavior tests complete below five seconds in the final bounded selections. No new parser, deserializer, file format, persisted value, dependency, or ambient production-request read was introduced, so no new input-robustness matrix or persistence round-trip is required. Existing descriptor/import matrices, corpus/real-artifact generation tests, and repeated stored-definition round trips remain passing in the area suites.
+
+Current documentation updated: schematic/docs/generation/workflow.md plus this plan/log/spec metadata. Skills updated: .claude/skills/os/windows.md and .claude/skills/schematic-define/schematic/SKILL.md. No document was created. Frontmatter inventories distinguish these Phase 7 edits from the preserved Phase 6 dirty tree; cumulative package inventory is retained (the executable/source changes are in schematic-gen).
+
+All three Phase 7 tasks are checked; Phase 8 remains pending. Spec frontmatter has human_review false and a fresh Phase 8 handoff. The active feature directory remains in place. No formatter, staging, branch commit, lifecycle move, or focus-changing terminal/browser operation occurred.
+
+The first final-audit script incorrectly required a phase field in the historical log (which instead records started_phase: 1). Corrected that audit assumption without changing historical metadata; the complete audit then passed. All eight Phase 7 changed paths exactly match the frontmatter inventories (two source, four documentation, two skill files); metadata keys are unique, every inventoried path exists, all three Phase 7 checkboxes are complete, git diff --check passes, the index is unchanged/empty, and the negative-control artifact is absent. All tool-run test/compiler/cross-check jobs have returned; no agent or background work remains. Earlier development/negative-control failures, existing exclusions, Windows warnings, and timing limits are explicitly accounted for above.
+
+**Phase 7 implementation complete, ready for review.**
+
+
+## Phase 8
+
+### Scope and requirement-to-test map before edits
+
+This phase changes authoring guidance and evidence only; no runtime, parser, configuration format, dependency, or persistence behavior is intended to change. The input robustness matrix does not apply to Markdown instructions or documentation rendering. Existing descriptor/import/transfer matrices remain the executable evidence for those boundaries.
+
+| Requirement | Concrete verification | Boundary, fidelity, tier |
+| --- | --- | --- |
+| R26 current authoring guidance replaces removed literals, string registrations, and legacy pagination | New `authoring_guidance::current_rest_guidance_uses_supported_authoring_surface`, initially run against unchanged shipped guidance | Repository documentation corpus, F2 L1; literal include_str inputs in the test |
+| R26 compiling ordinary model, alias, containers and complete API | Shipped `docs/authoring-examples.md` included in crate rustdoc; normal `just doctest` executes its public assembly and downstream descriptor/registry assertions | Real shipped documentation → Rust compiler → public API assembly, F2 L1 doctest |
+| Invalid facts and negative examples remain accurate | Existing builders/typed_registration/definition_forms integration targets and builder/registration compile-fail doctests | Public API/compiler, F2 L1 |
+| R1–R31 closure and historical/platform exceptions | Final requirement ledger below, linked to existing targets and Phases 1–7 results; `just test`, `just lint`, tier coverage audit | Area/API/generation/dependent boundaries; prior four-environment evidence preserved |
+
+No regression input is invented: the original stale examples include external `Endpoint`/`RestApi` literals, `ApiRequest::json_type`, `PaginationStyle` and `register::<Model>("Model")`. The corpus guard must fail before those instructions are replaced. No live provider or terminal/browser focus is needed.
+
+### Documentation checkpoint
+
+The new corpus test failed against the unchanged guidance with `generator README teaches obsolete REST authoring: Endpoint {` (Nextest exit 100). Updated the command and IO pages, removed speculative API sketches that contradicted current input/output behavior, and moved the generator README's full reference into `docs/generation/generated-clients.md`, retaining its content with typed builder examples and adjusted relative links. The README is now an overview. Added `docs/authoring-examples.md`, included directly in crate rustdoc so the shipped example compiles through the normal invocation path; no copied test-only example substitutes for it. Both skills and the area/define/definitions READMEs link to current topics. No dependency was added or removed, so dependency documents are unchanged.
+
+### Final R1–R31 evidence ledger
+
+The paths below are repository-relative. Test names refer to their declared live integration target or module, not informal future tests. F2 denotes the real crate/compiler/artifact/HTTP boundary exercised with hermetic inputs; pure shape/validation cases also contain F1 assertions. All are L1 unless the established compiler guard is explicitly named `slow_`; those guards run through `just test-fresh-output` / `just test-compile-fail` inside the area `just test`. The existing L2 evidence is separately identified under Phase 7. No live-provider F3 claim is made.
+
+| Requirement | Concrete evidence and disposition |
+| --- | --- |
+| R1 context and typed paths | `define/tests/typed_registration.rs::nominal_renamed_alias_reexport_foreign_and_generic_paths`; registration compile-fail doctests; `gen/tests/l1/fresh_output_compile.rs` compiles real generated providers. |
+| R2 reserved structure and Serde | `typed_registration::destination_checks_named_paths_wrappers_inline_and_reserved_structure` and `descriptor_json_matrix_uses_public_destination_validation`; internal registration round-trip tests. Authored structure remains None; non-null transfer data is not authored registration. |
+| R3 containers | `wrappers_inline_shape_nullability_and_order_reuse_leaf`, `primitives_value_and_integer_map_keys_create_no_components`, and `every_primitive_and_map_integer_key_stays_inline`; typed OpenAPI exporter tests and baseline registry differences. |
+| R4 free-form JSON | `builders::primitive_and_free_form_json_successes_remain_component_free`, typed registration inline tests, typed export tests; no invented component. |
+| R5 aliases/collisions | `collision_aggregation_is_ordered_and_never_merges_distinct_types`, `same_names_in_different_modules_collide_and_nominal_containers_stay_components`; registry typed alias tests; misspelled/mismatched path compiler cases and Bitbucket concrete generic-path regression. |
+| R6 registry assembly | `definitions/tests/authoring_surface.rs::provider_authoring_uses_builders_and_typed_registrations`; `registry::typed::tests::adapter_preserves_order_nested_extraction_and_unused_types`, shared-group tests, strict completeness tests and all baseline registries. |
+| R7 destination validation | `builders::destination_context_checks_transfers_roundtrips_and_forged_wrappers`, `missing_destination_references_fail_in_both_form_encodings`, descriptor matrix; completeness rejects a same-spelled untyped schema. |
+| R8 Default/builders | `builders::public_default_set_equals_documented_allow_list` (62 source modules/20 public defaults), builder Default compile-fail doctests and compiler misuse cases. |
+| R9 required facts | Builder missing description/success/API auth compile-fail doctests and diagnostic-checked fresh-output misuse cases. |
+| R10 preservation | All 18 `definition_baseline` API cases compare JSON before interpretation with exact explained normalization; `endpoint_builder_equals_legacy_literal_without_normalization`. |
+| R11 coherent auth | `auth_forms_preserve_fields_and_explicit_mapping_conflicts_in_both_orders`, `basic_and_key_mapping_conflicts_fail_independent_of_setter_order`, `explicit_multi_method_policy_preserves_authoritative_fallback`, `explicit_empty_mapping_preserves_the_absence_of_environment_credentials`. |
+| R12 non-exhaustive | Fresh-output external Endpoint/RestApi literal misuse cases assert E0639; authoring corpus enforces migrated production use. Default applied; no fallback. |
+| R13 placeholders | `accepted_successes_and_requests_preserve_stored_wire_shapes`, `repeated_success_and_invalid_required_facts_report_errors`, non-none error constructor compile-fail; method table in current builder docs. |
+| R14 endpoint origin | Runtime `redirects::endpoint_origin_replacement_controls_redirects_links_and_caller_tightening`, `pager_surface::endpoint_origin_override_reaches_followed_page_and_caller_can_tighten_it`; compiled generated redirect/page-link child tests observe second-origin requests. |
+| R15 metadata sugar | `definition_forms::metadata_normalizes_header_names_and_rejects_invalid_origins_and_names`; generated runtime-metadata assertions and request-id/secrets generated child test. Existing runtime redaction remains unchanged. |
+| R16 auth/scopes | Explicit multi-method policy tests and emitted effective-policy tests; Phase 6 reader scan removed unused endpoint scopes from storage/import/export/emitter and preserved auth_policy. |
+| R17 definition Serde | `definition_serde::{parameter_variants_round_trip_twice,parameter_collections_reject_malformed_json_matrix,origin_policy_variants_round_trip}`; `definition_baseline::{shipped_definitions_round_trip,shipped_json_field_matrix_preserves_required_and_optional_shapes}`. |
+| R18 all providers | `definition_baseline::baseline_catalog_matches_shipped_apis`, 18 snapshots, per-provider exact ordered-id/count tests, production authoring corpus. Final count is 539 (547 minus eight merged routes), OpenAI 258. |
+| R19 endpoint pagination | Exhaustive `definitions/tests/pagination_coverage` checks every authored list, controls, unverified lists, non-lists and overlay id validation; historical baseline pagination comparison. Explicit collection origin still serializes Exception. |
+| R20 legacy removal | Phase 6 workspace scan and authoring corpus; all 35 old declarations accounted for in inventory/batches, surviving controls preserved in resolver/generated schema HTTP/compiler tests; GetSource stays binary NotAList. |
+| R21 existing list recognition | `builders::typed_list_recognition_respects_root_array_and_get_boundaries`; exhaustive pagination tests and default/unpaginated endpoint-surface test. GET root Vec inference survives; Option/nominal/non-GET shapes require explicit authorship. |
+| R22 repeatable import | `import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition`, `an_overlay_import_emits_the_call_and_leaves_the_overlay_untouched`, `slow_imported_builders_compile_and_match_public_import`; reproduce-first evidence and seven-pair schema gate in Phases 1/5. |
+| R23 Schema module path | WebSocket full_path tests retain its semantic reader; REST builder/importer uses qualified type_name plus descriptor and no module_path. Phase 6 reader audit records this split. |
+| R24 safety net | `artifact_drift::{generated_rust_artifacts_are_up_to_date,generated_openapi_artifacts_are_up_to_date,generated_postman_artifacts_are_up_to_date}`; description negative control and exact historical exception guards; Phase 7 stale Postman file-set control. No permanent current-drift allow-list. |
+| R25 dependents | Phase 7 complete local area/schema/consumer test/lint/all-target ledger and four-host checks, including all five WebSocket definitions and OAuth. Phase 6 Sniff Gitea/GitLab call-site changes are the only outside-area migration edits. |
+| R26 guidance | `authoring_guidance::current_rest_guidance_uses_supported_authoring_surface` reads all maintained entry points, both skills, command, builder/registration/IO pages, and moved generator reference; included shipped authoring tutorial executes under normal rustdoc. |
+| R27 retired tests | Phase 6 six-row retirement ledger names each replacement; retained no-GraphQL assertion, EndpointParams exact field/default coverage, exhaustive endpoint pagination and OpenAI overlay unknown-id errors. No additional test is retired in Phase 8. |
+| R28 hard query-path error | `construction_enforcement::query_bearing_paths_fail_endpoint_and_destination_api_build`, generator `query_in_path_is_one_error_per_output`; exact original paths and API/endpoint/path errors. |
+| R29 nine migrations | `fresh_output_compile::slow_query_wire_matches_pre_split_baseline` records 34 HTTP request lines, seven OpenAI beta pairs plus omitted/true/false controls, Gitea recursive and GitLab ref encoding; importer JSON/YAML normalization matrices and schema gate. |
+| R30 adoption | `definition_forms::{pager_marker_requires_matching_strategy_and_authored_required_default,unmatched_markers_and_invalid_aliases_cannot_hide_inputs,json_definition_forms_matrix_reaches_public_assembly}`; generated required default and caller replacement evidence. |
+| R31 location/GET body | `definition_forms::{every_get_body_family_is_rejected_and_post_is_accepted,transferred_get_body_reports_destination_api_endpoint_and_method}`; JSON/YAML importer matrices; generated query/header/cookie/body HTTP checks. HEAD unchanged. |
+
+### Review agenda: all 16 entries dispositioned
+
+This closes the implementation ledger, not the author's review cycle. Adjacent candidates below remain candidates for a later close-or-accept decision; none is presented as repaired by this implementation.
+
+1. **Defaults:** PD1 recursively registers leaves, preserves Option shape, and supports String/Serde integer map keys plus explicit string-newtype MapKey contracts. PD2 aggregates ordered structured collisions. PD3 lowercases/validates one API request-id header. PD4 uses the delivered secret_names storage and adds the missing parameter marker, rather than inventing a second redaction engine. PD5 endpoint origin replaces the API policy; callers tighten only. PD6 retains the audited 20 meaningful Defaults (exact table in `docs/definition-builders.md`), excludes Endpoint/RestApi/builders, retains WebSocket incremental construction. PD7 uses id/method/path and context/name/base URL constructors with required-fact typestate. PD8 follows the builder names and reserves later vocabulary. PD17 retains auth_policy and removes unused oauth_scopes. PD19 emitter-first OpenAI, then smallest-first provider batches. PD20 raw baseline 8,449,975 bytes exceeded 5 MB; biscuit-hash BLAKE3 covers canonical sorted-object JSON while preserving array/registry order, with readable definition/pagination evidence. PD21 removes module_path from REST identity while preserving its WebSocket reader. PD numbers assigned to later work are not silently implemented here.
+2. **Nine query paths:** Phase 1 inventory and Phase 5 seven-pair schema table identify every original OpenAI response beta path; all seven passed the compatible-superset gate and merged under ordinary ids. Gitea GetGitTreeRecursive merges into GetGitTree; GitLab repository-file ref becomes a separate input. Optional beta/recursive/ref retain omission, false, empty and encoding semantics through actual generated HTTP requests. The importer reproduction/overlay is generic and vendored source unchanged. No blocked pair remains.
+3. **Non-exhaustive:** applied to Endpoint/RestApi after external consumers migrated, with E0639 compiler proof and no fallback. Recommend keeping it: future storage evolution no longer requires literal churn. Stored fields/Serde remain available for transfer and deliberate invalid fixtures.
+4. **Schema.module_path:** REST stores None, qualified type_name and descriptor; WebSocket retains the field/full_path reader. The shared type was not deleted or stripped for unrelated users.
+5. **Defaults/scopes:** the Default corpus and current topic enumerate all 20 types/reasons; no meaningful existing default was removed. No shipped endpoint authored OAuth scopes, and final live reader scan removed the field/extension/emitter copies. AuthPolicy still drives effective client auth.
+6. **Migration data:** inventory contains all 18 API counts/ordered ids (547 resolved endpoints vs. 511 original production literals). Final count 539 is exactly eight removed twins. Phase 5 records 21 OpenAI container aliases; Phase 6 enumerates every other dropped component, seven nominal leaf additions, exact normalization and fingerprints. Baselines are preserved through review; no Phase 8 fixture recapture.
+7. **Pagination:** all 35 legacy declarations are accounted for by provider; Bitbucket GetSource's inert declaration is removed without making a pager. The final 93 pagers reflect the beta route merge from 94. Provider-local helpers remain; no shared presets. OpenAI overlay attaches endpoint collections and rejects unknown ids. Markers require resolved location/name/control/default agreement. Generated controls remain tested and no consumer setter was silently restored.
+8. **Descriptor:** `TypeDesc` has private `shape` and `structure: Option<models::TypeRef>`, derives Serialize/Deserialize, denies unknown fields, and has no public string constructor/structure setter. Named, Inline, Vec, Option, Map shapes distinguish nominal identity from wrappers. Missing structure and explicit null mean None; malformed required identity and forged matching-looking shapes fail destination validation. Non-null structure can round-trip internally but cannot author registrations yet.
+9. **Response/builder contract:** implemented table below; future names remain unimplemented. The two follow-up plans must be refreshed after author review 1, in vocabulary-then-response order; neither is refreshed here.
+10. **Design choices:** `Registration: JsonSchema + 'static` is explicit nominal dispatch; no overlapping blanket JsonSchema/container impl. `definition_type!` supplies identifiers; container/primitive/foreign impls are separate. `rust_path!` type-checks the named path against T and accepts concrete generic arguments, but cannot prove downstream visibility until generated compilation. Bitbucket generic impls retain concrete public arguments beside the model. DefinitionContext/TypeDesc/EndpointBuilder/RestApiBuilder/Success/ErrorSet/DefinitionError are final names. Missing/Present typestate tracks required facts. Registration entries preserve encounter order, not sorted order. Root Vec wire shape retains inference. Invalid transfer fixtures start from builders and mutate public storage fields.
+11. **Departures/interface facts:** predecessor secret_names existed but ParamDef.secret did not, so the marker was added and routed to existing metadata. HEAD keeps its established behavior. Catalog compatibility factories remain infallible wrappers around fallible module_group; lookup and generator use the checked common assembly. Empty explicit env mapping remains distinct from deriving a mapping. Diagnostic PaginationException/serialized Exception are retained category names, not live table types. Windows CLI needs an 8 MiB main stack (Phase 7 fix), with actual MSVC proof and GNU linker pattern noted. No new unexplained behavior difference is accepted.
+12. **Frozen tests:** all six replacements/retirements are recorded in Phase 6's R27 table. No-GraphQL, exact EndpointParams shape/default, per-list resolution and unknown overlay ids remain live.
+13. **Adjacent gaps:** optional auth (Ollama ignores but accepts keys) remains unimplemented; wider legacy/modern auth dual-source cleanup remains beyond coherence checking; HuggingFace invented stub shapes are not re-modeled; explicit orphan registrations are intentionally preserved pending a later audit. Recommend recording each as an explicit deferred candidate until source-backed decisions exist; do not silently prune schemas or widen auth. The author already accepted the convenience-method omission (D53); no new definition-authoring convenience layer is added, and existing generated endpoint-call methods remain.
+14. **Dependents:** Phase 6 edited `sniff/lib/src/remote/gitea.rs` to use the surviving tree request and `sniff/lib/src/remote/gitlab.rs` to use git_ref query spelling. Phase 7 found no additional consumer edits necessary. biscuit-speaks/model-citizen/homelab and integration helpers were tested, not rewritten. Phase 8 has no outside-area executable changes.
+15. **Tests/docs/skills:** only the new authoring corpus test and shipped doctest are added here; no deletion, tier rename, ignore, or timeout relaxation. READMEs now link to current topics; the large generator README reference moved to docs. Both skills and create command are updated. Request/response/Schema and registry rustdoc distinguish stored compatibility constructors from REST authoring. The initial docs drift failures are corrected and recorded, not accepted.
+16. **Hosts:** Phase 7's exact command/snapshot/exclusion ledger is authoritative implementation evidence: macOS local, Linux build-linux, native Windows/MSVC build-win-native, WSL2 build-win all exercised; generated schema 55/55 on each, WSL2 relocated archive 641/641. None was untested. This phase adds only host-neutral docs/test inputs; local final checks below do not fabricate new remote receipts. Existing resource exclusions, Windows TLS ignores/warnings, broad-run timings and native compiler slow checks remain explicit limitations.
+
+### Exact implemented response contract and later refresh facts
+
+| Entry point | Implemented contract |
+| --- | --- |
+| `EndpointBuilder::returns(Success)` | One json(TypeDesc), text(), binary(), or empty(); second declaration errors with “several success shapes arrive with response model v2”. |
+| `returns_json::<T>(&mut DefinitionContext)` | T: Registration; typed registration then single-success lowering. |
+| `returns_text`, `returns_binary`, `returns_empty` | Same single-success lowering. |
+| `errors(ErrorSet)` | Only ErrorSet::none; no status/range constructors. |
+| `RestApiBuilder::default_errors(ErrorSet)` | Only ErrorSet::none; does not suppress runtime errors. |
+
+Both placeholders are non-exhaustive. Endpoint storage still holds one ApiResponse;
+Success lowers in one private method. The future response work must add streaming,
+content negotiation, multiple successes and error lists without rewriting provider
+construction. Request content-type methods already exist and are separate.
+Reserved names: path_param, public, auth, deprecated, rate_limit, Success sse/ndjson,
+success content-type and stream-end vocabulary, and GraphQL surface. No selector
+exists or is reserved. Vocabulary refresh must preserve Registration bounds,
+TypeDesc's reserved structural carrier, independent schema/Rust identity,
+first-registration order, transfer Serde/destination validation, non-exhaustive
+construction, current ParamDef location/rust_name/secret/pager_managed fields,
+required-adoption sent defaults, and explicit auth_policy semantics. General
+required-query constructor fidelity remains planned there. Refresh the two named
+follow-up specs only after author review 1; no implementation of their features
+or premature refresh is part of this closure.
+
+### Authoring guidance complete; gates in progress
+
+The shipped tutorial now passes rustdoc after explicitly importing ParamDef and QueryParamType (they are crate exports, not prelude members). The attempted `authoring-examples` rustdoc name filter selected zero tests, so it is not counted as proof; the normal area doctest selection executed the actual included example. All 174 define doctests (163 merged + 11 separate) passed. The corpus selection passed after the original stale guidance failure. The remaining area doctest packages, ordinary/isolated compiler tests, lint and tier-coverage checks are in progress.
+
+The final scan found old pagination-table wording in the moved generator reference and corrected it to endpoint Collection assignments. Three research documents retain their historical design sketches with explicit historical notices and links to current builder/auth docs; their outdated OAuth runtime note was replaced. The output-validation topic's malformed string schema remains a deliberately invalid stored-transfer example, not provider-authoring guidance. Existing low-level registry tests likewise intentionally exercise compatibility storage. No live removed pagination constructor/type remains in current REST authoring guidance.
+
+Both Phase 8 plan tasks are checked at their completed documentation/ledger checkpoints; final verification is still required before the closing report. No runtime implementation or file-format reader changed. No new terminal or browser resource tier is introduced.
+
+### Gate feedback
+
+The first final area L1 selection passed 2,306/2,306 with the existing 13 exclusions. Four preexisting generator/import tests exceeded five seconds under concurrent compilation (7.798–8.639 s); they will receive a bounded diagnostic rerun after the build queue clears, not a new timeout or tier exemption. The tier audit reports zero stranded tests. Lint exposed a Markdown paragraph boundary in the newly added request module docs (`doc_lazy_continuation`); inserted an explicit doc blank line, preserving behavior, and will rerun the required lint gate. The accidentally started root doctest was terminated (143); only the actual area run is qualifying evidence. A failed edit attempted from the wrong working directory made no change and was immediately reapplied from the root.
+
+### Documentation gate passed
+
+The complete area `just doctest` returned zero: define 174, definitions 62, gen 18, oauth 3, runtime 1 (**258 passed**). The two existing ignored WebSocket documentation examples are `unfolded_circle::core_ws` and `unfolded_circle::integration_ws`; neither was added or changed here. The new shipped tutorial and converted registry examples execute successfully. The command now regenerates artifacts before the drift-bearing final test gate, avoiding stale-output failures when a new provider is added. Current skill/command/README authoring scans find no removed constructors or string-registration examples. Research sketches are explicitly historical; current docs contain no feature/fix directory references. Moved-reference and tutorial local links resolve.
+
+### Focused final tests and speed result
+
+The final bounded Nextest selection (`-p schematic-define -p schematic-gen --features schematic-define/openapi --test-threads 2`) passed **5/5**, zero slow reports: `current_rest_guidance_uses_supported_authoring_surface` 0.011 s; `shipped_openai_query_schema_gate_and_reimports` 2.170 s; `artifact_drift::generated_rust_artifacts_are_up_to_date` 2.434 s; `fresh_output_compile::generated_rest_code_references_the_runtime_and_defines_none_of_it` 2.683 s; `import_overlay::reimporting_the_vendored_openai_document_reproduces_the_committed_definition` 3.204 s. The 1,302 skipped by that exact name filter are outside its scope, already covered by the broad gate; this is not a new ignore/tier change. The initial broad timing observations remain recorded rather than erased. No production code or timeout needed changing. The new ordinary L1 test is well below five seconds.
+
+The final scope is seven source/test files: define/src/{lib,request,response,schema}.rs, define/tests/authoring_guidance.rs, definitions/src/registry/{mod,typed}.rs. Existing-source edits are rustdoc/comments only; lib.rs also includes the shipped tutorial. No runtime executable behavior, parser, dependency, generated artifact, or consumer call site changes in Phase 8. The complete documentation and skill inventories are in both frontmatters, with cumulative source_code/documentation unions and completed_phase 8 / implemented true. Packages preserve the complete earlier-phase inventory.
+
+### Final gates and closing audit
+
+| Command / check | Final result |
+| --- | --- |
+| Area `just test` | Exit 0: **2,306/2,306** ordinary tests; **7/7** generator fresh-output/import/compiler guards; **1/1** runtime diagnostic compiler guard. Ordinary run 15.144 s; generator guards 167.150 s; runtime guard 1.462 s. |
+| Area `just lint` | Exit 0 for schematic-define, schematic-gen, schematic-definitions, schematic-oauth, schematic-runtime after correcting the doc paragraph. The actual recipe runs Clippy only; no formatter ran. |
+| Area `just doctest` | Exit 0: **258 passed**, two preexisting ignored WebSocket examples, as named above. |
+| Focused final Nextest selection | Exit 0: **5/5**, all individual tests below five seconds, including the new source-corpus guard. |
+| Root `just check-tier-coverage schematic` | Exit 0: **zero stranded tests**. The new auto-discovered define integration binary is compiled and selected by ordinary L1; no feature-only or tier-only hidden test. |
+| Metadata / files / links | Unique root frontmatter keys; required Phase 8 inventories match all **27** changed/untracked files; cumulative source/documentation lists retained; every Phase 8 path exists; all plan GFM tasks checked; local links in new/moved docs resolve. |
+| Git hygiene | `git diff --check` passes; index remains empty. No formatter, staging, commit, lifecycle move, or `just complete`. |
+
+Exclusions remain explicit: the ordinary gate's **13 existing exclusions** are the same resource/ignore/separate compiler/strict cases described in the Phase 7 exclusion inventory; the seven generator and one runtime guards are run separately by the area recipe, not silently abandoned. Their filter counts (234 and 342 respectively) are the other tests already covered by the ordinary selection. The two strict real-named completeness cases and resource-dependent/live-provider coverage retain Phase 7's explicit proof/exclusion disposition; no new pass is fabricated here. The preexisting separate compiler guards exceed five seconds because they compile child crates, as already recorded in the plan's established guard recipes; no new slow test or exemption was introduced. The four ordinary broad-run timing observations all passed below five seconds in the focused run. No remaining functional failure is unexplained.
+
+No generated schema, dependent implementation, OS policy, or remote workflow changed, so the Phase 7 complete generated/dependent/four-host evidence is retained rather than rerun for doc-only source edits. Phase 8 executed locally on macOS; it does not claim new Linux/Windows/WSL2 runs or qualifying CI receipts. The no-focus terminal results and existing external-resource gaps remain exactly as recorded in Phase 7.
+
+Both plan/log frontmatters set completed_phase 8 and implemented true with complete per-phase and cumulative inventories. The spec sets implemented true, human_review false, and replaces the old Phase 8 handoff with the author-review/follow-up refresh facts. Author review 1 remains the next lifecycle step; the feature stays in place. All tool-run checks have returned, no delegated work is pending, and no task is left waiting.
+
+**Implementation complete, ready for review.**
+
+## Phase 9
+
+### 2026-10-18 — Review 1 ruling and remediation scope
+
+Author review 1, item 1 rejected the optional `Schema::descriptor` evidence recorded under **Builder implementation and lowering** above. That entry is left as written; this entry supersedes it. REST references become `TypeRef` names plus wrappers, `RestApi` carries the whole context registry, legacy untyped REST schemas are removed, and `SchemaRegistry` is deleted. The rules are in the plan's Phase 9.
+
+Pre-edit facts:
+
+- **Stored-evidence readers.** Only the following read `Schema::descriptor`: `define/src/builders.rs` (lowering, plus the agreement check), `define/src/pagination/resolve.rs`, `define/src/openapi/export/responses.rs`, `gen/src/output/assemble/api.rs`, and `definitions/src/registry/mod.rs`, plus tests. Provider code uses `TypeDesc` only as `register()`'s return value.
+- **Untyped branch.** No shipped artifact depends on the generator's untyped-schema branch. The `use super::responses::*` imports in the elevenlabs, github, bitbucket and openai artifacts come from unqualified pagination `item_type` strings.
+- **External consumers.** No `SchemaRegistry`, `openapi_registry`, `validate_completeness` or `Schema::descriptor` consumer exists outside `schematic/`, apart from the `schematic-define` skill documentation.
+- **Departure from the spec.** Removing `TypeDesc` serde and the reserved `structure` carrier departs from the spec's approved reserved-carrier constraint. The next specification's R6 must be refreshed to place compositions in `TypeRef` references and registry entries.
+
+### Wave 17 — Normalize References complete
+
+`schematic-define` now stores REST JSON bodies as `TypeRef` and carries `RestApi::schemas`. What changed:
+
+- **`TypeRef` extension.** `PrimitiveType` gained `I8`–`I128`, `Isize`, `U8`–`U128`, `Usize`, `F32`, `Char` and `Unit`. `Integer` (`i64`) and `Number` (`f64`) keep their meaning, so no variant duplicates another. `TypeRef::KeyedMap { key, value }` carries the Rust spelling of a non-`String` key. It is the one Rust spelling a reference holds, because a key type has no component (PD1 string-newtype keys, for example `crate::StringKey`). `String`-keyed maps stay `TypeRef::Map`. Primitive wire schemas are generated from the variant with the same schemars settings as the removed inline shape. New methods: `PrimitiveType::{rust_path, wire_schema}` and `TypeRef::wire_schema`.
+- **`TypeDesc`.** Now `{ reference: TypeRef, rust_path: String }`, with no serde derives and no `structure` carrier; the private `Shape` enum is removed. It adds `type_ref()` and `into_type_ref()`. `DefinitionContext` lost `validate_reference` and its descriptor list and gained `components()`. `DefinitionError::InvalidDescriptor` is replaced by `UnresolvedReference { api, endpoint, name }`.
+- **Components.** New `components` module with `SchemaComponent { name, rust_path: Option<String>, schema }` (`deny_unknown_fields`). Flattening moved from `SchemaRegistry::to_openapi_schemas` with identical rules: a registration replaces a same-named nested entry in place, a nested entry never replaces one, and `$schema`, `$defs` and `components` are stripped. The OpenAPI conversion ignores those keys, so output is unaffected. `RestApi::{component, rust_type, validate_references}` and `Endpoint::json_references` are public. `validate_references` also rejects empty names, empty Rust paths, non-object/non-boolean schemas, duplicate names, compositions, `Unknown` and empty map keys.
+- **Builders.** `RestApiBuilder::build` stores `ctx.components()` and then runs `validate_references`, replacing the descriptor loop and the lowered-path agreement check.
+- **Stored constructors.** `ApiResponse::json`, `ApiRequest::json` and `FormField::json` take a `TypeRef`. `json_type`/`json_vec_type` remain as `Named`/`Array(Named)` constructors, because a name *is* the reference now; this minimizes generator-fixture churn. `From<Schema> for ApiRequest` is removed. `Schema` lost `descriptor`, and its docs now describe WebSocket use only.
+- **Pagination.** `root_array_item_type(api, response)` recognizes only `TypeRef::Array` and resolves the item through `api.schemas`. The legacy `"Vec<..>"` string recognition is gone because strings are gone.
+- **OpenAPI.** `export(api, options)` drops the registry argument and `SchemaRegistryLike`. Components come from `api.schemas` through a conversion module copied into `define/src/openapi/export/conversion.rs`; the `schematic-definitions` copy is deleted in Wave 18. The importer emits `Primitive(Json)` instead of the string `"serde_json::Value"` for inline or absent schemas, and its request-name remapping operates on `Named`.
+
+**Design consequence for Wave 18.** A module group shares one context, but each API is built before later members register their types. `assemble_module_group` must therefore re-apply the finished context's `components()` to every member; the plan's Wave 18 task now says so.
+
+**Tests.**
+
+- Removed, because their forms are no longer representable:
+  - the descriptor transfer, forgery and wrapper-shape tests, and the descriptor JSON matrix (`typed_registration.rs`, `builders.rs`)
+  - the malformed-wire-schema export test
+  - the `From<Schema>` and string-schema unit tests in `request.rs`/`response.rs`
+- Added:
+  - `references_resolve_through_the_destination_context_and_survive_transfer`
+  - `deserialized_definitions_are_checked_by_the_same_resolution`
+  - `api_carries_the_whole_context_with_nested_definitions_flattened`
+  - `transferred_components_and_references_input_matrix`: the replacement matrix, one edit per cell over component `name`, `rust_path` and `schema`, the `schemas` list and the reference, including textual duplicate keys and trailing content
+- Rewritten: the `typed_registration.rs` cases that asserted descriptors now assert `TypeRef` shape.
+- Fixture helpers: the pagination support module turns fixture spellings into references (`reference`) and gives fixture APIs a component per referenced name (`registered`).
+- Docs: `docs/authoring-examples.md` is a transcluded doctest, so its `validate_reference` line was replaced with assertions on `api.schemas` and `api.rust_type` now rather than in Wave 19.
+
+**Checkpoint evidence (macOS).**
+
+- `cargo nextest run -p schematic-define --all-features`: 650/650 passed.
+- `cargo nextest run -p schematic-define`: 387/387 passed.
+- `cargo test -p schematic-define --all-features --doc`: 161 + 10 passed.
+- `cargo clippy -p schematic-define --tests`, with and without `--all-features`: no warnings.
+- As the checkpoint allows, `schematic-definitions` and `schematic-gen` do not compile yet.
+
+### 2026-10-20 — Phase 9 closing verification
+
+The Wave 18 and Wave 19 work was carried out by the review-findings cycle recorded under **Implementation of Review Findings #1** below, and every Phase 9 checkbox was already ticked. This run re-verified the unchanged tree against the phase gate and completed the closing metadata. It changed no source code.
+
+- **Metadata.** The cumulative `source_code` list was missing 16 Phase 9 source files, and `documentation` was missing 4 skill files; both lists now include them. The feature's plan, spec, log and `review-1.md` were added to `docs_updated_during_phase_9`. `docs_created_during_phase_9: []` and `human_review: false` were added. The spec now records `implemented: true`.
+- **Reader check.** `git grep` for `SchemaRegistry`, `validate_reference`, `.descriptor`, `openapi_registry` and `InvalidDescriptor` in `*.rs` and `*.md` files finds no hits. The search excluded `features/`, `research/`, `reviews/` and `plans/`, and the unrelated `descriptor` fields in `sniff` and `worktree`.
+- **Gates (macOS, from `schematic/`).**
+  - `just test`: 2,277 passed, 13 skipped; slow tier 7/7; 1/1. No test failed or timed out.
+  - `just lint`: exit 0.
+  - `just doctest`: 161, 10, 44 (2 ignored), 18, 3 and 1 passed.
+  - `just test-schema`: 55/55.
+  - `just lint-schema`: exit 0.
+  - `just check-tier-coverage schematic`: 0 stranded.
+- **Dependents.**
+  - `cargo nextest run -p sniff --features remote -E 'test(/gitea|gitlab/)'`: 69/69.
+  - `cargo nextest run -p model-citizen -E 'test(/scanner::(ollama|lmstudio)::/)'`: 45/45.
+- **Cross-OS check.** Not run. The change is a data-model and code-generation refactor with no path, process, console or `#[cfg]`-specific code.
+
+**Phase 9 complete: implementation complete, ready for review.**
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-10-20T08:11:36-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-schematics/schematic/features/2026-10-14-schematic-definition-api/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- review 1 is a decision-only review: `findings: []` and `observations: []`. Its one actionable item is the author's **Human rulings → Item 1** (normalize schema references, option C), which this cycle tracks as finding `R1-H1`, with one child row per "Required direction" bullet
+- inventory before edits (08:12):
+        - commit `ee6a67ae6` already landed plan Phase 9 **Wave 17** (stored model in `schematic-define`), recorded in this log under Phase 9
+        - `schematic-definitions` fails to compile (`SchemaRegistryLike` no longer exists), so `schematic-gen` cannot build either; plan Phase 9 **Wave 18** (definitions, generator) and **Wave 19** (artifacts, baselines, docs) remain open
+        - matches for `ModuleGroup`, `validate_reference` and similar names in `darkmatter/`, `sniff/` and `worktree/` are unrelated symbols that share a name
+
+### Finding Ledger
+
+| ID         | Finding or required instance/consumer and expected result | Disposition | Verification evidence or blocker |
+| ---------- | --------------------------------------------------------- | ----------- | -------------------------------- |
+| R1-H1      | Human ruling item 1: normalize REST schema references (option C) within this spec | fixed | every child row below is fixed; area gates `just test`, `just lint`, `just doctest` pass on macOS |
+| R1-H1.1    | A REST request/response reference stores only canonical identity plus wrapper shape as `TypeRef`, with no Rust path and no inline schema copy | fixed | Wave 17 (`ee6a67ae6`): `ApiResponse::Json`/`ApiRequest::Json`/`FormFieldKind::Json` hold `TypeRef`; verified in `define/src/components.rs` (`json_references`) and the 18-API equivalence proof (every old reference maps to a `TypeRef` whose `api.rust_type` equals the old spelling) |
+| R1-H1.2    | `RestApi` carries its context's registry (name → Rust path + wire schema), each fact stored once | fixed | `RestApi::schemas: Vec<SchemaComponent { name, rust_path, schema }>` built from the whole context (Wave 17); module groups re-apply the finished context (`members_built_before_a_later_registration_carry_the_full_components`); `registry_invariants.rs` asserts identical group registries |
+| R1-H1.3    | API assembly validation: every reference resolves in the destination registry (dangling → error naming API, endpoint, name); merging module-group registries rejects conflicting definitions; descriptor agreement/forgery checks removed | fixed | `RestApi::validate_references` → `UnresolvedReference { api, endpoint, name }` for builds and deserialized APIs (`deserialized_definitions_are_checked_by_the_same_resolution`, `a_dangling_reference_fails_group_assembly`); conflicting group registrations fail through the shared context (`isolated_groups_can_reuse_names_but_shared_collisions_fail_assembly`, including a swallowed collision); descriptor agreement/forgery checks removed |
+| R1-H1.4    | `TypeRef` extended (not replaced) for Rust map keys and free-form JSON; extensions recorded in the log | fixed | `PrimitiveType` widths and `TypeRef::KeyedMap { key, value }` added; free-form JSON uses existing `PrimitiveType::Json`; recorded in the Phase 9 Wave 17 entry; `wrapper_references_spell_their_rust_types_through_the_components` |
+| R1-H1.5    | `Schema::descriptor` removed; WebSocket `Schema` (`type_name` + `module_path`) unchanged | fixed | `Schema` is `{ type_name, module_path }` only (`define/src/schema.rs`); no `.descriptor` reader remains in the workspace (grep) |
+| R1-H1.6    | Consumer: `schematic-definitions` (delete `SchemaRegistry` and lookups, `ModuleGroup::registry`, every `openapi_registry()`; module groups re-apply the finished context's components; registry/bitbucket tests) | fixed | `SchemaRegistry`, `ModuleGroup`, lookups and 15 `openapi_registry()` deleted; `schematic-definitions` 566/566, doctests 44, clippy clean |
+| R1-H1.7    | Consumer: generator type-path derivation from `TypeRef` + `api.schemas`; untyped-schema branch removed; `registry_for` and registry parameters removed from pipeline/validation | fixed | types spelled through `api.rust_type`; `registry_for`/registry parameters and `validate_openapi_registry` removed; `invalid-schema-reference` diagnostic (`a_dangling_reference_names_the_api_endpoint_and_name_for_rust_and_openapi`); `schematic-gen` 657/657 |
+| R1-H1.8    | Consumer: OpenAPI and Postman export read `api.schemas`; strict OpenAPI completeness coverage kept | fixed | `openapi::export(api, options)` reads `api.schemas`; `real_apis_still_pass_strict_completeness`, `real_module_documents_carry_exactly_their_components`; Postman tree byte-identical |
+| R1-H1.9    | Consumer: typed list (pagination root-array) inference through `TypeRef::Array` + `api.schemas` | fixed | `root_array_item_type` recognizes `TypeRef::Array` and resolves through `api.schemas` (Wave 17); pagination validation resolves via `api.component`; pagination section identical in all 18 baselines |
+| R1-H1.10   | JSON definition snapshots and canonical baseline regenerated in the normalized form; generated Rust/OpenAPI/Postman output unchanged or every difference explained | fixed | 18 baselines regenerated after a 0-difference equivalence proof against `d12321ae5`; `schematic/schema` and `schematic/postman` byte-identical; 15 OpenAPI files differ only in `x-schematic` values (orchestrator re-check: 0 non-`x-schematic` diffs); `just migration-check` 33/33, `just check-drift` 9/9, `just test-schema` 55/55 |
+| R1-H1.11   | Builder/transfer tests updated to the normalized form | fixed | Wave 17 rewrote `define/tests/builders.rs`/`typed_registration.rs` (transfer matrix `transferred_components_and_references_input_matrix`); generator and definitions tests rewritten to `TypeRef`/`api.schemas` |
+| R1-H1.12   | The **Builder implementation and lowering** log entry amended to record the departure | fixed | Departure note appended under **Builder implementation and lowering** |
+| R1-H1.13   | Docs, READMEs and the `schematic-define` skill describe name-plus-wrapper references and `RestApi::schemas`; no reader of `Schema::descriptor`, `SchemaRegistry` or `validate_reference` remains | fixed | 11 docs pages, `definitions/README.md`, 4 skill files and the `create-schematic-api` command updated; docs-reading tests (`authoring_guidance`, `builders`) and doctests pass; workspace grep finds no current-API reader of `Schema::descriptor`, `SchemaRegistry` or `validate_reference` |
+
+### Progress
+
+- starting the work on 'R1-H1 / Wave 18 — Migrate Definitions (R1-H1.6)' at 08:12:51
+        - defect class: a stored or derived copy of schema identity (a registry view, a descriptor, a Rust-path string) is kept alongside `RestApi::schemas`, so a reader can consult a second source that may disagree with the API's own registry
+        - deleted `SchemaRegistry` (and `SchemaRegistryLike` impl, `validate_completeness`, `from_context`), `ModuleGroup`, `get_registry`, `get_registries_for_module`, `get_module_group`, all 15 provider `openapi_registry()` functions and `definitions/src/registry/conversion.rs`; `assemble_module_group` now returns `Result<Vec<RestApi>, DefinitionError>`
+        - `assemble_module_group` runs `context.finish()` (collisions are still aggregated even when the callback swallows one), then gives every member the finished `context.components()` and re-runs `validate_references`
+        - discovery: `api.schemas` uses the flatten (OpenAPI `components.schemas`) order, not the old registration order, so six inventory tests (anthropic, bitbucket, gitea, gitlab, lmstudio, ollama) now expect component order
+        - sibling sweep: besides `schema.descriptor` (bitbucket ×4), REST tests in gitea ×8, github ×7, gitlab ×9, huggingface ×1 and bitbucket ×2 read `schema.type_name` strings; all now assert `TypeRef` shape. WebSocket `Schema::new` (elevenlabs, unfolded_circle) and pagination `item_type` strings are out of scope per the ruling and plan (clean)
+        - kept `registry_key_for` as the stable per-API artifact key used by `schematic-gen`; it is not a registry lookup
+        - the committed `src/openai/mod.rs` was edited by hand to the new `module_group() -> Result<Vec<RestApi>, DefinitionError>` shape; the generator's import emitter must reproduce it (handed to the generator task)
+        - tests added: `members_built_before_a_later_registration_carry_the_full_components`, `a_dangling_reference_fails_group_assembly`, `component_schema_includes_description_from_doc_comments`, `registry_key_for_covers_every_shipped_api`; `tests/registry_invariants.rs` re-pointed at `api.schemas` (unique keys, references resolve, every reference has a Rust type, module-group members carry identical `schemas`)
+        - orchestrator: removed the now-unused `openapiv3` dependency from `schematic-definitions` (`Cargo.lock` −1 line; no per-area dependency doc lists this crate)
+        - verification (macOS): `cargo nextest run -p schematic-definitions --all-features` 566/566 passed; doctests 44 passed, 2 ignored; `cargo clippy -p schematic-definitions --all-features --tests -- -D warnings` clean
+- work completed for 'R1-H1 / Wave 18 — Migrate Definitions (R1-H1.6)' at 08:26:43
+- starting the work on 'R1-H1 / Wave 18 — Migrate Generator (R1-H1.7, R1-H1.8, R1-H1.9)' at 08:26:43
+        - the generator spells every JSON body/response type through `api.rust_type(&reference)` (one helper, `json_type_name`); an unresolved reference is spelled as a `::core::compile_error!(..)` type, so unvalidated generation fails to compile at that type
+        - removed `registry_for` (from `generate_batch`), every registry argument of `write_openapi`/`write_openapi_grouped`/`build_openapi_grouped`, and `validate_openapi_registry`; `generate_request_struct*` now take `api: &RestApi`
+        - diagnostic `incomplete-schema-registry` (`Feature::IncompleteSchemaRegistry`) replaced by `invalid-schema-reference` (`Feature::InvalidSchemaReference`): Rust and OpenAPI validation report each dangling name with API, endpoint and component, then run `api.validate_references()` for malformed components; Postman never reads schemas
+        - `needs_response_import` keeps only the pager-item branch; pagination validation resolves items through `api.component(..)` and now walks typed shipped responses it previously skipped (no shipped API reports a diagnostic)
+        - the import emitter (`definition_gen.rs`) emits the new `module_group() -> Result<Vec<RestApi>, DefinitionError>` shape; the OpenAI re-import reproduces the committed `schematic/definitions/src/openai/mod.rs` byte for byte
+        - discovery: a standalone (`--output`) import has no registered schemas, so validation rejected every standalone import; `import_pipeline.rs` now gives it one component per generated model (bare model name as Rust path, schema `{}` because the standalone client never exports OpenAPI)
+        - `schematic-define`: `TypeRef::names()` made `pub` so the generator can name the dangling component; the misuse compile test now expects E0624 (private `TypeDesc::new`) instead of E0599
+        - sibling sweep: every REST body match that read `type_name` (request body, response, form field, definition emitter, validation) migrated; legacy `"Vec<Release>"`-style string fixtures converted to name or wrapper references, with deliberately broken Rust spellings moved into a component's `rust_path`; no other workspace crate uses the removed APIs
+        - tests added: `wrapper_references_spell_their_rust_types_through_the_components`, `a_json_form_part_spells_its_rust_type_through_the_components`, `an_unresolved_reference_is_spelled_as_a_compile_error`, `a_dangling_reference_names_the_api_endpoint_and_name_for_rust_and_openapi`, `a_nested_only_component_cannot_be_referenced`, `a_malformed_component_is_reported_for_the_api`, `every_dangling_name_of_a_wrapped_reference_is_reported`, `real_apis_still_pass_strict_completeness`, `real_module_documents_carry_exactly_their_components`, `dangling_reference_blocks_rust_and_openapi_but_not_postman`, `grouped_export_rejects_a_dangling_reference_and_names_files_by_module`; removed `incomplete_registry_blocks_only_openapi` and `grouped_export_fails_when_module_registry_missing` (concepts gone)
+        - artifact finding: generated Rust and Postman trees are byte-identical; all 15 OpenAPI documents differ **only** in each operation's `x-schematic.request`/`response` value (449 responses, 140 requests), which serializes the stored `ApiRequest`/`ApiResponse` and now holds the `TypeRef` (for example `{"Json":{"Named":"MessageResponse"}}`) instead of `{type_name, module_path, descriptor}`; with `x-schematic` removed every document, including component order, is byte-identical
+        - verification (macOS): `cargo nextest run -p schematic-gen` 637/637 passed excluding 20 fixture-comparison tests (default and `--all-features`); slow tier 7/7; doctests 18; clippy `-D warnings` clean for define/definitions/gen; `just lint` exit 0; `schematic-define` 650/650
+        - 20 fixture tests left red for Wave 19: `artifact_drift::generated_openapi_artifacts_are_up_to_date` and 19 `definition_baseline::` tests (stored form and `schemas`-derived registry section)
+- work completed for 'R1-H1 / Wave 18 — Migrate Generator (R1-H1.7, R1-H1.8, R1-H1.9)' at 08:51:58
+- starting the work on 'R1-H1 / Wave 19 — Regenerate and Compare (R1-H1.10)' at 08:51:58
+        - equivalence proof before regeneration: the pre-Phase-9 commit `d12321ae5` (where `definition_baseline::` passed 25/25 against the old fixtures) was extracted with `git archive` and built separately; its snapshot and `SchemaRegistry` values were compared, using `python3 -I` scripts, with a dump of the new snapshot plus `api.rust_type(..)` for every `json_references()` entry
+        - result: 0 unexplained differences across all 18 APIs; API metadata (minus `schemas`), endpoint IDs and order, and pagination are identical; every old `{type_name, module_path: null, descriptor}` maps to a `TypeRef` (`Named`→`Named`, `Vec`→`Array`, `Inline(::serde_json::Value)`→`Primitive(Json)`) whose `api.rust_type` equals the old `type_name` exactly; `api.schemas` equals the old registry run through `flatten()` (names, order, content); registered order moved only where a registration first appeared nested in an earlier type (anthropic, bitbucket, elevenlabs, emqx, gitea, gitlab, lmstudio, ollama, openai)
+        - `definition_snapshot.rs`: registry rows are now `{name, rust_path, blake3}` in `api.schemas` order; the readable `definition` section and the `api_metadata` fingerprint leave out `schemas` (full schema text would make the baseline 3–4× larger, toward PD20's 5 MB limit, and each component is still fingerprinted)
+        - `definition_baseline.rs`: removed the historical `phase6_lowering` and OpenAI beta/alias reconstruction (+16/−190); `EXPLAINED` and `changed_description_is_detected_at_its_exact_field` kept
+        - regenerated all 18 `gen/tests/fixtures/definition-baseline/*.json` (1,347,051 bytes, was 1,270,391) and, via `just generate`, all 15 `schematic/openapi/*.json`
+        - artifact diff: `schematic/schema` and `schematic/postman` have no diff; in `schematic/openapi` every document with `x-schematic.request`/`response` removed is identical to `HEAD`; the 589 changed values are 576 `Named` leaves (41 inside `Vec`) and 13 OpenAI inline `::serde_json::Value` → `{"Primitive":"Json"}`, each mapped from its old descriptor
+        - verification (macOS): `just migration-check` 33/33; `cargo nextest run -p schematic-gen` 657/657 (3 skipped); `just check-drift` 9/9; `just test-schema` 55/55; `just lint-schema` clean; `just check-tier-coverage schematic` 0 stranded; clippy clean; Wave 15 dependents `cargo check --all-targets -p sniff -p sniff-cli -p biscuit-speaks -p biscuit-speaks-cli -p model-citizen -p model-citizen-cli -p homelab -p homelab-cli -p homelab-server -p eversolo-integration -p arcam-amp-integration -p sony-receiver-integration -p unfolded-integration-helper --features …` passed; `cargo nextest run -p sniff --features remote -E 'test(/gitea|gitlab/)'` 69/69; `cargo nextest run -p model-citizen -E 'test(/scanner::(ollama|lmstudio)::/)'` 45/45
+- work completed for 'R1-H1 / Wave 19 — Regenerate and Compare (R1-H1.10)' at 09:04:27
+- starting the work on 'R1-H1 / Wave 19 — Correct Documentation (R1-H1.12, R1-H1.13)' at 09:04:27
+        - Departure note appended under **Builder implementation and lowering** (R1-H1.12)
+        - updated `docs/definition-builders.md` (with a reference → `RestApi::schemas` → Rust path / OpenAPI `$ref` Mermaid diagram), `docs/typed-registration.md`, `docs/io/{import-openapi,export-openapi,openapi-extensions,export-postman}.md`, `docs/generation/{validation,generated-clients}.md`, `docs/definition-snapshots.md` (layout and 1,347,051-byte corpus), `docs/authoring-examples.md` (prose and diagram only), `docs/dependencies.md` (one wording line), `definitions/README.md`, four `schematic-define` skill files and `.claude/commands/create-schematic-api.md`
+        - discovered stale docs that the name grep missed and fixed them: the `invalid-type-syntax` example in `validation.md` (now places the bad spelling in a component's `rust_path`), `Json(Schema)` in `export-postman.md` and the skill, and `export(&api, &registry, …)` in `openapi-extensions.md`
+        - left as is: `schematic/docs/research/` notes (historical research), `research/project-mgmt/jira.md` (a Jira app "descriptor"), and `registry: &registry` in `partial-generation.md` (the list of APIs, not schemas)
+        - verification: `authoring_guidance` + `builders` 19/19; `schematic-define` doctests 161 + 10; `schematic-definitions` doctests 44 (2 ignored)
+- work completed for 'R1-H1 / Wave 19 — Correct Documentation (R1-H1.12, R1-H1.13)' at 09:18:28
+- orchestrator reconciliation at 09:18:28:
+        - workspace grep for `SchemaRegistry`, `openapi_registry`, `validate_completeness`, `InvalidDescriptor`, `Schema::descriptor`, `.descriptor`, `validate_openapi_registry`, `registry_for`, `get_registries_for_module`, `IncompleteSchemaRegistry` (Rust, Markdown, justfiles; excluding `features/` and `research/`): the only hits are historical snapshots (`homelab/plans/2026-03-04…`, `schematic/reviews/2026-07-31-macro-review/spec.md`) and unrelated `descriptor` fields in `sniff` and `worktree`
+        - independent OpenAPI check (`python3 -I` script): 15 files, 0 differences once `x-schematic` is removed; `git diff schematic/schema schematic/postman` shows only `schematic/schema/Cargo.lock` losing `openapiv3`, which follows from the dependency removal
+        - plan Phase 9 checkboxes ticked; plan and log frontmatter set `completed_phase: 9`, `implemented: true` with Phase 9 file inventories
+
+### Completion Report
+
+**Outcome: complete.** Elapsed: 08:11:36 → 09:18:28 (about 1 h 10 min).
+
+- review 1 had no frontmatter or body findings; its one actionable item, the author ruling on item 1, is tracked as `R1-H1` with 13 child rows
+- parent findings: **total 1 = fixed 1 + already fixed 0 + blocked 0 + deferred 0 + unresolved 0 + disputed 0**
+- child rows: 13 of 13 fixed (R1-H1.1–R1-H1.5, R1-H1.9 and R1-H1.11 were landed in Wave 17, commit `ee6a67ae6`, and re-verified in this cycle; the rest were implemented in this cycle)
+- open finding IDs: none
+
+#### Verified repairs
+
+- **Stored model (R1-H1.1–R1-H1.5):** REST bodies are `TypeRef`; `RestApi::schemas` carries the whole context; `validate_references` is the single resolution check; `Schema::descriptor` is gone and WebSocket `Schema` is unchanged
+- **Definitions (R1-H1.6):** `SchemaRegistry` and every registry lookup removed; module groups re-apply the finished components to each member
+- **Generator and export (R1-H1.7–R1-H1.9):** type spelling, OpenAPI components, validation and pagination all read `api.schemas`; dangling references produce `invalid-schema-reference`
+- **Artifacts (R1-H1.10):** an equivalence proof against `d12321ae5` found 0 unexplained differences before the baselines were regenerated; generated Rust and Postman output is byte-identical, and OpenAPI differs only in `x-schematic` reference values
+- **Tests and docs (R1-H1.11–R1-H1.13):** see the progress entries above
+
+#### Notes for the next review
+
+- **New `x-schematic` form:** OpenAPI `x-schematic.request`/`response` now serializes the `TypeRef` form (for example `{"Json":{"Named":"MessageResponse"}}`). The plan expected byte-identical OpenAPI output; this is the one artifact change, and it follows directly from the stored-model change.
+- **Baseline leaves out `schemas`:** the baseline's readable `definition` section and `api_metadata` fingerprint omit `schemas`, and each component is fingerprinted separately. This keeps the corpus under PD20's 5 MB limit.
+- **Standalone imports:** a standalone `--output` import now gets one `{}`-schema component per generated model, so its references resolve.
+- **Not checked:** the fresh fixture crate prints "unused import `schematic_definitions::fixture_basic::*`" warnings. They fail nothing, and this cycle did not establish whether they predate it.
+- **Cross-OS check not run:** the change is a data-model and code-generation refactor with no path, process, console or `#[cfg]`-specific code, so it carries no notable cross-OS risk; CI covers Linux and macOS.
+
+#### Changed files
+
+- `schematic/define/src/models/type_ref.rs` (`TypeRef::names` made public)
+- `schematic/definitions/`: `Cargo.toml` (dropped `openapiv3`), `README.md`, `src/lib.rs`, `src/registry/{mod,lookup,typed}.rs`, `src/registry/conversion.rs` (deleted), 15 provider modules, `src/artificial_analysis/types.rs`, `tests/registry_invariants.rs`
+- `schematic/gen/src/`: `pipeline.rs`, `validation.rs`, `diagnostics.rs`, `lib.rs`, `export/{openapi,body}.rs`, `definition_gen.rs`, `import_pipeline.rs`, `model_gen.rs`, `output/{mod,assemble/api}.rs`, `codegen/request_structs/*`, `codegen/endpoint_methods/*`, `codegen/request_enum.rs`, unit-test modules, `test_utils.rs`
+- `schematic/gen/tests/`: `common/{mod,components}.rs` (components is new), and in `l1/`: `artifact_drift`, `definition_baseline`, `e2e_generation`, `fresh_output_compile`, `import_overlay`, `openapi_strict_completeness`, `output_validation`, `pagination_validation`, `partial_generation`, `path_substitution`, `postman_golden`, `query_params_codegen`
+- `schematic/gen/examples/support/definition_snapshot.rs`
+- artifacts: 18 `gen/tests/fixtures/definition-baseline/*.json`, 15 `schematic/openapi/*.json`, `schematic/schema/Cargo.lock`, `Cargo.lock`
+- docs, skills and command files: listed in the Correct Documentation entry above
+- feature artifacts: `implementation-log.md`, `plan.md`, `review-1.md` (metadata only)
+
+#### Final verification (macOS)
+
+| Command (from `schematic/` unless noted) | Result | Verifies |
+| --- | --- | --- |
+| `just test` | exit 0: 2,277 passed (13 skipped); slow 7/7; 1/1 | R1-H1 overall |
+| `just lint` | exit 0 | R1-H1 overall |
+| `just doctest` | all passed (161, 10, 44 + 2 ignored, 18, 3, 1) | R1-H1.13 (transcluded docs) |
+| `just migration-check` | 33/33 | R1-H1.10 |
+| `just check-drift` | 9/9 | R1-H1.10 |
+| `just test-schema` / `just lint-schema` | 55/55 / clean | R1-H1.10 |
+| `just check-tier-coverage schematic` (repo root) | 0 stranded | new tests are selected |
+| Wave 15 dependents `cargo check --all-targets …`; `sniff` gitea/gitlab 69/69; `model-citizen` scanner 45/45 | passed | downstream consumers |
+| OpenAPI `x-schematic`-stripped comparison with `HEAD` | 0 of 15 differ | R1-H1.8, R1-H1.10 |
+
+**Implementation complete, ready for review.**
+
+## Implementation of Review Findings #3
+
+> **started at:** 2026-10-21T21:01:21-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/feat-better-schematics/schematic/features/2026-10-14-schematic-definition-api/review-3.md'
+- this is iteration 3 of the review-to-implement cycle 
+- review 3 frontmatter: `ready: true`, `findings: []`, `observations: []`, `blocked: false`, `human_review: false`
+
+| Finding | Source | Outcome |
+| --- | --- | --- |
+| _(none)_ | review-3.md | no findings, blocked findings, or observations to implement |
+
+## Follow-up Pass for Review #3
+
+- the review found in '/Volumes/coding/wt/rusty-biscuit/feat-better-schematics/schematic/features/2026-10-14-schematic-definition-api/review-3.md' indicated that the specification is **production ready**
+- the specification can be found at '/Volumes/coding/wt/rusty-biscuit/feat-better-schematics/schematic/features/2026-10-14-schematic-definition-api/spec.md'
+- review 3 lists no open follow-ups:
+        - "Unblocked Findings", "Blocked Findings", and "Recurrence" are all empty
+        - "Observations" states none require a separate author follow-up
+        - R1-H1 (all instances) and R2-F1 (R2-F1.1–R2-F1.13) are verified fixed
+- no source, test, generated artifact, or baseline was changed in this pass, so no test run or cross-OS check was required
+- state of the cycle: the review/implement cycle is closed; the feature awaits the author's move to `_completed`
+
+**Review cycle complete; no follow-up work remains.**

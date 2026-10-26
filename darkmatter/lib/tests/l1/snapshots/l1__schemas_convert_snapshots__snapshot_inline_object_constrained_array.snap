@@ -1,14 +1,15 @@
 ---
-source: darkmatter/lib/tests/schemas_convert_snapshots.rs
-assertion_line: 277
+source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: convert_yaml(yaml)
 ---
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
   "additionalProperties": true,
   "properties": {
     "replicas": {
+      "type": "array",
       "items": {
+        "type": "object",
         "additionalProperties": false,
         "properties": {
           "host": {
@@ -21,15 +22,13 @@ expression: convert_yaml(yaml)
               }
             ]
           }
-        },
-        "type": "object"
+        }
       },
-      "minItems": 1,
-      "type": "array"
+      "minItems": 1
     }
   },
   "required": [
     "replicas"
   ],
-  "type": "object"
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

@@ -1,0 +1,36 @@
+# Spike S2: which text measurer should turn Merman diagrams into images?
+#   A: our own TextMeasurer, shaping directly with rustybuzz (mirrors usvg 0.47).
+#   B: Merman's native measurement (`native-fonts`) on the same font files.
+#
+# Standalone, NOT a member of the rusty-biscuit workspace (empty `[workspace]`).
+# Build with CARGO_TARGET_DIR outside the repository.
+[package]
+name = "s2-measurement"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+# Same commit as S0 and S1.
+merman = { git = "https://github.com/Latias94/merman.git", rev = "482fcde7faffb05a466f198085d615e604075d97", default-features = false, features = [
+    "svg",
+    "all-diagrams",
+    "layout-cytoscape",
+    "native-fonts",
+] }
+# Merman's own rasterizer version, so A, B, and the drawing all use usvg 0.47.
+resvg = "0.47"
+# The shaping stack usvg 0.47 uses (option A shapes with it directly).
+rustybuzz = "0.20.1"
+ttf-parser = "0.25"
+unicode-bidi = "0.3"
+unicode-script = "0.5"
+# Step 3 of the font chain; the version Merman pins.
+fontique = { version = "0.12.0", default-features = false, features = ["system"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+debug = false

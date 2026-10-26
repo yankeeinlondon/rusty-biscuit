@@ -1,0 +1,448 @@
+{
+  "definition": {
+    "auth": {
+      "BearerToken": {
+        "header": null
+      }
+    },
+    "auth_policy": null,
+    "base_url": "http://remote.local/api",
+    "cross_origin": "SameOrigin",
+    "default_pagination": null,
+    "description": "Unfolded Circle Core REST API",
+    "docs_url": "https://unfoldedcircle.github.io/core-api/rest/",
+    "endpoints": [
+      {
+        "description": "Create a cookie session using username/password credentials for clients that do not use bearer tokens. Docs: /pub/login in the official Core REST reference.",
+        "headers": [],
+        "id": "Login",
+        "method": "POST",
+        "params": null,
+        "path": "/pub/login",
+        "request": {
+          "Json": {
+            "Named": "LoginRequest"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "ApiResponseMessage"
+          }
+        }
+      },
+      {
+        "description": "Invalidate the active cookie session created by Login. Typical usage is explicit sign-out in long-running admin tools.",
+        "headers": [],
+        "id": "Logout",
+        "method": "POST",
+        "params": null,
+        "path": "/pub/logout",
+        "request": null,
+        "response": "Empty"
+      },
+      {
+        "description": "Return model/serial/hardware metadata for the remote. If this endpoint is polled frequently, callers should avoid storing repeated owned `String` snapshots to reduce memory churn.",
+        "headers": [],
+        "id": "GetSystemInfo",
+        "method": "GET",
+        "params": null,
+        "path": "/system",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "SystemInfo"
+          }
+        }
+      },
+      {
+        "description": "Download the current device backup archive as binary bytes. This endpoint maps to ApiResponse::Binary because the server returns an archive stream.",
+        "headers": [],
+        "id": "ExportBackup",
+        "method": "GET",
+        "params": null,
+        "path": "/system/backup/export",
+        "request": null,
+        "response": "Binary"
+      },
+      {
+        "description": "Upload and restore a backup archive using multipart form-data (`file`). The response contains per-domain restore counters.",
+        "headers": [],
+        "id": "RestoreBackup",
+        "method": "PUT",
+        "params": null,
+        "path": "/system/backup/restore",
+        "request": {
+          "FormData": {
+            "fields": [
+              {
+                "description": null,
+                "kind": {
+                  "File": {
+                    "accept": []
+                  }
+                },
+                "name": "file",
+                "required": true
+              }
+            ]
+          }
+        },
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "BackupRestoreReportItem"
+            }
+          }
+        }
+      },
+      {
+        "description": "Upload a custom resource for the selected resource type via multipart form-data (`file`). Valid `resource_type` values: `icon`, `background`, `sound`.",
+        "headers": [],
+        "id": "UploadResource",
+        "method": "POST",
+        "params": null,
+        "path": "/resources/{resource_type}",
+        "request": {
+          "FormData": {
+            "fields": [
+              {
+                "description": null,
+                "kind": {
+                  "File": {
+                    "accept": []
+                  }
+                },
+                "name": "file",
+                "required": true
+              }
+            ]
+          }
+        },
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "ResourceItem"
+            }
+          }
+        }
+      },
+      {
+        "description": "Download a single stored resource by type and identifier. Valid `resource_type` values: `icon`, `background`, `sound`. Binary response supports image/audio/file resources.",
+        "headers": [],
+        "id": "GetResource",
+        "method": "GET",
+        "params": null,
+        "path": "/resources/{resource_type}/{resource_id}",
+        "request": null,
+        "response": "Binary"
+      },
+      {
+        "description": "Install a custom integration driver from a tar archive upload (`file`). Returned metadata includes required driver identity fields.",
+        "headers": [],
+        "id": "InstallCustomIntegration",
+        "method": "POST",
+        "params": null,
+        "path": "/intg/install",
+        "request": {
+          "FormData": {
+            "fields": [
+              {
+                "description": null,
+                "kind": {
+                  "File": {
+                    "accept": []
+                  }
+                },
+                "name": "file",
+                "required": true
+              }
+            ]
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "IntegrationDriverInfo"
+          }
+        }
+      },
+      {
+        "description": "Upload an IR code CSV for a custom code-set via multipart form-data (`file`). Response reports processed/added/updated counts.",
+        "headers": [],
+        "id": "UploadCustomIrCodeSet",
+        "method": "POST",
+        "params": null,
+        "path": "/ir/codes/custom/{code_set_id}",
+        "request": {
+          "FormData": {
+            "fields": [
+              {
+                "description": null,
+                "kind": {
+                  "File": {
+                    "accept": []
+                  }
+                },
+                "name": "file",
+                "required": true
+              }
+            ]
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "CodeSetUploadResult"
+          }
+        }
+      },
+      {
+        "description": "Upload and install a custom UI or web-configurator component package (`file`). Valid `custom_component` values: `ui`, `web_configurator`. Returns install/activation status.",
+        "headers": [],
+        "id": "InstallCustomComponent",
+        "method": "POST",
+        "params": null,
+        "path": "/system/install/{custom_component}",
+        "request": {
+          "FormData": {
+            "fields": [
+              {
+                "description": null,
+                "kind": {
+                  "File": {
+                    "accept": []
+                  }
+                },
+                "name": "file",
+                "required": true
+              }
+            ]
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "CustomInstall"
+          }
+        }
+      },
+      {
+        "description": "Retrieve system logs as plain text export for diagnostics pipelines and offline inspection.",
+        "headers": [],
+        "id": "QueryLogsText",
+        "method": "GET",
+        "params": null,
+        "path": "/system/logs",
+        "request": null,
+        "response": "Text"
+      }
+    ],
+    "env_auth": [
+      "UCR_CORE_API_KEY",
+      "UNFOLDED_CIRCLE_API_KEY"
+    ],
+    "env_mapping": {
+      "api_key": null,
+      "basic_pass": {
+        "names": [
+          "UCR_CORE_PASSWORD"
+        ]
+      },
+      "basic_user": {
+        "names": [
+          "UCR_CORE_USER"
+        ]
+      },
+      "bearer_token": {
+        "names": [
+          "UCR_CORE_API_KEY",
+          "UNFOLDED_CIRCLE_API_KEY"
+        ]
+      }
+    },
+    "env_username": "UCR_CORE_USER",
+    "headers": [],
+    "module_path": "unfolded_circle_core_rest",
+    "name": "UnfoldedCircleCoreRest",
+    "request_id_header": null,
+    "request_suffix": "CoreRestRequest",
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "8bffd84acaebf0f9a0c50c59dc6b233442652adac4b37414186bab0b2ada7e9f",
+    "endpoints": [
+      {
+        "blake3": "8525f098e36ca5a62908ec897bc25690357abefc7b606a3d4b0415b9cd62874d",
+        "id": "Login"
+      },
+      {
+        "blake3": "a60b26ae3d9cd44050a004a49a4b239a3e4ae6792167ebe2d914c5df59030826",
+        "id": "Logout"
+      },
+      {
+        "blake3": "a441aef03849853df8d296cdfdd2cd0e883e1685aa8ee55a5872e5f7f2824f63",
+        "id": "GetSystemInfo"
+      },
+      {
+        "blake3": "0e8be91e6e4f0d6d3681ae96bdd0bcf23734f4ff2c0560436d456e4d11852701",
+        "id": "ExportBackup"
+      },
+      {
+        "blake3": "d51cc590b0a73721d55fab343927265dbf7640c700fd28cec6ddabd06a319da1",
+        "id": "RestoreBackup"
+      },
+      {
+        "blake3": "78d0f04a43a004ac2d0dd02af00063c9d9db8a12aa799c571ace3113249b45ab",
+        "id": "UploadResource"
+      },
+      {
+        "blake3": "5cafa82613e3473fe646fc315344101890a4648dc72559097c3adf7017010fdc",
+        "id": "GetResource"
+      },
+      {
+        "blake3": "43d8a620542df935a5ed1e29871ea2ed2982c61d68b5c02064d723e6a1109eec",
+        "id": "InstallCustomIntegration"
+      },
+      {
+        "blake3": "52935546ede83e6df60c5ff0ac99c8967f35ff65977623ed7af4cacdbb34d224",
+        "id": "UploadCustomIrCodeSet"
+      },
+      {
+        "blake3": "ca9f4efc4ffada1ce6337bbfff0c53d4c6320384b8c68e930ea89b9dd6c428f4",
+        "id": "InstallCustomComponent"
+      },
+      {
+        "blake3": "3b8b523894f22c0a8de92185dce1f2e0a42486c5cdb3c96c4d52ab5a20875682",
+        "id": "QueryLogsText"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "Login",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "Logout",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetSystemInfo",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ExportBackup",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "RestoreBackup",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "UploadResource",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetResource",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "InstallCustomIntegration",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "UploadCustomIrCodeSet",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "InstallCustomComponent",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "QueryLogsText",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "df59fd1c14843f854c069857ebc8e5dcf7286f688687c420e474c4df005eba64",
+      "name": "LoginRequest",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::LoginRequest"
+    },
+    {
+      "blake3": "3507da8268f41b5e60cb23931837b6f9a0639eb095229010708583dfac562687",
+      "name": "ApiResponseMessage",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::ApiResponseMessage"
+    },
+    {
+      "blake3": "7205ba0762880b112fc62bd04ed1f90f3e3073370b3efd0fda521b63339c8b51",
+      "name": "SystemInfo",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::SystemInfo"
+    },
+    {
+      "blake3": "acdfa02d5c5441247c87f5e6865254d078ec8a2db4435b629ef025d21e4bfacc",
+      "name": "BackupRestoreReportItem",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::BackupRestoreReportItem"
+    },
+    {
+      "blake3": "c6ced9d158f081cae9521e1949eb6df359f38f43758924871c74ad1ee801039a",
+      "name": "BackupRestoreItem",
+      "rust_path": null
+    },
+    {
+      "blake3": "a27b0296a611d056fa4599816d848c16a5f4dbd6d9ed13d2e8b619634a7e2981",
+      "name": "ResourceItem",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::ResourceItem"
+    },
+    {
+      "blake3": "b41c9a21ee938623dea5a9e6dba62a3c275097a54516d872d6ac1f2a1eb268c4",
+      "name": "IntegrationDriverInfo",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::IntegrationDriverInfo"
+    },
+    {
+      "blake3": "d8a248f79a507e4c78b7657b80a67a7978b417e50152a5423f7799bcaf097cce",
+      "name": "DriverState",
+      "rust_path": null
+    },
+    {
+      "blake3": "bdd56370874e1e1e57599a9ffe3d80fedd2c4e0e5c33e1a04da648aaf7bf67b3",
+      "name": "IntegrationDriverType",
+      "rust_path": null
+    },
+    {
+      "blake3": "5dfb267b8cac0316a5908341366f0191f78388f70b41657140a9870d19392fd6",
+      "name": "CodeSetUploadResult",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::CodeSetUploadResult"
+    },
+    {
+      "blake3": "6a1ee1b75240ebfc12f331f82df170649593abc5ae3994b0465f899b792de7ae",
+      "name": "CustomInstall",
+      "rust_path": "::schematic_definitions::unfolded_circle::core_rest::CustomInstall"
+    },
+    {
+      "blake3": "590be236ce1de03e0882c8207313d072b88bffdb6da8d1c3371967ccc85e51e6",
+      "name": "CustomComponent",
+      "rust_path": null
+    }
+  ]
+}

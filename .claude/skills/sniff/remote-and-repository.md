@@ -111,7 +111,13 @@ The provider modules (`github.rs`, `gitlab.rs`, `gitea.rs`, `bitbucket.rs`)
 call the generated endpoint methods, e.g.
 `client.list_pull_requests(owner, repo).state(s).await`, which yields
 `Result<T, CallError<E>>`. Classify every result through the module's
-`REPLIES` (`REPLIES.value(..)` in `remote/envelope.rs`), never by hand:
+`REPLIES` (`REPLIES.value(..)` in `remote/envelope.rs`, or `REPLIES.raw(..)`
+for a `send_raw` reply), never by hand. Bitbucket `GetSource` declares two
+success shapes, so a directory read matches `GetSourceResponse::Directory`
+and treats `File` as an error; a file read uses `send_raw`, because a
+committed `.json` file would select the `Directory` shape.
+
+Classification rules:
 
 - 401 is per provider; 403 with `x-ratelimit-remaining: 0` or a "rate limit"
   body, and 429, are `RateLimited` with `retry_after` from `Retry-After`

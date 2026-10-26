@@ -2,7138 +2,10021 @@
 
 //! OpenAI REST API definition, imported from an OpenAPI specification.
 //!
-//! Endpoints: 265.
+//! Endpoints: 258.
 //!
 //! Regenerate with `schematic-gen import --input <spec> --api-name OpenAI --definitions-out <dir> --overlay crate::openai_pagination::apply`.
 mod types;
 pub use types::*;
-use crate::registry::SchemaRegistry;
+use crate::registry::assemble_module_group;
 use schematic_define::*;
 /// Builds the OpenAI REST API definition.
 #[must_use]
 pub fn define_openai_api() -> RestApi {
-    let endpoints = Vec::from([
-        Endpoint {
-            id: "CreateSpeech".to_string(),
-            method: RestMethod::Post,
-            path: "/audio/speech".to_string(),
-            description: "Generates audio from the input text.\n\nReturns the audio file content, or a stream of audio events.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateSpeechRequest2"))),
-            response: ApiResponse::Binary,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
+    module_group().expect("valid imported API").remove(0)
+}
+/// Assemble the API and its ordered schemas from one registration context.
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
+    assemble_module_group(
+        "::schematic_definitions::openai",
+        |ctx| {
+            fn register_types_0(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<AddUploadPartRequest2>()?;
+                ctx.register::<AdminApiKey>()?;
+                ctx.register::<AdminApiKeyCreateResponse>()?;
+                ctx.register::<ApiKeyList>()?;
+                ctx.register::<AssignedRoleDetails>()?;
+                ctx.register::<AssistantObject>()?;
+                ctx.register::<AssistantStreamEvent>()?;
+                ctx.register::<AssistantSupportedModels>()?;
+                ctx.register::<AssistantToolsCode>()?;
+                ctx.register::<AssistantToolsFileSearch>()?;
+                ctx.register::<AssistantToolsFileSearchTypeOnly>()?;
+                ctx.register::<AssistantToolsFunction>()?;
+                ctx.register::<AssistantsApiResponseFormatOption>()?;
+                ctx.register::<AssistantsApiToolChoiceOption>()?;
+                ctx.register::<AssistantsNamedToolChoice>()?;
+                ctx.register::<AudioResponseFormat>()?;
+                ctx.register::<AudioTranscription>()?;
+                ctx.register::<AudioTranscriptionResponse>()?;
+                ctx.register::<AuditLog>()?;
+                ctx.register::<AuditLogActor>()?;
+                ctx.register::<AuditLogActorApiKey>()?;
+                ctx.register::<AuditLogActorServiceAccount>()?;
+                ctx.register::<AuditLogActorSession>()?;
+                ctx.register::<AuditLogActorUser>()?;
+                ctx.register::<AuditLogEventType>()?;
+                ctx.register::<AutoChunkingStrategyRequestParam>()?;
+                ctx.register::<Batch>()?;
+                ctx.register::<BatchError>()?;
+                ctx.register::<BatchFileExpirationAfter>()?;
+                ctx.register::<BatchRequestCounts>()?;
+                ctx.register::<Certificate>()?;
+                ctx.register::<ChatCompletionAllowedTools>()?;
+                Ok(())
+            }
+            register_types_0(ctx)?;
+            fn register_types_1(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<ChatCompletionAllowedToolsChoice>()?;
+                ctx.register::<ChatCompletionDeleted>()?;
+                ctx.register::<ChatCompletionFunctionCallOption>()?;
+                ctx.register::<ChatCompletionFunctions>()?;
+                ctx.register::<ChatCompletionList>()?;
+                ctx.register::<ChatCompletionMessageCustomToolCall>()?;
+                ctx.register::<ChatCompletionMessageList>()?;
+                ctx.register::<ChatCompletionMessageToolCall>()?;
+                ctx.register::<ChatCompletionMessageToolCallChunk>()?;
+                ctx.register::<ChatCompletionMessageToolCalls>()?;
+                ctx.register::<ChatCompletionModalities>()?;
+                ctx.register::<ChatCompletionModeration>()?;
+                ctx.register::<ChatCompletionModerationError>()?;
+                ctx.register::<ChatCompletionModerationResults>()?;
+                ctx.register::<ChatCompletionNamedToolChoice>()?;
+                ctx.register::<ChatCompletionNamedToolChoiceCustom>()?;
+                ctx.register::<ChatCompletionRequestAssistantMessage>()?;
+                ctx.register::<ChatCompletionRequestAssistantMessageContentPart>()?;
+                ctx.register::<ChatCompletionRequestDeveloperMessage>()?;
+                ctx.register::<ChatCompletionRequestFunctionMessage>()?;
+                ctx.register::<ChatCompletionRequestMessage>()?;
+                ctx.register::<ChatCompletionRequestMessageContentPartAudio>()?;
+                ctx.register::<ChatCompletionRequestMessageContentPartFile>()?;
+                ctx.register::<ChatCompletionRequestMessageContentPartImage>()?;
+                ctx.register::<ChatCompletionRequestMessageContentPartRefusal>()?;
+                ctx.register::<ChatCompletionRequestMessageContentPartText>()?;
+                ctx.register::<ChatCompletionRequestSystemMessage>()?;
+                ctx.register::<ChatCompletionRequestSystemMessageContentPart>()?;
+                ctx.register::<ChatCompletionRequestToolMessage>()?;
+                ctx.register::<ChatCompletionRequestToolMessageContentPart>()?;
+                ctx.register::<ChatCompletionRequestUserMessage>()?;
+                ctx.register::<ChatCompletionRequestUserMessageContentPart>()?;
+                Ok(())
+            }
+            register_types_1(ctx)?;
+            fn register_types_2(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<ChatCompletionResponseMessage>()?;
+                ctx.register::<ChatCompletionRole>()?;
+                ctx.register::<ChatCompletionStreamOptions>()?;
+                ctx.register::<ChatCompletionStreamResponseDelta>()?;
+                ctx.register::<ChatCompletionTokenLogprob>()?;
+                ctx.register::<ChatCompletionTool>()?;
+                ctx.register::<ChatCompletionToolChoiceOption>()?;
+                ctx.register::<ChunkingStrategyRequestParam>()?;
+                ctx.register::<CodeInterpreterFileOutput>()?;
+                ctx.register::<CodeInterpreterTextOutput>()?;
+                ctx.register::<CodeInterpreterTool>()?;
+                ctx.register::<CodeInterpreterToolCall>()?;
+                ctx.register::<ComparisonFilter>()?;
+                ctx.register::<CompleteUploadRequest2>()?;
+                ctx.register::<CompletionUsage>()?;
+                ctx.register::<CompoundFilter>()?;
+                ctx.register::<ComputerAction>()?;
+                ctx.register::<ComputerActionList>()?;
+                ctx.register::<ComputerScreenshotImage>()?;
+                ctx.register::<ComputerToolCall>()?;
+                ctx.register::<ComputerToolCallOutput>()?;
+                ctx.register::<ComputerToolCallOutputResource>()?;
+                ctx.register::<ContainerFileListResource>()?;
+                ctx.register::<ContainerFileResource>()?;
+                ctx.register::<ContainerListResource>()?;
+                ctx.register::<ContainerResource>()?;
+                ctx.register::<Content>()?;
+                ctx.register::<ConversationItem>()?;
+                ctx.register::<ConversationItemList>()?;
+                ctx.register::<ConversationParam>()?;
+                ctx.register::<CostsResult>()?;
+                ctx.register::<CreateAssistantRequest2>()?;
+                Ok(())
+            }
+            register_types_2(ctx)?;
+            fn register_types_3(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<CreateBatchRequest2>()?;
+                ctx.register::<CreateChatCompletionRequest2>()?;
+                ctx.register::<CreateChatCompletionResponse>()?;
+                ctx.register::<CreateChatCompletionStreamResponse>()?;
+                ctx.register::<CreateCompletionRequest2>()?;
+                ctx.register::<CreateCompletionResponse>()?;
+                ctx.register::<CreateContainerBody>()?;
+                ctx.register::<CreateContainerFileBody>()?;
+                ctx.register::<CreateEmbeddingRequest2>()?;
+                ctx.register::<CreateEmbeddingResponse>()?;
+                ctx.register::<CreateEvalCompletionsRunDataSource>()?;
+                ctx.register::<CreateEvalCustomDataSourceConfig>()?;
+                ctx.register::<CreateEvalItem>()?;
+                ctx.register::<CreateEvalJsonlRunDataSource>()?;
+                ctx.register::<CreateEvalLabelModelGrader>()?;
+                ctx.register::<CreateEvalLogsDataSourceConfig>()?;
+                ctx.register::<CreateEvalRequest2>()?;
+                ctx.register::<CreateEvalResponsesRunDataSource>()?;
+                ctx.register::<CreateEvalRunRequest2>()?;
+                ctx.register::<CreateEvalStoredCompletionsDataSourceConfig>()?;
+                ctx.register::<CreateFileRequest2>()?;
+                ctx.register::<CreateFineTuningCheckpointPermissionRequest2>()?;
+                ctx.register::<CreateFineTuningJobRequest2>()?;
+                ctx.register::<CreateGroupBody>()?;
+                ctx.register::<CreateGroupUserBody>()?;
+                ctx.register::<CreateImageEditRequest2>()?;
+                ctx.register::<CreateImageRequest2>()?;
+                ctx.register::<CreateImageVariationRequest2>()?;
+                ctx.register::<CreateMessageRequest2>()?;
+                ctx.register::<CreateModelResponseProperties>()?;
+                ctx.register::<CreateModerationRequest2>()?;
+                ctx.register::<CreateModerationResponse>()?;
+                Ok(())
+            }
+            register_types_3(ctx)?;
+            fn register_types_4(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<CreateResponse>()?;
+                ctx.register::<CreateRunRequest2>()?;
+                ctx.register::<CreateSpeechRequest2>()?;
+                ctx.register::<CreateSpeechResponseStreamEvent>()?;
+                ctx.register::<CreateSpendAlertBody>()?;
+                ctx.register::<CreateThreadAndRunRequest2>()?;
+                ctx.register::<CreateThreadRequest2>()?;
+                ctx.register::<CreateTranscriptionRequest2>()?;
+                ctx.register::<CreateTranscriptionResponseDiarizedJson>()?;
+                ctx.register::<CreateTranscriptionResponseJson>()?;
+                ctx.register::<CreateTranscriptionResponseStreamEvent>()?;
+                ctx.register::<CreateTranscriptionResponseVerboseJson>()?;
+                ctx.register::<CreateTranslationRequest2>()?;
+                ctx.register::<CreateTranslationResponseJson>()?;
+                ctx.register::<CreateTranslationResponseVerboseJson>()?;
+                ctx.register::<CreateUploadRequest2>()?;
+                ctx.register::<CreateVectorStoreFileBatchRequest2>()?;
+                ctx.register::<CreateVectorStoreFileRequest2>()?;
+                ctx.register::<CreateVectorStoreRequest2>()?;
+                ctx.register::<CreateVoiceConsentRequest2>()?;
+                ctx.register::<CreateVoiceRequest2>()?;
+                ctx.register::<CustomToolCall>()?;
+                ctx.register::<CustomToolCallOutput>()?;
+                ctx.register::<CustomToolCallOutputResource>()?;
+                ctx.register::<CustomToolCallResource>()?;
+                ctx.register::<CustomToolChatCompletions>()?;
+                ctx.register::<DeleteAssistantResponse>()?;
+                ctx.register::<DeleteCertificateResponse>()?;
+                ctx.register::<DeleteFileResponse>()?;
+                ctx.register::<DeleteFineTuningCheckpointPermissionResponse>()?;
+                ctx.register::<DeleteMessageResponse>()?;
+                ctx.register::<DeleteModelResponse>()?;
+                Ok(())
+            }
+            register_types_4(ctx)?;
+            fn register_types_5(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<DeleteThreadResponse>()?;
+                ctx.register::<DeleteVectorStoreFileResponse>()?;
+                ctx.register::<DeleteVectorStoreResponse>()?;
+                ctx.register::<DeletedConversation>()?;
+                ctx.register::<DeletedRoleAssignmentResource>()?;
+                ctx.register::<DoneEvent>()?;
+                ctx.register::<EasyInputMessage>()?;
+                ctx.register::<EditImageBodyJsonParam>()?;
+                ctx.register::<Embedding>()?;
+                ctx.register::<Error>()?;
+                ctx.register::<ErrorEvent>()?;
+                ctx.register::<ErrorResponse>()?;
+                ctx.register::<Eval>()?;
+                ctx.register::<EvalApiError>()?;
+                ctx.register::<EvalCustomDataSourceConfig>()?;
+                ctx.register::<EvalGraderLabelModel>()?;
+                ctx.register::<EvalGraderPython>()?;
+                ctx.register::<EvalGraderScoreModel>()?;
+                ctx.register::<EvalGraderStringCheck>()?;
+                ctx.register::<EvalGraderTextSimilarity>()?;
+                ctx.register::<EvalItem>()?;
+                ctx.register::<EvalItemContent>()?;
+                ctx.register::<EvalItemContentArray>()?;
+                ctx.register::<EvalItemContentItem>()?;
+                ctx.register::<EvalItemContentOutputText>()?;
+                ctx.register::<EvalItemContentText>()?;
+                ctx.register::<EvalItemInputImage>()?;
+                ctx.register::<EvalJsonlFileContentSource>()?;
+                ctx.register::<EvalJsonlFileIdSource>()?;
+                ctx.register::<EvalList>()?;
+                ctx.register::<EvalLogsDataSourceConfig>()?;
+                ctx.register::<EvalResponsesSource>()?;
+                Ok(())
+            }
+            register_types_5(ctx)?;
+            fn register_types_6(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<EvalRun>()?;
+                ctx.register::<EvalRunList>()?;
+                ctx.register::<EvalRunOutputItem>()?;
+                ctx.register::<EvalRunOutputItemList>()?;
+                ctx.register::<EvalRunOutputItemResult>()?;
+                ctx.register::<EvalStoredCompletionsDataSourceConfig>()?;
+                ctx.register::<EvalStoredCompletionsSource>()?;
+                ctx.register::<FileExpirationAfter>()?;
+                ctx.register::<FilePath>()?;
+                ctx.register::<FileSearchRanker>()?;
+                ctx.register::<FileSearchRankingOptions>()?;
+                ctx.register::<FileSearchToolCall>()?;
+                ctx.register::<FineTuneChatCompletionRequestAssistantMessage>()?;
+                ctx.register::<FineTuneDPOHyperparameters>()?;
+                ctx.register::<FineTuneDPOMethod>()?;
+                ctx.register::<FineTuneMethod>()?;
+                ctx.register::<FineTuneReinforcementHyperparameters>()?;
+                ctx.register::<FineTuneReinforcementMethod>()?;
+                ctx.register::<FineTuneSupervisedHyperparameters>()?;
+                ctx.register::<FineTuneSupervisedMethod>()?;
+                ctx.register::<FineTuningCheckpointPermission>()?;
+                ctx.register::<FineTuningIntegration>()?;
+                ctx.register::<FineTuningJob>()?;
+                ctx.register::<FineTuningJobCheckpoint>()?;
+                ctx.register::<FineTuningJobEvent>()?;
+                ctx.register::<FunctionAndCustomToolCallOutput>()?;
+                ctx.register::<FunctionObject>()?;
+                ctx.register::<FunctionParameters>()?;
+                ctx.register::<FunctionToolCall>()?;
+                ctx.register::<FunctionToolCallOutput>()?;
+                ctx.register::<FunctionToolCallOutputResource>()?;
+                ctx.register::<FunctionToolCallResource>()?;
+                Ok(())
+            }
+            register_types_6(ctx)?;
+            fn register_types_7(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<GraderLabelModel>()?;
+                ctx.register::<GraderMulti>()?;
+                ctx.register::<GraderPython>()?;
+                ctx.register::<GraderScoreModel>()?;
+                ctx.register::<GraderStringCheck>()?;
+                ctx.register::<GraderTextSimilarity>()?;
+                ctx.register::<Group>()?;
+                ctx.register::<GroupDeletedResource>()?;
+                ctx.register::<GroupListResource>()?;
+                ctx.register::<GroupMemberUser>()?;
+                ctx.register::<GroupResourceWithSuccess>()?;
+                ctx.register::<GroupResponse>()?;
+                ctx.register::<GroupRoleAssignment>()?;
+                ctx.register::<GroupUser>()?;
+                ctx.register::<GroupUserAssignment>()?;
+                ctx.register::<GroupUserDeletedResource>()?;
+                ctx.register::<HostedToolPermission>()?;
+                ctx.register::<HostedToolPermissionUpdate>()?;
+                ctx.register::<Image>()?;
+                ctx.register::<ImageEditCompletedEvent>()?;
+                ctx.register::<ImageEditPartialImageEvent>()?;
+                ctx.register::<ImageEditStreamEvent>()?;
+                ctx.register::<ImageGenCompletedEvent>()?;
+                ctx.register::<ImageGenPartialImageEvent>()?;
+                ctx.register::<ImageGenStreamEvent>()?;
+                ctx.register::<ImageGenTool>()?;
+                ctx.register::<ImageGenToolCall>()?;
+                ctx.register::<ImageRefParam>()?;
+                ctx.register::<ImagesResponse>()?;
+                ctx.register::<ImagesUsage>()?;
+                ctx.register::<InputAudio>()?;
+                ctx.register::<InputContent>()?;
+                Ok(())
+            }
+            register_types_7(ctx)?;
+            fn register_types_8(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<InputItem>()?;
+                ctx.register::<InputMessage>()?;
+                ctx.register::<InputMessageContentList>()?;
+                ctx.register::<InputMessageResource>()?;
+                ctx.register::<InputParam>()?;
+                ctx.register::<Invite>()?;
+                ctx.register::<InviteDeleteResponse>()?;
+                ctx.register::<InviteListResponse>()?;
+                ctx.register::<InviteProjectGroupBody>()?;
+                ctx.register::<InviteRequest>()?;
+                ctx.register::<Item>()?;
+                ctx.register::<ItemResource>()?;
+                ctx.register::<ListAssistantsResponse>()?;
+                ctx.register::<ListAuditLogsResponse>()?;
+                ctx.register::<ListBatchesResponse>()?;
+                ctx.register::<ListCertificatesResponse>()?;
+                ctx.register::<ListFilesResponse>()?;
+                ctx.register::<ListFineTuningCheckpointPermissionResponse>()?;
+                ctx.register::<ListFineTuningJobCheckpointsResponse>()?;
+                ctx.register::<ListFineTuningJobEventsResponse>()?;
+                ctx.register::<ListMessagesResponse>()?;
+                ctx.register::<ListModelsResponse>()?;
+                ctx.register::<ListPaginatedFineTuningJobsResponse>()?;
+                ctx.register::<ListProjectCertificatesResponse>()?;
+                ctx.register::<ListRunStepsResponse>()?;
+                ctx.register::<ListRunsResponse>()?;
+                ctx.register::<ListVectorStoreFilesResponse>()?;
+                ctx.register::<ListVectorStoresResponse>()?;
+                ctx.register::<LocalShellToolCall>()?;
+                ctx.register::<LocalShellToolCallOutput>()?;
+                ctx.register::<LogProbProperties>()?;
+                ctx.register::<MCPApprovalRequest>()?;
+                Ok(())
+            }
+            register_types_8(ctx)?;
+            fn register_types_9(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<MCPApprovalResponse>()?;
+                ctx.register::<MCPApprovalResponseResource>()?;
+                ctx.register::<MCPListTools>()?;
+                ctx.register::<MCPListToolsTool>()?;
+                ctx.register::<MCPTool>()?;
+                ctx.register::<MCPToolCall>()?;
+                ctx.register::<MCPToolFilter>()?;
+                ctx.register::<MessageContentImageFileObject>()?;
+                ctx.register::<MessageContentImageUrlObject>()?;
+                ctx.register::<MessageContentRefusalObject>()?;
+                ctx.register::<MessageContentTextAnnotationsFileCitationObject>()?;
+                ctx.register::<MessageContentTextAnnotationsFilePathObject>()?;
+                ctx.register::<MessageContentTextObject>()?;
+                ctx.register::<MessageDeltaContentImageFileObject>()?;
+                ctx.register::<MessageDeltaContentImageUrlObject>()?;
+                ctx.register::<MessageDeltaContentRefusalObject>()?;
+                ctx.register::<MessageDeltaContentTextAnnotationsFileCitationObject>()?;
+                ctx.register::<MessageDeltaContentTextAnnotationsFilePathObject>()?;
+                ctx.register::<MessageDeltaContentTextObject>()?;
+                ctx.register::<MessageDeltaObject>()?;
+                ctx.register::<MessageObject>()?;
+                ctx.register::<MessagePhase>()?;
+                ctx.register::<MessageRequestContentTextObject>()?;
+                ctx.register::<MessageStreamEvent>()?;
+                ctx.register::<Metadata>()?;
+                ctx.register::<Model>()?;
+                ctx.register::<ModelIds>()?;
+                ctx.register::<ModelIdsCompaction>()?;
+                ctx.register::<ModelIdsResponses>()?;
+                ctx.register::<ModelIdsShared>()?;
+                ctx.register::<ModelResponseProperties>()?;
+                ctx.register::<ModifyAssistantRequest2>()?;
+                Ok(())
+            }
+            register_types_9(ctx)?;
+            fn register_types_10(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<ModifyCertificateRequest2>()?;
+                ctx.register::<ModifyMessageRequest2>()?;
+                ctx.register::<ModifyRunRequest2>()?;
+                ctx.register::<ModifyThreadRequest2>()?;
+                ctx.register::<NoiseReductionType>()?;
+                ctx.register::<OpenAIFile>()?;
+                ctx.register::<OrganizationCertificate>()?;
+                ctx.register::<OrganizationCertificateActivationResponse>()?;
+                ctx.register::<OrganizationCertificateDeactivationResponse>()?;
+                ctx.register::<OrganizationDataRetention>()?;
+                ctx.register::<OrganizationProjectCertificate>()?;
+                ctx.register::<OrganizationProjectCertificateActivationResponse>()?;
+                ctx.register::<OrganizationProjectCertificateDeactivationResponse>()?;
+                ctx.register::<OrganizationSpendAlert>()?;
+                ctx.register::<OrganizationSpendAlertDeletedResource>()?;
+                ctx.register::<OrganizationSpendAlertListResource>()?;
+                ctx.register::<OtherChunkingStrategyResponseParam>()?;
+                ctx.register::<OutputAudio>()?;
+                ctx.register::<OutputContent>()?;
+                ctx.register::<OutputItem>()?;
+                ctx.register::<OutputMessage>()?;
+                ctx.register::<OutputMessageContent>()?;
+                ctx.register::<ParallelToolCalls>()?;
+                ctx.register::<PartialImages>()?;
+                ctx.register::<PredictionContent>()?;
+                ctx.register::<Project>()?;
+                ctx.register::<ProjectApiKey>()?;
+                ctx.register::<ProjectApiKeyDeleteResponse>()?;
+                ctx.register::<ProjectApiKeyListResponse>()?;
+                ctx.register::<ProjectApiKeyOwnerServiceAccount>()?;
+                ctx.register::<ProjectApiKeyOwnerUser>()?;
+                ctx.register::<ProjectCreateRequest>()?;
+                Ok(())
+            }
+            register_types_10(ctx)?;
+            fn register_types_11(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<ProjectDataRetention>()?;
+                ctx.register::<ProjectGroup>()?;
+                ctx.register::<ProjectGroupDeletedResource>()?;
+                ctx.register::<ProjectGroupListResource>()?;
+                ctx.register::<ProjectHostedToolPermissions>()?;
+                ctx.register::<ProjectHostedToolPermissionsUpdateRequest>()?;
+                ctx.register::<ProjectListResponse>()?;
+                ctx.register::<ProjectModelPermissions>()?;
+                ctx.register::<ProjectModelPermissionsDeleteResponse>()?;
+                ctx.register::<ProjectModelPermissionsUpdateRequest>()?;
+                ctx.register::<ProjectRateLimit>()?;
+                ctx.register::<ProjectRateLimitListResponse>()?;
+                ctx.register::<ProjectRateLimitUpdateRequest>()?;
+                ctx.register::<ProjectServiceAccount>()?;
+                ctx.register::<ProjectServiceAccountApiKey>()?;
+                ctx.register::<ProjectServiceAccountCreateRequest>()?;
+                ctx.register::<ProjectServiceAccountCreateResponse>()?;
+                ctx.register::<ProjectServiceAccountDeleteResponse>()?;
+                ctx.register::<ProjectServiceAccountListResponse>()?;
+                ctx.register::<ProjectSpendAlert>()?;
+                ctx.register::<ProjectSpendAlertDeletedResource>()?;
+                ctx.register::<ProjectSpendAlertListResource>()?;
+                ctx.register::<ProjectUpdateRequest>()?;
+                ctx.register::<ProjectUser>()?;
+                ctx.register::<ProjectUserCreateRequest>()?;
+                ctx.register::<ProjectUserDeleteResponse>()?;
+                ctx.register::<ProjectUserListResponse>()?;
+                ctx.register::<ProjectUserUpdateRequest>()?;
+                ctx.register::<Prompt>()?;
+                ctx.register::<PublicAssignOrganizationGroupRoleBody>()?;
+                ctx.register::<PublicCreateOrganizationRoleBody>()?;
+                ctx.register::<PublicRoleListResource>()?;
+                Ok(())
+            }
+            register_types_11(ctx)?;
+            fn register_types_12(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<PublicUpdateOrganizationRoleBody>()?;
+                ctx.register::<RealtimeAudioFormats>()?;
+                ctx.register::<RealtimeBetaClientEventConversationItemCreate>()?;
+                ctx.register::<RealtimeBetaClientEventConversationItemDelete>()?;
+                ctx.register::<RealtimeBetaClientEventConversationItemRetrieve>()?;
+                ctx.register::<RealtimeBetaClientEventConversationItemTruncate>()?;
+                ctx.register::<RealtimeBetaClientEventInputAudioBufferAppend>()?;
+                ctx.register::<RealtimeBetaClientEventInputAudioBufferClear>()?;
+                ctx.register::<RealtimeBetaClientEventInputAudioBufferCommit>()?;
+                ctx.register::<RealtimeBetaClientEventOutputAudioBufferClear>()?;
+                ctx.register::<RealtimeBetaClientEventResponseCancel>()?;
+                ctx.register::<RealtimeBetaClientEventResponseCreate>()?;
+                ctx.register::<RealtimeBetaClientEventSessionUpdate>()?;
+                ctx.register::<RealtimeBetaClientEventTranscriptionSessionUpdate>()?;
+                ctx.register::<RealtimeBetaResponse>()?;
+                ctx.register::<RealtimeBetaResponseCreateParams>()?;
+                ctx.register::<RealtimeBetaServerEventConversationItemCreated>()?;
+                ctx.register::<RealtimeBetaServerEventConversationItemDeleted>()?;
+                ctx.register::<
+                        RealtimeBetaServerEventConversationItemInputAudioTranscriptionCompleted,
+                    >()?;
+                ctx.register::<
+                        RealtimeBetaServerEventConversationItemInputAudioTranscriptionDelta,
+                    >()?;
+                ctx.register::<
+                        RealtimeBetaServerEventConversationItemInputAudioTranscriptionFailed,
+                    >()?;
+                ctx.register::<
+                        RealtimeBetaServerEventConversationItemInputAudioTranscriptionSegment,
+                    >()?;
+                ctx.register::<RealtimeBetaServerEventConversationItemRetrieved>()?;
+                ctx.register::<RealtimeBetaServerEventConversationItemTruncated>()?;
+                ctx.register::<RealtimeBetaServerEventError>()?;
+                ctx.register::<RealtimeBetaServerEventInputAudioBufferCleared>()?;
+                ctx.register::<RealtimeBetaServerEventInputAudioBufferCommitted>()?;
+                ctx.register::<RealtimeBetaServerEventInputAudioBufferSpeechStarted>()?;
+                ctx.register::<RealtimeBetaServerEventInputAudioBufferSpeechStopped>()?;
+                ctx.register::<RealtimeBetaServerEventMCPListToolsCompleted>()?;
+                ctx.register::<RealtimeBetaServerEventMCPListToolsFailed>()?;
+                ctx.register::<RealtimeBetaServerEventMCPListToolsInProgress>()?;
+                Ok(())
+            }
+            register_types_12(ctx)?;
+            fn register_types_13(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<RealtimeBetaServerEventRateLimitsUpdated>()?;
+                ctx.register::<RealtimeBetaServerEventResponseAudioDelta>()?;
+                ctx.register::<RealtimeBetaServerEventResponseAudioDone>()?;
+                ctx.register::<RealtimeBetaServerEventResponseAudioTranscriptDelta>()?;
+                ctx.register::<RealtimeBetaServerEventResponseAudioTranscriptDone>()?;
+                ctx.register::<RealtimeBetaServerEventResponseContentPartAdded>()?;
+                ctx.register::<RealtimeBetaServerEventResponseContentPartDone>()?;
+                ctx.register::<RealtimeBetaServerEventResponseCreated>()?;
+                ctx.register::<RealtimeBetaServerEventResponseDone>()?;
+                ctx.register::<
+                        RealtimeBetaServerEventResponseFunctionCallArgumentsDelta,
+                    >()?;
+                ctx.register::<
+                        RealtimeBetaServerEventResponseFunctionCallArgumentsDone,
+                    >()?;
+                ctx.register::<RealtimeBetaServerEventResponseMCPCallArgumentsDelta>()?;
+                ctx.register::<RealtimeBetaServerEventResponseMCPCallArgumentsDone>()?;
+                ctx.register::<RealtimeBetaServerEventResponseMCPCallCompleted>()?;
+                ctx.register::<RealtimeBetaServerEventResponseMCPCallFailed>()?;
+                ctx.register::<RealtimeBetaServerEventResponseMCPCallInProgress>()?;
+                ctx.register::<RealtimeBetaServerEventResponseOutputItemAdded>()?;
+                ctx.register::<RealtimeBetaServerEventResponseOutputItemDone>()?;
+                ctx.register::<RealtimeBetaServerEventResponseTextDelta>()?;
+                ctx.register::<RealtimeBetaServerEventResponseTextDone>()?;
+                ctx.register::<RealtimeBetaServerEventSessionCreated>()?;
+                ctx.register::<RealtimeBetaServerEventSessionUpdated>()?;
+                ctx.register::<RealtimeBetaServerEventTranscriptionSessionCreated>()?;
+                ctx.register::<RealtimeBetaServerEventTranscriptionSessionUpdated>()?;
+                ctx.register::<RealtimeCallCreateRequest>()?;
+                ctx.register::<RealtimeCallReferRequest>()?;
+                ctx.register::<RealtimeCallRejectRequest>()?;
+                ctx.register::<RealtimeClientEvent>()?;
+                ctx.register::<RealtimeClientEventConversationItemCreate>()?;
+                ctx.register::<RealtimeClientEventConversationItemDelete>()?;
+                ctx.register::<RealtimeClientEventConversationItemRetrieve>()?;
+                ctx.register::<RealtimeClientEventConversationItemTruncate>()?;
+                Ok(())
+            }
+            register_types_13(ctx)?;
+            fn register_types_14(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<RealtimeClientEventInputAudioBufferAppend>()?;
+                ctx.register::<RealtimeClientEventInputAudioBufferClear>()?;
+                ctx.register::<RealtimeClientEventInputAudioBufferCommit>()?;
+                ctx.register::<RealtimeClientEventOutputAudioBufferClear>()?;
+                ctx.register::<RealtimeClientEventResponseCancel>()?;
+                ctx.register::<RealtimeClientEventResponseCreate>()?;
+                ctx.register::<RealtimeClientEventSessionUpdate>()?;
+                ctx.register::<RealtimeClientEventTranscriptionSessionUpdate>()?;
+                ctx.register::<RealtimeConversationItem>()?;
+                ctx.register::<RealtimeConversationItemFunctionCall>()?;
+                ctx.register::<RealtimeConversationItemFunctionCallOutput>()?;
+                ctx.register::<RealtimeConversationItemMessageAssistant>()?;
+                ctx.register::<RealtimeConversationItemMessageSystem>()?;
+                ctx.register::<RealtimeConversationItemMessageUser>()?;
+                ctx.register::<RealtimeConversationItemWithReference>()?;
+                ctx.register::<RealtimeCreateClientSecretRequest>()?;
+                ctx.register::<RealtimeCreateClientSecretResponse>()?;
+                ctx.register::<RealtimeFunctionTool>()?;
+                ctx.register::<RealtimeMCPApprovalRequest>()?;
+                ctx.register::<RealtimeMCPApprovalResponse>()?;
+                ctx.register::<RealtimeMCPHTTPError>()?;
+                ctx.register::<RealtimeMCPListTools>()?;
+                ctx.register::<RealtimeMCPProtocolError>()?;
+                ctx.register::<RealtimeMCPToolCall>()?;
+                ctx.register::<RealtimeMCPToolExecutionError>()?;
+                ctx.register::<RealtimeReasoning>()?;
+                ctx.register::<RealtimeReasoningEffort>()?;
+                ctx.register::<RealtimeResponse>()?;
+                ctx.register::<RealtimeResponseCreateParams>()?;
+                ctx.register::<RealtimeServerEvent>()?;
+                ctx.register::<RealtimeServerEventConversationCreated>()?;
+                ctx.register::<RealtimeServerEventConversationItemAdded>()?;
+                Ok(())
+            }
+            register_types_14(ctx)?;
+            fn register_types_15(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<RealtimeServerEventConversationItemCreated>()?;
+                ctx.register::<RealtimeServerEventConversationItemDeleted>()?;
+                ctx.register::<RealtimeServerEventConversationItemDone>()?;
+                ctx.register::<
+                        RealtimeServerEventConversationItemInputAudioTranscriptionCompleted,
+                    >()?;
+                ctx.register::<
+                        RealtimeServerEventConversationItemInputAudioTranscriptionDelta,
+                    >()?;
+                ctx.register::<
+                        RealtimeServerEventConversationItemInputAudioTranscriptionFailed,
+                    >()?;
+                ctx.register::<
+                        RealtimeServerEventConversationItemInputAudioTranscriptionSegment,
+                    >()?;
+                ctx.register::<RealtimeServerEventConversationItemRetrieved>()?;
+                ctx.register::<RealtimeServerEventConversationItemTruncated>()?;
+                ctx.register::<RealtimeServerEventError>()?;
+                ctx.register::<RealtimeServerEventInputAudioBufferCleared>()?;
+                ctx.register::<RealtimeServerEventInputAudioBufferCommitted>()?;
+                ctx.register::<RealtimeServerEventInputAudioBufferDtmfEventReceived>()?;
+                ctx.register::<RealtimeServerEventInputAudioBufferSpeechStarted>()?;
+                ctx.register::<RealtimeServerEventInputAudioBufferSpeechStopped>()?;
+                ctx.register::<RealtimeServerEventInputAudioBufferTimeoutTriggered>()?;
+                ctx.register::<RealtimeServerEventMCPListToolsCompleted>()?;
+                ctx.register::<RealtimeServerEventMCPListToolsFailed>()?;
+                ctx.register::<RealtimeServerEventMCPListToolsInProgress>()?;
+                ctx.register::<RealtimeServerEventOutputAudioBufferCleared>()?;
+                ctx.register::<RealtimeServerEventOutputAudioBufferStarted>()?;
+                ctx.register::<RealtimeServerEventOutputAudioBufferStopped>()?;
+                ctx.register::<RealtimeServerEventRateLimitsUpdated>()?;
+                ctx.register::<RealtimeServerEventResponseAudioDelta>()?;
+                ctx.register::<RealtimeServerEventResponseAudioDone>()?;
+                ctx.register::<RealtimeServerEventResponseAudioTranscriptDelta>()?;
+                ctx.register::<RealtimeServerEventResponseAudioTranscriptDone>()?;
+                ctx.register::<RealtimeServerEventResponseContentPartAdded>()?;
+                ctx.register::<RealtimeServerEventResponseContentPartDone>()?;
+                ctx.register::<RealtimeServerEventResponseCreated>()?;
+                ctx.register::<RealtimeServerEventResponseDone>()?;
+                ctx.register::<RealtimeServerEventResponseFunctionCallArgumentsDelta>()?;
+                Ok(())
+            }
+            register_types_15(ctx)?;
+            fn register_types_16(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<RealtimeServerEventResponseFunctionCallArgumentsDone>()?;
+                ctx.register::<RealtimeServerEventResponseMCPCallArgumentsDelta>()?;
+                ctx.register::<RealtimeServerEventResponseMCPCallArgumentsDone>()?;
+                ctx.register::<RealtimeServerEventResponseMCPCallCompleted>()?;
+                ctx.register::<RealtimeServerEventResponseMCPCallFailed>()?;
+                ctx.register::<RealtimeServerEventResponseMCPCallInProgress>()?;
+                ctx.register::<RealtimeServerEventResponseOutputItemAdded>()?;
+                ctx.register::<RealtimeServerEventResponseOutputItemDone>()?;
+                ctx.register::<RealtimeServerEventResponseTextDelta>()?;
+                ctx.register::<RealtimeServerEventResponseTextDone>()?;
+                ctx.register::<RealtimeServerEventSessionCreated>()?;
+                ctx.register::<RealtimeServerEventSessionUpdated>()?;
+                ctx.register::<RealtimeServerEventTranscriptionSessionUpdated>()?;
+                ctx.register::<RealtimeSession>()?;
+                ctx.register::<RealtimeSessionCreateRequest>()?;
+                ctx.register::<RealtimeSessionCreateRequestGA>()?;
+                ctx.register::<RealtimeSessionCreateResponse>()?;
+                ctx.register::<RealtimeSessionCreateResponseGA>()?;
+                ctx.register::<RealtimeTranscriptionSessionCreateRequest>()?;
+                ctx.register::<RealtimeTranscriptionSessionCreateRequestGA>()?;
+                ctx.register::<RealtimeTranscriptionSessionCreateResponse>()?;
+                ctx.register::<RealtimeTranscriptionSessionCreateResponseGA>()?;
+                ctx.register::<RealtimeTranslationClientEvent>()?;
+                ctx.register::<RealtimeTranslationClientEventInputAudioBufferAppend>()?;
+                ctx.register::<RealtimeTranslationClientEventSessionClose>()?;
+                ctx.register::<RealtimeTranslationClientEventSessionUpdate>()?;
+                ctx.register::<RealtimeTranslationClientSecretCreateRequest>()?;
+                ctx.register::<RealtimeTranslationClientSecretCreateResponse>()?;
+                ctx.register::<RealtimeTranslationServerEvent>()?;
+                ctx.register::<RealtimeTranslationServerEventSessionClosed>()?;
+                ctx.register::<RealtimeTranslationServerEventSessionCreated>()?;
+                ctx.register::<
+                        RealtimeTranslationServerEventSessionInputTranscriptDelta,
+                    >()?;
+                Ok(())
+            }
+            register_types_16(ctx)?;
+            fn register_types_17(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<RealtimeTranslationServerEventSessionOutputAudioDelta>()?;
+                ctx.register::<
+                        RealtimeTranslationServerEventSessionOutputTranscriptDelta,
+                    >()?;
+                ctx.register::<RealtimeTranslationServerEventSessionUpdated>()?;
+                ctx.register::<RealtimeTranslationSession>()?;
+                ctx.register::<RealtimeTranslationSessionCreateRequest>()?;
+                ctx.register::<RealtimeTranslationSessionUpdateRequest>()?;
+                ctx.register::<RealtimeTruncation>()?;
+                ctx.register::<RealtimeTurnDetection>()?;
+                ctx.register::<Reasoning>()?;
+                ctx.register::<ReasoningEffort>()?;
+                ctx.register::<ReasoningItem>()?;
+                ctx.register::<Response>()?;
+                ctx.register::<ResponseAudioDeltaEvent>()?;
+                ctx.register::<ResponseAudioDoneEvent>()?;
+                ctx.register::<ResponseAudioTranscriptDeltaEvent>()?;
+                ctx.register::<ResponseAudioTranscriptDoneEvent>()?;
+                ctx.register::<ResponseCodeInterpreterCallCodeDeltaEvent>()?;
+                ctx.register::<ResponseCodeInterpreterCallCodeDoneEvent>()?;
+                ctx.register::<ResponseCodeInterpreterCallCompletedEvent>()?;
+                ctx.register::<ResponseCodeInterpreterCallInProgressEvent>()?;
+                ctx.register::<ResponseCodeInterpreterCallInterpretingEvent>()?;
+                ctx.register::<ResponseCompletedEvent>()?;
+                ctx.register::<ResponseContentPartAddedEvent>()?;
+                ctx.register::<ResponseContentPartDoneEvent>()?;
+                ctx.register::<ResponseCreatedEvent>()?;
+                ctx.register::<ResponseCustomToolCallInputDeltaEvent>()?;
+                ctx.register::<ResponseCustomToolCallInputDoneEvent>()?;
+                ctx.register::<ResponseError>()?;
+                ctx.register::<ResponseErrorCode>()?;
+                ctx.register::<ResponseErrorEvent>()?;
+                ctx.register::<ResponseFailedEvent>()?;
+                ctx.register::<ResponseFileSearchCallCompletedEvent>()?;
+                Ok(())
+            }
+            register_types_17(ctx)?;
+            fn register_types_18(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<ResponseFileSearchCallInProgressEvent>()?;
+                ctx.register::<ResponseFileSearchCallSearchingEvent>()?;
+                ctx.register::<ResponseFormatJsonObject>()?;
+                ctx.register::<ResponseFormatJsonSchema>()?;
+                ctx.register::<ResponseFormatJsonSchemaSchema>()?;
+                ctx.register::<ResponseFormatText>()?;
+                ctx.register::<ResponseFormatTextGrammar>()?;
+                ctx.register::<ResponseFormatTextPython>()?;
+                ctx.register::<ResponseFunctionCallArgumentsDeltaEvent>()?;
+                ctx.register::<ResponseFunctionCallArgumentsDoneEvent>()?;
+                ctx.register::<ResponseImageGenCallCompletedEvent>()?;
+                ctx.register::<ResponseImageGenCallGeneratingEvent>()?;
+                ctx.register::<ResponseImageGenCallInProgressEvent>()?;
+                ctx.register::<ResponseImageGenCallPartialImageEvent>()?;
+                ctx.register::<ResponseInProgressEvent>()?;
+                ctx.register::<ResponseIncompleteEvent>()?;
+                ctx.register::<ResponseItemList>()?;
+                ctx.register::<ResponseLogProb>()?;
+                ctx.register::<ResponseMCPCallArgumentsDeltaEvent>()?;
+                ctx.register::<ResponseMCPCallArgumentsDoneEvent>()?;
+                ctx.register::<ResponseMCPCallCompletedEvent>()?;
+                ctx.register::<ResponseMCPCallFailedEvent>()?;
+                ctx.register::<ResponseMCPCallInProgressEvent>()?;
+                ctx.register::<ResponseMCPListToolsCompletedEvent>()?;
+                ctx.register::<ResponseMCPListToolsFailedEvent>()?;
+                ctx.register::<ResponseMCPListToolsInProgressEvent>()?;
+                ctx.register::<ResponseModalities>()?;
+                ctx.register::<ResponseOutputItemAddedEvent>()?;
+                ctx.register::<ResponseOutputItemDoneEvent>()?;
+                ctx.register::<ResponseOutputTextAnnotationAddedEvent>()?;
+                ctx.register::<ResponsePromptVariables>()?;
+                ctx.register::<ResponseProperties>()?;
+                Ok(())
+            }
+            register_types_18(ctx)?;
+            fn register_types_19(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<ResponseQueuedEvent>()?;
+                ctx.register::<ResponseReasoningSummaryPartAddedEvent>()?;
+                ctx.register::<ResponseReasoningSummaryPartDoneEvent>()?;
+                ctx.register::<ResponseReasoningSummaryTextDeltaEvent>()?;
+                ctx.register::<ResponseReasoningSummaryTextDoneEvent>()?;
+                ctx.register::<ResponseReasoningTextDeltaEvent>()?;
+                ctx.register::<ResponseReasoningTextDoneEvent>()?;
+                ctx.register::<ResponseRefusalDeltaEvent>()?;
+                ctx.register::<ResponseRefusalDoneEvent>()?;
+                ctx.register::<ResponseStreamEvent>()?;
+                ctx.register::<ResponseStreamOptions>()?;
+                ctx.register::<ResponseTextDeltaEvent>()?;
+                ctx.register::<ResponseTextDoneEvent>()?;
+                ctx.register::<ResponseTextParam>()?;
+                ctx.register::<ResponseUsage>()?;
+                ctx.register::<ResponseWebSearchCallCompletedEvent>()?;
+                ctx.register::<ResponseWebSearchCallInProgressEvent>()?;
+                ctx.register::<ResponseWebSearchCallSearchingEvent>()?;
+                ctx.register::<ResponsesClientEvent>()?;
+                ctx.register::<ResponsesClientEventResponseCreate>()?;
+                ctx.register::<ResponsesServerEvent>()?;
+                ctx.register::<Role>()?;
+                ctx.register::<RoleDeletedResource>()?;
+                ctx.register::<RoleListResource>()?;
+                ctx.register::<RunCompletionUsage>()?;
+                ctx.register::<RunGraderRequest2>()?;
+                ctx.register::<RunGraderResponse>()?;
+                ctx.register::<RunObject>()?;
+                ctx.register::<RunStepCompletionUsage>()?;
+                ctx.register::<RunStepDeltaObject>()?;
+                ctx.register::<RunStepDeltaStepDetailsMessageCreationObject>()?;
+                ctx.register::<RunStepDeltaStepDetailsToolCallsCodeObject>()?;
+                Ok(())
+            }
+            register_types_19(ctx)?;
+            fn register_types_20(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<RunStepDeltaStepDetailsToolCallsCodeOutputImageObject>()?;
+                ctx.register::<RunStepDeltaStepDetailsToolCallsCodeOutputLogsObject>()?;
+                ctx.register::<RunStepDeltaStepDetailsToolCallsFileSearchObject>()?;
+                ctx.register::<RunStepDeltaStepDetailsToolCallsFunctionObject>()?;
+                ctx.register::<RunStepDeltaStepDetailsToolCallsObject>()?;
+                ctx.register::<RunStepDetailsMessageCreationObject>()?;
+                ctx.register::<RunStepDetailsToolCallsCodeObject>()?;
+                ctx.register::<RunStepDetailsToolCallsCodeOutputImageObject>()?;
+                ctx.register::<RunStepDetailsToolCallsCodeOutputLogsObject>()?;
+                ctx.register::<RunStepDetailsToolCallsFileSearchObject>()?;
+                ctx.register::<RunStepDetailsToolCallsFileSearchRankingOptionsObject>()?;
+                ctx.register::<RunStepDetailsToolCallsFileSearchResultObject>()?;
+                ctx.register::<RunStepDetailsToolCallsFunctionObject>()?;
+                ctx.register::<RunStepDetailsToolCallsObject>()?;
+                ctx.register::<RunStepObject>()?;
+                ctx.register::<RunStepStreamEvent>()?;
+                ctx.register::<RunStreamEvent>()?;
+                ctx.register::<RunToolCallObject>()?;
+                ctx.register::<ServiceTier>()?;
+                ctx.register::<SpeechAudioDeltaEvent>()?;
+                ctx.register::<SpeechAudioDoneEvent>()?;
+                ctx.register::<SpendAlertNotificationChannel>()?;
+                ctx.register::<StaticChunkingStrategy>()?;
+                ctx.register::<StaticChunkingStrategyRequestParam>()?;
+                ctx.register::<StaticChunkingStrategyResponseParam>()?;
+                ctx.register::<StopConfiguration>()?;
+                ctx.register::<SubmitToolOutputsRunRequest>()?;
+                ctx.register::<TextResponseFormatConfiguration>()?;
+                ctx.register::<TextResponseFormatJsonSchema>()?;
+                ctx.register::<ThreadObject>()?;
+                ctx.register::<ThreadStreamEvent>()?;
+                ctx.register::<ToggleCertificatesRequest>()?;
+                Ok(())
+            }
+            register_types_20(ctx)?;
+            fn register_types_21(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<Tool>()?;
+                ctx.register::<ToolChoiceAllowed>()?;
+                ctx.register::<ToolChoiceCustom>()?;
+                ctx.register::<ToolChoiceFunction>()?;
+                ctx.register::<ToolChoiceMCP>()?;
+                ctx.register::<ToolChoiceOptions>()?;
+                ctx.register::<ToolChoiceParam>()?;
+                ctx.register::<ToolChoiceTypes>()?;
+                ctx.register::<ToolsArray>()?;
+                ctx.register::<TranscriptTextDeltaEvent>()?;
+                ctx.register::<TranscriptTextDoneEvent>()?;
+                ctx.register::<TranscriptTextSegmentEvent>()?;
+                ctx.register::<TranscriptTextUsageDuration>()?;
+                ctx.register::<TranscriptTextUsageTokens>()?;
+                ctx.register::<TranscriptionChunkingStrategy>()?;
+                ctx.register::<TranscriptionDiarizedSegment>()?;
+                ctx.register::<TranscriptionInclude>()?;
+                ctx.register::<TranscriptionLanguage>()?;
+                ctx.register::<TranscriptionSegment>()?;
+                ctx.register::<TranscriptionWord>()?;
+                ctx.register::<TruncationObject>()?;
+                ctx.register::<UpdateGroupBody>()?;
+                ctx.register::<UpdateOrganizationDataRetentionBody>()?;
+                ctx.register::<UpdateProjectDataRetentionBody>()?;
+                ctx.register::<UpdateProjectServiceAccountBody>()?;
+                ctx.register::<UpdateVectorStoreFileAttributesRequest2>()?;
+                ctx.register::<UpdateVectorStoreRequest>()?;
+                ctx.register::<UpdateVoiceConsentRequest2>()?;
+                ctx.register::<Upload>()?;
+                ctx.register::<UploadCertificateRequest2>()?;
+                ctx.register::<UploadPart>()?;
+                ctx.register::<UsageAudioSpeechesResult>()?;
+                Ok(())
+            }
+            register_types_21(ctx)?;
+            fn register_types_22(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<UsageAudioTranscriptionsResult>()?;
+                ctx.register::<UsageCodeInterpreterSessionsResult>()?;
+                ctx.register::<UsageCompletionsResult>()?;
+                ctx.register::<UsageEmbeddingsResult>()?;
+                ctx.register::<UsageFileSearchCallsResult>()?;
+                ctx.register::<UsageImagesResult>()?;
+                ctx.register::<UsageModerationsResult>()?;
+                ctx.register::<UsageResponse>()?;
+                ctx.register::<UsageTimeBucket>()?;
+                ctx.register::<UsageVectorStoresResult>()?;
+                ctx.register::<UsageWebSearchCallsResult>()?;
+                ctx.register::<User>()?;
+                ctx.register::<UserDeleteResponse>()?;
+                ctx.register::<UserListResource>()?;
+                ctx.register::<UserListResponse>()?;
+                ctx.register::<UserRoleAssignment>()?;
+                ctx.register::<UserRoleUpdateRequest>()?;
+                ctx.register::<VadConfig>()?;
+                ctx.register::<ValidateGraderRequest2>()?;
+                ctx.register::<ValidateGraderResponse>()?;
+                ctx.register::<VectorStoreExpirationAfter>()?;
+                ctx.register::<VectorStoreFileAttributes>()?;
+                ctx.register::<VectorStoreFileBatchObject>()?;
+                ctx.register::<VectorStoreFileContentResponse>()?;
+                ctx.register::<VectorStoreFileObject>()?;
+                ctx.register::<VectorStoreObject>()?;
+                ctx.register::<VectorStoreSearchRequest>()?;
+                ctx.register::<VectorStoreSearchResultContentObject>()?;
+                ctx.register::<VectorStoreSearchResultItem>()?;
+                ctx.register::<VectorStoreSearchResultsPage>()?;
+                ctx.register::<Verbosity>()?;
+                ctx.register::<VoiceConsentDeletedResource>()?;
+                Ok(())
+            }
+            register_types_22(ctx)?;
+            fn register_types_23(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<VoiceConsentListResource>()?;
+                ctx.register::<VoiceConsentResource>()?;
+                ctx.register::<VoiceIdsOrCustomVoice>()?;
+                ctx.register::<VoiceIdsShared>()?;
+                ctx.register::<VoiceResource>()?;
+                ctx.register::<WebSearchActionFind>()?;
+                ctx.register::<WebSearchActionOpenPage>()?;
+                ctx.register::<WebSearchActionSearch>()?;
+                ctx.register::<WebSearchApproximateLocation>()?;
+                ctx.register::<WebSearchContextSize>()?;
+                ctx.register::<WebSearchLocation>()?;
+                ctx.register::<WebSearchTool>()?;
+                ctx.register::<WebSearchToolCall>()?;
+                ctx.register::<WebhookBatchCancelled>()?;
+                ctx.register::<WebhookBatchCompleted>()?;
+                ctx.register::<WebhookBatchExpired>()?;
+                ctx.register::<WebhookBatchFailed>()?;
+                ctx.register::<WebhookEvalRunCanceled>()?;
+                ctx.register::<WebhookEvalRunFailed>()?;
+                ctx.register::<WebhookEvalRunSucceeded>()?;
+                ctx.register::<WebhookFineTuningJobCancelled>()?;
+                ctx.register::<WebhookFineTuningJobFailed>()?;
+                ctx.register::<WebhookFineTuningJobSucceeded>()?;
+                ctx.register::<WebhookLiveCallIncoming>()?;
+                ctx.register::<WebhookRealtimeCallIncoming>()?;
+                ctx.register::<WebhookResponseCancelled>()?;
+                ctx.register::<WebhookResponseCompleted>()?;
+                ctx.register::<WebhookResponseFailed>()?;
+                ctx.register::<WebhookResponseIncomplete>()?;
+                ctx.register::<ModerationInputType>()?;
+                ctx.register::<ModerationResultBody>()?;
+                ctx.register::<PromptCacheTTLEnum>()?;
+                Ok(())
+            }
+            register_types_23(ctx)?;
+            fn register_types_24(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<PromptCacheModeEnum>()?;
+                ctx.register::<PromptCacheOptionsParam>()?;
+                ctx.register::<PromptCacheBreakpointParam>()?;
+                ctx.register::<ModerationMode>()?;
+                ctx.register::<ModerationConfigParam>()?;
+                ctx.register::<ModerationPolicyParam>()?;
+                ctx.register::<ModerationParam>()?;
+                ctx.register::<SkillReferenceParam>()?;
+                ctx.register::<InlineSkillSourceParam>()?;
+                ctx.register::<InlineSkillParam>()?;
+                ctx.register::<ContainerNetworkPolicyDisabledParam>()?;
+                ctx.register::<ContainerNetworkPolicyDomainSecretParam>()?;
+                ctx.register::<ContainerNetworkPolicyAllowlistParam>()?;
+                ctx.register::<IncludeEnum>()?;
+                ctx.register::<MessageStatus>()?;
+                ctx.register::<MessageRole>()?;
+                ctx.register::<PromptCacheBreakpointConfig>()?;
+                ctx.register::<InputTextContent>()?;
+                ctx.register::<FileCitationBody>()?;
+                ctx.register::<UrlCitationBody>()?;
+                ctx.register::<ContainerFileCitationBody>()?;
+                ctx.register::<Annotation>()?;
+                ctx.register::<TopLogProb>()?;
+                ctx.register::<LogProb>()?;
+                ctx.register::<OutputTextContent>()?;
+                ctx.register::<TextContent>()?;
+                ctx.register::<SummaryTextContent>()?;
+                ctx.register::<ReasoningTextContent>()?;
+                ctx.register::<RefusalContent>()?;
+                ctx.register::<ImageDetail>()?;
+                ctx.register::<InputImageContent>()?;
+                ctx.register::<ComputerScreenshotContent>()?;
+                Ok(())
+            }
+            register_types_24(ctx)?;
+            fn register_types_25(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<FileInputDetail>()?;
+                ctx.register::<InputFileContent>()?;
+                ctx.register::<MessagePhase2>()?;
+                ctx.register::<Message>()?;
+                ctx.register::<DirectToolCallCaller>()?;
+                ctx.register::<ProgramToolCallCaller>()?;
+                ctx.register::<ToolCallCaller>()?;
+                ctx.register::<FunctionCallStatus>()?;
+                ctx.register::<DirectToolCallCallerParam>()?;
+                ctx.register::<ProgramToolCallCallerParam>()?;
+                ctx.register::<ToolCallCallerParam>()?;
+                ctx.register::<FunctionCallOutputStatusEnum>()?;
+                ctx.register::<ClickButtonType>()?;
+                ctx.register::<ClickParam>()?;
+                ctx.register::<DoubleClickAction>()?;
+                ctx.register::<CoordParam>()?;
+                ctx.register::<DragParam>()?;
+                ctx.register::<KeyPressAction>()?;
+                ctx.register::<MoveParam>()?;
+                ctx.register::<ScreenshotParam>()?;
+                ctx.register::<ScrollParam>()?;
+                ctx.register::<TypeParam>()?;
+                ctx.register::<WaitParam>()?;
+                ctx.register::<ComputerCallSafetyCheckParam>()?;
+                ctx.register::<ComputerCallOutputStatus>()?;
+                ctx.register::<ToolSearchExecutionType>()?;
+                ctx.register::<ToolSearchCall>()?;
+                ctx.register::<CallableToolAllowedCaller>()?;
+                ctx.register::<FunctionTool>()?;
+                ctx.register::<RankerVersionType>()?;
+                ctx.register::<HybridSearchOptions>()?;
+                ctx.register::<RankingOptions>()?;
+                Ok(())
+            }
+            register_types_25(ctx)?;
+            fn register_types_26(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<Filters>()?;
+                ctx.register::<FileSearchTool>()?;
+                ctx.register::<ComputerTool>()?;
+                ctx.register::<ComputerEnvironment>()?;
+                ctx.register::<ComputerUsePreviewTool>()?;
+                ctx.register::<ContainerMemoryLimit>()?;
+                ctx.register::<AutoCodeInterpreterToolParam>()?;
+                ctx.register::<ProgrammaticToolCallingParam>()?;
+                ctx.register::<InputFidelity>()?;
+                ctx.register::<ImageGenActionEnum>()?;
+                ctx.register::<LocalShellToolParam>()?;
+                ctx.register::<ContainerAutoParam>()?;
+                ctx.register::<LocalSkillParam>()?;
+                ctx.register::<LocalEnvironmentParam>()?;
+                ctx.register::<ContainerReferenceParam>()?;
+                ctx.register::<FunctionShellToolParam>()?;
+                ctx.register::<CustomTextFormatParam>()?;
+                ctx.register::<GrammarSyntax1>()?;
+                ctx.register::<CustomGrammarFormatParam>()?;
+                ctx.register::<CustomToolParam>()?;
+                ctx.register::<EmptyModelParam>()?;
+                ctx.register::<FunctionToolParam>()?;
+                ctx.register::<NamespaceToolParam>()?;
+                ctx.register::<ToolSearchToolParam>()?;
+                ctx.register::<ApproximateLocation>()?;
+                ctx.register::<SearchContextSize>()?;
+                ctx.register::<SearchContentType>()?;
+                ctx.register::<WebSearchPreviewTool>()?;
+                ctx.register::<ApplyPatchToolParam>()?;
+                ctx.register::<ToolSearchOutput>()?;
+                ctx.register::<AdditionalTools>()?;
+                ctx.register::<Program>()?;
+                Ok(())
+            }
+            register_types_26(ctx)?;
+            fn register_types_27(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<ProgramOutputStatus>()?;
+                ctx.register::<ProgramOutput>()?;
+                ctx.register::<CompactionBody>()?;
+                ctx.register::<CodeInterpreterOutputLogs>()?;
+                ctx.register::<CodeInterpreterOutputImage>()?;
+                ctx.register::<LocalShellExecAction>()?;
+                ctx.register::<FunctionShellAction>()?;
+                ctx.register::<FunctionShellCallStatus>()?;
+                ctx.register::<LocalEnvironmentResource>()?;
+                ctx.register::<ContainerReferenceResource>()?;
+                ctx.register::<FunctionShellCall>()?;
+                ctx.register::<FunctionShellCallOutputStatusEnum>()?;
+                ctx.register::<FunctionShellCallOutputTimeoutOutcome>()?;
+                ctx.register::<FunctionShellCallOutputExitOutcome>()?;
+                ctx.register::<FunctionShellCallOutputContent>()?;
+                ctx.register::<FunctionShellCallOutput>()?;
+                ctx.register::<ApplyPatchCallStatus>()?;
+                ctx.register::<ApplyPatchCreateFileOperation>()?;
+                ctx.register::<ApplyPatchDeleteFileOperation>()?;
+                ctx.register::<ApplyPatchUpdateFileOperation>()?;
+                ctx.register::<ApplyPatchToolCall>()?;
+                ctx.register::<ApplyPatchCallOutputStatus>()?;
+                ctx.register::<ApplyPatchToolCallOutput>()?;
+                ctx.register::<MCPToolCallStatus>()?;
+                ctx.register::<DetailEnum>()?;
+                ctx.register::<FunctionCallItemStatus>()?;
+                ctx.register::<ComputerCallOutputItemParam>()?;
+                ctx.register::<InputTextContentParam>()?;
+                ctx.register::<InputImageContentParamAutoParam>()?;
+                ctx.register::<FileDetailEnum>()?;
+                ctx.register::<InputFileContentParam>()?;
+                ctx.register::<FunctionCallOutputItemParam>()?;
+                Ok(())
+            }
+            register_types_27(ctx)?;
+            fn register_types_28(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<FileCitationParam>()?;
+                ctx.register::<UrlCitationParam>()?;
+                ctx.register::<ContainerFileCitationParam>()?;
+                ctx.register::<ToolSearchCallItemParam>()?;
+                ctx.register::<ToolSearchOutputItemParam>()?;
+                ctx.register::<AdditionalToolsItemParam>()?;
+                ctx.register::<CompactionSummaryItemParam>()?;
+                ctx.register::<FunctionShellActionParam>()?;
+                ctx.register::<FunctionShellCallItemStatus>()?;
+                ctx.register::<FunctionShellCallItemParam>()?;
+                ctx.register::<FunctionShellCallOutputTimeoutOutcomeParam>()?;
+                ctx.register::<FunctionShellCallOutputExitOutcomeParam>()?;
+                ctx.register::<FunctionShellCallOutputOutcomeParam>()?;
+                ctx.register::<FunctionShellCallOutputContentParam>()?;
+                ctx.register::<FunctionShellCallOutputItemParam>()?;
+                ctx.register::<ApplyPatchCallStatusParam>()?;
+                ctx.register::<ApplyPatchCreateFileOperationParam>()?;
+                ctx.register::<ApplyPatchDeleteFileOperationParam>()?;
+                ctx.register::<ApplyPatchUpdateFileOperationParam>()?;
+                ctx.register::<ApplyPatchOperationParam>()?;
+                ctx.register::<ApplyPatchToolCallItemParam>()?;
+                ctx.register::<ApplyPatchCallOutputStatusParam>()?;
+                ctx.register::<ApplyPatchToolCallOutputItemParam>()?;
+                ctx.register::<CompactionTriggerItemParam>()?;
+                ctx.register::<ItemReferenceParam>()?;
+                ctx.register::<ProgramItemParam>()?;
+                ctx.register::<ProgramOutputItemStatus>()?;
+                ctx.register::<ProgramOutputItemParam>()?;
+                ctx.register::<ConversationResource>()?;
+                ctx.register::<ImageGenOutputTokensDetails>()?;
+                ctx.register::<ImageGenInputUsageDetails>()?;
+                ctx.register::<ImageGenUsage>()?;
+                Ok(())
+            }
+            register_types_28(ctx)?;
+            fn register_types_29(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<SpecificProgrammaticToolCallingParam>()?;
+                ctx.register::<SpecificApplyPatchParam>()?;
+                ctx.register::<SpecificFunctionShellParam>()?;
+                ctx.register::<ReasoningModeEnum>()?;
+                ctx.register::<ConversationParam2>()?;
+                ctx.register::<ContextManagementParam>()?;
+                ctx.register::<PromptCacheOptions>()?;
+                ctx.register::<ModerationErrorBody>()?;
+                ctx.register::<Moderation>()?;
+                ctx.register::<ResponseConversation>()?;
+                ctx.register::<CreateConversationBody>()?;
+                ctx.register::<UpdateConversationBody>()?;
+                ctx.register::<DeletedConversationResource>()?;
+                ctx.register::<SpendLimitCurrency>()?;
+                ctx.register::<SpendLimitInterval>()?;
+                ctx.register::<SpendLimitEnforcementStatus>()?;
+                ctx.register::<SpendLimitEnforcement>()?;
+                ctx.register::<OrganizationSpendLimitResource>()?;
+                ctx.register::<UpdateOrganizationSpendLimitBody>()?;
+                ctx.register::<OrganizationSpendLimitDeletedResource>()?;
+                ctx.register::<ProjectSpendLimitResource>()?;
+                ctx.register::<UpdateProjectSpendLimitBody>()?;
+                ctx.register::<ProjectSpendLimitDeletedResource>()?;
+                ctx.register::<CreateProjectServiceAccountApiKeyBody>()?;
+                ctx.register::<ServiceAccountApiKeyBody>()?;
+                ctx.register::<CreateContentProvenanceBody>()?;
+                ctx.register::<ProvenanceCheckObject>()?;
+                ctx.register::<ProvenanceDetectionResultApi>()?;
+                ctx.register::<C2PAValidationStateApi>()?;
+                ctx.register::<C2PAProvenanceResult>()?;
+                ctx.register::<SynthIDProvenanceResult>()?;
+                ctx.register::<ProvenanceResource>()?;
+                Ok(())
+            }
+            register_types_29(ctx)?;
+            fn register_types_30(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<OrderEnum>()?;
+                ctx.register::<VideoModel>()?;
+                ctx.register::<VideoStatus>()?;
+                ctx.register::<VideoSize>()?;
+                ctx.register::<Error2>()?;
+                ctx.register::<VideoResource>()?;
+                ctx.register::<VideoListResource>()?;
+                ctx.register::<ImageRefParam2>()?;
+                ctx.register::<VideoSeconds>()?;
+                ctx.register::<CreateVideoMultipartBody>()?;
+                ctx.register::<CreateVideoJsonBody>()?;
+                ctx.register::<CreateVideoCharacterBody>()?;
+                ctx.register::<VideoCharacterResource>()?;
+                ctx.register::<VideoReferenceInputParam>()?;
+                ctx.register::<CreateVideoEditMultipartBody>()?;
+                ctx.register::<CreateVideoEditJsonBody>()?;
+                ctx.register::<CreateVideoExtendMultipartBody>()?;
+                ctx.register::<CreateVideoExtendJsonBody>()?;
+                ctx.register::<DeletedVideoResource>()?;
+                ctx.register::<VideoContentVariant>()?;
+                ctx.register::<CreateVideoRemixBody>()?;
+                ctx.register::<TruncationEnum>()?;
+                ctx.register::<PersonalityEnum>()?;
+                ctx.register::<TokenCountsBody>()?;
+                ctx.register::<TokenCountsResource>()?;
+                ctx.register::<PromptCacheRetentionEnum>()?;
+                ctx.register::<ServiceTierEnum>()?;
+                ctx.register::<CompactResponseMethodPublicBody>()?;
+                ctx.register::<ItemField>()?;
+                ctx.register::<CompactResource>()?;
+                ctx.register::<SkillResource>()?;
+                ctx.register::<SkillListResource>()?;
+                Ok(())
+            }
+            register_types_30(ctx)?;
+            fn register_types_31(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<CreateSkillBody>()?;
+                ctx.register::<SetDefaultSkillVersionBody>()?;
+                ctx.register::<DeletedSkillResource>()?;
+                ctx.register::<SkillVersionResource>()?;
+                ctx.register::<SkillVersionListResource>()?;
+                ctx.register::<CreateSkillVersionBody>()?;
+                ctx.register::<DeletedSkillVersionResource>()?;
+                ctx.register::<ChatkitWorkflowTracing>()?;
+                ctx.register::<ChatkitWorkflow>()?;
+                ctx.register::<ChatSessionRateLimits>()?;
+                ctx.register::<ChatSessionStatus>()?;
+                ctx.register::<ChatSessionAutomaticThreadTitling>()?;
+                ctx.register::<ChatSessionFileUpload>()?;
+                ctx.register::<ChatSessionHistory>()?;
+                ctx.register::<ChatSessionChatkitConfiguration>()?;
+                ctx.register::<ChatSessionResource>()?;
+                ctx.register::<WorkflowTracingParam>()?;
+                ctx.register::<WorkflowParam>()?;
+                ctx.register::<ExpiresAfterParam>()?;
+                ctx.register::<RateLimitsParam>()?;
+                ctx.register::<AutomaticThreadTitlingParam>()?;
+                ctx.register::<FileUploadParam>()?;
+                ctx.register::<HistoryParam>()?;
+                ctx.register::<ChatkitConfigurationParam>()?;
+                ctx.register::<CreateChatSessionBody>()?;
+                ctx.register::<UserMessageInputText>()?;
+                ctx.register::<UserMessageQuotedText>()?;
+                ctx.register::<AttachmentType>()?;
+                ctx.register::<Attachment>()?;
+                ctx.register::<ToolChoice>()?;
+                ctx.register::<InferenceOptions>()?;
+                ctx.register::<UserMessageItem>()?;
+                Ok(())
+            }
+            register_types_31(ctx)?;
+            fn register_types_32(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<FileAnnotationSource>()?;
+                ctx.register::<FileAnnotation>()?;
+                ctx.register::<UrlAnnotationSource>()?;
+                ctx.register::<UrlAnnotation>()?;
+                ctx.register::<ResponseOutputText>()?;
+                ctx.register::<AssistantMessageItem>()?;
+                ctx.register::<WidgetMessageItem>()?;
+                ctx.register::<ClientToolCallStatus>()?;
+                ctx.register::<ClientToolCallItem>()?;
+                ctx.register::<TaskType>()?;
+                ctx.register::<TaskItem>()?;
+                ctx.register::<TaskGroupTask>()?;
+                ctx.register::<TaskGroupItem>()?;
+                ctx.register::<ThreadItem>()?;
+                ctx.register::<ThreadItemListResource>()?;
+                ctx.register::<ActiveStatus>()?;
+                ctx.register::<LockedStatus>()?;
+                ctx.register::<ClosedStatus>()?;
+                ctx.register::<ThreadResource>()?;
+                ctx.register::<DeletedThreadResource>()?;
+                ctx.register::<ThreadListResource>()?;
+                ctx.register::<DragPoint>()?;
+                ctx.register::<BetaTokenCountsResource>()?;
+                ctx.register::<BetaTokenCountsBody>()?;
+                ctx.register::<BetaToolChoiceParam>()?;
+                ctx.register::<BetaSpecificFunctionShellParam>()?;
+                ctx.register::<BetaSpecificApplyPatchParam>()?;
+                ctx.register::<BetaSpecificProgrammaticToolCallingParam>()?;
+                ctx.register::<BetaToolChoiceCustom>()?;
+                ctx.register::<BetaToolChoiceMCP>()?;
+                ctx.register::<BetaToolChoiceFunction>()?;
+                ctx.register::<BetaToolChoiceTypes>()?;
+                Ok(())
+            }
+            register_types_32(ctx)?;
+            fn register_types_33(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<BetaToolChoiceAllowed>()?;
+                ctx.register::<BetaToolChoiceOptions>()?;
+                ctx.register::<BetaConversationParam>()?;
+                ctx.register::<BetaConversationParam2>()?;
+                ctx.register::<BetaPersonalityEnum>()?;
+                ctx.register::<BetaTruncationEnum>()?;
+                ctx.register::<BetaReasoning>()?;
+                ctx.register::<BetaReasoningEffort>()?;
+                ctx.register::<BetaReasoningModeEnum>()?;
+                ctx.register::<BetaResponseTextParam>()?;
+                ctx.register::<BetaVerbosity>()?;
+                ctx.register::<BetaTextResponseFormatConfiguration>()?;
+                ctx.register::<BetaResponseFormatJsonObject>()?;
+                ctx.register::<BetaTextResponseFormatJsonSchema>()?;
+                ctx.register::<BetaResponseFormatJsonSchemaSchema>()?;
+                ctx.register::<BetaResponseFormatText>()?;
+                ctx.register::<BetaTool>()?;
+                ctx.register::<BetaApplyPatchToolParam>()?;
+                ctx.register::<BetaCallableToolAllowedCaller>()?;
+                ctx.register::<BetaWebSearchPreviewTool>()?;
+                ctx.register::<BetaSearchContentType>()?;
+                ctx.register::<BetaSearchContextSize>()?;
+                ctx.register::<BetaApproximateLocation>()?;
+                ctx.register::<BetaToolSearchToolParam>()?;
+                ctx.register::<BetaEmptyModelParam>()?;
+                ctx.register::<BetaToolSearchExecutionType>()?;
+                ctx.register::<BetaNamespaceToolParam>()?;
+                ctx.register::<BetaCustomToolParam>()?;
+                ctx.register::<BetaCustomGrammarFormatParam>()?;
+                ctx.register::<BetaGrammarSyntax1>()?;
+                ctx.register::<BetaCustomTextFormatParam>()?;
+                ctx.register::<BetaFunctionToolParam>()?;
+                Ok(())
+            }
+            register_types_33(ctx)?;
+            fn register_types_34(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<BetaFunctionShellToolParam>()?;
+                ctx.register::<BetaContainerReferenceParam>()?;
+                ctx.register::<BetaLocalEnvironmentParam>()?;
+                ctx.register::<BetaLocalSkillParam>()?;
+                ctx.register::<BetaContainerAutoParam>()?;
+                ctx.register::<BetaInlineSkillParam>()?;
+                ctx.register::<BetaInlineSkillSourceParam>()?;
+                ctx.register::<BetaSkillReferenceParam>()?;
+                ctx.register::<BetaContainerNetworkPolicyAllowlistParam>()?;
+                ctx.register::<BetaContainerNetworkPolicyDomainSecretParam>()?;
+                ctx.register::<BetaContainerNetworkPolicyDisabledParam>()?;
+                ctx.register::<BetaContainerMemoryLimit>()?;
+                ctx.register::<BetaLocalShellToolParam>()?;
+                ctx.register::<BetaImageGenTool>()?;
+                ctx.register::<BetaImageGenActionEnum>()?;
+                ctx.register::<BetaInputFidelity>()?;
+                ctx.register::<BetaProgrammaticToolCallingParam>()?;
+                ctx.register::<BetaCodeInterpreterTool>()?;
+                ctx.register::<BetaAutoCodeInterpreterToolParam>()?;
+                ctx.register::<BetaMCPTool>()?;
+                ctx.register::<BetaMCPToolFilter>()?;
+                ctx.register::<BetaWebSearchTool>()?;
+                ctx.register::<BetaWebSearchApproximateLocation>()?;
+                ctx.register::<BetaComputerUsePreviewTool>()?;
+                ctx.register::<BetaComputerEnvironment>()?;
+                ctx.register::<BetaComputerTool>()?;
+                ctx.register::<BetaFileSearchTool>()?;
+                ctx.register::<BetaFilters>()?;
+                ctx.register::<BetaCompoundFilter>()?;
+                ctx.register::<BetaComparisonFilter>()?;
+                ctx.register::<BetaRankingOptions>()?;
+                ctx.register::<BetaHybridSearchOptions>()?;
+                Ok(())
+            }
+            register_types_34(ctx)?;
+            fn register_types_35(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<BetaRankerVersionType>()?;
+                ctx.register::<BetaFunctionTool>()?;
+                ctx.register::<BetaInputItem>()?;
+                ctx.register::<BetaProgramOutputItemParam>()?;
+                ctx.register::<BetaProgramOutputItemStatus>()?;
+                ctx.register::<BetaAgentTagParam>()?;
+                ctx.register::<BetaProgramItemParam>()?;
+                ctx.register::<BetaItemReferenceParam>()?;
+                ctx.register::<BetaCompactionTriggerItemParam>()?;
+                ctx.register::<BetaItem>()?;
+                ctx.register::<BetaCustomToolCall>()?;
+                ctx.register::<BetaToolCallCaller>()?;
+                ctx.register::<BetaProgramToolCallCaller>()?;
+                ctx.register::<BetaDirectToolCallCaller>()?;
+                ctx.register::<BetaAgentTag>()?;
+                ctx.register::<BetaCustomToolCallOutput>()?;
+                ctx.register::<BetaFunctionAndCustomToolCallOutput>()?;
+                ctx.register::<BetaInputFileContent>()?;
+                ctx.register::<BetaFileInputDetail>()?;
+                ctx.register::<BetaPromptCacheBreakpointConfig>()?;
+                ctx.register::<BetaInputImageContent>()?;
+                ctx.register::<BetaImageDetail>()?;
+                ctx.register::<BetaInputTextContent>()?;
+                ctx.register::<BetaToolCallCallerParam>()?;
+                ctx.register::<BetaProgramToolCallCallerParam>()?;
+                ctx.register::<BetaDirectToolCallCallerParam>()?;
+                ctx.register::<BetaMCPToolCall>()?;
+                ctx.register::<BetaMCPToolCallStatus>()?;
+                ctx.register::<BetaMCPApprovalResponse>()?;
+                ctx.register::<BetaMCPApprovalRequest>()?;
+                ctx.register::<BetaMCPListTools>()?;
+                ctx.register::<BetaMCPListToolsTool>()?;
+                Ok(())
+            }
+            register_types_35(ctx)?;
+            fn register_types_36(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<BetaApplyPatchToolCallOutputItemParam>()?;
+                ctx.register::<BetaApplyPatchCallOutputStatusParam>()?;
+                ctx.register::<BetaApplyPatchToolCallItemParam>()?;
+                ctx.register::<BetaApplyPatchOperationParam>()?;
+                ctx.register::<BetaApplyPatchUpdateFileOperationParam>()?;
+                ctx.register::<BetaApplyPatchDeleteFileOperationParam>()?;
+                ctx.register::<BetaApplyPatchCreateFileOperationParam>()?;
+                ctx.register::<BetaApplyPatchCallStatusParam>()?;
+                ctx.register::<BetaFunctionShellCallOutputItemParam>()?;
+                ctx.register::<BetaFunctionShellCallItemStatus>()?;
+                ctx.register::<BetaFunctionShellCallOutputContentParam>()?;
+                ctx.register::<BetaFunctionShellCallOutputOutcomeParam>()?;
+                ctx.register::<BetaFunctionShellCallOutputExitOutcomeParam>()?;
+                ctx.register::<BetaFunctionShellCallOutputTimeoutOutcomeParam>()?;
+                ctx.register::<BetaFunctionShellCallItemParam>()?;
+                ctx.register::<BetaFunctionShellActionParam>()?;
+                ctx.register::<BetaLocalShellToolCallOutput>()?;
+                ctx.register::<BetaLocalShellToolCall>()?;
+                ctx.register::<BetaLocalShellExecAction>()?;
+                ctx.register::<BetaCodeInterpreterToolCall>()?;
+                ctx.register::<BetaCodeInterpreterOutputImage>()?;
+                ctx.register::<BetaCodeInterpreterOutputLogs>()?;
+                ctx.register::<BetaImageGenToolCall>()?;
+                ctx.register::<BetaCompactionSummaryItemParam>()?;
+                ctx.register::<BetaReasoningItem>()?;
+                ctx.register::<BetaReasoningTextContent>()?;
+                ctx.register::<BetaSummaryTextContent>()?;
+                ctx.register::<BetaAdditionalToolsItemParam>()?;
+                ctx.register::<BetaToolSearchOutputItemParam>()?;
+                ctx.register::<BetaFunctionCallItemStatus>()?;
+                ctx.register::<BetaToolSearchCallItemParam>()?;
+                ctx.register::<BetaMultiAgentCallOutputItemParam>()?;
+                Ok(())
+            }
+            register_types_36(ctx)?;
+            fn register_types_37(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<BetaOutputTextContentParam>()?;
+                ctx.register::<BetaContainerFileCitationParam>()?;
+                ctx.register::<BetaUrlCitationParam>()?;
+                ctx.register::<BetaFileCitationParam>()?;
+                ctx.register::<BetaMultiAgentAction1>()?;
+                ctx.register::<BetaMultiAgentCallItemParam>()?;
+                ctx.register::<BetaAgentMessageItemParam>()?;
+                ctx.register::<BetaEncryptedContentParam>()?;
+                ctx.register::<BetaInputImageContentParamAutoParam>()?;
+                ctx.register::<BetaPromptCacheBreakpointParam>()?;
+                ctx.register::<BetaDetailEnum>()?;
+                ctx.register::<BetaInputTextContentParam>()?;
+                ctx.register::<BetaFunctionCallOutputItemParam>()?;
+                ctx.register::<BetaInputFileContentParam>()?;
+                ctx.register::<BetaFileDetailEnum>()?;
+                ctx.register::<BetaFunctionToolCall>()?;
+                ctx.register::<BetaWebSearchToolCall>()?;
+                ctx.register::<BetaWebSearchActionFind>()?;
+                ctx.register::<BetaWebSearchActionOpenPage>()?;
+                ctx.register::<BetaWebSearchActionSearch>()?;
+                ctx.register::<BetaComputerCallOutputItemParam>()?;
+                ctx.register::<BetaComputerCallSafetyCheckParam>()?;
+                ctx.register::<BetaComputerScreenshotImage>()?;
+                ctx.register::<BetaComputerToolCall>()?;
+                ctx.register::<BetaComputerActionList>()?;
+                ctx.register::<BetaComputerAction>()?;
+                ctx.register::<BetaWaitParam>()?;
+                ctx.register::<BetaTypeParam>()?;
+                ctx.register::<BetaScrollParam>()?;
+                ctx.register::<BetaScreenshotParam>()?;
+                ctx.register::<BetaMoveParam>()?;
+                ctx.register::<BetaKeyPressAction>()?;
+                Ok(())
+            }
+            register_types_37(ctx)?;
+            fn register_types_38(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<BetaDragParam>()?;
+                ctx.register::<BetaCoordParam>()?;
+                ctx.register::<BetaDoubleClickAction>()?;
+                ctx.register::<BetaClickParam>()?;
+                ctx.register::<BetaClickButtonType>()?;
+                ctx.register::<BetaFileSearchToolCall>()?;
+                ctx.register::<BetaVectorStoreFileAttributes>()?;
+                ctx.register::<BetaOutputMessage>()?;
+                ctx.register::<BetaMessagePhase>()?;
+                ctx.register::<BetaOutputMessageContent>()?;
+                ctx.register::<BetaRefusalContent>()?;
+                ctx.register::<BetaOutputTextContent>()?;
+                ctx.register::<BetaLogProb>()?;
+                ctx.register::<BetaTopLogProb>()?;
+                ctx.register::<BetaAnnotation>()?;
+                ctx.register::<BetaFilePath>()?;
+                ctx.register::<BetaContainerFileCitationBody>()?;
+                ctx.register::<BetaUrlCitationBody>()?;
+                ctx.register::<BetaFileCitationBody>()?;
+                ctx.register::<BetaInputMessage>()?;
+                ctx.register::<BetaInputMessageContentList>()?;
+                ctx.register::<BetaInputContent>()?;
+                ctx.register::<BetaEasyInputMessage>()?;
+                ctx.register::<BetaCompactResponseMethodPublicBody>()?;
+                ctx.register::<BetaServiceTierEnum>()?;
+                ctx.register::<BetaPromptCacheOptionsParam>()?;
+                ctx.register::<BetaPromptCacheModeEnum>()?;
+                ctx.register::<BetaPromptCacheTTLEnum>()?;
+                ctx.register::<BetaPromptCacheRetentionEnum>()?;
+                ctx.register::<BetaModelIdsCompaction>()?;
+                ctx.register::<BetaModelIdsResponses>()?;
+                ctx.register::<BetaModelIdsShared>()?;
+                Ok(())
+            }
+            register_types_38(ctx)?;
+            fn register_types_39(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<BetaError>()?;
+                ctx.register::<BetaResponseItemList>()?;
+                ctx.register::<BetaItemResource>()?;
+                ctx.register::<BetaCustomToolCallOutputResource>()?;
+                ctx.register::<BetaFunctionCallOutputStatusEnum>()?;
+                ctx.register::<BetaCustomToolCallResource>()?;
+                ctx.register::<BetaFunctionCallStatus>()?;
+                ctx.register::<BetaMCPApprovalResponseResource>()?;
+                ctx.register::<BetaApplyPatchToolCallOutput>()?;
+                ctx.register::<BetaApplyPatchCallOutputStatus>()?;
+                ctx.register::<BetaApplyPatchToolCall>()?;
+                ctx.register::<BetaApplyPatchUpdateFileOperation>()?;
+                ctx.register::<BetaApplyPatchDeleteFileOperation>()?;
+                ctx.register::<BetaApplyPatchCreateFileOperation>()?;
+                ctx.register::<BetaApplyPatchCallStatus>()?;
+                ctx.register::<BetaFunctionShellCallOutput>()?;
+                ctx.register::<BetaFunctionShellCallOutputContent>()?;
+                ctx.register::<BetaFunctionShellCallOutputExitOutcome>()?;
+                ctx.register::<BetaFunctionShellCallOutputTimeoutOutcome>()?;
+                ctx.register::<BetaFunctionShellCallOutputStatusEnum>()?;
+                ctx.register::<BetaFunctionShellCall>()?;
+                ctx.register::<BetaContainerReferenceResource>()?;
+                ctx.register::<BetaLocalEnvironmentResource>()?;
+                ctx.register::<BetaFunctionShellCallStatus>()?;
+                ctx.register::<BetaFunctionShellAction>()?;
+                ctx.register::<BetaCompactionBody>()?;
+                ctx.register::<BetaProgramOutput>()?;
+                ctx.register::<BetaProgramOutputStatus>()?;
+                ctx.register::<BetaProgram>()?;
+                ctx.register::<BetaAdditionalTools>()?;
+                ctx.register::<BetaMessageRole>()?;
+                ctx.register::<BetaToolSearchOutput>()?;
+                Ok(())
+            }
+            register_types_39(ctx)?;
+            fn register_types_40(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<BetaToolSearchCall>()?;
+                ctx.register::<BetaMultiAgentCallOutput>()?;
+                ctx.register::<BetaMultiAgentAction>()?;
+                ctx.register::<BetaMultiAgentCall>()?;
+                ctx.register::<BetaAgentMessage>()?;
+                ctx.register::<BetaEncryptedContent>()?;
+                ctx.register::<BetaComputerScreenshotContent>()?;
+                ctx.register::<BetaTextContent>()?;
+                ctx.register::<BetaFunctionToolCallOutputResource>()?;
+                ctx.register::<BetaFunctionToolCallOutput>()?;
+                ctx.register::<BetaFunctionToolCallResource>()?;
+                ctx.register::<BetaComputerToolCallOutputResource>()?;
+                ctx.register::<BetaComputerCallOutputStatus>()?;
+                ctx.register::<BetaComputerToolCallOutput>()?;
+                ctx.register::<BetaInputMessageResource>()?;
+                ctx.register::<BetaCompactResource>()?;
+                ctx.register::<BetaResponseUsage>()?;
+                ctx.register::<BetaItemField>()?;
+                ctx.register::<BetaMessage>()?;
+                ctx.register::<BetaMessagePhase2>()?;
+                ctx.register::<BetaMessageStatus>()?;
+                ctx.register::<BetaResponseCustomToolCallInputDoneEvent>()?;
+                ctx.register::<BetaResponseCustomToolCallInputDeltaEvent>()?;
+                ctx.register::<BetaResponseQueuedEvent>()?;
+                ctx.register::<BetaResponse>()?;
+                ctx.register::<BetaResponseConversation>()?;
+                ctx.register::<BetaModeration>()?;
+                ctx.register::<BetaModerationErrorBody>()?;
+                ctx.register::<BetaModerationResultBody>()?;
+                ctx.register::<BetaModerationInputType>()?;
+                ctx.register::<BetaPromptCacheOptions>()?;
+                ctx.register::<BetaOutputItem>()?;
+                Ok(())
+            }
+            register_types_40(ctx)?;
+            fn register_types_41(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<BetaResponseError>()?;
+                ctx.register::<BetaResponseErrorCode>()?;
+                ctx.register::<BetaResponseProperties>()?;
+                ctx.register::<BetaPrompt>()?;
+                ctx.register::<BetaResponsePromptVariables>()?;
+                ctx.register::<BetaToolsArray>()?;
+                ctx.register::<BetaModelResponseProperties>()?;
+                ctx.register::<BetaServiceTier>()?;
+                ctx.register::<BetaMetadata>()?;
+                ctx.register::<BetaResponseOutputTextAnnotationAddedEvent>()?;
+                ctx.register::<BetaResponseMCPListToolsInProgressEvent>()?;
+                ctx.register::<BetaResponseMCPListToolsFailedEvent>()?;
+                ctx.register::<BetaResponseMCPListToolsCompletedEvent>()?;
+                ctx.register::<BetaResponseMCPCallInProgressEvent>()?;
+                ctx.register::<BetaResponseMCPCallFailedEvent>()?;
+                ctx.register::<BetaResponseMCPCallCompletedEvent>()?;
+                ctx.register::<BetaResponseMCPCallArgumentsDoneEvent>()?;
+                ctx.register::<BetaResponseMCPCallArgumentsDeltaEvent>()?;
+                ctx.register::<BetaResponseImageGenCallPartialImageEvent>()?;
+                ctx.register::<BetaResponseImageGenCallInProgressEvent>()?;
+                ctx.register::<BetaResponseImageGenCallGeneratingEvent>()?;
+                ctx.register::<BetaResponseImageGenCallCompletedEvent>()?;
+                ctx.register::<BetaResponseReasoningTextDoneEvent>()?;
+                ctx.register::<BetaResponseReasoningTextDeltaEvent>()?;
+                ctx.register::<BetaResponseReasoningSummaryTextDoneEvent>()?;
+                ctx.register::<BetaResponseReasoningSummaryTextDeltaEvent>()?;
+                ctx.register::<BetaResponseReasoningSummaryPartDoneEvent>()?;
+                ctx.register::<BetaResponseReasoningSummaryPartAddedEvent>()?;
+                ctx.register::<BetaResponseTextDoneEvent>()?;
+                ctx.register::<BetaResponseLogProb>()?;
+                ctx.register::<BetaResponseTextDeltaEvent>()?;
+                ctx.register::<BetaResponseRefusalDoneEvent>()?;
+                Ok(())
+            }
+            register_types_41(ctx)?;
+            fn register_types_42(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<BetaResponseRefusalDeltaEvent>()?;
+                ctx.register::<BetaResponseOutputItemDoneEvent>()?;
+                ctx.register::<BetaResponseOutputItemAddedEvent>()?;
+                ctx.register::<BetaResponseInProgressEvent>()?;
+                ctx.register::<BetaResponseFunctionCallArgumentsDoneEvent>()?;
+                ctx.register::<BetaResponseFunctionCallArgumentsDeltaEvent>()?;
+                ctx.register::<BetaResponseFileSearchCallSearchingEvent>()?;
+                ctx.register::<BetaResponseFileSearchCallInProgressEvent>()?;
+                ctx.register::<BetaResponseFileSearchCallCompletedEvent>()?;
+                ctx.register::<BetaResponseErrorEvent>()?;
+                ctx.register::<BetaResponseCreatedEvent>()?;
+                ctx.register::<BetaResponseContentPartDoneEvent>()?;
+                ctx.register::<BetaOutputContent>()?;
+                ctx.register::<BetaResponseContentPartAddedEvent>()?;
+                ctx.register::<BetaResponseCompletedEvent>()?;
+                ctx.register::<BetaResponseCodeInterpreterCallInterpretingEvent>()?;
+                ctx.register::<BetaResponseCodeInterpreterCallInProgressEvent>()?;
+                ctx.register::<BetaResponseCodeInterpreterCallCompletedEvent>()?;
+                ctx.register::<BetaResponseCodeInterpreterCallCodeDoneEvent>()?;
+                ctx.register::<BetaResponseCodeInterpreterCallCodeDeltaEvent>()?;
+                ctx.register::<BetaResponseAudioTranscriptDoneEvent>()?;
+                ctx.register::<BetaResponseAudioTranscriptDeltaEvent>()?;
+                ctx.register::<BetaResponseAudioDoneEvent>()?;
+                ctx.register::<BetaResponseAudioDeltaEvent>()?;
+                ctx.register::<BetaResponseIncompleteEvent>()?;
+                ctx.register::<BetaResponseFailedEvent>()?;
+                ctx.register::<BetaResponseWebSearchCallCompletedEvent>()?;
+                ctx.register::<BetaResponseWebSearchCallSearchingEvent>()?;
+                ctx.register::<BetaResponseWebSearchCallInProgressEvent>()?;
+                ctx.register::<BetaOutputAudio>()?;
+                ctx.register::<BetaInputAudio>()?;
+                ctx.register::<BetaInputParam>()?;
+                Ok(())
+            }
+            register_types_42(ctx)?;
+            fn register_types_43(
+                ctx: &mut DefinitionContext,
+            ) -> Result<(), DefinitionError> {
+                ctx.register::<BetaContent>()?;
+                ctx.register::<BetaIncludeEnum>()?;
+                ctx.register::<BetaResponsesServerEvent>()?;
+                ctx.register::<BetaResponseInjectFailedEvent>()?;
+                ctx.register::<BetaResponseInjectCreatedEvent>()?;
+                ctx.register::<BetaResponseStreamEvent>()?;
+                ctx.register::<BetaResponsesClientEvent>()?;
+                ctx.register::<BetaResponseInjectEvent>()?;
+                ctx.register::<BetaResponsesClientEventResponseCreate>()?;
+                ctx.register::<BetaCreateResponse>()?;
+                ctx.register::<BetaMultiAgentParam>()?;
+                ctx.register::<BetaContextManagementParam>()?;
+                ctx.register::<BetaResponseStreamOptions>()?;
+                ctx.register::<BetaModerationParam>()?;
+                ctx.register::<BetaModerationPolicyParam>()?;
+                ctx.register::<BetaModerationConfigParam>()?;
+                ctx.register::<BetaModerationMode>()?;
+                ctx.register::<BetaCreateModelResponseProperties>()?;
+                Ok(())
+            }
+            register_types_43(ctx)?;
+            let api = imported_api(ctx)?;
+            Ok(vec![api])
         },
-        Endpoint {
-            id: "CreateTranscription".to_string(),
-            method: RestMethod::Post,
-            path: "/audio/transcriptions".to_string(),
-            description: "Transcribes audio into the input language.\n\nReturns a transcription object in `json`, `diarized_json`, or `verbose_json`\nformat, or a stream of transcript events.\n"
-                .to_string(),
-            request: Some(ApiRequest::FormData {
-                fields: vec![
+    )
+}
+fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
+    let mut endpoints = Vec::with_capacity(258usize);
+    fn endpoint_0(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateSpeech", RestMethod::Post, "/audio/speech")
+            .describes(
+                "Generates audio from the input text.\n\nReturns the audio file content, or a stream of audio events.\n",
+            )
+            .returns(Success::binary())
+            .returns(Success::sse(ctx.register::<CreateSpeechResponseStreamEvent>()?))
+            .request_json::<CreateSpeechRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_0(ctx)?);
+    fn endpoint_1(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateTranscription", RestMethod::Post, "/audio/transcriptions")
+            .describes(
+                "Transcribes audio into the input language.\n\nReturns a transcription object in `json`, `diarized_json`, or `verbose_json`\nformat, or a stream of transcript events.\n",
+            )
+            .returns(Success::json(ctx.register::<serde_json::Value>()?))
+            .returns(
+                Success::sse(ctx.register::<CreateTranscriptionResponseStreamEvent>()?),
+            )
+            .request_form(
+                Vec::from([
                     FormField::file("file")
-                    .with_description("The audio file object (not file name) to transcribe, in one of these formats: flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, or webm.\n"),
+                        .with_description(
+                            "The audio file object (not file name) to transcribe, in one of these formats: flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, or webm.\n",
+                        ),
                     FormField::text("model")
-                    .with_description("ID of the model to use. The options are `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `gpt-4o-mini-transcribe-2025-12-15`, `whisper-1` (which is powered by our open source Whisper V2 model), and `gpt-4o-transcribe-diarize`.\n"),
-                    FormField::text("language").optional()
-                    .with_description("The language of the input audio. Supplying the input language in [ISO-639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes) (e.g. `en`) format will improve accuracy and latency.\n"),
-                    FormField::text("languages").optional()
-                    .with_description("Possible languages of the input audio, in [ISO-639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes) format. Supported by `gpt-transcribe`.\n"),
-                    FormField::text("keywords").optional()
-                    .with_description("Words or phrases to guide transcription of the input audio. Supported by `gpt-transcribe`.\n"),
-                    FormField::text("prompt").optional()
-                    .with_description("An optional text to guide the model's style or continue a previous audio segment. The [prompt](/docs/guides/speech-to-text#prompting) should match the audio language. This field is not supported when using `gpt-4o-transcribe-diarize`.\n"),
-                    FormField::text("response_format").optional()
-                    .with_description("The format of the output, in one of these options: `json`, `text`, `srt`, `verbose_json`, `vtt`, or `diarized_json`. For `gpt-4o-transcribe` and `gpt-4o-mini-transcribe`, the only supported format is `json`. For `gpt-4o-transcribe-diarize`, the supported formats are `json`, `text`, and `diarized_json`, with `diarized_json` required to receive speaker annotations.\n"),
-                    FormField::text("temperature").optional()
-                    .with_description("The sampling temperature, between 0 and 1. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. If set to 0, the model will use [log probability](https://en.wikipedia.org/wiki/Log_probability) to automatically increase the temperature until certain thresholds are hit.\n"),
-                    FormField::text("include").optional()
-                    .with_description("Additional information to include in the transcription response.\n`logprobs` will return the log probabilities of the tokens in the\nresponse to understand the model's confidence in the transcription.\n`logprobs` only works with response_format set to `json` and only with\nthe models `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, and `gpt-4o-mini-transcribe-2025-12-15`. This field is not supported when using `gpt-4o-transcribe-diarize`.\n"),
-                    FormField::text("timestamp_granularities").optional()
-                    .with_description("The timestamp granularities to populate for this transcription. `response_format` must be set `verbose_json` to use timestamp granularities. Either or both of these options are supported: `word`, or `segment`. Note: There is no additional latency for segment timestamps, but generating word timestamps incurs additional latency.\nThis option is not available for `gpt-4o-transcribe-diarize`.\n"),
+                        .with_description(
+                            "ID of the model to use. The options are `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `gpt-4o-mini-transcribe-2025-12-15`, `whisper-1` (which is powered by our open source Whisper V2 model), and `gpt-4o-transcribe-diarize`.\n",
+                        ),
+                    FormField::text("language")
+                        .optional()
+                        .with_description(
+                            "The language of the input audio. Supplying the input language in [ISO-639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes) (e.g. `en`) format will improve accuracy and latency.\n",
+                        ),
+                    FormField::text("languages")
+                        .optional()
+                        .with_description(
+                            "Possible languages of the input audio, in [ISO-639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes) format. Supported by `gpt-transcribe`.\n",
+                        ),
+                    FormField::text("keywords")
+                        .optional()
+                        .with_description(
+                            "Words or phrases to guide transcription of the input audio. Supported by `gpt-transcribe`.\n",
+                        ),
+                    FormField::text("prompt")
+                        .optional()
+                        .with_description(
+                            "An optional text to guide the model's style or continue a previous audio segment. The [prompt](/docs/guides/speech-to-text#prompting) should match the audio language. This field is not supported when using `gpt-4o-transcribe-diarize`.\n",
+                        ),
+                    FormField::text("response_format")
+                        .optional()
+                        .with_description(
+                            "The format of the output, in one of these options: `json`, `text`, `srt`, `verbose_json`, `vtt`, or `diarized_json`. For `gpt-4o-transcribe` and `gpt-4o-mini-transcribe`, the only supported format is `json`. For `gpt-4o-transcribe-diarize`, the supported formats are `json`, `text`, and `diarized_json`, with `diarized_json` required to receive speaker annotations.\n",
+                        ),
+                    FormField::text("temperature")
+                        .optional()
+                        .with_description(
+                            "The sampling temperature, between 0 and 1. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. If set to 0, the model will use [log probability](https://en.wikipedia.org/wiki/Log_probability) to automatically increase the temperature until certain thresholds are hit.\n",
+                        ),
+                    FormField::text("include")
+                        .optional()
+                        .with_description(
+                            "Additional information to include in the transcription response.\n`logprobs` will return the log probabilities of the tokens in the\nresponse to understand the model's confidence in the transcription.\n`logprobs` only works with response_format set to `json` and only with\nthe models `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, and `gpt-4o-mini-transcribe-2025-12-15`. This field is not supported when using `gpt-4o-transcribe-diarize`.\n",
+                        ),
+                    FormField::text("timestamp_granularities")
+                        .optional()
+                        .with_description(
+                            "The timestamp granularities to populate for this transcription. `response_format` must be set `verbose_json` to use timestamp granularities. Either or both of these options are supported: `word`, or `segment`. Note: There is no additional latency for segment timestamps, but generating word timestamps incurs additional latency.\nThis option is not available for `gpt-4o-transcribe-diarize`.\n",
+                        ),
                     FormField::text("stream").optional(),
                     FormField::text("chunking_strategy").optional(),
-                    FormField::text("known_speaker_names").optional()
-                    .with_description("Optional list of speaker names that correspond to the audio samples provided in `known_speaker_references[]`. Each entry should be a short identifier (for example `customer` or `agent`). Up to 4 speakers are supported.\n"),
-                    FormField::text("known_speaker_references").optional()
-                    .with_description("Optional list of audio samples (as [data URLs](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Data_URLs)) that contain known speaker references matching `known_speaker_names[]`. Each sample must be between 2 and 10 seconds, and can use any of the same input audio formats supported by `file`.\n")
-                ],
-            }),
-            response: ApiResponse::Json(Schema::new("serde_json::Value")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateTranslation".to_string(),
-            method: RestMethod::Post,
-            path: "/audio/translations".to_string(),
-            description: "Translates audio into English.".to_string(),
-            request: Some(ApiRequest::FormData {
-                fields: vec![
+                    FormField::text("known_speaker_names")
+                        .optional()
+                        .with_description(
+                            "Optional list of speaker names that correspond to the audio samples provided in `known_speaker_references[]`. Each entry should be a short identifier (for example `customer` or `agent`). Up to 4 speakers are supported.\n",
+                        ),
+                    FormField::text("known_speaker_references")
+                        .optional()
+                        .with_description(
+                            "Optional list of audio samples (as [data URLs](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Data_URLs)) that contain known speaker references matching `known_speaker_names[]`. Each sample must be between 2 and 10 seconds, and can use any of the same input audio formats supported by `file`.\n",
+                        ),
+                ]),
+            )
+            .build()
+    }
+    endpoints.push(endpoint_1(ctx)?);
+    fn endpoint_2(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateTranslation", RestMethod::Post, "/audio/translations")
+            .describes("Translates audio into English.")
+            .returns_json::<serde_json::Value>(ctx)
+            .request_form(
+                Vec::from([
                     FormField::file("file")
-                    .with_description("The audio file object (not file name) translate, in one of these formats: flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, or webm.\n"),
+                        .with_description(
+                            "The audio file object (not file name) translate, in one of these formats: flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, or webm.\n",
+                        ),
                     FormField::text("model")
-                    .with_description("ID of the model to use. Only `whisper-1` (which is powered by our open source Whisper V2 model) is currently available.\n"),
-                    FormField::text("prompt").optional()
-                    .with_description("An optional text to guide the model's style or continue a previous audio segment. The [prompt](/docs/guides/speech-to-text#prompting) should be in English.\n"),
-                    FormField::text("response_format").optional()
-                    .with_description("The format of the output, in one of these options: `json`, `text`, `srt`, `verbose_json`, or `vtt`.\n"),
-                    FormField::text("temperature").optional()
-                    .with_description("The sampling temperature, between 0 and 1. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. If set to 0, the model will use [log probability](https://en.wikipedia.org/wiki/Log_probability) to automatically increase the temperature until certain thresholds are hit.\n")
-                ],
-            }),
-            response: ApiResponse::Json(Schema::new("serde_json::Value")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListVoiceConsents".to_string(),
-            method: RestMethod::Get,
-            path: "/audio/voice_consents".to_string(),
-            description: "Returns a list of voice consent recordings.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("VoiceConsentListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateVoiceConsent".to_string(),
-            method: RestMethod::Post,
-            path: "/audio/voice_consents".to_string(),
-            description: "Upload a voice consent recording.".to_string(),
-            request: Some(ApiRequest::FormData {
-                fields: vec![
+                        .with_description(
+                            "ID of the model to use. Only `whisper-1` (which is powered by our open source Whisper V2 model) is currently available.\n",
+                        ),
+                    FormField::text("prompt")
+                        .optional()
+                        .with_description(
+                            "An optional text to guide the model's style or continue a previous audio segment. The [prompt](/docs/guides/speech-to-text#prompting) should be in English.\n",
+                        ),
+                    FormField::text("response_format")
+                        .optional()
+                        .with_description(
+                            "The format of the output, in one of these options: `json`, `text`, `srt`, `verbose_json`, or `vtt`.\n",
+                        )
+                        .constraints(
+                            schematic_define::constraints::Constraints::new()
+                                .allowed_values([
+                                    "json",
+                                    "text",
+                                    "srt",
+                                    "verbose_json",
+                                    "vtt",
+                                ]),
+                        ),
+                    FormField::text("temperature")
+                        .optional()
+                        .with_description(
+                            "The sampling temperature, between 0 and 1. Higher values like 0.8 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. If set to 0, the model will use [log probability](https://en.wikipedia.org/wiki/Log_probability) to automatically increase the temperature until certain thresholds are hit.\n",
+                        ),
+                ]),
+            )
+            .build()
+    }
+    endpoints.push(endpoint_2(ctx)?);
+    fn endpoint_3(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListVoiceConsents", RestMethod::Get, "/audio/voice_consents")
+            .describes("Returns a list of voice consent recordings.")
+            .returns_json::<VoiceConsentListResource>(ctx)
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_3(ctx)?);
+    fn endpoint_4(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateVoiceConsent", RestMethod::Post, "/audio/voice_consents")
+            .describes("Upload a voice consent recording.")
+            .returns_json::<VoiceConsentResource>(ctx)
+            .request_form(
+                Vec::from([
                     FormField::text("name")
-                    .with_description("The label to use for this consent recording."),
+                        .with_description(
+                            "The label to use for this consent recording.",
+                        ),
                     FormField::file("recording")
-                    .with_description("The consent audio recording file. Maximum size is 10 MiB.\n\nSupported MIME types:\n`audio/mpeg`, `audio/wav`, `audio/x-wav`, `audio/ogg`, `audio/aac`, `audio/flac`, `audio/webm`, `audio/mp4`.\n"),
+                        .with_description(
+                            "The consent audio recording file. Maximum size is 10 MiB.\n\nSupported MIME types:\n`audio/mpeg`, `audio/wav`, `audio/x-wav`, `audio/ogg`, `audio/aac`, `audio/flac`, `audio/webm`, `audio/mp4`.\n",
+                        ),
                     FormField::text("language")
-                    .with_description("The BCP 47 language tag for the consent phrase (for example, `en-US`).")
-                ],
-            }),
-            response: ApiResponse::Json(Schema::new("VoiceConsentResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetVoiceConsent".to_string(),
-            method: RestMethod::Get,
-            path: "/audio/voice_consents/{consent_id}".to_string(),
-            description: "Retrieves a voice consent recording.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("VoiceConsentResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateVoiceConsent".to_string(),
-            method: RestMethod::Post,
-            path: "/audio/voice_consents/{consent_id}".to_string(),
-            description: "Updates a voice consent recording (metadata only)."
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("UpdateVoiceConsentRequest2"))),
-            response: ApiResponse::Json(Schema::new("VoiceConsentResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteVoiceConsent".to_string(),
-            method: RestMethod::Delete,
-            path: "/audio/voice_consents/{consent_id}".to_string(),
-            description: "Deletes a voice consent recording.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("VoiceConsentDeletedResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateVoice".to_string(),
-            method: RestMethod::Post,
-            path: "/audio/voices".to_string(),
-            description: "Creates a custom voice.".to_string(),
-            request: Some(ApiRequest::FormData {
-                fields: vec![
+                        .with_description(
+                            "The BCP 47 language tag for the consent phrase (for example, `en-US`).",
+                        ),
+                ]),
+            )
+            .build()
+    }
+    endpoints.push(endpoint_4(ctx)?);
+    fn endpoint_5(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "GetVoiceConsent",
+                RestMethod::Get,
+                "/audio/voice_consents/{consent_id}",
+            )
+            .describes("Retrieves a voice consent recording.")
+            .returns_json::<VoiceConsentResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_5(ctx)?);
+    fn endpoint_6(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UpdateVoiceConsent",
+                RestMethod::Post,
+                "/audio/voice_consents/{consent_id}",
+            )
+            .describes("Updates a voice consent recording (metadata only).")
+            .returns_json::<VoiceConsentResource>(ctx)
+            .request_json::<UpdateVoiceConsentRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_6(ctx)?);
+    fn endpoint_7(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteVoiceConsent",
+                RestMethod::Delete,
+                "/audio/voice_consents/{consent_id}",
+            )
+            .describes("Deletes a voice consent recording.")
+            .returns_json::<VoiceConsentDeletedResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_7(ctx)?);
+    fn endpoint_8(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateVoice", RestMethod::Post, "/audio/voices")
+            .describes("Creates a custom voice.")
+            .returns_json::<VoiceResource>(ctx)
+            .request_form(
+                Vec::from([
                     FormField::text("name")
-                    .with_description("The name of the new voice."),
+                        .with_description("The name of the new voice."),
                     FormField::file("audio_sample")
-                    .with_description("The sample audio recording file. Maximum size is 10 MiB.\n\nSupported MIME types:\n`audio/mpeg`, `audio/wav`, `audio/x-wav`, `audio/ogg`, `audio/aac`, `audio/flac`, `audio/webm`, `audio/mp4`.\n"),
+                        .with_description(
+                            "The sample audio recording file. Maximum size is 10 MiB.\n\nSupported MIME types:\n`audio/mpeg`, `audio/wav`, `audio/x-wav`, `audio/ogg`, `audio/aac`, `audio/flac`, `audio/webm`, `audio/mp4`.\n",
+                        ),
                     FormField::text("consent")
-                    .with_description("The consent recording ID (for example, `cons_1234`).")
-                ],
-            }),
-            response: ApiResponse::Json(Schema::new("VoiceResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListBatches".to_string(),
-            method: RestMethod::Get,
-            path: "/batches".to_string(),
-            description: "List your organization's batches.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ListBatchesResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateBatch".to_string(),
-            method: RestMethod::Post,
-            path: "/batches".to_string(),
-            description: "Creates and executes a batch from an uploaded file of requests"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateBatchRequest2"))),
-            response: ApiResponse::Json(Schema::new("Batch")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveBatch".to_string(),
-            method: RestMethod::Get,
-            path: "/batches/{batch_id}".to_string(),
-            description: "Retrieves a batch.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("Batch")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CancelBatch".to_string(),
-            method: RestMethod::Post,
-            path: "/batches/{batch_id}/cancel".to_string(),
-            description: "Cancels an in-progress batch. The batch will be in status `cancelling` for up to 10 minutes, before changing to `cancelled`, where it will have partial results (if any) available in the output file."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("Batch")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListChatCompletions".to_string(),
-            method: RestMethod::Get,
-            path: "/chat/completions".to_string(),
-            description: "List stored Chat Completions. Only Chat Completions that have been stored\nwith the `store` parameter set to `true` will be returned.\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ChatCompletionList")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "model".to_string(), required : false, description
-                    : Some("The model used to generate the Chat Completions."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "metadata"
-                    .to_string(), required : false, description :
-                    Some("A list of metadata keys to filter the Chat Completions by. Example:\n\n`metadata[key1]=value1&metadata[key2]=value2`\n"
-                    .to_string()), param_type : QueryParamType::Json, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("Identifier for the last chat completion from the previous pagination request."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("Number of Chat Completions to retrieve.".to_string()),
-                    param_type : QueryParamType::Integer, explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "order".to_string(), required
-                    : false, description :
-                    Some("Sort order for Chat Completions by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateChatCompletion".to_string(),
-            method: RestMethod::Post,
-            path: "/chat/completions".to_string(),
-            description: "**Starting a new project?** We recommend trying [Responses](/docs/api-reference/responses)\nto take advantage of the latest OpenAI platform features. Compare\n[Chat Completions with Responses](/docs/guides/responses-vs-chat-completions?api-mode=responses).\n\n---\n\nCreates a model response for the given chat conversation. Learn more in the\n[text generation](/docs/guides/text-generation), [vision](/docs/guides/vision),\nand [audio](/docs/guides/audio) guides.\n\nParameter support can differ depending on the model used to generate the\nresponse, particularly for newer reasoning models. Parameters that are only\nsupported for reasoning models are noted below. For the current state of\nunsupported parameters in reasoning models,\n[refer to the reasoning guide](/docs/guides/reasoning).\n\nReturns a chat completion object, or a streamed sequence of chat completion\nchunk objects if the request is streamed.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateChatCompletionRequest2"))),
-            response: ApiResponse::Json(Schema::new("CreateChatCompletionResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetChatCompletion".to_string(),
-            method: RestMethod::Get,
-            path: "/chat/completions/{completion_id}".to_string(),
-            description: "Get a stored chat completion. Only Chat Completions that have been created\nwith the `store` parameter set to `true` will be returned.\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("CreateChatCompletionResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateChatCompletion".to_string(),
-            method: RestMethod::Post,
-            path: "/chat/completions/{completion_id}".to_string(),
-            description: "Modify a stored chat completion. Only Chat Completions that have been\ncreated with the `store` parameter set to `true` can be modified. Currently,\nthe only supported modification is to update the `metadata` field.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("serde_json::Value"))),
-            response: ApiResponse::Json(Schema::new("CreateChatCompletionResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteChatCompletion".to_string(),
-            method: RestMethod::Delete,
-            path: "/chat/completions/{completion_id}".to_string(),
-            description: "Delete a stored chat completion. Only Chat Completions that have been\ncreated with the `store` parameter set to `true` can be deleted.\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ChatCompletionDeleted")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetChatCompletionMessages".to_string(),
-            method: RestMethod::Get,
-            path: "/chat/completions/{completion_id}/messages".to_string(),
-            description: "Get the messages in a stored chat completion. Only Chat Completions that\nhave been created with the `store` parameter set to `true` will be\nreturned.\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ChatCompletionMessageList")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
-                    Some("Identifier for the last message from the previous pagination request."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("Number of messages to retrieve.".to_string()), param_type :
-                    QueryParamType::Integer, explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "order".to_string(), required : false,
-                    description :
-                    Some("Sort order for messages by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateCompletion".to_string(),
-            method: RestMethod::Post,
-            path: "/completions".to_string(),
-            description: "Creates a completion for the provided prompt and parameters.\n\nReturns a completion object, or a sequence of completion objects if the request is streamed.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateCompletionRequest2"))),
-            response: ApiResponse::Json(Schema::new("CreateCompletionResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListContainers".to_string(),
-            method: RestMethod::Get,
-            path: "/containers".to_string(),
-            description: "List Containers".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ContainerListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "name".to_string(),
-                    required : false, description :
-                    Some("Filter results by container name.".to_string()), param_type :
-                    QueryParamType::String, explode : false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateContainer".to_string(),
-            method: RestMethod::Post,
-            path: "/containers".to_string(),
-            description: "Create Container".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateContainerBody"))),
-            response: ApiResponse::Json(Schema::new("ContainerResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveContainer".to_string(),
-            method: RestMethod::Get,
-            path: "/containers/{container_id}".to_string(),
-            description: "Retrieve Container".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ContainerResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteContainer".to_string(),
-            method: RestMethod::Delete,
-            path: "/containers/{container_id}".to_string(),
-            description: "Delete Container".to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListContainerFiles".to_string(),
-            method: RestMethod::Get,
-            path: "/containers/{container_id}/files".to_string(),
-            description: "List Container files".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ContainerFileListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateContainerFile".to_string(),
-            method: RestMethod::Post,
-            path: "/containers/{container_id}/files".to_string(),
-            description: "Create a Container File\n\nYou can send either a multipart/form-data request with the raw file content, or a JSON request with a file ID.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateContainerFileBody"))),
-            response: ApiResponse::Json(Schema::new("ContainerFileResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveContainerFile".to_string(),
-            method: RestMethod::Get,
-            path: "/containers/{container_id}/files/{file_id}".to_string(),
-            description: "Retrieve Container File".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ContainerFileResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteContainerFile".to_string(),
-            method: RestMethod::Delete,
-            path: "/containers/{container_id}/files/{file_id}".to_string(),
-            description: "Delete Container File".to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveContainerFileContent".to_string(),
-            method: RestMethod::Get,
-            path: "/containers/{container_id}/files/{file_id}/content".to_string(),
-            description: "Retrieve Container File Content".to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListConversationItems".to_string(),
-            method: RestMethod::Get,
-            path: "/conversations/{conversation_id}/items".to_string(),
-            description: "List all items for a conversation with the given ID."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ConversationItemList")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between\n1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("The order to return the input items in. Default is `desc`.\n- `asc`: Return the input items in ascending order.\n- `desc`: Return the input items in descending order.\n"
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
-                    Some("An item ID to list items after, used in pagination.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "include".to_string(),
-                    required : false, description :
-                    Some("Specify additional output data to include in the model response. Currently supported values are:\n- `web_search_call.action.sources`: Include the sources of the web search tool call.\n- `code_interpreter_call.outputs`: Includes the outputs of python code execution in code interpreter tool call items.\n- `computer_call_output.output.image_url`: Include image urls from the computer call output.\n- `file_search_call.results`: Include the search results of the file search tool call.\n- `message.input_image.image_url`: Include image urls from the input message.\n- `message.output_text.logprobs`: Include logprobs with assistant messages.\n- `reasoning.encrypted_content`: Includes an encrypted version of reasoning tokens in reasoning item outputs. This enables reasoning items to be used in multi-turn conversations when using the Responses API statelessly (like when the `store` parameter is set to `false`, or when an organization is enrolled in the zero data retention program)."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
-                    false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateConversationItems".to_string(),
-            method: RestMethod::Post,
-            path: "/conversations/{conversation_id}/items".to_string(),
-            description: "Create items in a conversation with the given ID.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("serde_json::Value"))),
-            response: ApiResponse::Json(Schema::new("ConversationItemList")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "include".to_string(), required : false,
-                    description :
-                    Some("Additional fields to include in the response. See the `include`\nparameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.\n"
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
-                    false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetConversationItem".to_string(),
-            method: RestMethod::Get,
-            path: "/conversations/{conversation_id}/items/{item_id}".to_string(),
-            description: "Get a single item from a conversation with the given IDs."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ConversationItem")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "include".to_string(), required : false,
-                    description :
-                    Some("Additional fields to include in the response. See the `include`\nparameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.\n"
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
-                    false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteConversationItem".to_string(),
-            method: RestMethod::Delete,
-            path: "/conversations/{conversation_id}/items/{item_id}".to_string(),
-            description: "Delete an item from a conversation with the given IDs."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ConversationResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateEmbedding".to_string(),
-            method: RestMethod::Post,
-            path: "/embeddings".to_string(),
-            description: "Creates an embedding vector representing the input text."
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateEmbeddingRequest2"))),
-            response: ApiResponse::Json(Schema::new("CreateEmbeddingResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListEvals".to_string(),
-            method: RestMethod::Get,
-            path: "/evals".to_string(),
-            description: "List evaluations for a project.\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("EvalList")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
-                    Some("Identifier for the last eval from the previous pagination request."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description : Some("Number of evals to retrieve."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for evals by timestamp. Use `asc` for ascending order or `desc` for descending order."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "order_by".to_string(),
-                    required : false, description :
-                    Some("Evals can be ordered by creation time or last updated time. Use\n`created_at` for creation time or `updated_at` for last updated time.\n"
-                    .to_string()), param_type : QueryParamType::Enum(vec!["created_at"
-                    .to_string(), "updated_at".to_string()]), explode : false, style :
-                    ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateEval".to_string(),
-            method: RestMethod::Post,
-            path: "/evals".to_string(),
-            description: "Create the structure of an evaluation that can be used to test a model's performance.\nAn evaluation is a set of testing criteria and the config for a data source, which dictates the schema of the data used in the evaluation. After creating an evaluation, you can run it on different models and model parameters. We support several types of graders and datasources.\nFor more information, see the [Evals guide](/docs/guides/evals).\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateEvalRequest2"))),
-            response: ApiResponse::Json(Schema::new("Eval")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetEval".to_string(),
-            method: RestMethod::Get,
-            path: "/evals/{eval_id}".to_string(),
-            description: "Get an evaluation by ID.\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("Eval")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateEval".to_string(),
-            method: RestMethod::Post,
-            path: "/evals/{eval_id}".to_string(),
-            description: "Update certain properties of an evaluation.\n".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("serde_json::Value"))),
-            response: ApiResponse::Json(Schema::new("Eval")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteEval".to_string(),
-            method: RestMethod::Delete,
-            path: "/evals/{eval_id}".to_string(),
-            description: "Delete an evaluation.\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("serde_json::Value")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetEvalRuns".to_string(),
-            method: RestMethod::Get,
-            path: "/evals/{eval_id}/runs".to_string(),
-            description: "Get a list of runs for an evaluation.\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("EvalRunList")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
-                    Some("Identifier for the last run from the previous pagination request."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description : Some("Number of runs to retrieve."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for runs by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "status".to_string(), required
-                    : false, description :
-                    Some("Filter runs by status. One of `queued` | `in_progress` | `failed` | `completed` | `canceled`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["queued"
-                    .to_string(), "in_progress".to_string(), "completed".to_string(),
-                    "canceled".to_string(), "failed".to_string()]), explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateEvalRun".to_string(),
-            method: RestMethod::Post,
-            path: "/evals/{eval_id}/runs".to_string(),
-            description: "Kicks off a new run for a given evaluation, specifying the data source, and what model configuration to use to test. The datasource will be validated against the schema specified in the config of the evaluation.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateEvalRunRequest2"))),
-            response: ApiResponse::Json(Schema::new("EvalRun")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetEvalRun".to_string(),
-            method: RestMethod::Get,
-            path: "/evals/{eval_id}/runs/{run_id}".to_string(),
-            description: "Get an evaluation run by ID.\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("EvalRun")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CancelEvalRun".to_string(),
-            method: RestMethod::Post,
-            path: "/evals/{eval_id}/runs/{run_id}".to_string(),
-            description: "Cancel an ongoing evaluation run.\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("EvalRun")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteEvalRun".to_string(),
-            method: RestMethod::Delete,
-            path: "/evals/{eval_id}/runs/{run_id}".to_string(),
-            description: "Delete an eval run.\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("serde_json::Value")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetEvalRunOutputItems".to_string(),
-            method: RestMethod::Get,
-            path: "/evals/{eval_id}/runs/{run_id}/output_items".to_string(),
-            description: "Get a list of output items for an evaluation run.\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("EvalRunOutputItemList")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
-                    Some("Identifier for the last output item from the previous pagination request."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("Number of output items to retrieve.".to_string()), param_type :
-                    QueryParamType::Integer, explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "status".to_string(), required : false,
-                    description :
-                    Some("Filter output items by status. Use `failed` to filter by failed output\nitems or `pass` to filter by passed output items.\n"
-                    .to_string()), param_type : QueryParamType::Enum(vec!["fail"
-                    .to_string(), "pass".to_string()]), explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "order".to_string(), required
-                    : false, description :
-                    Some("Sort order for output items by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetEvalRunOutputItem".to_string(),
-            method: RestMethod::Get,
-            path: "/evals/{eval_id}/runs/{run_id}/output_items/{output_item_id}"
-                .to_string(),
-            description: "Get an evaluation run output item by ID.\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("EvalRunOutputItem")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListFiles".to_string(),
-            method: RestMethod::Get,
-            path: "/files".to_string(),
-            description: "Returns a list of files.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ListFilesResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "purpose".to_string(), required : false,
-                    description : Some("Only return files with the given purpose."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 10,000, and the default is 10,000.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateFile".to_string(),
-            method: RestMethod::Post,
-            path: "/files".to_string(),
-            description: "Upload a file that can be used across various endpoints. Individual files\ncan be up to 512 MB, and each project can store up to 2.5 TB of files in\ntotal. There is no organization-wide storage limit. Uploads to this\nendpoint are rate-limited to 1,000 requests per minute per authenticated\nuser.\n\n- The Assistants API supports files up to 2 million tokens and of specific\n  file types. See the [Assistants Tools guide](/docs/assistants/tools) for\n  details.\n- The Fine-tuning API only supports `.jsonl` files. The input also has\n  certain required formats for fine-tuning\n  [chat](/docs/api-reference/fine-tuning/chat-input) or\n  [completions](/docs/api-reference/fine-tuning/completions-input) models.\n- The Batch API only supports `.jsonl` files up to 200 MB in size. The input\n  also has a specific required\n  [format](/docs/api-reference/batch/request-input).\n- For Retrieval or `file_search` ingestion, upload files here first. If\n  you need to attach multiple uploaded files to the same vector store, use\n  [`/vector_stores/{vector_store_id}/file_batches`](/docs/api-reference/vector-stores-file-batches/createBatch)\n  instead of attaching them one by one. Vector store attachment has separate\n  limits from file upload, including 2,000 attached files per minute per\n  organization.\n\nPlease [contact us](https://help.openai.com/) if you need to increase these\nstorage limits.\n"
-                .to_string(),
-            request: Some(ApiRequest::FormData {
-                fields: vec![
+                        .with_description(
+                            "The consent recording ID (for example, `cons_1234`).",
+                        ),
+                ]),
+            )
+            .build()
+    }
+    endpoints.push(endpoint_8(ctx)?);
+    fn endpoint_9(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListBatches", RestMethod::Get, "/batches")
+            .describes("List your organization's batches.")
+            .returns_json::<ListBatchesResponse>(ctx)
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_9(ctx)?);
+    fn endpoint_10(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateBatch", RestMethod::Post, "/batches")
+            .describes("Creates and executes a batch from an uploaded file of requests")
+            .returns_json::<Batch>(ctx)
+            .request_json::<CreateBatchRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_10(ctx)?);
+    fn endpoint_11(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("RetrieveBatch", RestMethod::Get, "/batches/{batch_id}")
+            .describes("Retrieves a batch.")
+            .returns_json::<Batch>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_11(ctx)?);
+    fn endpoint_12(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CancelBatch", RestMethod::Post, "/batches/{batch_id}/cancel")
+            .describes(
+                "Cancels an in-progress batch. The batch will be in status `cancelling` for up to 10 minutes, before changing to `cancelled`, where it will have partial results (if any) available in the output file.",
+            )
+            .returns_json::<Batch>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_12(ctx)?);
+    fn endpoint_13(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListChatCompletions", RestMethod::Get, "/chat/completions")
+            .describes(
+                "List stored Chat Completions. Only Chat Completions that have been stored\nwith the `store` parameter set to `true` will be returned.\n",
+            )
+            .returns_json::<ChatCompletionList>(ctx)
+            .query(ParamDef {
+                name: "model".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "The model used to generate the Chat Completions.".to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "metadata".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A list of metadata keys to filter the Chat Completions by. Example:\n\n`metadata[key1]=value1&metadata[key2]=value2`\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Json,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Identifier for the last chat completion from the previous pagination request."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Number of Chat Completions to retrieve.".to_string()),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order for Chat Completions by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_13(ctx)?);
+    fn endpoint_14(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateChatCompletion", RestMethod::Post, "/chat/completions")
+            .describes(
+                "**Starting a new project?** We recommend trying [Responses](/docs/api-reference/responses)\nto take advantage of the latest OpenAI platform features. Compare\n[Chat Completions with Responses](/docs/guides/responses-vs-chat-completions?api-mode=responses).\n\n---\n\nCreates a model response for the given chat conversation. Learn more in the\n[text generation](/docs/guides/text-generation), [vision](/docs/guides/vision),\nand [audio](/docs/guides/audio) guides.\n\nParameter support can differ depending on the model used to generate the\nresponse, particularly for newer reasoning models. Parameters that are only\nsupported for reasoning models are noted below. For the current state of\nunsupported parameters in reasoning models,\n[refer to the reasoning guide](/docs/guides/reasoning).\n\nReturns a chat completion object, or a streamed sequence of chat completion\nchunk objects if the request is streamed.\n",
+            )
+            .returns(Success::json(ctx.register::<CreateChatCompletionResponse>()?))
+            .returns(Success::sse(ctx.register::<CreateChatCompletionStreamResponse>()?))
+            .request_json::<CreateChatCompletionRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_14(ctx)?);
+    fn endpoint_15(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "GetChatCompletion",
+                RestMethod::Get,
+                "/chat/completions/{completion_id}",
+            )
+            .describes(
+                "Get a stored chat completion. Only Chat Completions that have been created\nwith the `store` parameter set to `true` will be returned.\n",
+            )
+            .returns_json::<CreateChatCompletionResponse>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_15(ctx)?);
+    fn endpoint_16(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UpdateChatCompletion",
+                RestMethod::Post,
+                "/chat/completions/{completion_id}",
+            )
+            .describes(
+                "Modify a stored chat completion. Only Chat Completions that have been\ncreated with the `store` parameter set to `true` can be modified. Currently,\nthe only supported modification is to update the `metadata` field.\n",
+            )
+            .returns_json::<CreateChatCompletionResponse>(ctx)
+            .request_json::<serde_json::Value>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_16(ctx)?);
+    fn endpoint_17(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteChatCompletion",
+                RestMethod::Delete,
+                "/chat/completions/{completion_id}",
+            )
+            .describes(
+                "Delete a stored chat completion. Only Chat Completions that have been\ncreated with the `store` parameter set to `true` can be deleted.\n",
+            )
+            .returns_json::<ChatCompletionDeleted>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_17(ctx)?);
+    fn endpoint_18(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "GetChatCompletionMessages",
+                RestMethod::Get,
+                "/chat/completions/{completion_id}/messages",
+            )
+            .describes(
+                "Get the messages in a stored chat completion. Only Chat Completions that\nhave been created with the `store` parameter set to `true` will be\nreturned.\n",
+            )
+            .returns_json::<ChatCompletionMessageList>(ctx)
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Identifier for the last message from the previous pagination request."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Number of messages to retrieve.".to_string()),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order for messages by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_18(ctx)?);
+    fn endpoint_19(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateCompletion", RestMethod::Post, "/completions")
+            .describes(
+                "Creates a completion for the provided prompt and parameters.\n\nReturns a completion object, or a sequence of completion objects if the request is streamed.\n",
+            )
+            .returns_json::<CreateCompletionResponse>(ctx)
+            .request_json::<CreateCompletionRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_19(ctx)?);
+    fn endpoint_20(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListContainers", RestMethod::Get, "/containers")
+            .describes("List Containers")
+            .returns_json::<ContainerListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "name".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Filter results by container name.".to_string()),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_20(ctx)?);
+    fn endpoint_21(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateContainer", RestMethod::Post, "/containers")
+            .describes("Create Container")
+            .returns_json::<ContainerResource>(ctx)
+            .request_json::<CreateContainerBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_21(ctx)?);
+    fn endpoint_22(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("RetrieveContainer", RestMethod::Get, "/containers/{container_id}")
+            .describes("Retrieve Container")
+            .returns_json::<ContainerResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_22(ctx)?);
+    fn endpoint_23(_ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteContainer",
+                RestMethod::Delete,
+                "/containers/{container_id}",
+            )
+            .describes("Delete Container")
+            .returns_empty()
+            .build()
+    }
+    endpoints.push(endpoint_23(ctx)?);
+    fn endpoint_24(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListContainerFiles",
+                RestMethod::Get,
+                "/containers/{container_id}/files",
+            )
+            .describes("List Container files")
+            .returns_json::<ContainerFileListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_24(ctx)?);
+    fn endpoint_25(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CreateContainerFile",
+                RestMethod::Post,
+                "/containers/{container_id}/files",
+            )
+            .describes(
+                "Create a Container File\n\nYou can send either a multipart/form-data request with the raw file content, or a JSON request with a file ID.\n",
+            )
+            .returns_json::<ContainerFileResource>(ctx)
+            .request_json::<CreateContainerFileBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_25(ctx)?);
+    fn endpoint_26(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveContainerFile",
+                RestMethod::Get,
+                "/containers/{container_id}/files/{file_id}",
+            )
+            .describes("Retrieve Container File")
+            .returns_json::<ContainerFileResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_26(ctx)?);
+    fn endpoint_27(_ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteContainerFile",
+                RestMethod::Delete,
+                "/containers/{container_id}/files/{file_id}",
+            )
+            .describes("Delete Container File")
+            .returns_empty()
+            .build()
+    }
+    endpoints.push(endpoint_27(ctx)?);
+    fn endpoint_28(_ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveContainerFileContent",
+                RestMethod::Get,
+                "/containers/{container_id}/files/{file_id}/content",
+            )
+            .describes("Retrieve Container File Content")
+            .returns_empty()
+            .build()
+    }
+    endpoints.push(endpoint_28(ctx)?);
+    fn endpoint_29(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListConversationItems",
+                RestMethod::Get,
+                "/conversations/{conversation_id}/items",
+            )
+            .describes("List all items for a conversation with the given ID.")
+            .returns_json::<ConversationItemList>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between\n1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "The order to return the input items in. Default is `desc`.\n- `asc`: Return the input items in ascending order.\n- `desc`: Return the input items in descending order.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "An item ID to list items after, used in pagination.\n".to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "include".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Specify additional output data to include in the model response. Currently supported values are:\n- `web_search_call.action.sources`: Include the sources of the web search tool call.\n- `code_interpreter_call.outputs`: Includes the outputs of python code execution in code interpreter tool call items.\n- `computer_call_output.output.image_url`: Include image urls from the computer call output.\n- `file_search_call.results`: Include the search results of the file search tool call.\n- `message.input_image.image_url`: Include image urls from the input message.\n- `message.output_text.logprobs`: Include logprobs with assistant messages.\n- `reasoning.encrypted_content`: Includes an encrypted version of reasoning tokens in reasoning item outputs. This enables reasoning items to be used in multi-turn conversations when using the Responses API statelessly (like when the `store` parameter is set to `false`, or when an organization is enrolled in the zero data retention program)."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::Json)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_29(ctx)?);
+    fn endpoint_30(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CreateConversationItems",
+                RestMethod::Post,
+                "/conversations/{conversation_id}/items",
+            )
+            .describes("Create items in a conversation with the given ID.")
+            .returns_json::<ConversationItemList>(ctx)
+            .request_json::<serde_json::Value>(ctx)
+            .query(ParamDef {
+                name: "include".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Additional fields to include in the response. See the `include`\nparameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::Json)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_30(ctx)?);
+    fn endpoint_31(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "GetConversationItem",
+                RestMethod::Get,
+                "/conversations/{conversation_id}/items/{item_id}",
+            )
+            .describes("Get a single item from a conversation with the given IDs.")
+            .returns(
+                Success::json(ctx.register::<Message>()?)
+                    .tagged("type", "message")
+                    .variant("Message"),
+            )
+            .returns(
+                Success::json(ctx.register::<FunctionToolCallResource>()?)
+                    .tagged("type", "function_call")
+                    .variant("FunctionToolCallResource"),
+            )
+            .returns(
+                Success::json(ctx.register::<FunctionToolCallOutputResource>()?)
+                    .tagged("type", "function_call_output")
+                    .variant("FunctionToolCallOutputResource"),
+            )
+            .returns(
+                Success::json(ctx.register::<FileSearchToolCall>()?)
+                    .tagged("type", "file_search_call")
+                    .variant("FileSearchToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<WebSearchToolCall>()?)
+                    .tagged("type", "web_search_call")
+                    .variant("WebSearchToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<ImageGenToolCall>()?)
+                    .tagged("type", "image_generation_call")
+                    .variant("ImageGenToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<ComputerToolCall>()?)
+                    .tagged("type", "computer_call")
+                    .variant("ComputerToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<ComputerToolCallOutputResource>()?)
+                    .tagged("type", "computer_call_output")
+                    .variant("ComputerToolCallOutputResource"),
+            )
+            .returns(
+                Success::json(ctx.register::<ToolSearchCall>()?)
+                    .tagged("type", "tool_search_call")
+                    .variant("ToolSearchCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<ToolSearchOutput>()?)
+                    .tagged("type", "tool_search_output")
+                    .variant("ToolSearchOutput"),
+            )
+            .returns(
+                Success::json(ctx.register::<AdditionalTools>()?)
+                    .tagged("type", "additional_tools")
+                    .variant("AdditionalTools"),
+            )
+            .returns(
+                Success::json(ctx.register::<ReasoningItem>()?)
+                    .tagged("type", "reasoning")
+                    .variant("ReasoningItem"),
+            )
+            .returns(
+                Success::json(ctx.register::<Program>()?)
+                    .tagged("type", "program")
+                    .variant("Program"),
+            )
+            .returns(
+                Success::json(ctx.register::<ProgramOutput>()?)
+                    .tagged("type", "program_output")
+                    .variant("ProgramOutput"),
+            )
+            .returns(
+                Success::json(ctx.register::<CompactionBody>()?)
+                    .tagged("type", "compaction")
+                    .variant("CompactionBody"),
+            )
+            .returns(
+                Success::json(ctx.register::<CodeInterpreterToolCall>()?)
+                    .tagged("type", "code_interpreter_call")
+                    .variant("CodeInterpreterToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<LocalShellToolCall>()?)
+                    .tagged("type", "local_shell_call")
+                    .variant("LocalShellToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<LocalShellToolCallOutput>()?)
+                    .tagged("type", "local_shell_call_output")
+                    .variant("LocalShellToolCallOutput"),
+            )
+            .returns(
+                Success::json(ctx.register::<FunctionShellCall>()?)
+                    .tagged("type", "shell_call")
+                    .variant("FunctionShellCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<FunctionShellCallOutput>()?)
+                    .tagged("type", "shell_call_output")
+                    .variant("FunctionShellCallOutput"),
+            )
+            .returns(
+                Success::json(ctx.register::<ApplyPatchToolCall>()?)
+                    .tagged("type", "apply_patch_call")
+                    .variant("ApplyPatchToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<ApplyPatchToolCallOutput>()?)
+                    .tagged("type", "apply_patch_call_output")
+                    .variant("ApplyPatchToolCallOutput"),
+            )
+            .returns(
+                Success::json(ctx.register::<MCPListTools>()?)
+                    .tagged("type", "mcp_list_tools")
+                    .variant("MCPListTools"),
+            )
+            .returns(
+                Success::json(ctx.register::<MCPApprovalRequest>()?)
+                    .tagged("type", "mcp_approval_request")
+                    .variant("MCPApprovalRequest"),
+            )
+            .returns(
+                Success::json(ctx.register::<MCPApprovalResponseResource>()?)
+                    .tagged("type", "mcp_approval_response")
+                    .variant("MCPApprovalResponseResource"),
+            )
+            .returns(
+                Success::json(ctx.register::<MCPToolCall>()?)
+                    .tagged("type", "mcp_call")
+                    .variant("MCPToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<CustomToolCall>()?)
+                    .tagged("type", "custom_tool_call")
+                    .variant("CustomToolCall"),
+            )
+            .returns(
+                Success::json(ctx.register::<CustomToolCallOutput>()?)
+                    .tagged("type", "custom_tool_call_output")
+                    .variant("CustomToolCallOutput"),
+            )
+            .query(ParamDef {
+                name: "include".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Additional fields to include in the response. See the `include`\nparameter for [listing Conversation items above](/docs/api-reference/conversations/list-items#conversations_list_items-include) for more information.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::Json)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_31(ctx)?);
+    fn endpoint_32(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteConversationItem",
+                RestMethod::Delete,
+                "/conversations/{conversation_id}/items/{item_id}",
+            )
+            .describes("Delete an item from a conversation with the given IDs.")
+            .returns_json::<ConversationResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_32(ctx)?);
+    fn endpoint_33(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateEmbedding", RestMethod::Post, "/embeddings")
+            .describes("Creates an embedding vector representing the input text.")
+            .returns_json::<CreateEmbeddingResponse>(ctx)
+            .request_json::<CreateEmbeddingRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_33(ctx)?);
+    fn endpoint_34(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListEvals", RestMethod::Get, "/evals")
+            .describes("List evaluations for a project.\n")
+            .returns_json::<EvalList>(ctx)
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Identifier for the last eval from the previous pagination request."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Number of evals to retrieve.".to_string()),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order for evals by timestamp. Use `asc` for ascending order or `desc` for descending order."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order_by".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Evals can be ordered by creation time or last updated time. Use\n`created_at` for creation time or `updated_at` for last updated time.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from(["created_at".to_string(), "updated_at".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_34(ctx)?);
+    fn endpoint_35(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateEval", RestMethod::Post, "/evals")
+            .describes(
+                "Create the structure of an evaluation that can be used to test a model's performance.\nAn evaluation is a set of testing criteria and the config for a data source, which dictates the schema of the data used in the evaluation. After creating an evaluation, you can run it on different models and model parameters. We support several types of graders and datasources.\nFor more information, see the [Evals guide](/docs/guides/evals).\n",
+            )
+            .returns_json::<Eval>(ctx)
+            .request_json::<CreateEvalRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_35(ctx)?);
+    fn endpoint_36(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("GetEval", RestMethod::Get, "/evals/{eval_id}")
+            .describes("Get an evaluation by ID.\n")
+            .returns_json::<Eval>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_36(ctx)?);
+    fn endpoint_37(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("UpdateEval", RestMethod::Post, "/evals/{eval_id}")
+            .describes("Update certain properties of an evaluation.\n")
+            .returns_json::<Eval>(ctx)
+            .request_json::<serde_json::Value>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_37(ctx)?);
+    fn endpoint_38(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("DeleteEval", RestMethod::Delete, "/evals/{eval_id}")
+            .describes("Delete an evaluation.\n")
+            .returns_json::<serde_json::Value>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(404u16),
+                        ErrorShape::json(ctx.register::<Error>()?),
+                    ),
+            )
+            .build()
+    }
+    endpoints.push(endpoint_38(ctx)?);
+    fn endpoint_39(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("GetEvalRuns", RestMethod::Get, "/evals/{eval_id}/runs")
+            .describes("Get a list of runs for an evaluation.\n")
+            .returns_json::<EvalRunList>(ctx)
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Identifier for the last run from the previous pagination request."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Number of runs to retrieve.".to_string()),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order for runs by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "status".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Filter runs by status. One of `queued` | `in_progress` | `failed` | `completed` | `canceled`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from([
+                        "queued".to_string(),
+                        "in_progress".to_string(),
+                        "completed".to_string(),
+                        "canceled".to_string(),
+                        "failed".to_string(),
+                    ]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_39(ctx)?);
+    fn endpoint_40(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateEvalRun", RestMethod::Post, "/evals/{eval_id}/runs")
+            .describes(
+                "Kicks off a new run for a given evaluation, specifying the data source, and what model configuration to use to test. The datasource will be validated against the schema specified in the config of the evaluation.\n",
+            )
+            .returns_json::<EvalRun>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<Error>()?),
+                    ),
+            )
+            .request_json::<CreateEvalRunRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_40(ctx)?);
+    fn endpoint_41(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("GetEvalRun", RestMethod::Get, "/evals/{eval_id}/runs/{run_id}")
+            .describes("Get an evaluation run by ID.\n")
+            .returns_json::<EvalRun>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_41(ctx)?);
+    fn endpoint_42(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CancelEvalRun",
+                RestMethod::Post,
+                "/evals/{eval_id}/runs/{run_id}",
+            )
+            .describes("Cancel an ongoing evaluation run.\n")
+            .returns_json::<EvalRun>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_42(ctx)?);
+    fn endpoint_43(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteEvalRun",
+                RestMethod::Delete,
+                "/evals/{eval_id}/runs/{run_id}",
+            )
+            .describes("Delete an eval run.\n")
+            .returns_json::<serde_json::Value>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(404u16),
+                        ErrorShape::json(ctx.register::<Error>()?),
+                    ),
+            )
+            .build()
+    }
+    endpoints.push(endpoint_43(ctx)?);
+    fn endpoint_44(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "GetEvalRunOutputItems",
+                RestMethod::Get,
+                "/evals/{eval_id}/runs/{run_id}/output_items",
+            )
+            .describes("Get a list of output items for an evaluation run.\n")
+            .returns_json::<EvalRunOutputItemList>(ctx)
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Identifier for the last output item from the previous pagination request."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Number of output items to retrieve.".to_string()),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "status".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Filter output items by status. Use `failed` to filter by failed output\nitems or `pass` to filter by passed output items.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["fail".to_string(), "pass".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order for output items by timestamp. Use `asc` for ascending order or `desc` for descending order. Defaults to `asc`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_44(ctx)?);
+    fn endpoint_45(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "GetEvalRunOutputItem",
+                RestMethod::Get,
+                "/evals/{eval_id}/runs/{run_id}/output_items/{output_item_id}",
+            )
+            .describes("Get an evaluation run output item by ID.\n")
+            .returns_json::<EvalRunOutputItem>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_45(ctx)?);
+    fn endpoint_46(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListFiles", RestMethod::Get, "/files")
+            .describes("Returns a list of files.")
+            .returns_json::<ListFilesResponse>(ctx)
+            .query(ParamDef {
+                name: "purpose".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Only return files with the given purpose.".to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 10,000, and the default is 10,000.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_46(ctx)?);
+    fn endpoint_47(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateFile", RestMethod::Post, "/files")
+            .describes(
+                "Upload a file that can be used across various endpoints. Individual files\ncan be up to 512 MB, and each project can store up to 2.5 TB of files in\ntotal. There is no organization-wide storage limit. Uploads to this\nendpoint are rate-limited to 1,000 requests per minute per authenticated\nuser.\n\n- The Assistants API supports files up to 2 million tokens and of specific\n  file types. See the [Assistants Tools guide](/docs/assistants/tools) for\n  details.\n- The Fine-tuning API only supports `.jsonl` files. The input also has\n  certain required formats for fine-tuning\n  [chat](/docs/api-reference/fine-tuning/chat-input) or\n  [completions](/docs/api-reference/fine-tuning/completions-input) models.\n- The Batch API only supports `.jsonl` files up to 200 MB in size. The input\n  also has a specific required\n  [format](/docs/api-reference/batch/request-input).\n- For Retrieval or `file_search` ingestion, upload files here first. If\n  you need to attach multiple uploaded files to the same vector store, use\n  [`/vector_stores/{vector_store_id}/file_batches`](/docs/api-reference/vector-stores-file-batches/createBatch)\n  instead of attaching them one by one. Vector store attachment has separate\n  limits from file upload, including 2,000 attached files per minute per\n  organization.\n\nPlease [contact us](https://help.openai.com/) if you need to increase these\nstorage limits.\n",
+            )
+            .returns_json::<OpenAIFile>(ctx)
+            .request_form(
+                Vec::from([
                     FormField::file("file")
-                    .with_description("The File object (not file name) to be uploaded.\n"),
+                        .with_description(
+                            "The File object (not file name) to be uploaded.\n",
+                        ),
                     FormField::text("purpose")
-                    .with_description("The intended purpose of the uploaded file. One of:\n- `assistants`: Used in the Assistants API\n- `batch`: Used in the Batch API\n- `fine-tune`: Used for fine-tuning\n- `vision`: Images used for vision fine-tuning\n- `user_data`: Flexible file type for any purpose\n- `evals`: Used for eval data sets\n"),
-                    FormField::text("expires_after").optional()
-                    .with_description("The expiration policy for a file. By default, files with `purpose=batch` expire after 30 days and all other files are persisted until they are manually deleted.")
-                ],
-            }),
-            response: ApiResponse::Json(Schema::new("OpenAIFile")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveFile".to_string(),
-            method: RestMethod::Get,
-            path: "/files/{file_id}".to_string(),
-            description: "Returns information about a specific file.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("OpenAIFile")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteFile".to_string(),
-            method: RestMethod::Delete,
-            path: "/files/{file_id}".to_string(),
-            description: "Delete a file and remove it from all vector stores."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("DeleteFileResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DownloadFile".to_string(),
-            method: RestMethod::Get,
-            path: "/files/{file_id}/content".to_string(),
-            description: "Returns the contents of the specified file.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("serde_json::Value")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RunGrader".to_string(),
-            method: RestMethod::Post,
-            path: "/fine_tuning/alpha/graders/run".to_string(),
-            description: "Run a grader.\n".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("RunGraderRequest2"))),
-            response: ApiResponse::Json(Schema::new("RunGraderResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ValidateGrader".to_string(),
-            method: RestMethod::Post,
-            path: "/fine_tuning/alpha/graders/validate".to_string(),
-            description: "Validate a grader.\n".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("ValidateGraderRequest2"))),
-            response: ApiResponse::Json(Schema::new("ValidateGraderResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListFineTuningCheckpointPermissions".to_string(),
-            method: RestMethod::Get,
-            path: "/fine_tuning/checkpoints/{fine_tuned_model_checkpoint}/permissions"
-                .to_string(),
-            description: "**NOTE:** This endpoint requires an [admin API key](../admin-api-keys).\n\nOrganization owners can use this endpoint to view all permissions for a fine-tuned model checkpoint.\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(
-                Schema::new("ListFineTuningCheckpointPermissionResponse"),
-            ),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "project_id".to_string(), required : false,
-                    description : Some("The ID of the project to get permissions for."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("Identifier for the last permission ID from the previous pagination request."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("Number of permissions to retrieve.".to_string()), param_type :
-                    QueryParamType::Integer, explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "order".to_string(), required : false,
-                    description : Some("The order in which to retrieve permissions."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["ascending"
-                    .to_string(), "descending".to_string()]), explode : false, style :
-                    ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateFineTuningCheckpointPermission".to_string(),
-            method: RestMethod::Post,
-            path: "/fine_tuning/checkpoints/{fine_tuned_model_checkpoint}/permissions"
-                .to_string(),
-            description: "**NOTE:** Calling this endpoint requires an [admin API key](../admin-api-keys).\n\nThis enables organization owners to share fine-tuned models with other projects in their organization.\n"
-                .to_string(),
-            request: Some(
-                ApiRequest::Json(
-                    Schema::new("CreateFineTuningCheckpointPermissionRequest2"),
+                        .with_description(
+                            "The intended purpose of the uploaded file. One of:\n- `assistants`: Used in the Assistants API\n- `batch`: Used in the Batch API\n- `fine-tune`: Used for fine-tuning\n- `vision`: Images used for vision fine-tuning\n- `user_data`: Flexible file type for any purpose\n- `evals`: Used for eval data sets\n",
+                        )
+                        .constraints(
+                            schematic_define::constraints::Constraints::new()
+                                .allowed_values([
+                                    "assistants",
+                                    "batch",
+                                    "fine-tune",
+                                    "vision",
+                                    "user_data",
+                                    "evals",
+                                ]),
+                        ),
+                    FormField::text("expires_after")
+                        .optional()
+                        .with_description(
+                            "The expiration policy for a file. By default, files with `purpose=batch` expire after 30 days and all other files are persisted until they are manually deleted.",
+                        ),
+                ]),
+            )
+            .build()
+    }
+    endpoints.push(endpoint_47(ctx)?);
+    fn endpoint_48(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("RetrieveFile", RestMethod::Get, "/files/{file_id}")
+            .describes("Returns information about a specific file.")
+            .returns_json::<OpenAIFile>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_48(ctx)?);
+    fn endpoint_49(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("DeleteFile", RestMethod::Delete, "/files/{file_id}")
+            .describes("Delete a file and remove it from all vector stores.")
+            .returns_json::<DeleteFileResponse>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_49(ctx)?);
+    fn endpoint_50(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("DownloadFile", RestMethod::Get, "/files/{file_id}/content")
+            .describes("Returns the contents of the specified file.")
+            .returns_json::<serde_json::Value>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_50(ctx)?);
+    fn endpoint_51(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("RunGrader", RestMethod::Post, "/fine_tuning/alpha/graders/run")
+            .describes("Run a grader.\n")
+            .returns_json::<RunGraderResponse>(ctx)
+            .request_json::<RunGraderRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_51(ctx)?);
+    fn endpoint_52(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ValidateGrader",
+                RestMethod::Post,
+                "/fine_tuning/alpha/graders/validate",
+            )
+            .describes("Validate a grader.\n")
+            .returns_json::<ValidateGraderResponse>(ctx)
+            .request_json::<ValidateGraderRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_52(ctx)?);
+    fn endpoint_53(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListFineTuningCheckpointPermissions",
+                RestMethod::Get,
+                "/fine_tuning/checkpoints/{fine_tuned_model_checkpoint}/permissions",
+            )
+            .describes(
+                "**NOTE:** This endpoint requires an [admin API key](../admin-api-keys).\n\nOrganization owners can use this endpoint to view all permissions for a fine-tuned model checkpoint.\n",
+            )
+            .returns_json::<ListFineTuningCheckpointPermissionResponse>(ctx)
+            .query(ParamDef {
+                name: "project_id".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "The ID of the project to get permissions for.".to_string(),
                 ),
-            ),
-            response: ApiResponse::Json(
-                Schema::new("ListFineTuningCheckpointPermissionResponse"),
-            ),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteFineTuningCheckpointPermission".to_string(),
-            method: RestMethod::Delete,
-            path: "/fine_tuning/checkpoints/{fine_tuned_model_checkpoint}/permissions/{permission_id}"
-                .to_string(),
-            description: "**NOTE:** This endpoint requires an [admin API key](../admin-api-keys).\n\nOrganization owners can use this endpoint to delete a permission for a fine-tuned model checkpoint.\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(
-                Schema::new("DeleteFineTuningCheckpointPermissionResponse"),
-            ),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListPaginatedFineTuningJobs".to_string(),
-            method: RestMethod::Get,
-            path: "/fine_tuning/jobs".to_string(),
-            description: "List your organization's fine-tuning jobs\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(
-                Schema::new("ListPaginatedFineTuningJobsResponse"),
-            ),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
-                    Some("Identifier for the last job from the previous pagination request."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("Number of fine-tuning jobs to retrieve.".to_string()),
-                    param_type : QueryParamType::Integer, explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "metadata".to_string(),
-                    required : false, description :
-                    Some("Optional metadata filter. To filter, use the syntax `metadata[k]=v`. Alternatively, set `metadata=null` to indicate no metadata.\n"
-                    .to_string()), param_type : QueryParamType::Json, explode : true,
-                    style : ParamStyle::DeepObject, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateFineTuningJob".to_string(),
-            method: RestMethod::Post,
-            path: "/fine_tuning/jobs".to_string(),
-            description: "Creates a fine-tuning job which begins the process of creating a new model from a given dataset.\n\nResponse includes details of the enqueued job including job status and the name of the fine-tuned models once complete.\n\n[Learn more about fine-tuning](/docs/guides/model-optimization)\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateFineTuningJobRequest2"))),
-            response: ApiResponse::Json(Schema::new("FineTuningJob")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveFineTuningJob".to_string(),
-            method: RestMethod::Get,
-            path: "/fine_tuning/jobs/{fine_tuning_job_id}".to_string(),
-            description: "Get info about a fine-tuning job.\n\n[Learn more about fine-tuning](/docs/guides/model-optimization)\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("FineTuningJob")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CancelFineTuningJob".to_string(),
-            method: RestMethod::Post,
-            path: "/fine_tuning/jobs/{fine_tuning_job_id}/cancel".to_string(),
-            description: "Immediately cancel a fine-tune job.\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("FineTuningJob")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListFineTuningJobCheckpoints".to_string(),
-            method: RestMethod::Get,
-            path: "/fine_tuning/jobs/{fine_tuning_job_id}/checkpoints".to_string(),
-            description: "List checkpoints for a fine-tuning job.\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(
-                Schema::new("ListFineTuningJobCheckpointsResponse"),
-            ),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
-                    Some("Identifier for the last checkpoint ID from the previous pagination request."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("Number of checkpoints to retrieve.".to_string()), param_type :
-                    QueryParamType::Integer, explode : false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListFineTuningEvents".to_string(),
-            method: RestMethod::Get,
-            path: "/fine_tuning/jobs/{fine_tuning_job_id}/events".to_string(),
-            description: "Get status updates for a fine-tuning job.\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ListFineTuningJobEventsResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
-                    Some("Identifier for the last event from the previous pagination request."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description : Some("Number of events to retrieve."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "PauseFineTuningJob".to_string(),
-            method: RestMethod::Post,
-            path: "/fine_tuning/jobs/{fine_tuning_job_id}/pause".to_string(),
-            description: "Pause a fine-tune job.\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("FineTuningJob")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ResumeFineTuningJob".to_string(),
-            method: RestMethod::Post,
-            path: "/fine_tuning/jobs/{fine_tuning_job_id}/resume".to_string(),
-            description: "Resume a fine-tune job.\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("FineTuningJob")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateImageEdit".to_string(),
-            method: RestMethod::Post,
-            path: "/images/edits".to_string(),
-            description: "Creates an edited or extended image given one or more source images and a prompt. This endpoint supports GPT Image models (`gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini`, and `chatgpt-image-latest`) and `dall-e-2`."
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("EditImageBodyJsonParam"))),
-            response: ApiResponse::Json(Schema::new("ImagesResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateImage".to_string(),
-            method: RestMethod::Post,
-            path: "/images/generations".to_string(),
-            description: "Creates an image given a prompt. [Learn more](/docs/guides/images).\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateImageRequest2"))),
-            response: ApiResponse::Json(Schema::new("ImagesResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateImageVariation".to_string(),
-            method: RestMethod::Post,
-            path: "/images/variations".to_string(),
-            description: "Creates a variation of a given image. This endpoint only supports `dall-e-2`."
-                .to_string(),
-            request: Some(ApiRequest::FormData {
-                fields: vec![
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Identifier for the last permission ID from the previous pagination request."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Number of permissions to retrieve.".to_string()),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "The order in which to retrieve permissions.".to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from(["ascending".to_string(), "descending".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_53(ctx)?);
+    fn endpoint_54(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CreateFineTuningCheckpointPermission",
+                RestMethod::Post,
+                "/fine_tuning/checkpoints/{fine_tuned_model_checkpoint}/permissions",
+            )
+            .describes(
+                "**NOTE:** Calling this endpoint requires an [admin API key](../admin-api-keys).\n\nThis enables organization owners to share fine-tuned models with other projects in their organization.\n",
+            )
+            .returns_json::<ListFineTuningCheckpointPermissionResponse>(ctx)
+            .request_json::<CreateFineTuningCheckpointPermissionRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_54(ctx)?);
+    fn endpoint_55(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteFineTuningCheckpointPermission",
+                RestMethod::Delete,
+                "/fine_tuning/checkpoints/{fine_tuned_model_checkpoint}/permissions/{permission_id}",
+            )
+            .describes(
+                "**NOTE:** This endpoint requires an [admin API key](../admin-api-keys).\n\nOrganization owners can use this endpoint to delete a permission for a fine-tuned model checkpoint.\n",
+            )
+            .returns_json::<DeleteFineTuningCheckpointPermissionResponse>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_55(ctx)?);
+    fn endpoint_56(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListPaginatedFineTuningJobs",
+                RestMethod::Get,
+                "/fine_tuning/jobs",
+            )
+            .describes("List your organization's fine-tuning jobs\n")
+            .returns_json::<ListPaginatedFineTuningJobsResponse>(ctx)
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Identifier for the last job from the previous pagination request."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Number of fine-tuning jobs to retrieve.".to_string()),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "metadata".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Optional metadata filter. To filter, use the syntax `metadata[k]=v`. Alternatively, set `metadata=null` to indicate no metadata.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Json,
+                explode: true,
+                style: ParamStyle::DeepObject,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_56(ctx)?);
+    fn endpoint_57(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateFineTuningJob", RestMethod::Post, "/fine_tuning/jobs")
+            .describes(
+                "Creates a fine-tuning job which begins the process of creating a new model from a given dataset.\n\nResponse includes details of the enqueued job including job status and the name of the fine-tuned models once complete.\n\n[Learn more about fine-tuning](/docs/guides/model-optimization)\n",
+            )
+            .returns_json::<FineTuningJob>(ctx)
+            .request_json::<CreateFineTuningJobRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_57(ctx)?);
+    fn endpoint_58(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveFineTuningJob",
+                RestMethod::Get,
+                "/fine_tuning/jobs/{fine_tuning_job_id}",
+            )
+            .describes(
+                "Get info about a fine-tuning job.\n\n[Learn more about fine-tuning](/docs/guides/model-optimization)\n",
+            )
+            .returns_json::<FineTuningJob>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_58(ctx)?);
+    fn endpoint_59(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CancelFineTuningJob",
+                RestMethod::Post,
+                "/fine_tuning/jobs/{fine_tuning_job_id}/cancel",
+            )
+            .describes("Immediately cancel a fine-tune job.\n")
+            .returns_json::<FineTuningJob>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_59(ctx)?);
+    fn endpoint_60(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListFineTuningJobCheckpoints",
+                RestMethod::Get,
+                "/fine_tuning/jobs/{fine_tuning_job_id}/checkpoints",
+            )
+            .describes("List checkpoints for a fine-tuning job.\n")
+            .returns_json::<ListFineTuningJobCheckpointsResponse>(ctx)
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Identifier for the last checkpoint ID from the previous pagination request."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Number of checkpoints to retrieve.".to_string()),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_60(ctx)?);
+    fn endpoint_61(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListFineTuningEvents",
+                RestMethod::Get,
+                "/fine_tuning/jobs/{fine_tuning_job_id}/events",
+            )
+            .describes("Get status updates for a fine-tuning job.\n")
+            .returns_json::<ListFineTuningJobEventsResponse>(ctx)
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Identifier for the last event from the previous pagination request."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Number of events to retrieve.".to_string()),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_61(ctx)?);
+    fn endpoint_62(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "PauseFineTuningJob",
+                RestMethod::Post,
+                "/fine_tuning/jobs/{fine_tuning_job_id}/pause",
+            )
+            .describes("Pause a fine-tune job.\n")
+            .returns_json::<FineTuningJob>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_62(ctx)?);
+    fn endpoint_63(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ResumeFineTuningJob",
+                RestMethod::Post,
+                "/fine_tuning/jobs/{fine_tuning_job_id}/resume",
+            )
+            .describes("Resume a fine-tune job.\n")
+            .returns_json::<FineTuningJob>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_63(ctx)?);
+    fn endpoint_64(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateImageEdit", RestMethod::Post, "/images/edits")
+            .describes(
+                "Creates an edited or extended image given one or more source images and a prompt. This endpoint supports GPT Image models (`gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini`, and `chatgpt-image-latest`) and `dall-e-2`.",
+            )
+            .returns(Success::json(ctx.register::<ImagesResponse>()?))
+            .returns(Success::sse(ctx.register::<ImageEditStreamEvent>()?))
+            .request_json::<EditImageBodyJsonParam>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_64(ctx)?);
+    fn endpoint_65(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateImage", RestMethod::Post, "/images/generations")
+            .describes(
+                "Creates an image given a prompt. [Learn more](/docs/guides/images).\n",
+            )
+            .returns(Success::json(ctx.register::<ImagesResponse>()?))
+            .returns(Success::sse(ctx.register::<ImageGenStreamEvent>()?))
+            .request_json::<CreateImageRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_65(ctx)?);
+    fn endpoint_66(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateImageVariation", RestMethod::Post, "/images/variations")
+            .describes(
+                "Creates a variation of a given image. This endpoint only supports `dall-e-2`.",
+            )
+            .returns_json::<ImagesResponse>(ctx)
+            .request_form(
+                Vec::from([
                     FormField::file("image")
-                    .with_description("The image to use as the basis for the variation(s). Must be a valid PNG file, less than 4MB, and square."),
-                    FormField::text("model").optional()
-                    .with_description("The model to use for image generation. Only `dall-e-2` is supported at this time."),
-                    FormField::text("n").optional()
-                    .with_description("The number of images to generate. Must be between 1 and 10."),
-                    FormField::text("response_format").optional()
-                    .with_description("The format in which the generated images are returned. Must be one of `url` or `b64_json`. URLs are only valid for 60 minutes after the image has been generated."),
-                    FormField::text("size").optional()
-                    .with_description("The size of the generated images. Must be one of `256x256`, `512x512`, or `1024x1024`."),
-                    FormField::text("user").optional()
-                    .with_description("A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse. [Learn more](/docs/guides/safety-best-practices#end-user-ids).\n")
-                ],
-            }),
-            response: ApiResponse::Json(Schema::new("ImagesResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListModels".to_string(),
-            method: RestMethod::Get,
-            path: "/models".to_string(),
-            description: "Lists the currently available models, and provides basic information about each one such as the owner and availability."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ListModelsResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveModel".to_string(),
-            method: RestMethod::Get,
-            path: "/models/{model}".to_string(),
-            description: "Retrieves a model instance, providing basic information about the model such as the owner and permissioning."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("Model")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteModel".to_string(),
-            method: RestMethod::Delete,
-            path: "/models/{model}".to_string(),
-            description: "Delete a fine-tuned model. You must have the Owner role in your organization to delete a model."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("DeleteModelResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateModeration".to_string(),
-            method: RestMethod::Post,
-            path: "/moderations".to_string(),
-            description: "Classifies if text and/or image inputs are potentially harmful. Learn\nmore in the [moderation guide](/docs/guides/moderation).\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateModerationRequest2"))),
-            response: ApiResponse::Json(Schema::new("CreateModerationResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "AdminApiKeysList".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/admin_api_keys".to_string(),
-            description: "List organization API keys".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ApiKeyList")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "after".to_string(), required : false, description
-                    : None, param_type : QueryParamType::String, explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "order".to_string(), required
-                    : false, description : None, param_type :
-                    QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
-                    explode : false, style : ParamStyle::Form, }, ParamDef { name :
-                    "limit".to_string(), required : false, description : None, param_type
-                    : QueryParamType::Integer, explode : false, style : ParamStyle::Form,
-                    }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "AdminApiKeysCreate".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/admin_api_keys".to_string(),
-            description: "Create an organization admin API key".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("serde_json::Value"))),
-            response: ApiResponse::Json(Schema::new("AdminApiKeyCreateResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "AdminApiKeysGet".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/admin_api_keys/{key_id}".to_string(),
-            description: "Retrieve a single organization API key".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("AdminApiKey")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "AdminApiKeysDelete".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/admin_api_keys/{key_id}".to_string(),
-            description: "Delete an organization admin API key".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("serde_json::Value")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListAuditLogs".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/audit_logs".to_string(),
-            description: "List user actions and configuration changes within this organization."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ListAuditLogsResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "effective_at".to_string(), required : false,
-                    description :
-                    Some("Return only events whose `effective_at` (Unix seconds) is in this range."
-                    .to_string()), param_type : QueryParamType::Json, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "project_ids[]"
-                    .to_string(), required : false, description :
-                    Some("Return only events for these projects.".to_string()),
-                    param_type : QueryParamType::Array(Box::new(QueryParamType::String)),
-                    explode : false, style : ParamStyle::Form, }, ParamDef { name :
-                    "event_types[]".to_string(), required : false, description :
-                    Some("Return only events with a `type` in one of these values. For example, `project.created`. For all options, see the documentation for the [audit log object](/docs/api-reference/audit-logs/object)."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "actor_ids[]"
-                    .to_string(), required : false, description :
-                    Some("Return only events performed by these actors. Can be a user ID, a service account ID, or an api key tracking ID."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name :
-                    "actor_emails[]".to_string(), required : false, description :
-                    Some("Return only events performed by users with these emails."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name :
-                    "resource_ids[]".to_string(), required : false, description :
-                    Some("Return only events performed on these targets. For example, a project ID updated. For ChatGPT connector role events, use the workspace connector resource ID shown in `details.id`, such as `<workspace_id>__<connector_id>`."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "tenant_only"
-                    .to_string(), required : false, description :
-                    Some("Return only tenant-scoped events associated with this organization. Required for tenant-scoped events such as `role.bound_to_resource` and `role.unbound_from_resource`. When `true`, all supplied event types must be tenant-scoped."
-                    .to_string()), param_type : QueryParamType::Boolean, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "limit".to_string(),
-                    required : false, description :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListOrganizationCertificates".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/certificates".to_string(),
-            description: "List uploaded certificates for this organization.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ListCertificatesResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UploadCertificate".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/certificates".to_string(),
-            description: "Upload a certificate to the organization. This does **not** automatically activate the certificate.\n\nOrganizations can upload up to 50 certificates.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("UploadCertificateRequest2"))),
-            response: ApiResponse::Json(Schema::new("Certificate")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ActivateOrganizationCertificates".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/certificates/activate".to_string(),
-            description: "Activate certificates at the organization level.\n\nYou can atomically and idempotently activate up to 10 certificates at a time.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("ToggleCertificatesRequest"))),
-            response: ApiResponse::Json(
-                Schema::new("OrganizationCertificateActivationResponse"),
-            ),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeactivateOrganizationCertificates".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/certificates/deactivate".to_string(),
-            description: "Deactivate certificates at the organization level.\n\nYou can atomically and idempotently deactivate up to 10 certificates at a time.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("ToggleCertificatesRequest"))),
-            response: ApiResponse::Json(
-                Schema::new("OrganizationCertificateDeactivationResponse"),
-            ),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetCertificate".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/certificates/{certificate_id}".to_string(),
-            description: "Get a certificate that has been uploaded to the organization.\n\nYou can get a certificate regardless of whether it is active or not.\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("Certificate")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "include".to_string(), required : false,
-                    description :
-                    Some("A list of additional fields to include in the response. Currently the only supported value is `content` to fetch the PEM content of the certificate."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["content"
-                    .to_string()]))), explode : false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ModifyCertificate".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/certificates/{certificate_id}".to_string(),
-            description: "Modify a certificate. Note that only the name can be modified.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("ModifyCertificateRequest2"))),
-            response: ApiResponse::Json(Schema::new("Certificate")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteCertificate".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/certificates/{certificate_id}".to_string(),
-            description: "Delete a certificate from the organization.\n\nThe certificate must be inactive for the organization and all projects.\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("DeleteCertificateResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UsageCosts".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/costs".to_string(),
-            description: "Get costs details for the organization.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("UsageResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
-                    Some("Start time (Unix seconds) of the query time range, inclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
-                    Some("End time (Unix seconds) of the query time range, exclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
-                    Some("Width of each time bucket in response. Currently only `1d` is supported, default to `1d`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["1d"
-                    .to_string()]), explode : false, style : ParamStyle::Form, },
-                    ParamDef { name : "project_ids".to_string(), required : false,
-                    description : Some("Return only costs for these projects."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only costs for these API keys.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
-                    Some("Group the costs by the specified fields. Support fields include `project_id`, `line_item`, `api_key_id` and any combination of them."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
-                    .to_string(), "line_item".to_string(), "api_key_id".to_string()]))),
-                    explode : false, style : ParamStyle::Form, }, ParamDef { name :
-                    "limit".to_string(), required : false, description :
-                    Some("A limit on the number of buckets to be returned. Limit can range between 1 and 180, and the default is 7.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveOrganizationDataRetention".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/data_retention".to_string(),
-            description: "Retrieves organization data retention controls.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("OrganizationDataRetention")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateOrganizationDataRetention".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/data_retention".to_string(),
-            description: "Updates organization data retention controls.".to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("UpdateOrganizationDataRetentionBody")),
-            ),
-            response: ApiResponse::Json(Schema::new("OrganizationDataRetention")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListGroups".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/groups".to_string(),
-            description: "Lists all groups in the organization.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("GroupListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of groups to be returned. Limit can range between 0 and 1000, and the default is 100.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `after` is a group ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with group_abc, your subsequent call can include `after=group_abc` in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Specifies the sort order of the returned groups.".to_string()),
-                    param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
-                    .to_string()]), explode : false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateGroup".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/groups".to_string(),
-            description: "Creates a new group in the organization.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateGroupBody"))),
-            response: ApiResponse::Json(Schema::new("GroupResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveGroup".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/groups/{group_id}".to_string(),
-            description: "Retrieves a group.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("GroupResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateGroup".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/groups/{group_id}".to_string(),
-            description: "Updates a group's information.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("UpdateGroupBody"))),
-            response: ApiResponse::Json(Schema::new("GroupResourceWithSuccess")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteGroup".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/groups/{group_id}".to_string(),
-            description: "Deletes a group from the organization.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("GroupDeletedResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListGroupRoleAssignments".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/groups/{group_id}/roles".to_string(),
-            description: "Lists the organization roles assigned to a group within the organization."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("RoleListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of organization role assignments to return."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for the returned organization roles.".to_string()),
-                    param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
-                    .to_string()]), explode : false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "AssignGroupRole".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/groups/{group_id}/roles".to_string(),
-            description: "Assigns an organization role to a group within the organization."
-                .to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("PublicAssignOrganizationGroupRoleBody")),
-            ),
-            response: ApiResponse::Json(Schema::new("GroupRoleAssignment")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveGroupRole".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/groups/{group_id}/roles/{role_id}".to_string(),
-            description: "Retrieves an organization role assigned to a group."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("AssignedRoleDetails")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UnassignGroupRole".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/groups/{group_id}/roles/{role_id}".to_string(),
-            description: "Unassigns an organization role from a group within the organization."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("DeletedRoleAssignmentResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListGroupUsers".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/groups/{group_id}/users".to_string(),
-            description: "Lists the users assigned to a group.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("UserListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of users to be returned. Limit can range between 0 and 1000, and the default is 100.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. Provide the ID of the last user from the previous list response to retrieve the next page.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Specifies the sort order of users in the list.".to_string()),
-                    param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
-                    .to_string()]), explode : false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "AddGroupUser".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/groups/{group_id}/users".to_string(),
-            description: "Adds a user to a group.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateGroupUserBody"))),
-            response: ApiResponse::Json(Schema::new("GroupUserAssignment")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveGroupUser".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/groups/{group_id}/users/{user_id}".to_string(),
-            description: "Retrieves a user in a group.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("GroupMemberUser")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RemoveGroupUser".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/groups/{group_id}/users/{user_id}".to_string(),
-            description: "Removes a user from a group.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("GroupUserDeletedResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListInvites".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/invites".to_string(),
-            description: "Returns a list of invites in the organization.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("InviteListResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "InviteUser".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/invites".to_string(),
-            description: "Create an invite for a user to the organization. The invite must be accepted by the user before they have access to the organization."
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("InviteRequest"))),
-            response: ApiResponse::Json(Schema::new("Invite")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveInvite".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/invites/{invite_id}".to_string(),
-            description: "Retrieves an invite.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("Invite")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteInvite".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/invites/{invite_id}".to_string(),
-            description: "Delete an invite. If the invite has already been accepted, it cannot be deleted."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("InviteDeleteResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListProjects".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects".to_string(),
-            description: "Returns a list of projects.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectListResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "include_archived"
-                    .to_string(), required : false, description :
-                    Some("If `true` returns all projects including those that have been `archived`. Archived projects are not included by default."
-                    .to_string()), param_type : QueryParamType::Boolean, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateProject".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects".to_string(),
-            description: "Create a new project in the organization. Projects can be created and archived, but cannot be deleted."
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("ProjectCreateRequest"))),
-            response: ApiResponse::Json(Schema::new("Project")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveProject".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}".to_string(),
-            description: "Retrieves a project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("Project")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ModifyProject".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}".to_string(),
-            description: "Modifies a project in the organization.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("ProjectUpdateRequest"))),
-            response: ApiResponse::Json(Schema::new("Project")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListProjectApiKeys".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/api_keys".to_string(),
-            description: "Returns a list of API keys in the project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectApiKeyListResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "owner_project_access"
-                    .to_string(), required : false, description :
-                    Some("Filter API keys by whether the owner currently has effective access to the project. Use `active` for owners with access, `inactive` for owners without access, or `any` for all enabled project API keys. If omitted, the endpoint applies its existing membership-based visibility rules, which may exclude some enabled keys.\n"
-                    .to_string()), param_type : QueryParamType::Enum(vec!["active"
-                    .to_string(), "inactive".to_string(), "any".to_string()]), explode :
-                    false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveProjectApiKey".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/api_keys/{api_key_id}"
-                .to_string(),
-            description: "Retrieves an API key in the project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectApiKey")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteProjectApiKey".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/projects/{project_id}/api_keys/{api_key_id}"
-                .to_string(),
-            description: "Deletes an API key from the project.\n\nReturns confirmation of the key deletion, or an error if the key belonged to\na service account.\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectApiKeyDeleteResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ArchiveProject".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/archive".to_string(),
-            description: "Archives a project in the organization. Archived projects cannot be used or updated."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("Project")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListProjectCertificates".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/certificates".to_string(),
-            description: "List certificates for this project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ListProjectCertificatesResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ActivateProjectCertificates".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/certificates/activate"
-                .to_string(),
-            description: "Activate certificates at the project level.\n\nYou can atomically and idempotently activate up to 10 certificates at a time.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("ToggleCertificatesRequest"))),
-            response: ApiResponse::Json(
-                Schema::new("OrganizationProjectCertificateActivationResponse"),
-            ),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeactivateProjectCertificates".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/certificates/deactivate"
-                .to_string(),
-            description: "Deactivate certificates at the project level. You can atomically and \nidempotently deactivate up to 10 certificates at a time.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("ToggleCertificatesRequest"))),
-            response: ApiResponse::Json(
-                Schema::new("OrganizationProjectCertificateDeactivationResponse"),
-            ),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveProjectDataRetention".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/data_retention".to_string(),
-            description: "Retrieves project data retention controls.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectDataRetention")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateProjectDataRetention".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/data_retention".to_string(),
-            description: "Updates project data retention controls.".to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("UpdateProjectDataRetentionBody")),
-            ),
-            response: ApiResponse::Json(Schema::new("ProjectDataRetention")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListProjectGroups".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/groups".to_string(),
-            description: "Lists the groups that have access to a project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectGroupListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of project groups to return. Defaults to 20."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("Cursor for pagination. Provide the ID of the last group from the previous response to fetch the next page."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for the returned groups.".to_string()), param_type :
-                    QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
-                    explode : false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "AddProjectGroup".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/groups".to_string(),
-            description: "Grants a group access to a project.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("InviteProjectGroupBody"))),
-            response: ApiResponse::Json(Schema::new("ProjectGroup")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveProjectGroup".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/groups/{group_id}".to_string(),
-            description: "Retrieves a project's group.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectGroup")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "group_type".to_string(), required : false,
-                    description : Some("The type of group to retrieve.".to_string()),
-                    param_type : QueryParamType::Enum(vec!["group".to_string(),
-                    "tenant_group".to_string()]), explode : false, style :
-                    ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RemoveProjectGroup".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/projects/{project_id}/groups/{group_id}".to_string(),
-            description: "Revokes a group's access to a project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectGroupDeletedResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveProjectHostedToolPermissions".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/hosted_tool_permissions"
-                .to_string(),
-            description: "Returns hosted tool permissions for a project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectHostedToolPermissions")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateProjectHostedToolPermissions".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/hosted_tool_permissions"
-                .to_string(),
-            description: "Updates hosted tool permissions for a project.".to_string(),
-            request: Some(
-                ApiRequest::Json(
-                    Schema::new("ProjectHostedToolPermissionsUpdateRequest"),
+                        .with_description(
+                            "The image to use as the basis for the variation(s). Must be a valid PNG file, less than 4MB, and square.",
+                        ),
+                    FormField::text("model")
+                        .optional()
+                        .with_description(
+                            "The model to use for image generation. Only `dall-e-2` is supported at this time.",
+                        ),
+                    FormField::text("n")
+                        .optional()
+                        .with_description(
+                            "The number of images to generate. Must be between 1 and 10.",
+                        ),
+                    FormField::text("response_format")
+                        .optional()
+                        .with_description(
+                            "The format in which the generated images are returned. Must be one of `url` or `b64_json`. URLs are only valid for 60 minutes after the image has been generated.",
+                        )
+                        .constraints(
+                            schematic_define::constraints::Constraints::new()
+                                .allowed_values(["url", "b64_json"]),
+                        ),
+                    FormField::text("size")
+                        .optional()
+                        .with_description(
+                            "The size of the generated images. Must be one of `256x256`, `512x512`, or `1024x1024`.",
+                        )
+                        .constraints(
+                            schematic_define::constraints::Constraints::new()
+                                .allowed_values(["256x256", "512x512", "1024x1024"]),
+                        ),
+                    FormField::text("user")
+                        .optional()
+                        .with_description(
+                            "A unique identifier representing your end-user, which can help OpenAI to monitor and detect abuse. [Learn more](/docs/guides/safety-best-practices#end-user-ids).\n",
+                        ),
+                ]),
+            )
+            .build()
+    }
+    endpoints.push(endpoint_66(ctx)?);
+    fn endpoint_67(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListModels", RestMethod::Get, "/models")
+            .describes(
+                "Lists the currently available models, and provides basic information about each one such as the owner and availability.",
+            )
+            .returns_json::<ListModelsResponse>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_67(ctx)?);
+    fn endpoint_68(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("RetrieveModel", RestMethod::Get, "/models/{model}")
+            .describes(
+                "Retrieves a model instance, providing basic information about the model such as the owner and permissioning.",
+            )
+            .returns_json::<Model>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_68(ctx)?);
+    fn endpoint_69(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("DeleteModel", RestMethod::Delete, "/models/{model}")
+            .describes(
+                "Delete a fine-tuned model. You must have the Owner role in your organization to delete a model.",
+            )
+            .returns_json::<DeleteModelResponse>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_69(ctx)?);
+    fn endpoint_70(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateModeration", RestMethod::Post, "/moderations")
+            .describes(
+                "Classifies if text and/or image inputs are potentially harmful. Learn\nmore in the [moderation guide](/docs/guides/moderation).\n",
+            )
+            .returns_json::<CreateModerationResponse>(ctx)
+            .request_json::<CreateModerationRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_70(ctx)?);
+    fn endpoint_71(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "AdminApiKeysList",
+                RestMethod::Get,
+                "/organization/admin_api_keys",
+            )
+            .describes("List organization API keys")
+            .returns_json::<ApiKeyList>(ctx)
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: None,
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: None,
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
                 ),
-            ),
-            response: ApiResponse::Json(Schema::new("ProjectHostedToolPermissions")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveProjectModelPermissions".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/model_permissions".to_string(),
-            description: "Returns model permissions for a project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectModelPermissions")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateProjectModelPermissions".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/model_permissions".to_string(),
-            description: "Updates model permissions for a project.".to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("ProjectModelPermissionsUpdateRequest")),
-            ),
-            response: ApiResponse::Json(Schema::new("ProjectModelPermissions")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteProjectModelPermissions".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/projects/{project_id}/model_permissions".to_string(),
-            description: "Deletes model permissions for a project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(
-                Schema::new("ProjectModelPermissionsDeleteResponse"),
-            ),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListProjectRateLimits".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/rate_limits".to_string(),
-            description: "Returns the rate limits per model for a project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectRateLimitListResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. The default is 100.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, beginning with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateProjectRateLimits".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/rate_limits/{rate_limit_id}"
-                .to_string(),
-            description: "Updates a project rate limit.".to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("ProjectRateLimitUpdateRequest")),
-            ),
-            response: ApiResponse::Json(Schema::new("ProjectRateLimit")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListProjectServiceAccounts".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/service_accounts".to_string(),
-            description: "Returns a list of service accounts in the project."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(
-                Schema::new("ProjectServiceAccountListResponse"),
-            ),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateProjectServiceAccount".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/service_accounts".to_string(),
-            description: "Creates a new service account in the project. By default, this also returns an unredacted API key for the service account."
-                .to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("ProjectServiceAccountCreateRequest")),
-            ),
-            response: ApiResponse::Json(
-                Schema::new("ProjectServiceAccountCreateResponse"),
-            ),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveProjectServiceAccount".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/service_accounts/{service_account_id}"
-                .to_string(),
-            description: "Retrieves a service account in the project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectServiceAccount")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateProjectServiceAccount".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/service_accounts/{service_account_id}"
-                .to_string(),
-            description: "Updates a service account in the project.".to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("UpdateProjectServiceAccountBody")),
-            ),
-            response: ApiResponse::Json(Schema::new("ProjectServiceAccount")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteProjectServiceAccount".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/projects/{project_id}/service_accounts/{service_account_id}"
-                .to_string(),
-            description: "Deletes a service account from the project.\n\nReturns confirmation of service account deletion, or an error if the project\nis archived (archived projects have no service accounts).\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(
-                Schema::new("ProjectServiceAccountDeleteResponse"),
-            ),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListProjectSpendAlerts".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/spend_alerts".to_string(),
-            description: "Lists project spend alerts.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectSpendAlertListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of spend alerts to return. Defaults to 20."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for the returned spend alerts.".to_string()),
-                    param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
-                    .to_string()]), explode : false, style : ParamStyle::Form, },
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
-                    Some("Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
-                    Some("Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateProjectSpendAlert".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/spend_alerts".to_string(),
-            description: "Creates a project spend alert.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateSpendAlertBody"))),
-            response: ApiResponse::Json(Schema::new("ProjectSpendAlert")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveProjectSpendAlert".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/spend_alerts/{alert_id}"
-                .to_string(),
-            description: "Retrieves a project spend alert.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectSpendAlert")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateProjectSpendAlert".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/spend_alerts/{alert_id}"
-                .to_string(),
-            description: "Updates a project spend alert.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateSpendAlertBody"))),
-            response: ApiResponse::Json(Schema::new("ProjectSpendAlert")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteProjectSpendAlert".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/projects/{project_id}/spend_alerts/{alert_id}"
-                .to_string(),
-            description: "Deletes a project spend alert.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectSpendAlertDeletedResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListProjectUsers".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/users".to_string(),
-            description: "Returns a list of users in the project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectUserListResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateProjectUser".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/users".to_string(),
-            description: "Adds a user to the project. Users must already be members of the organization to be added to a project."
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("ProjectUserCreateRequest"))),
-            response: ApiResponse::Json(Schema::new("ProjectUser")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveProjectUser".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/users/{user_id}".to_string(),
-            description: "Retrieves a user in the project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectUser")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ModifyProjectUser".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/users/{user_id}".to_string(),
-            description: "Modifies a user's role in the project.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("ProjectUserUpdateRequest"))),
-            response: ApiResponse::Json(Schema::new("ProjectUser")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteProjectUser".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/projects/{project_id}/users/{user_id}".to_string(),
-            description: "Deletes a user from the project.\n\nReturns confirmation of project user deletion, or an error if the project is\narchived (archived projects have no users).\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectUserDeleteResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListRoles".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/roles".to_string(),
-            description: "Lists the roles configured for the organization.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("PublicRoleListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("A limit on the number of roles to return. Defaults to 1000."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for the returned roles.".to_string()), param_type :
-                    QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
-                    explode : false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateRole".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/roles".to_string(),
-            description: "Creates a custom role for the organization.".to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("PublicCreateOrganizationRoleBody")),
-            ),
-            response: ApiResponse::Json(Schema::new("Role")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveRole".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/roles/{role_id}".to_string(),
-            description: "Retrieves an organization role.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("Role")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateRole".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/roles/{role_id}".to_string(),
-            description: "Updates an existing organization role.".to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("PublicUpdateOrganizationRoleBody")),
-            ),
-            response: ApiResponse::Json(Schema::new("Role")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteRole".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/roles/{role_id}".to_string(),
-            description: "Deletes a custom role from the organization.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("RoleDeletedResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListOrganizationSpendAlerts".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/spend_alerts".to_string(),
-            description: "Lists organization spend alerts.".to_string(),
-            request: None,
-            response: ApiResponse::Json(
-                Schema::new("OrganizationSpendAlertListResource"),
-            ),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of spend alerts to return. Defaults to 20."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for the returned spend alerts.".to_string()),
-                    param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
-                    .to_string()]), explode : false, style : ParamStyle::Form, },
-                    ParamDef { name : "after".to_string(), required : false, description
-                    :
-                    Some("Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
-                    Some("Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateOrganizationSpendAlert".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/spend_alerts".to_string(),
-            description: "Creates an organization spend alert.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateSpendAlertBody"))),
-            response: ApiResponse::Json(Schema::new("OrganizationSpendAlert")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveOrganizationSpendAlert".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/spend_alerts/{alert_id}".to_string(),
-            description: "Retrieves an organization spend alert.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("OrganizationSpendAlert")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateOrganizationSpendAlert".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/spend_alerts/{alert_id}".to_string(),
-            description: "Updates an organization spend alert.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateSpendAlertBody"))),
-            response: ApiResponse::Json(Schema::new("OrganizationSpendAlert")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteOrganizationSpendAlert".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/spend_alerts/{alert_id}".to_string(),
-            description: "Deletes an organization spend alert.".to_string(),
-            request: None,
-            response: ApiResponse::Json(
-                Schema::new("OrganizationSpendAlertDeletedResource"),
-            ),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UsageAudioSpeeches".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/usage/audio_speeches".to_string(),
-            description: "Get audio speeches usage details for the organization."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("UsageResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
-                    Some("Start time (Unix seconds) of the query time range, inclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
-                    Some("End time (Unix seconds) of the query time range, exclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
-                    Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["1m"
-                    .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these projects.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these users.".to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these API keys.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "models"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these models.".to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
-                    Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
-                    .to_string(), "user_id".to_string(), "api_key_id".to_string(),
-                    "model".to_string()]))), explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "limit".to_string(), required : false,
-                    description :
-                    Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UsageAudioTranscriptions".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/usage/audio_transcriptions".to_string(),
-            description: "Get audio transcriptions usage details for the organization."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("UsageResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
-                    Some("Start time (Unix seconds) of the query time range, inclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
-                    Some("End time (Unix seconds) of the query time range, exclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
-                    Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["1m"
-                    .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these projects.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these users.".to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these API keys.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "models"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these models.".to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
-                    Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
-                    .to_string(), "user_id".to_string(), "api_key_id".to_string(),
-                    "model".to_string()]))), explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "limit".to_string(), required : false,
-                    description :
-                    Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UsageCodeInterpreterSessions".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/usage/code_interpreter_sessions".to_string(),
-            description: "Get code interpreter sessions usage details for the organization."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("UsageResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
-                    Some("Start time (Unix seconds) of the query time range, inclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
-                    Some("End time (Unix seconds) of the query time range, exclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
-                    Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["1m"
-                    .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these projects.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
-                    Some("Group the usage data by the specified fields. Support fields include `project_id`."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
-                    .to_string()]))), explode : false, style : ParamStyle::Form, },
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UsageCompletions".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/usage/completions".to_string(),
-            description: "Get completions usage details for the organization."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("UsageResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
-                    Some("Start time (Unix seconds) of the query time range, inclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
-                    Some("End time (Unix seconds) of the query time range, exclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
-                    Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["1m"
-                    .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these projects.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these users.".to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these API keys.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "models"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these models.".to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "batch"
-                    .to_string(), required : false, description :
-                    Some("If `true`, return batch jobs only. If `false`, return non-batch jobs only. By default, return both.\n"
-                    .to_string()), param_type : QueryParamType::Boolean, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
-                    Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `batch`, `service_tier` or any combination of them."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
-                    .to_string(), "user_id".to_string(), "api_key_id".to_string(),
-                    "model".to_string(), "batch".to_string(), "service_tier"
-                    .to_string()]))), explode : false, style : ParamStyle::Form, },
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UsageEmbeddings".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/usage/embeddings".to_string(),
-            description: "Get embeddings usage details for the organization."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("UsageResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
-                    Some("Start time (Unix seconds) of the query time range, inclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
-                    Some("End time (Unix seconds) of the query time range, exclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
-                    Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["1m"
-                    .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these projects.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these users.".to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these API keys.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "models"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these models.".to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
-                    Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
-                    .to_string(), "user_id".to_string(), "api_key_id".to_string(),
-                    "model".to_string()]))), explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "limit".to_string(), required : false,
-                    description :
-                    Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UsageFileSearchCalls".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/usage/file_search_calls".to_string(),
-            description: "Get file search calls usage details for the organization."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("UsageResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
-                    Some("Start time (Unix seconds) of the query time range, inclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
-                    Some("End time (Unix seconds) of the query time range, exclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
-                    Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["1m"
-                    .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these projects.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these users.".to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these API keys.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name :
-                    "vector_store_ids".to_string(), required : false, description :
-                    Some("Return only usage for these vector stores.".to_string()),
-                    param_type : QueryParamType::Array(Box::new(QueryParamType::String)),
-                    explode : false, style : ParamStyle::Form, }, ParamDef { name :
-                    "group_by".to_string(), required : false, description :
-                    Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `vector_store_id` or any combination of them."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
-                    .to_string(), "user_id".to_string(), "api_key_id".to_string(),
-                    "vector_store_id".to_string()]))), explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "limit".to_string(), required
-                    : false, description :
-                    Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UsageImages".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/usage/images".to_string(),
-            description: "Get images usage details for the organization.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("UsageResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
-                    Some("Start time (Unix seconds) of the query time range, inclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
-                    Some("End time (Unix seconds) of the query time range, exclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
-                    Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["1m"
-                    .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "sources".to_string(),
-                    required : false, description :
-                    Some("Return only usages for these sources. Possible values are `image.generation`, `image.edit`, `image.variation` or any combination of them."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["image.generation"
-                    .to_string(), "image.edit".to_string(), "image.variation"
-                    .to_string()]))), explode : false, style : ParamStyle::Form, },
-                    ParamDef { name : "sizes".to_string(), required : false, description
-                    :
-                    Some("Return only usages for these image sizes. Possible values are `256x256`, `512x512`, `1024x1024`, `1792x1792`, `1024x1792` or any combination of them."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["256x256"
-                    .to_string(), "512x512".to_string(), "1024x1024".to_string(),
-                    "1792x1792".to_string(), "1024x1792".to_string()]))), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these projects.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these users.".to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these API keys.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "models"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these models.".to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
-                    Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `size`, `source` or any combination of them."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
-                    .to_string(), "user_id".to_string(), "api_key_id".to_string(),
-                    "model".to_string(), "size".to_string(), "source".to_string()]))),
-                    explode : false, style : ParamStyle::Form, }, ParamDef { name :
-                    "limit".to_string(), required : false, description :
-                    Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UsageModerations".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/usage/moderations".to_string(),
-            description: "Get moderations usage details for the organization."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("UsageResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
-                    Some("Start time (Unix seconds) of the query time range, inclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
-                    Some("End time (Unix seconds) of the query time range, exclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
-                    Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["1m"
-                    .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these projects.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these users.".to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these API keys.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "models"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these models.".to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
-                    Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
-                    .to_string(), "user_id".to_string(), "api_key_id".to_string(),
-                    "model".to_string()]))), explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "limit".to_string(), required : false,
-                    description :
-                    Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UsageVectorStores".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/usage/vector_stores".to_string(),
-            description: "Get vector stores usage details for the organization."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("UsageResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
-                    Some("Start time (Unix seconds) of the query time range, inclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
-                    Some("End time (Unix seconds) of the query time range, exclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
-                    Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["1m"
-                    .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these projects.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
-                    Some("Group the usage data by the specified fields. Support fields include `project_id`."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
-                    .to_string()]))), explode : false, style : ParamStyle::Form, },
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UsageWebSearchCalls".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/usage/web_search_calls".to_string(),
-            description: "Get web search calls usage details for the organization."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("UsageResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "start_time".to_string(), required : true,
-                    description :
-                    Some("Start time (Unix seconds) of the query time range, inclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "end_time"
-                    .to_string(), required : false, description :
-                    Some("End time (Unix seconds) of the query time range, exclusive."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "bucket_width"
-                    .to_string(), required : false, description :
-                    Some("Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["1m"
-                    .to_string(), "1h".to_string(), "1d".to_string()]), explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "project_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these projects.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "user_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these users.".to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "api_key_ids"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these API keys.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "models"
-                    .to_string(), required : false, description :
-                    Some("Return only usage for these models.".to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name :
-                    "context_levels".to_string(), required : false, description :
-                    Some("Return only web search usage for these context levels."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["low"
-                    .to_string(), "medium".to_string(), "high".to_string()]))), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "group_by"
-                    .to_string(), required : false, description :
-                    Some("Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `context_level` or any combination of them."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["project_id"
-                    .to_string(), "user_id".to_string(), "api_key_id".to_string(),
-                    "model".to_string(), "context_level".to_string()]))), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "limit"
-                    .to_string(), required : false, description :
-                    Some("Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "page".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListUsers".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/users".to_string(),
-            description: "Lists all of the users in the organization.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("UserListResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "emails".to_string(),
-                    required : false, description :
-                    Some("Filter by the email address of users.".to_string()), param_type
-                    : QueryParamType::Array(Box::new(QueryParamType::String)), explode :
-                    false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveUser".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/users/{user_id}".to_string(),
-            description: "Retrieves a user by their identifier.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("User")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ModifyUser".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/users/{user_id}".to_string(),
-            description: "Modifies a user's role in the organization.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("UserRoleUpdateRequest"))),
-            response: ApiResponse::Json(Schema::new("User")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteUser".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/users/{user_id}".to_string(),
-            description: "Deletes a user from the organization.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("UserDeleteResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListUserRoleAssignments".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/users/{user_id}/roles".to_string(),
-            description: "Lists the organization roles assigned to a user within the organization."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("RoleListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of organization role assignments to return."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for the returned organization roles.".to_string()),
-                    param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
-                    .to_string()]), explode : false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "AssignUserRole".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/users/{user_id}/roles".to_string(),
-            description: "Assigns an organization role to a user within the organization."
-                .to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("PublicAssignOrganizationGroupRoleBody")),
-            ),
-            response: ApiResponse::Json(Schema::new("UserRoleAssignment")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveUserRole".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/users/{user_id}/roles/{role_id}".to_string(),
-            description: "Retrieves an organization role assigned to a user."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("AssignedRoleDetails")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UnassignUserRole".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/users/{user_id}/roles/{role_id}".to_string(),
-            description: "Unassigns an organization role from a user within the organization."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("DeletedRoleAssignmentResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListProjectGroupRoleAssignments".to_string(),
-            method: RestMethod::Get,
-            path: "/projects/{project_id}/groups/{group_id}/roles".to_string(),
-            description: "Lists the project roles assigned to a group within a project."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("RoleListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("A limit on the number of project role assignments to return."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for the returned project roles.".to_string()),
-                    param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
-                    .to_string()]), explode : false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "AssignProjectGroupRole".to_string(),
-            method: RestMethod::Post,
-            path: "/projects/{project_id}/groups/{group_id}/roles".to_string(),
-            description: "Assigns a project role to a group within a project."
-                .to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("PublicAssignOrganizationGroupRoleBody")),
-            ),
-            response: ApiResponse::Json(Schema::new("GroupRoleAssignment")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveProjectGroupRole".to_string(),
-            method: RestMethod::Get,
-            path: "/projects/{project_id}/groups/{group_id}/roles/{role_id}".to_string(),
-            description: "Retrieves a project role assigned to a group.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("AssignedRoleDetails")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UnassignProjectGroupRole".to_string(),
-            method: RestMethod::Delete,
-            path: "/projects/{project_id}/groups/{group_id}/roles/{role_id}".to_string(),
-            description: "Unassigns a project role from a group within a project."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("DeletedRoleAssignmentResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListProjectRoles".to_string(),
-            method: RestMethod::Get,
-            path: "/projects/{project_id}/roles".to_string(),
-            description: "Lists the roles configured for a project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("PublicRoleListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("A limit on the number of roles to return. Defaults to 1000."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for the returned roles.".to_string()), param_type :
-                    QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
-                    explode : false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateProjectRole".to_string(),
-            method: RestMethod::Post,
-            path: "/projects/{project_id}/roles".to_string(),
-            description: "Creates a custom role for a project.".to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("PublicCreateOrganizationRoleBody")),
-            ),
-            response: ApiResponse::Json(Schema::new("Role")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveProjectRole".to_string(),
-            method: RestMethod::Get,
-            path: "/projects/{project_id}/roles/{role_id}".to_string(),
-            description: "Retrieves a project role.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("Role")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateProjectRole".to_string(),
-            method: RestMethod::Post,
-            path: "/projects/{project_id}/roles/{role_id}".to_string(),
-            description: "Updates an existing project role.".to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("PublicUpdateOrganizationRoleBody")),
-            ),
-            response: ApiResponse::Json(Schema::new("Role")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteProjectRole".to_string(),
-            method: RestMethod::Delete,
-            path: "/projects/{project_id}/roles/{role_id}".to_string(),
-            description: "Deletes a custom role from a project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("RoleDeletedResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListProjectUserRoleAssignments".to_string(),
-            method: RestMethod::Get,
-            path: "/projects/{project_id}/users/{user_id}/roles".to_string(),
-            description: "Lists the project roles assigned to a user within a project."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("RoleListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("A limit on the number of project role assignments to return."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for the returned project roles.".to_string()),
-                    param_type : QueryParamType::Enum(vec!["asc".to_string(), "desc"
-                    .to_string()]), explode : false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "AssignProjectUserRole".to_string(),
-            method: RestMethod::Post,
-            path: "/projects/{project_id}/users/{user_id}/roles".to_string(),
-            description: "Assigns a project role to a user within a project."
-                .to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("PublicAssignOrganizationGroupRoleBody")),
-            ),
-            response: ApiResponse::Json(Schema::new("UserRoleAssignment")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveProjectUserRole".to_string(),
-            method: RestMethod::Get,
-            path: "/projects/{project_id}/users/{user_id}/roles/{role_id}".to_string(),
-            description: "Retrieves a project role assigned to a user.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("AssignedRoleDetails")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UnassignProjectUserRole".to_string(),
-            method: RestMethod::Delete,
-            path: "/projects/{project_id}/users/{user_id}/roles/{role_id}".to_string(),
-            description: "Unassigns a project role from a user within a project."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("DeletedRoleAssignmentResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateRealtimeCall".to_string(),
-            method: RestMethod::Post,
-            path: "/realtime/calls".to_string(),
-            description: "Create a new Realtime API call over WebRTC and receive the SDP answer needed\nto complete the peer connection."
-                .to_string(),
-            request: Some(ApiRequest::FormData {
-                fields: vec![
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: None,
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_71(ctx)?);
+    fn endpoint_72(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "AdminApiKeysCreate",
+                RestMethod::Post,
+                "/organization/admin_api_keys",
+            )
+            .describes("Create an organization admin API key")
+            .returns_json::<AdminApiKeyCreateResponse>(ctx)
+            .request_json::<serde_json::Value>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_72(ctx)?);
+    fn endpoint_73(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "AdminApiKeysGet",
+                RestMethod::Get,
+                "/organization/admin_api_keys/{key_id}",
+            )
+            .describes("Retrieve a single organization API key")
+            .returns_json::<AdminApiKey>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_73(ctx)?);
+    fn endpoint_74(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "AdminApiKeysDelete",
+                RestMethod::Delete,
+                "/organization/admin_api_keys/{key_id}",
+            )
+            .describes("Delete an organization admin API key")
+            .returns_json::<serde_json::Value>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_74(ctx)?);
+    fn endpoint_75(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListAuditLogs", RestMethod::Get, "/organization/audit_logs")
+            .describes(
+                "List user actions and configuration changes within this organization.",
+            )
+            .returns_json::<ListAuditLogsResponse>(ctx)
+            .query(ParamDef {
+                name: "effective_at".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Return only events whose `effective_at` (Unix seconds) is in this range."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Json,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "project_ids[]".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only events for these projects.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "event_types[]".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Return only events with a `type` in one of these values. For example, `project.created`. For all options, see the documentation for the [audit log object](/docs/api-reference/audit-logs/object)."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::Json)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "actor_ids[]".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Return only events performed by these actors. Can be a user ID, a service account ID, or an api key tracking ID."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "actor_emails[]".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Return only events performed by users with these emails."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "resource_ids[]".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Return only events performed on these targets. For example, a project ID updated. For ChatGPT connector role events, use the workspace connector resource ID shown in `details.id`, such as `<workspace_id>__<connector_id>`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "tenant_only".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Return only tenant-scoped events associated with this organization. Required for tenant-scoped events such as `role.bound_to_resource` and `role.unbound_from_resource`. When `true`, all supplied event types must be tenant-scoped."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Boolean,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "before".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_75(ctx)?);
+    fn endpoint_76(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListOrganizationCertificates",
+                RestMethod::Get,
+                "/organization/certificates",
+            )
+            .describes("List uploaded certificates for this organization.")
+            .returns_json::<ListCertificatesResponse>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_76(ctx)?);
+    fn endpoint_77(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UploadCertificate",
+                RestMethod::Post,
+                "/organization/certificates",
+            )
+            .describes(
+                "Upload a certificate to the organization. This does **not** automatically activate the certificate.\n\nOrganizations can upload up to 50 certificates.\n",
+            )
+            .returns_json::<Certificate>(ctx)
+            .request_json::<UploadCertificateRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_77(ctx)?);
+    fn endpoint_78(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ActivateOrganizationCertificates",
+                RestMethod::Post,
+                "/organization/certificates/activate",
+            )
+            .describes(
+                "Activate certificates at the organization level.\n\nYou can atomically and idempotently activate up to 10 certificates at a time.\n",
+            )
+            .returns_json::<OrganizationCertificateActivationResponse>(ctx)
+            .request_json::<ToggleCertificatesRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_78(ctx)?);
+    fn endpoint_79(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeactivateOrganizationCertificates",
+                RestMethod::Post,
+                "/organization/certificates/deactivate",
+            )
+            .describes(
+                "Deactivate certificates at the organization level.\n\nYou can atomically and idempotently deactivate up to 10 certificates at a time.\n",
+            )
+            .returns_json::<OrganizationCertificateDeactivationResponse>(ctx)
+            .request_json::<ToggleCertificatesRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_79(ctx)?);
+    fn endpoint_80(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "GetCertificate",
+                RestMethod::Get,
+                "/organization/certificates/{certificate_id}",
+            )
+            .describes(
+                "Get a certificate that has been uploaded to the organization.\n\nYou can get a certificate regardless of whether it is active or not.\n",
+            )
+            .returns_json::<Certificate>(ctx)
+            .query(ParamDef {
+                name: "include".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A list of additional fields to include in the response. Currently the only supported value is `content` to fetch the PEM content of the certificate."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<String>::from(["content".to_string()]),
+                        ),
+                    ),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["content"]),
+                            ),
+                    ),
+                ),
+            })
+            .build()
+    }
+    endpoints.push(endpoint_80(ctx)?);
+    fn endpoint_81(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ModifyCertificate",
+                RestMethod::Post,
+                "/organization/certificates/{certificate_id}",
+            )
+            .describes(
+                "Modify a certificate. Note that only the name can be modified.\n",
+            )
+            .returns_json::<Certificate>(ctx)
+            .request_json::<ModifyCertificateRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_81(ctx)?);
+    fn endpoint_82(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteCertificate",
+                RestMethod::Delete,
+                "/organization/certificates/{certificate_id}",
+            )
+            .describes(
+                "Delete a certificate from the organization.\n\nThe certificate must be inactive for the organization and all projects.\n",
+            )
+            .returns_json::<DeleteCertificateResponse>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_82(ctx)?);
+    fn endpoint_83(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("UsageCosts", RestMethod::Get, "/organization/costs")
+            .describes("Get costs details for the organization.")
+            .returns_json::<UsageResponse>(ctx)
+            .query(ParamDef {
+                name: "start_time".to_string(),
+                required: true,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Start time (Unix seconds) of the query time range, inclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "end_time".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "End time (Unix seconds) of the query time range, exclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "bucket_width".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Width of each time bucket in response. Currently only `1d` is supported, default to `1d`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["1d".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "project_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only costs for these projects.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "api_key_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only costs for these API keys.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "group_by".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Group the costs by the specified fields. Support fields include `project_id`, `line_item`, `api_key_id` and any combination of them."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<
+                                String,
+                            >::from([
+                                "project_id".to_string(),
+                                "line_item".to_string(),
+                                "api_key_id".to_string(),
+                            ]),
+                        ),
+                    ),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["project_id", "line_item", "api_key_id"]),
+                            ),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of buckets to be returned. Limit can range between 1 and 180, and the default is 7.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "page".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_83(ctx)?);
+    fn endpoint_84(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveOrganizationDataRetention",
+                RestMethod::Get,
+                "/organization/data_retention",
+            )
+            .describes("Retrieves organization data retention controls.")
+            .returns_json::<OrganizationDataRetention>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_84(ctx)?);
+    fn endpoint_85(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UpdateOrganizationDataRetention",
+                RestMethod::Post,
+                "/organization/data_retention",
+            )
+            .describes("Updates organization data retention controls.")
+            .returns_json::<OrganizationDataRetention>(ctx)
+            .request_json::<UpdateOrganizationDataRetentionBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_85(ctx)?);
+    fn endpoint_86(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListGroups", RestMethod::Get, "/organization/groups")
+            .describes("Lists all groups in the organization.")
+            .returns_json::<GroupListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of groups to be returned. Limit can range between 0 and 1000, and the default is 100.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is a group ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with group_abc, your subsequent call can include `after=group_abc` in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Specifies the sort order of the returned groups.".to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_86(ctx)?);
+    fn endpoint_87(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateGroup", RestMethod::Post, "/organization/groups")
+            .describes("Creates a new group in the organization.")
+            .returns_json::<GroupResponse>(ctx)
+            .request_json::<CreateGroupBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_87(ctx)?);
+    fn endpoint_88(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveGroup",
+                RestMethod::Get,
+                "/organization/groups/{group_id}",
+            )
+            .describes("Retrieves a group.")
+            .returns_json::<GroupResponse>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_88(ctx)?);
+    fn endpoint_89(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("UpdateGroup", RestMethod::Post, "/organization/groups/{group_id}")
+            .describes("Updates a group's information.")
+            .returns_json::<GroupResourceWithSuccess>(ctx)
+            .request_json::<UpdateGroupBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_89(ctx)?);
+    fn endpoint_90(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteGroup",
+                RestMethod::Delete,
+                "/organization/groups/{group_id}",
+            )
+            .describes("Deletes a group from the organization.")
+            .returns_json::<GroupDeletedResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_90(ctx)?);
+    fn endpoint_91(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListGroupRoleAssignments",
+                RestMethod::Get,
+                "/organization/groups/{group_id}/roles",
+            )
+            .describes(
+                "Lists the organization roles assigned to a group within the organization.",
+            )
+            .returns_json::<RoleListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of organization role assignments to return."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order for the returned organization roles.".to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_91(ctx)?);
+    fn endpoint_92(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "AssignGroupRole",
+                RestMethod::Post,
+                "/organization/groups/{group_id}/roles",
+            )
+            .describes(
+                "Assigns an organization role to a group within the organization.",
+            )
+            .returns_json::<GroupRoleAssignment>(ctx)
+            .request_json::<PublicAssignOrganizationGroupRoleBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_92(ctx)?);
+    fn endpoint_93(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveGroupRole",
+                RestMethod::Get,
+                "/organization/groups/{group_id}/roles/{role_id}",
+            )
+            .describes("Retrieves an organization role assigned to a group.")
+            .returns_json::<AssignedRoleDetails>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_93(ctx)?);
+    fn endpoint_94(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UnassignGroupRole",
+                RestMethod::Delete,
+                "/organization/groups/{group_id}/roles/{role_id}",
+            )
+            .describes(
+                "Unassigns an organization role from a group within the organization.",
+            )
+            .returns_json::<DeletedRoleAssignmentResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_94(ctx)?);
+    fn endpoint_95(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListGroupUsers",
+                RestMethod::Get,
+                "/organization/groups/{group_id}/users",
+            )
+            .describes("Lists the users assigned to a group.")
+            .returns_json::<UserListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of users to be returned. Limit can range between 0 and 1000, and the default is 100.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. Provide the ID of the last user from the previous list response to retrieve the next page.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Specifies the sort order of users in the list.".to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_95(ctx)?);
+    fn endpoint_96(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "AddGroupUser",
+                RestMethod::Post,
+                "/organization/groups/{group_id}/users",
+            )
+            .describes("Adds a user to a group.")
+            .returns_json::<GroupUserAssignment>(ctx)
+            .request_json::<CreateGroupUserBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_96(ctx)?);
+    fn endpoint_97(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveGroupUser",
+                RestMethod::Get,
+                "/organization/groups/{group_id}/users/{user_id}",
+            )
+            .describes("Retrieves a user in a group.")
+            .returns_json::<GroupMemberUser>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_97(ctx)?);
+    fn endpoint_98(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RemoveGroupUser",
+                RestMethod::Delete,
+                "/organization/groups/{group_id}/users/{user_id}",
+            )
+            .describes("Removes a user from a group.")
+            .returns_json::<GroupUserDeletedResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_98(ctx)?);
+    fn endpoint_99(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListInvites", RestMethod::Get, "/organization/invites")
+            .describes("Returns a list of invites in the organization.")
+            .returns_json::<InviteListResponse>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_99(ctx)?);
+    fn endpoint_100(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("InviteUser", RestMethod::Post, "/organization/invites")
+            .describes(
+                "Create an invite for a user to the organization. The invite must be accepted by the user before they have access to the organization.",
+            )
+            .returns_json::<Invite>(ctx)
+            .request_json::<InviteRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_100(ctx)?);
+    fn endpoint_101(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveInvite",
+                RestMethod::Get,
+                "/organization/invites/{invite_id}",
+            )
+            .describes("Retrieves an invite.")
+            .returns_json::<Invite>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_101(ctx)?);
+    fn endpoint_102(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteInvite",
+                RestMethod::Delete,
+                "/organization/invites/{invite_id}",
+            )
+            .describes(
+                "Delete an invite. If the invite has already been accepted, it cannot be deleted.",
+            )
+            .returns_json::<InviteDeleteResponse>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_102(ctx)?);
+    fn endpoint_103(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListProjects", RestMethod::Get, "/organization/projects")
+            .describes("Returns a list of projects.")
+            .returns_json::<ProjectListResponse>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "include_archived".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "If `true` returns all projects including those that have been `archived`. Archived projects are not included by default."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Boolean,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_103(ctx)?);
+    fn endpoint_104(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateProject", RestMethod::Post, "/organization/projects")
+            .describes(
+                "Create a new project in the organization. Projects can be created and archived, but cannot be deleted.",
+            )
+            .returns_json::<Project>(ctx)
+            .request_json::<ProjectCreateRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_104(ctx)?);
+    fn endpoint_105(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveProject",
+                RestMethod::Get,
+                "/organization/projects/{project_id}",
+            )
+            .describes("Retrieves a project.")
+            .returns_json::<Project>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_105(ctx)?);
+    fn endpoint_106(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ModifyProject",
+                RestMethod::Post,
+                "/organization/projects/{project_id}",
+            )
+            .describes("Modifies a project in the organization.")
+            .returns_json::<Project>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
+            .request_json::<ProjectUpdateRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_106(ctx)?);
+    fn endpoint_107(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListProjectApiKeys",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/api_keys",
+            )
+            .describes("Returns a list of API keys in the project.")
+            .returns_json::<ProjectApiKeyListResponse>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "owner_project_access".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Filter API keys by whether the owner currently has effective access to the project. Use `active` for owners with access, `inactive` for owners without access, or `any` for all enabled project API keys. If omitted, the endpoint applies its existing membership-based visibility rules, which may exclude some enabled keys.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from([
+                        "active".to_string(),
+                        "inactive".to_string(),
+                        "any".to_string(),
+                    ]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_107(ctx)?);
+    fn endpoint_108(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveProjectApiKey",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/api_keys/{api_key_id}",
+            )
+            .describes("Retrieves an API key in the project.")
+            .returns_json::<ProjectApiKey>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_108(ctx)?);
+    fn endpoint_109(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteProjectApiKey",
+                RestMethod::Delete,
+                "/organization/projects/{project_id}/api_keys/{api_key_id}",
+            )
+            .describes(
+                "Deletes an API key from the project.\n\nReturns confirmation of the key deletion, or an error if the key belonged to\na service account.\n",
+            )
+            .returns_json::<ProjectApiKeyDeleteResponse>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
+            .build()
+    }
+    endpoints.push(endpoint_109(ctx)?);
+    fn endpoint_110(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ArchiveProject",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/archive",
+            )
+            .describes(
+                "Archives a project in the organization. Archived projects cannot be used or updated.",
+            )
+            .returns_json::<Project>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_110(ctx)?);
+    fn endpoint_111(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListProjectCertificates",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/certificates",
+            )
+            .describes("List certificates for this project.")
+            .returns_json::<ListProjectCertificatesResponse>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_111(ctx)?);
+    fn endpoint_112(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ActivateProjectCertificates",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/certificates/activate",
+            )
+            .describes(
+                "Activate certificates at the project level.\n\nYou can atomically and idempotently activate up to 10 certificates at a time.\n",
+            )
+            .returns_json::<OrganizationProjectCertificateActivationResponse>(ctx)
+            .request_json::<ToggleCertificatesRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_112(ctx)?);
+    fn endpoint_113(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeactivateProjectCertificates",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/certificates/deactivate",
+            )
+            .describes(
+                "Deactivate certificates at the project level. You can atomically and \nidempotently deactivate up to 10 certificates at a time.\n",
+            )
+            .returns_json::<OrganizationProjectCertificateDeactivationResponse>(ctx)
+            .request_json::<ToggleCertificatesRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_113(ctx)?);
+    fn endpoint_114(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveProjectDataRetention",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/data_retention",
+            )
+            .describes("Retrieves project data retention controls.")
+            .returns_json::<ProjectDataRetention>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_114(ctx)?);
+    fn endpoint_115(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UpdateProjectDataRetention",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/data_retention",
+            )
+            .describes("Updates project data retention controls.")
+            .returns_json::<ProjectDataRetention>(ctx)
+            .request_json::<UpdateProjectDataRetentionBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_115(ctx)?);
+    fn endpoint_116(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListProjectGroups",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/groups",
+            )
+            .describes("Lists the groups that have access to a project.")
+            .returns_json::<ProjectGroupListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of project groups to return. Defaults to 20."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Cursor for pagination. Provide the ID of the last group from the previous response to fetch the next page."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Sort order for the returned groups.".to_string()),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_116(ctx)?);
+    fn endpoint_117(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "AddProjectGroup",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/groups",
+            )
+            .describes("Grants a group access to a project.")
+            .returns_json::<ProjectGroup>(ctx)
+            .request_json::<InviteProjectGroupBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_117(ctx)?);
+    fn endpoint_118(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveProjectGroup",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/groups/{group_id}",
+            )
+            .describes("Retrieves a project's group.")
+            .returns_json::<ProjectGroup>(ctx)
+            .query(ParamDef {
+                name: "group_type".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("The type of group to retrieve.".to_string()),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from(["group".to_string(), "tenant_group".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_118(ctx)?);
+    fn endpoint_119(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RemoveProjectGroup",
+                RestMethod::Delete,
+                "/organization/projects/{project_id}/groups/{group_id}",
+            )
+            .describes("Revokes a group's access to a project.")
+            .returns_json::<ProjectGroupDeletedResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_119(ctx)?);
+    fn endpoint_120(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveProjectHostedToolPermissions",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/hosted_tool_permissions",
+            )
+            .describes("Returns hosted tool permissions for a project.")
+            .returns_json::<ProjectHostedToolPermissions>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_120(ctx)?);
+    fn endpoint_121(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UpdateProjectHostedToolPermissions",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/hosted_tool_permissions",
+            )
+            .describes("Updates hosted tool permissions for a project.")
+            .returns_json::<ProjectHostedToolPermissions>(ctx)
+            .request_json::<ProjectHostedToolPermissionsUpdateRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_121(ctx)?);
+    fn endpoint_122(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveProjectModelPermissions",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/model_permissions",
+            )
+            .describes("Returns model permissions for a project.")
+            .returns_json::<ProjectModelPermissions>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_122(ctx)?);
+    fn endpoint_123(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UpdateProjectModelPermissions",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/model_permissions",
+            )
+            .describes("Updates model permissions for a project.")
+            .returns_json::<ProjectModelPermissions>(ctx)
+            .request_json::<ProjectModelPermissionsUpdateRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_123(ctx)?);
+    fn endpoint_124(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteProjectModelPermissions",
+                RestMethod::Delete,
+                "/organization/projects/{project_id}/model_permissions",
+            )
+            .describes("Deletes model permissions for a project.")
+            .returns_json::<ProjectModelPermissionsDeleteResponse>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_124(ctx)?);
+    fn endpoint_125(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListProjectRateLimits",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/rate_limits",
+            )
+            .describes("Returns the rate limits per model for a project.")
+            .returns_json::<ProjectRateLimitListResponse>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. The default is 100.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "before".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, beginning with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_125(ctx)?);
+    fn endpoint_126(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UpdateProjectRateLimits",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/rate_limits/{rate_limit_id}",
+            )
+            .describes("Updates a project rate limit.")
+            .returns_json::<ProjectRateLimit>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
+            .request_json::<ProjectRateLimitUpdateRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_126(ctx)?);
+    fn endpoint_127(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListProjectServiceAccounts",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/service_accounts",
+            )
+            .describes("Returns a list of service accounts in the project.")
+            .returns_json::<ProjectServiceAccountListResponse>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_127(ctx)?);
+    fn endpoint_128(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CreateProjectServiceAccount",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/service_accounts",
+            )
+            .describes(
+                "Creates a new service account in the project. By default, this also returns an unredacted API key for the service account.",
+            )
+            .returns_json::<ProjectServiceAccountCreateResponse>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
+            .request_json::<ProjectServiceAccountCreateRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_128(ctx)?);
+    fn endpoint_129(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveProjectServiceAccount",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/service_accounts/{service_account_id}",
+            )
+            .describes("Retrieves a service account in the project.")
+            .returns_json::<ProjectServiceAccount>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_129(ctx)?);
+    fn endpoint_130(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UpdateProjectServiceAccount",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/service_accounts/{service_account_id}",
+            )
+            .describes("Updates a service account in the project.")
+            .returns_json::<ProjectServiceAccount>(ctx)
+            .request_json::<UpdateProjectServiceAccountBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_130(ctx)?);
+    fn endpoint_131(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteProjectServiceAccount",
+                RestMethod::Delete,
+                "/organization/projects/{project_id}/service_accounts/{service_account_id}",
+            )
+            .describes(
+                "Deletes a service account from the project.\n\nReturns confirmation of service account deletion, or an error if the project\nis archived (archived projects have no service accounts).\n",
+            )
+            .returns_json::<ProjectServiceAccountDeleteResponse>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_131(ctx)?);
+    fn endpoint_132(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListProjectSpendAlerts",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/spend_alerts",
+            )
+            .describes("Lists project spend alerts.")
+            .returns_json::<ProjectSpendAlertListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of spend alerts to return. Defaults to 20."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order for the returned spend alerts.".to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "before".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_132(ctx)?);
+    fn endpoint_133(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CreateProjectSpendAlert",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/spend_alerts",
+            )
+            .describes("Creates a project spend alert.")
+            .returns_json::<ProjectSpendAlert>(ctx)
+            .request_json::<CreateSpendAlertBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_133(ctx)?);
+    fn endpoint_134(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveProjectSpendAlert",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/spend_alerts/{alert_id}",
+            )
+            .describes("Retrieves a project spend alert.")
+            .returns_json::<ProjectSpendAlert>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_134(ctx)?);
+    fn endpoint_135(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UpdateProjectSpendAlert",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/spend_alerts/{alert_id}",
+            )
+            .describes("Updates a project spend alert.")
+            .returns_json::<ProjectSpendAlert>(ctx)
+            .request_json::<CreateSpendAlertBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_135(ctx)?);
+    fn endpoint_136(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteProjectSpendAlert",
+                RestMethod::Delete,
+                "/organization/projects/{project_id}/spend_alerts/{alert_id}",
+            )
+            .describes("Deletes a project spend alert.")
+            .returns_json::<ProjectSpendAlertDeletedResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_136(ctx)?);
+    fn endpoint_137(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListProjectUsers",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/users",
+            )
+            .describes("Returns a list of users in the project.")
+            .returns_json::<ProjectUserListResponse>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_137(ctx)?);
+    fn endpoint_138(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CreateProjectUser",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/users",
+            )
+            .describes(
+                "Adds a user to the project. Users must already be members of the organization to be added to a project.",
+            )
+            .returns_json::<ProjectUser>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
+            .request_json::<ProjectUserCreateRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_138(ctx)?);
+    fn endpoint_139(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveProjectUser",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/users/{user_id}",
+            )
+            .describes("Retrieves a user in the project.")
+            .returns_json::<ProjectUser>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_139(ctx)?);
+    fn endpoint_140(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ModifyProjectUser",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/users/{user_id}",
+            )
+            .describes("Modifies a user's role in the project.")
+            .returns_json::<ProjectUser>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
+            .request_json::<ProjectUserUpdateRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_140(ctx)?);
+    fn endpoint_141(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteProjectUser",
+                RestMethod::Delete,
+                "/organization/projects/{project_id}/users/{user_id}",
+            )
+            .describes(
+                "Deletes a user from the project.\n\nReturns confirmation of project user deletion, or an error if the project is\narchived (archived projects have no users).\n",
+            )
+            .returns_json::<ProjectUserDeleteResponse>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(400u16),
+                        ErrorShape::json(ctx.register::<ErrorResponse>()?),
+                    ),
+            )
+            .build()
+    }
+    endpoints.push(endpoint_141(ctx)?);
+    fn endpoint_142(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListRoles", RestMethod::Get, "/organization/roles")
+            .describes("Lists the roles configured for the organization.")
+            .returns_json::<PublicRoleListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of roles to return. Defaults to 1000."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Sort order for the returned roles.".to_string()),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_142(ctx)?);
+    fn endpoint_143(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateRole", RestMethod::Post, "/organization/roles")
+            .describes("Creates a custom role for the organization.")
+            .returns_json::<Role>(ctx)
+            .request_json::<PublicCreateOrganizationRoleBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_143(ctx)?);
+    fn endpoint_144(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("RetrieveRole", RestMethod::Get, "/organization/roles/{role_id}")
+            .describes("Retrieves an organization role.")
+            .returns_json::<Role>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_144(ctx)?);
+    fn endpoint_145(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("UpdateRole", RestMethod::Post, "/organization/roles/{role_id}")
+            .describes("Updates an existing organization role.")
+            .returns_json::<Role>(ctx)
+            .request_json::<PublicUpdateOrganizationRoleBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_145(ctx)?);
+    fn endpoint_146(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("DeleteRole", RestMethod::Delete, "/organization/roles/{role_id}")
+            .describes("Deletes a custom role from the organization.")
+            .returns_json::<RoleDeletedResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_146(ctx)?);
+    fn endpoint_147(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListOrganizationSpendAlerts",
+                RestMethod::Get,
+                "/organization/spend_alerts",
+            )
+            .describes("Lists organization spend alerts.")
+            .returns_json::<OrganizationSpendAlertListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of spend alerts to return. Defaults to 20."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order for the returned spend alerts.".to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Cursor for pagination. Provide the ID of the last spend alert from the previous response to fetch the next page."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "before".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Cursor for pagination. Provide the ID of the first spend alert from the previous response to fetch the previous page."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_147(ctx)?);
+    fn endpoint_148(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CreateOrganizationSpendAlert",
+                RestMethod::Post,
+                "/organization/spend_alerts",
+            )
+            .describes("Creates an organization spend alert.")
+            .returns_json::<OrganizationSpendAlert>(ctx)
+            .request_json::<CreateSpendAlertBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_148(ctx)?);
+    fn endpoint_149(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveOrganizationSpendAlert",
+                RestMethod::Get,
+                "/organization/spend_alerts/{alert_id}",
+            )
+            .describes("Retrieves an organization spend alert.")
+            .returns_json::<OrganizationSpendAlert>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_149(ctx)?);
+    fn endpoint_150(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UpdateOrganizationSpendAlert",
+                RestMethod::Post,
+                "/organization/spend_alerts/{alert_id}",
+            )
+            .describes("Updates an organization spend alert.")
+            .returns_json::<OrganizationSpendAlert>(ctx)
+            .request_json::<CreateSpendAlertBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_150(ctx)?);
+    fn endpoint_151(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteOrganizationSpendAlert",
+                RestMethod::Delete,
+                "/organization/spend_alerts/{alert_id}",
+            )
+            .describes("Deletes an organization spend alert.")
+            .returns_json::<OrganizationSpendAlertDeletedResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_151(ctx)?);
+    fn endpoint_152(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UsageAudioSpeeches",
+                RestMethod::Get,
+                "/organization/usage/audio_speeches",
+            )
+            .describes("Get audio speeches usage details for the organization.")
+            .returns_json::<UsageResponse>(ctx)
+            .query(ParamDef {
+                name: "start_time".to_string(),
+                required: true,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Start time (Unix seconds) of the query time range, inclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "end_time".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "End time (Unix seconds) of the query time range, exclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "bucket_width".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from(["1m".to_string(), "1h".to_string(), "1d".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "project_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these projects.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "user_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these users.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "api_key_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these API keys.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "models".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these models.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "group_by".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<
+                                String,
+                            >::from([
+                                "project_id".to_string(),
+                                "user_id".to_string(),
+                                "api_key_id".to_string(),
+                                "model".to_string(),
+                            ]),
+                        ),
+                    ),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "model",
+                                    ]),
+                            ),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "page".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_152(ctx)?);
+    fn endpoint_153(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UsageAudioTranscriptions",
+                RestMethod::Get,
+                "/organization/usage/audio_transcriptions",
+            )
+            .describes("Get audio transcriptions usage details for the organization.")
+            .returns_json::<UsageResponse>(ctx)
+            .query(ParamDef {
+                name: "start_time".to_string(),
+                required: true,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Start time (Unix seconds) of the query time range, inclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "end_time".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "End time (Unix seconds) of the query time range, exclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "bucket_width".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from(["1m".to_string(), "1h".to_string(), "1d".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "project_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these projects.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "user_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these users.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "api_key_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these API keys.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "models".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these models.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "group_by".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<
+                                String,
+                            >::from([
+                                "project_id".to_string(),
+                                "user_id".to_string(),
+                                "api_key_id".to_string(),
+                                "model".to_string(),
+                            ]),
+                        ),
+                    ),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "model",
+                                    ]),
+                            ),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "page".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_153(ctx)?);
+    fn endpoint_154(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UsageCodeInterpreterSessions",
+                RestMethod::Get,
+                "/organization/usage/code_interpreter_sessions",
+            )
+            .describes(
+                "Get code interpreter sessions usage details for the organization.",
+            )
+            .returns_json::<UsageResponse>(ctx)
+            .query(ParamDef {
+                name: "start_time".to_string(),
+                required: true,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Start time (Unix seconds) of the query time range, inclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "end_time".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "End time (Unix seconds) of the query time range, exclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "bucket_width".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from(["1m".to_string(), "1h".to_string(), "1d".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "project_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these projects.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "group_by".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Group the usage data by the specified fields. Support fields include `project_id`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<String>::from(["project_id".to_string()]),
+                        ),
+                    ),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["project_id"]),
+                            ),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "page".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_154(ctx)?);
+    fn endpoint_155(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UsageCompletions",
+                RestMethod::Get,
+                "/organization/usage/completions",
+            )
+            .describes("Get completions usage details for the organization.")
+            .returns_json::<UsageResponse>(ctx)
+            .query(ParamDef {
+                name: "start_time".to_string(),
+                required: true,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Start time (Unix seconds) of the query time range, inclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "end_time".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "End time (Unix seconds) of the query time range, exclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "bucket_width".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from(["1m".to_string(), "1h".to_string(), "1d".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "project_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these projects.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "user_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these users.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "api_key_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these API keys.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "models".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these models.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "batch".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "If `true`, return batch jobs only. If `false`, return non-batch jobs only. By default, return both.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Boolean,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "group_by".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `batch`, `service_tier` or any combination of them."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<
+                                String,
+                            >::from([
+                                "project_id".to_string(),
+                                "user_id".to_string(),
+                                "api_key_id".to_string(),
+                                "model".to_string(),
+                                "batch".to_string(),
+                                "service_tier".to_string(),
+                            ]),
+                        ),
+                    ),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "model",
+                                        "batch",
+                                        "service_tier",
+                                    ]),
+                            ),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "page".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_155(ctx)?);
+    fn endpoint_156(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UsageEmbeddings",
+                RestMethod::Get,
+                "/organization/usage/embeddings",
+            )
+            .describes("Get embeddings usage details for the organization.")
+            .returns_json::<UsageResponse>(ctx)
+            .query(ParamDef {
+                name: "start_time".to_string(),
+                required: true,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Start time (Unix seconds) of the query time range, inclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "end_time".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "End time (Unix seconds) of the query time range, exclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "bucket_width".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from(["1m".to_string(), "1h".to_string(), "1d".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "project_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these projects.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "user_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these users.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "api_key_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these API keys.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "models".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these models.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "group_by".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<
+                                String,
+                            >::from([
+                                "project_id".to_string(),
+                                "user_id".to_string(),
+                                "api_key_id".to_string(),
+                                "model".to_string(),
+                            ]),
+                        ),
+                    ),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "model",
+                                    ]),
+                            ),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "page".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_156(ctx)?);
+    fn endpoint_157(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UsageFileSearchCalls",
+                RestMethod::Get,
+                "/organization/usage/file_search_calls",
+            )
+            .describes("Get file search calls usage details for the organization.")
+            .returns_json::<UsageResponse>(ctx)
+            .query(ParamDef {
+                name: "start_time".to_string(),
+                required: true,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Start time (Unix seconds) of the query time range, inclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "end_time".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "End time (Unix seconds) of the query time range, exclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "bucket_width".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from(["1m".to_string(), "1h".to_string(), "1d".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "project_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these projects.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "user_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these users.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "api_key_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these API keys.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "vector_store_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Return only usage for these vector stores.".to_string(),
+                ),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "group_by".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `vector_store_id` or any combination of them."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<
+                                String,
+                            >::from([
+                                "project_id".to_string(),
+                                "user_id".to_string(),
+                                "api_key_id".to_string(),
+                                "vector_store_id".to_string(),
+                            ]),
+                        ),
+                    ),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "vector_store_id",
+                                    ]),
+                            ),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "page".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_157(ctx)?);
+    fn endpoint_158(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("UsageImages", RestMethod::Get, "/organization/usage/images")
+            .describes("Get images usage details for the organization.")
+            .returns_json::<UsageResponse>(ctx)
+            .query(ParamDef {
+                name: "start_time".to_string(),
+                required: true,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Start time (Unix seconds) of the query time range, inclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "end_time".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "End time (Unix seconds) of the query time range, exclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "bucket_width".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from(["1m".to_string(), "1h".to_string(), "1d".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "sources".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Return only usages for these sources. Possible values are `image.generation`, `image.edit`, `image.variation` or any combination of them."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<
+                                String,
+                            >::from([
+                                "image.generation".to_string(),
+                                "image.edit".to_string(),
+                                "image.variation".to_string(),
+                            ]),
+                        ),
+                    ),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "image.generation",
+                                        "image.edit",
+                                        "image.variation",
+                                    ]),
+                            ),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "sizes".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Return only usages for these image sizes. Possible values are `256x256`, `512x512`, `1024x1024`, `1792x1792`, `1024x1792` or any combination of them."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<
+                                String,
+                            >::from([
+                                "256x256".to_string(),
+                                "512x512".to_string(),
+                                "1024x1024".to_string(),
+                                "1792x1792".to_string(),
+                                "1024x1792".to_string(),
+                            ]),
+                        ),
+                    ),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "256x256",
+                                        "512x512",
+                                        "1024x1024",
+                                        "1792x1792",
+                                        "1024x1792",
+                                    ]),
+                            ),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "project_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these projects.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "user_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these users.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "api_key_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these API keys.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "models".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these models.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "group_by".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `size`, `source` or any combination of them."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<
+                                String,
+                            >::from([
+                                "project_id".to_string(),
+                                "user_id".to_string(),
+                                "api_key_id".to_string(),
+                                "model".to_string(),
+                                "size".to_string(),
+                                "source".to_string(),
+                            ]),
+                        ),
+                    ),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "model",
+                                        "size",
+                                        "source",
+                                    ]),
+                            ),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "page".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_158(ctx)?);
+    fn endpoint_159(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UsageModerations",
+                RestMethod::Get,
+                "/organization/usage/moderations",
+            )
+            .describes("Get moderations usage details for the organization.")
+            .returns_json::<UsageResponse>(ctx)
+            .query(ParamDef {
+                name: "start_time".to_string(),
+                required: true,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Start time (Unix seconds) of the query time range, inclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "end_time".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "End time (Unix seconds) of the query time range, exclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "bucket_width".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from(["1m".to_string(), "1h".to_string(), "1d".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "project_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these projects.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "user_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these users.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "api_key_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these API keys.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "models".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these models.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "group_by".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model` or any combination of them."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<
+                                String,
+                            >::from([
+                                "project_id".to_string(),
+                                "user_id".to_string(),
+                                "api_key_id".to_string(),
+                                "model".to_string(),
+                            ]),
+                        ),
+                    ),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "model",
+                                    ]),
+                            ),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "page".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_159(ctx)?);
+    fn endpoint_160(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UsageVectorStores",
+                RestMethod::Get,
+                "/organization/usage/vector_stores",
+            )
+            .describes("Get vector stores usage details for the organization.")
+            .returns_json::<UsageResponse>(ctx)
+            .query(ParamDef {
+                name: "start_time".to_string(),
+                required: true,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Start time (Unix seconds) of the query time range, inclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "end_time".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "End time (Unix seconds) of the query time range, exclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "bucket_width".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from(["1m".to_string(), "1h".to_string(), "1d".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "project_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these projects.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "group_by".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Group the usage data by the specified fields. Support fields include `project_id`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<String>::from(["project_id".to_string()]),
+                        ),
+                    ),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["project_id"]),
+                            ),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "page".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_160(ctx)?);
+    fn endpoint_161(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UsageWebSearchCalls",
+                RestMethod::Get,
+                "/organization/usage/web_search_calls",
+            )
+            .describes("Get web search calls usage details for the organization.")
+            .returns_json::<UsageResponse>(ctx)
+            .query(ParamDef {
+                name: "start_time".to_string(),
+                required: true,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Start time (Unix seconds) of the query time range, inclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "end_time".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "End time (Unix seconds) of the query time range, exclusive."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "bucket_width".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Width of each time bucket in response. Currently `1m`, `1h` and `1d` are supported, default to `1d`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from(["1m".to_string(), "1h".to_string(), "1d".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "project_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these projects.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "user_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these users.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "api_key_ids".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these API keys.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "models".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Return only usage for these models.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "context_levels".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Return only web search usage for these context levels.".to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<
+                                String,
+                            >::from([
+                                "low".to_string(),
+                                "medium".to_string(),
+                                "high".to_string(),
+                            ]),
+                        ),
+                    ),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["low", "medium", "high"]),
+                            ),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "group_by".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Group the usage data by the specified fields. Support fields include `project_id`, `user_id`, `api_key_id`, `model`, `context_level` or any combination of them."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<
+                                String,
+                            >::from([
+                                "project_id".to_string(),
+                                "user_id".to_string(),
+                                "api_key_id".to_string(),
+                                "model".to_string(),
+                                "context_level".to_string(),
+                            ]),
+                        ),
+                    ),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values([
+                                        "project_id",
+                                        "user_id",
+                                        "api_key_id",
+                                        "model",
+                                        "context_level",
+                                    ]),
+                            ),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Specifies the number of buckets to return.\n- `bucket_width=1d`: default: 7, max: 31\n- `bucket_width=1h`: default: 24, max: 168\n- `bucket_width=1m`: default: 60, max: 1440\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "page".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. Corresponding to the `next_page` field from the previous response."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_161(ctx)?);
+    fn endpoint_162(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListUsers", RestMethod::Get, "/organization/users")
+            .describes("Lists all of the users in the organization.")
+            .returns_json::<UserListResponse>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "emails".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Filter by the email address of users.".to_string()),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::String)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_162(ctx)?);
+    fn endpoint_163(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("RetrieveUser", RestMethod::Get, "/organization/users/{user_id}")
+            .describes("Retrieves a user by their identifier.")
+            .returns_json::<User>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_163(ctx)?);
+    fn endpoint_164(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ModifyUser", RestMethod::Post, "/organization/users/{user_id}")
+            .describes("Modifies a user's role in the organization.")
+            .returns_json::<User>(ctx)
+            .request_json::<UserRoleUpdateRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_164(ctx)?);
+    fn endpoint_165(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("DeleteUser", RestMethod::Delete, "/organization/users/{user_id}")
+            .describes("Deletes a user from the organization.")
+            .returns_json::<UserDeleteResponse>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_165(ctx)?);
+    fn endpoint_166(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListUserRoleAssignments",
+                RestMethod::Get,
+                "/organization/users/{user_id}/roles",
+            )
+            .describes(
+                "Lists the organization roles assigned to a user within the organization.",
+            )
+            .returns_json::<RoleListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of organization role assignments to return."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Cursor for pagination. Provide the value from the previous response's `next` field to continue listing organization roles."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order for the returned organization roles.".to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_166(ctx)?);
+    fn endpoint_167(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "AssignUserRole",
+                RestMethod::Post,
+                "/organization/users/{user_id}/roles",
+            )
+            .describes("Assigns an organization role to a user within the organization.")
+            .returns_json::<UserRoleAssignment>(ctx)
+            .request_json::<PublicAssignOrganizationGroupRoleBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_167(ctx)?);
+    fn endpoint_168(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveUserRole",
+                RestMethod::Get,
+                "/organization/users/{user_id}/roles/{role_id}",
+            )
+            .describes("Retrieves an organization role assigned to a user.")
+            .returns_json::<AssignedRoleDetails>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_168(ctx)?);
+    fn endpoint_169(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UnassignUserRole",
+                RestMethod::Delete,
+                "/organization/users/{user_id}/roles/{role_id}",
+            )
+            .describes(
+                "Unassigns an organization role from a user within the organization.",
+            )
+            .returns_json::<DeletedRoleAssignmentResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_169(ctx)?);
+    fn endpoint_170(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListProjectGroupRoleAssignments",
+                RestMethod::Get,
+                "/projects/{project_id}/groups/{group_id}/roles",
+            )
+            .describes("Lists the project roles assigned to a group within a project.")
+            .returns_json::<RoleListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of project role assignments to return."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order for the returned project roles.".to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_170(ctx)?);
+    fn endpoint_171(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "AssignProjectGroupRole",
+                RestMethod::Post,
+                "/projects/{project_id}/groups/{group_id}/roles",
+            )
+            .describes("Assigns a project role to a group within a project.")
+            .returns_json::<GroupRoleAssignment>(ctx)
+            .request_json::<PublicAssignOrganizationGroupRoleBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_171(ctx)?);
+    fn endpoint_172(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveProjectGroupRole",
+                RestMethod::Get,
+                "/projects/{project_id}/groups/{group_id}/roles/{role_id}",
+            )
+            .describes("Retrieves a project role assigned to a group.")
+            .returns_json::<AssignedRoleDetails>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_172(ctx)?);
+    fn endpoint_173(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UnassignProjectGroupRole",
+                RestMethod::Delete,
+                "/projects/{project_id}/groups/{group_id}/roles/{role_id}",
+            )
+            .describes("Unassigns a project role from a group within a project.")
+            .returns_json::<DeletedRoleAssignmentResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_173(ctx)?);
+    fn endpoint_174(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListProjectRoles",
+                RestMethod::Get,
+                "/projects/{project_id}/roles",
+            )
+            .describes("Lists the roles configured for a project.")
+            .returns_json::<PublicRoleListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of roles to return. Defaults to 1000."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Cursor for pagination. Provide the value from the previous response's `next` field to continue listing roles."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Sort order for the returned roles.".to_string()),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_174(ctx)?);
+    fn endpoint_175(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CreateProjectRole",
+                RestMethod::Post,
+                "/projects/{project_id}/roles",
+            )
+            .describes("Creates a custom role for a project.")
+            .returns_json::<Role>(ctx)
+            .request_json::<PublicCreateOrganizationRoleBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_175(ctx)?);
+    fn endpoint_176(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveProjectRole",
+                RestMethod::Get,
+                "/projects/{project_id}/roles/{role_id}",
+            )
+            .describes("Retrieves a project role.")
+            .returns_json::<Role>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_176(ctx)?);
+    fn endpoint_177(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UpdateProjectRole",
+                RestMethod::Post,
+                "/projects/{project_id}/roles/{role_id}",
+            )
+            .describes("Updates an existing project role.")
+            .returns_json::<Role>(ctx)
+            .request_json::<PublicUpdateOrganizationRoleBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_177(ctx)?);
+    fn endpoint_178(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteProjectRole",
+                RestMethod::Delete,
+                "/projects/{project_id}/roles/{role_id}",
+            )
+            .describes("Deletes a custom role from a project.")
+            .returns_json::<RoleDeletedResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_178(ctx)?);
+    fn endpoint_179(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListProjectUserRoleAssignments",
+                RestMethod::Get,
+                "/projects/{project_id}/users/{user_id}/roles",
+            )
+            .describes("Lists the project roles assigned to a user within a project.")
+            .returns_json::<RoleListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of project role assignments to return."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("1000"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Cursor for pagination. Provide the value from the previous response's `next` field to continue listing project roles."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order for the returned project roles.".to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_179(ctx)?);
+    fn endpoint_180(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "AssignProjectUserRole",
+                RestMethod::Post,
+                "/projects/{project_id}/users/{user_id}/roles",
+            )
+            .describes("Assigns a project role to a user within a project.")
+            .returns_json::<UserRoleAssignment>(ctx)
+            .request_json::<PublicAssignOrganizationGroupRoleBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_180(ctx)?);
+    fn endpoint_181(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveProjectUserRole",
+                RestMethod::Get,
+                "/projects/{project_id}/users/{user_id}/roles/{role_id}",
+            )
+            .describes("Retrieves a project role assigned to a user.")
+            .returns_json::<AssignedRoleDetails>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_181(ctx)?);
+    fn endpoint_182(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UnassignProjectUserRole",
+                RestMethod::Delete,
+                "/projects/{project_id}/users/{user_id}/roles/{role_id}",
+            )
+            .describes("Unassigns a project role from a user within a project.")
+            .returns_json::<DeletedRoleAssignmentResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_182(ctx)?);
+    fn endpoint_183(_ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateRealtimeCall", RestMethod::Post, "/realtime/calls")
+            .describes(
+                "Create a new Realtime API call over WebRTC and receive the SDP answer needed\nto complete the peer connection.",
+            )
+            .returns(Success::binary().content_type("application/sdp"))
+            .request_form(
+                Vec::from([
                     FormField::text("sdp")
-                    .with_description("WebRTC Session Description Protocol (SDP) offer generated by the caller."),
-                    FormField::text("session").optional()
-                    .with_description("Optional session configuration to apply before the realtime session is\ncreated. Use the same parameters you would send in a [`create client secret`](/docs/api-reference/realtime-sessions/create-realtime-client-secret)\nrequest.")
-                ],
-            }),
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "AcceptRealtimeCall".to_string(),
-            method: RestMethod::Post,
-            path: "/realtime/calls/{call_id}/accept".to_string(),
-            description: "Accept an incoming SIP call and configure the realtime session that will\nhandle it."
-                .to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("RealtimeSessionCreateRequestGA")),
-            ),
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "HangupRealtimeCall".to_string(),
-            method: RestMethod::Post,
-            path: "/realtime/calls/{call_id}/hangup".to_string(),
-            description: "End an active Realtime API call, whether it was initiated over SIP or\nWebRTC."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ReferRealtimeCall".to_string(),
-            method: RestMethod::Post,
-            path: "/realtime/calls/{call_id}/refer".to_string(),
-            description: "Transfer an active SIP call to a new destination using the SIP REFER verb."
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("RealtimeCallReferRequest"))),
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RejectRealtimeCall".to_string(),
-            method: RestMethod::Post,
-            path: "/realtime/calls/{call_id}/reject".to_string(),
-            description: "Decline an incoming SIP call by returning a SIP status code to the caller."
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("RealtimeCallRejectRequest"))),
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateRealtimeClientSecret".to_string(),
-            method: RestMethod::Post,
-            path: "/realtime/client_secrets".to_string(),
-            description: "Create a Realtime client secret with an associated session configuration.\n\nClient secrets are short-lived tokens that can be passed to a client app,\nsuch as a web frontend or mobile client, which grants access to the Realtime API without\nleaking your main API key. You can configure a custom TTL for each client secret.\n\nYou can also attach session configuration options to the client secret, which will be\napplied to any sessions created using that client secret, but these can also be overridden\nby the client connection.\n\n[Learn more about authentication with client secrets over WebRTC](/docs/guides/realtime-webrtc).\n\nReturns the created client secret and the effective session object. The client secret is a string that looks like `ek_1234`.\n"
-                .to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("RealtimeCreateClientSecretRequest")),
-            ),
-            response: ApiResponse::Json(
-                Schema::new("RealtimeCreateClientSecretResponse"),
-            ),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateRealtimeSession".to_string(),
-            method: RestMethod::Post,
-            path: "/realtime/sessions".to_string(),
-            description: "Create an ephemeral API token for use in client-side applications with the\nRealtime API. Can be configured with the same session parameters as the\n`session.update` client event.\n\nIt responds with a session object, plus a `client_secret` key which contains\na usable ephemeral API token that can be used to authenticate browser clients\nfor the Realtime API.\n\nReturns the created Realtime session object, plus an ephemeral key.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("RealtimeSessionCreateRequest"))),
-            response: ApiResponse::Json(Schema::new("RealtimeSessionCreateResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateRealtimeTranscriptionSession".to_string(),
-            method: RestMethod::Post,
-            path: "/realtime/transcription_sessions".to_string(),
-            description: "Create an ephemeral API token for use in client-side applications with the\nRealtime API specifically for realtime transcriptions. \nCan be configured with the same session parameters as the `transcription_session.update` client event.\n\nIt responds with a session object, plus a `client_secret` key which contains\na usable ephemeral API token that can be used to authenticate browser clients\nfor the Realtime API.\n\nReturns the created Realtime transcription session object, plus an ephemeral key.\n"
-                .to_string(),
-            request: Some(
-                ApiRequest::Json(
-                    Schema::new("RealtimeTranscriptionSessionCreateRequest"),
+                        .with_description(
+                            "WebRTC Session Description Protocol (SDP) offer generated by the caller.",
+                        ),
+                    FormField::text("session")
+                        .optional()
+                        .with_description(
+                            "Optional session configuration to apply before the realtime session is\ncreated. Use the same parameters you would send in a [`create client secret`](/docs/api-reference/realtime-sessions/create-realtime-client-secret)\nrequest.",
+                        ),
+                ]),
+            )
+            .build()
+    }
+    endpoints.push(endpoint_183(ctx)?);
+    fn endpoint_184(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "AcceptRealtimeCall",
+                RestMethod::Post,
+                "/realtime/calls/{call_id}/accept",
+            )
+            .describes(
+                "Accept an incoming SIP call and configure the realtime session that will\nhandle it.",
+            )
+            .returns_empty()
+            .request_json::<RealtimeSessionCreateRequestGA>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_184(ctx)?);
+    fn endpoint_185(_ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "HangupRealtimeCall",
+                RestMethod::Post,
+                "/realtime/calls/{call_id}/hangup",
+            )
+            .describes(
+                "End an active Realtime API call, whether it was initiated over SIP or\nWebRTC.",
+            )
+            .returns_empty()
+            .build()
+    }
+    endpoints.push(endpoint_185(ctx)?);
+    fn endpoint_186(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ReferRealtimeCall",
+                RestMethod::Post,
+                "/realtime/calls/{call_id}/refer",
+            )
+            .describes(
+                "Transfer an active SIP call to a new destination using the SIP REFER verb.",
+            )
+            .returns_empty()
+            .request_json::<RealtimeCallReferRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_186(ctx)?);
+    fn endpoint_187(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RejectRealtimeCall",
+                RestMethod::Post,
+                "/realtime/calls/{call_id}/reject",
+            )
+            .describes(
+                "Decline an incoming SIP call by returning a SIP status code to the caller.",
+            )
+            .returns_empty()
+            .request_json::<RealtimeCallRejectRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_187(ctx)?);
+    fn endpoint_188(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CreateRealtimeClientSecret",
+                RestMethod::Post,
+                "/realtime/client_secrets",
+            )
+            .describes(
+                "Create a Realtime client secret with an associated session configuration.\n\nClient secrets are short-lived tokens that can be passed to a client app,\nsuch as a web frontend or mobile client, which grants access to the Realtime API without\nleaking your main API key. You can configure a custom TTL for each client secret.\n\nYou can also attach session configuration options to the client secret, which will be\napplied to any sessions created using that client secret, but these can also be overridden\nby the client connection.\n\n[Learn more about authentication with client secrets over WebRTC](/docs/guides/realtime-webrtc).\n\nReturns the created client secret and the effective session object. The client secret is a string that looks like `ek_1234`.\n",
+            )
+            .returns_json::<RealtimeCreateClientSecretResponse>(ctx)
+            .request_json::<RealtimeCreateClientSecretRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_188(ctx)?);
+    fn endpoint_189(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateRealtimeSession", RestMethod::Post, "/realtime/sessions")
+            .describes(
+                "Create an ephemeral API token for use in client-side applications with the\nRealtime API. Can be configured with the same session parameters as the\n`session.update` client event.\n\nIt responds with a session object, plus a `client_secret` key which contains\na usable ephemeral API token that can be used to authenticate browser clients\nfor the Realtime API.\n\nReturns the created Realtime session object, plus an ephemeral key.\n",
+            )
+            .returns_json::<RealtimeSessionCreateResponse>(ctx)
+            .request_json::<RealtimeSessionCreateRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_189(ctx)?);
+    fn endpoint_190(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CreateRealtimeTranscriptionSession",
+                RestMethod::Post,
+                "/realtime/transcription_sessions",
+            )
+            .describes(
+                "Create an ephemeral API token for use in client-side applications with the\nRealtime API specifically for realtime transcriptions. \nCan be configured with the same session parameters as the `transcription_session.update` client event.\n\nIt responds with a session object, plus a `client_secret` key which contains\na usable ephemeral API token that can be used to authenticate browser clients\nfor the Realtime API.\n\nReturns the created Realtime transcription session object, plus an ephemeral key.\n",
+            )
+            .returns_json::<RealtimeTranscriptionSessionCreateResponse>(ctx)
+            .request_json::<RealtimeTranscriptionSessionCreateRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_190(ctx)?);
+    fn endpoint_191(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CreateRealtimeTranslationClientSecret",
+                RestMethod::Post,
+                "/realtime/translations/client_secrets",
+            )
+            .describes(
+                "Create a Realtime translation client secret with an associated translation session configuration.\n\nClient secrets are short-lived tokens that can be passed to a client app,\nsuch as a web frontend or mobile client, which grants access to the Realtime\nTranslation API without leaking your main API key. You can configure a custom\nTTL for each client secret.\n\nReturns the created client secret and the effective translation session object.\nThe client secret is a string that looks like `ek_1234`.\n",
+            )
+            .returns_json::<RealtimeTranslationClientSecretCreateResponse>(ctx)
+            .request_json::<RealtimeTranslationClientSecretCreateRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_191(ctx)?);
+    fn endpoint_192(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateResponse", RestMethod::Post, "/responses")
+            .describes(
+                "Creates a model response. Provide [text](/docs/guides/text) or\n[image](/docs/guides/images) inputs to generate [text](/docs/guides/text)\nor [JSON](/docs/guides/structured-outputs) outputs. Have the model call\nyour own [custom code](/docs/guides/function-calling) or use built-in\n[tools](/docs/guides/tools) like [web search](/docs/guides/tools-web-search)\nor [file search](/docs/guides/tools-file-search) to use your own data\nas input for the model's response.\n",
+            )
+            .returns(Success::json(ctx.register::<BetaResponse>()?))
+            .returns(Success::sse(ctx.register::<BetaResponseStreamEvent>()?))
+            .request_json::<BetaCreateResponse>(ctx)
+            .query(ParamDef {
+                name: "beta".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: None,
+                param_type: QueryParamType::Boolean,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .header_param(ParamDef {
+                name: "openai-beta".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Optional beta features to enable for this request.".to_string(),
                 ),
-            ),
-            response: ApiResponse::Json(
-                Schema::new("RealtimeTranscriptionSessionCreateResponse"),
-            ),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateRealtimeTranslationClientSecret".to_string(),
-            method: RestMethod::Post,
-            path: "/realtime/translations/client_secrets".to_string(),
-            description: "Create a Realtime translation client secret with an associated translation session configuration.\n\nClient secrets are short-lived tokens that can be passed to a client app,\nsuch as a web frontend or mobile client, which grants access to the Realtime\nTranslation API without leaking your main API key. You can configure a custom\nTTL for each client secret.\n\nReturns the created client secret and the effective translation session object.\nThe client secret is a string that looks like `ek_1234`.\n"
-                .to_string(),
-            request: Some(
-                ApiRequest::Json(
-                    Schema::new("RealtimeTranslationClientSecretCreateRequest"),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<String>::from(["responses_multi_agent=v1".to_string()]),
+                        ),
+                    ),
                 ),
-            ),
-            response: ApiResponse::Json(
-                Schema::new("RealtimeTranslationClientSecretCreateResponse"),
-            ),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateResponse".to_string(),
-            method: RestMethod::Post,
-            path: "/responses".to_string(),
-            description: "Creates a model response. Provide [text](/docs/guides/text) or\n[image](/docs/guides/images) inputs to generate [text](/docs/guides/text)\nor [JSON](/docs/guides/structured-outputs) outputs. Have the model call\nyour own [custom code](/docs/guides/function-calling) or use built-in\n[tools](/docs/guides/tools) like [web search](/docs/guides/tools-web-search)\nor [file search](/docs/guides/tools-file-search) to use your own data\nas input for the model's response.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateResponse"))),
-            response: ApiResponse::Json(Schema::new("Response")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetResponse".to_string(),
-            method: RestMethod::Get,
-            path: "/responses/{response_id}".to_string(),
-            description: "Retrieves a model response with the given ID.\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("Response")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "include".to_string(), required : false,
-                    description :
-                    Some("Additional fields to include in the response. See the `include`\nparameter for Response creation above for more information.\n"
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "stream"
-                    .to_string(), required : false, description :
-                    Some("If set to true, the model response data will be streamed to the client\nas it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format).\nSee the [Streaming section below](/docs/api-reference/responses-streaming)\nfor more information.\n"
-                    .to_string()), param_type : QueryParamType::Boolean, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "starting_after"
-                    .to_string(), required : false, description :
-                    Some("The sequence number of the event after which to start streaming.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "include_obfuscation"
-                    .to_string(), required : false, description :
-                    Some("When true, stream obfuscation will be enabled. Stream obfuscation adds\nrandom characters to an `obfuscation` field on streaming delta events\nto normalize payload sizes as a mitigation to certain side-channel\nattacks. These obfuscation fields are included by default, but add a\nsmall amount of overhead to the data stream. You can set\n`include_obfuscation` to false to optimize for bandwidth if you trust\nthe network links between your application and the OpenAI API.\n"
-                    .to_string()), param_type : QueryParamType::Boolean, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteResponse".to_string(),
-            method: RestMethod::Delete,
-            path: "/responses/{response_id}".to_string(),
-            description: "Deletes a model response with the given ID.\n".to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CancelResponse".to_string(),
-            method: RestMethod::Post,
-            path: "/responses/{response_id}/cancel".to_string(),
-            description: "Cancels a model response with the given ID. Only responses created with\nthe `background` parameter set to `true` can be cancelled. \n[Learn more](/docs/guides/background).\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("Response")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListInputItems".to_string(),
-            method: RestMethod::Get,
-            path: "/responses/{response_id}/input_items".to_string(),
-            description: "Returns a list of input items for a given response."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ResponseItemList")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between\n1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("The order to return the input items in. Default is `desc`.\n- `asc`: Return the input items in ascending order.\n- `desc`: Return the input items in descending order.\n"
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
-                    Some("An item ID to list items after, used in pagination.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "include".to_string(),
-                    required : false, description :
-                    Some("Additional fields to include in the response. See the `include`\nparameter for Response creation above for more information.\n"
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
-                    false, style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateUpload".to_string(),
-            method: RestMethod::Post,
-            path: "/uploads".to_string(),
-            description: "Creates an intermediate [Upload](/docs/api-reference/uploads/object) object\nthat you can add [Parts](/docs/api-reference/uploads/part-object) to.\nCurrently, an Upload can accept at most 8 GB in total and expires after an\nhour after you create it.\n\nOnce you complete the Upload, we will create a\n[File](/docs/api-reference/files/object) object that contains all the parts\nyou uploaded. This File is usable in the rest of our platform as a regular\nFile object.\n\nFor certain `purpose` values, the correct `mime_type` must be specified. \nPlease refer to documentation for the \n[supported MIME types for your use case](/docs/assistants/tools/file-search#supported-files).\n\nFor guidance on the proper filename extensions for each purpose, please\nfollow the documentation on [creating a\nFile](/docs/api-reference/files/create).\n\nReturns the Upload object with status `pending`.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateUploadRequest2"))),
-            response: ApiResponse::Json(Schema::new("Upload")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CancelUpload".to_string(),
-            method: RestMethod::Post,
-            path: "/uploads/{upload_id}/cancel".to_string(),
-            description: "Cancels the Upload. No Parts may be added after an Upload is cancelled.\n\nReturns the Upload object with status `cancelled`.\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("Upload")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CompleteUpload".to_string(),
-            method: RestMethod::Post,
-            path: "/uploads/{upload_id}/complete".to_string(),
-            description: "Completes the [Upload](/docs/api-reference/uploads/object). \n\nWithin the returned Upload object, there is a nested [File](/docs/api-reference/files/object) object that is ready to use in the rest of the platform.\n\nYou can specify the order of the Parts by passing in an ordered list of the Part IDs.\n\nThe number of bytes uploaded upon completion must match the number of bytes initially specified when creating the Upload object. No Parts may be added after an Upload is completed.\nReturns the Upload object with status `completed`, including an additional `file` property containing the created usable File object.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CompleteUploadRequest2"))),
-            response: ApiResponse::Json(Schema::new("Upload")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "AddUploadPart".to_string(),
-            method: RestMethod::Post,
-            path: "/uploads/{upload_id}/parts".to_string(),
-            description: "Adds a [Part](/docs/api-reference/uploads/part-object) to an [Upload](/docs/api-reference/uploads/object) object. A Part represents a chunk of bytes from the file you are trying to upload. \n\nEach Part can be at most 64 MB, and you can add Parts until you hit the Upload maximum of 8 GB.\n\nIt is possible to add multiple Parts in parallel. You can decide the intended order of the Parts when you [complete the Upload](/docs/api-reference/uploads/complete).\n"
-                .to_string(),
-            request: Some(ApiRequest::FormData {
-                fields: vec![
+                explode: false,
+                style: ParamStyle::Simple,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["responses_multi_agent=v1"]),
+                            ),
+                    ),
+                ),
+            })
+            .build()
+    }
+    endpoints.push(endpoint_192(ctx)?);
+    fn endpoint_193(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("GetResponse", RestMethod::Get, "/responses/{response_id}")
+            .describes("Retrieves a model response with the given ID.\n")
+            .returns_json::<BetaResponse>(ctx)
+            .query(ParamDef {
+                name: "include".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Additional fields to include in the response. See the `include`\nparameter for Response creation above for more information.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::Json)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "stream".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "If set to true, the model response data will be streamed to the client\nas it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format).\nSee the [Streaming section below](/docs/api-reference/responses-streaming)\nfor more information.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Boolean,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "starting_after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "The sequence number of the event after which to start streaming.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "include_obfuscation".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "When true, stream obfuscation will be enabled. Stream obfuscation adds\nrandom characters to an `obfuscation` field on streaming delta events\nto normalize payload sizes as a mitigation to certain side-channel\nattacks. These obfuscation fields are included by default, but add a\nsmall amount of overhead to the data stream. You can set\n`include_obfuscation` to false to optimize for bandwidth if you trust\nthe network links between your application and the OpenAI API.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Boolean,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "beta".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: None,
+                param_type: QueryParamType::Boolean,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .header_param(ParamDef {
+                name: "openai-beta".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Optional beta features to enable for this request.".to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<String>::from(["responses_multi_agent=v1".to_string()]),
+                        ),
+                    ),
+                ),
+                explode: false,
+                style: ParamStyle::Simple,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["responses_multi_agent=v1"]),
+                            ),
+                    ),
+                ),
+            })
+            .build()
+    }
+    endpoints.push(endpoint_193(ctx)?);
+    fn endpoint_194(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("DeleteResponse", RestMethod::Delete, "/responses/{response_id}")
+            .describes("Deletes a model response with the given ID.\n")
+            .returns_empty()
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(404u16),
+                        ErrorShape::json(ctx.register::<BetaError>()?),
+                    ),
+            )
+            .query(ParamDef {
+                name: "beta".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: None,
+                param_type: QueryParamType::Boolean,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .header_param(ParamDef {
+                name: "openai-beta".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Optional beta features to enable for this request.".to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<String>::from(["responses_multi_agent=v1".to_string()]),
+                        ),
+                    ),
+                ),
+                explode: false,
+                style: ParamStyle::Simple,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["responses_multi_agent=v1"]),
+                            ),
+                    ),
+                ),
+            })
+            .build()
+    }
+    endpoints.push(endpoint_194(ctx)?);
+    fn endpoint_195(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CancelResponse",
+                RestMethod::Post,
+                "/responses/{response_id}/cancel",
+            )
+            .describes(
+                "Cancels a model response with the given ID. Only responses created with\nthe `background` parameter set to `true` can be cancelled. \n[Learn more](/docs/guides/background).\n",
+            )
+            .returns_json::<BetaResponse>(ctx)
+            .errors(
+                ErrorSet::new()
+                    .on(
+                        StatusMatch::exact(404u16),
+                        ErrorShape::json(ctx.register::<BetaError>()?),
+                    ),
+            )
+            .query(ParamDef {
+                name: "beta".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: None,
+                param_type: QueryParamType::Boolean,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .header_param(ParamDef {
+                name: "openai-beta".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Optional beta features to enable for this request.".to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<String>::from(["responses_multi_agent=v1".to_string()]),
+                        ),
+                    ),
+                ),
+                explode: false,
+                style: ParamStyle::Simple,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["responses_multi_agent=v1"]),
+                            ),
+                    ),
+                ),
+            })
+            .build()
+    }
+    endpoints.push(endpoint_195(ctx)?);
+    fn endpoint_196(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListInputItems",
+                RestMethod::Get,
+                "/responses/{response_id}/input_items",
+            )
+            .describes("Returns a list of input items for a given response.")
+            .returns_json::<BetaResponseItemList>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between\n1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "The order to return the input items in. Default is `desc`.\n- `asc`: Return the input items in ascending order.\n- `desc`: Return the input items in descending order.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "An item ID to list items after, used in pagination.\n".to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "include".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Additional fields to include in the response. See the `include`\nparameter for Response creation above for more information.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Array(Box::new(QueryParamType::Json)),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "beta".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: None,
+                param_type: QueryParamType::Boolean,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .header_param(ParamDef {
+                name: "openai-beta".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Optional beta features to enable for this request.".to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<String>::from(["responses_multi_agent=v1".to_string()]),
+                        ),
+                    ),
+                ),
+                explode: false,
+                style: ParamStyle::Simple,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["responses_multi_agent=v1"]),
+                            ),
+                    ),
+                ),
+            })
+            .build()
+    }
+    endpoints.push(endpoint_196(ctx)?);
+    fn endpoint_197(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateUpload", RestMethod::Post, "/uploads")
+            .describes(
+                "Creates an intermediate [Upload](/docs/api-reference/uploads/object) object\nthat you can add [Parts](/docs/api-reference/uploads/part-object) to.\nCurrently, an Upload can accept at most 8 GB in total and expires after an\nhour after you create it.\n\nOnce you complete the Upload, we will create a\n[File](/docs/api-reference/files/object) object that contains all the parts\nyou uploaded. This File is usable in the rest of our platform as a regular\nFile object.\n\nFor certain `purpose` values, the correct `mime_type` must be specified. \nPlease refer to documentation for the \n[supported MIME types for your use case](/docs/assistants/tools/file-search#supported-files).\n\nFor guidance on the proper filename extensions for each purpose, please\nfollow the documentation on [creating a\nFile](/docs/api-reference/files/create).\n\nReturns the Upload object with status `pending`.\n",
+            )
+            .returns_json::<Upload>(ctx)
+            .request_json::<CreateUploadRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_197(ctx)?);
+    fn endpoint_198(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CancelUpload", RestMethod::Post, "/uploads/{upload_id}/cancel")
+            .describes(
+                "Cancels the Upload. No Parts may be added after an Upload is cancelled.\n\nReturns the Upload object with status `cancelled`.\n",
+            )
+            .returns_json::<Upload>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_198(ctx)?);
+    fn endpoint_199(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CompleteUpload",
+                RestMethod::Post,
+                "/uploads/{upload_id}/complete",
+            )
+            .describes(
+                "Completes the [Upload](/docs/api-reference/uploads/object). \n\nWithin the returned Upload object, there is a nested [File](/docs/api-reference/files/object) object that is ready to use in the rest of the platform.\n\nYou can specify the order of the Parts by passing in an ordered list of the Part IDs.\n\nThe number of bytes uploaded upon completion must match the number of bytes initially specified when creating the Upload object. No Parts may be added after an Upload is completed.\nReturns the Upload object with status `completed`, including an additional `file` property containing the created usable File object.\n",
+            )
+            .returns_json::<Upload>(ctx)
+            .request_json::<CompleteUploadRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_199(ctx)?);
+    fn endpoint_200(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("AddUploadPart", RestMethod::Post, "/uploads/{upload_id}/parts")
+            .describes(
+                "Adds a [Part](/docs/api-reference/uploads/part-object) to an [Upload](/docs/api-reference/uploads/object) object. A Part represents a chunk of bytes from the file you are trying to upload. \n\nEach Part can be at most 64 MB, and you can add Parts until you hit the Upload maximum of 8 GB.\n\nIt is possible to add multiple Parts in parallel. You can decide the intended order of the Parts when you [complete the Upload](/docs/api-reference/uploads/complete).\n",
+            )
+            .returns_json::<UploadPart>(ctx)
+            .request_form(
+                Vec::from([
                     FormField::file("data")
-                    .with_description("The chunk of bytes for this Part.\n")
-                ],
-            }),
-            response: ApiResponse::Json(Schema::new("UploadPart")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListVectorStores".to_string(),
-            method: RestMethod::Get,
-            path: "/vector_stores".to_string(),
-            description: "Returns a list of vector stores.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ListVectorStoresResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateVectorStore".to_string(),
-            method: RestMethod::Post,
-            path: "/vector_stores".to_string(),
-            description: "Create a vector store.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateVectorStoreRequest2"))),
-            response: ApiResponse::Json(Schema::new("VectorStoreObject")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetVectorStore".to_string(),
-            method: RestMethod::Get,
-            path: "/vector_stores/{vector_store_id}".to_string(),
-            description: "Retrieves a vector store.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("VectorStoreObject")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ModifyVectorStore".to_string(),
-            method: RestMethod::Post,
-            path: "/vector_stores/{vector_store_id}".to_string(),
-            description: "Modifies a vector store.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("UpdateVectorStoreRequest"))),
-            response: ApiResponse::Json(Schema::new("VectorStoreObject")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteVectorStore".to_string(),
-            method: RestMethod::Delete,
-            path: "/vector_stores/{vector_store_id}".to_string(),
-            description: "Delete a vector store.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("DeleteVectorStoreResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateVectorStoreFileBatch".to_string(),
-            method: RestMethod::Post,
-            path: "/vector_stores/{vector_store_id}/file_batches".to_string(),
-            description: "Create a vector store file batch.".to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("CreateVectorStoreFileBatchRequest2")),
-            ),
-            response: ApiResponse::Json(Schema::new("VectorStoreFileBatchObject")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetVectorStoreFileBatch".to_string(),
-            method: RestMethod::Get,
-            path: "/vector_stores/{vector_store_id}/file_batches/{batch_id}".to_string(),
-            description: "Retrieves a vector store file batch.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("VectorStoreFileBatchObject")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CancelVectorStoreFileBatch".to_string(),
-            method: RestMethod::Post,
-            path: "/vector_stores/{vector_store_id}/file_batches/{batch_id}/cancel"
-                .to_string(),
-            description: "Cancel a vector store file batch. This attempts to cancel the processing of files in this batch as soon as possible."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("VectorStoreFileBatchObject")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListFilesInVectorStoreBatch".to_string(),
-            method: RestMethod::Get,
-            path: "/vector_stores/{vector_store_id}/file_batches/{batch_id}/files"
-                .to_string(),
-            description: "Returns a list of vector store files in a batch.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ListVectorStoreFilesResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "filter".to_string(),
-                    required : false, description :
-                    Some("Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["in_progress"
-                    .to_string(), "completed".to_string(), "failed".to_string(),
-                    "cancelled".to_string()]), explode : false, style : ParamStyle::Form,
-                    }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListVectorStoreFiles".to_string(),
-            method: RestMethod::Get,
-            path: "/vector_stores/{vector_store_id}/files".to_string(),
-            description: "Returns a list of vector store files.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ListVectorStoreFilesResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
-                    Some("A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
-                    Some("A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "filter".to_string(),
-                    required : false, description :
-                    Some("Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`."
-                    .to_string()), param_type : QueryParamType::Enum(vec!["in_progress"
-                    .to_string(), "completed".to_string(), "failed".to_string(),
-                    "cancelled".to_string()]), explode : false, style : ParamStyle::Form,
-                    }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateVectorStoreFile".to_string(),
-            method: RestMethod::Post,
-            path: "/vector_stores/{vector_store_id}/files".to_string(),
-            description: "Create a vector store file by attaching a [File](/docs/api-reference/files) to a [vector store](/docs/api-reference/vector-stores/object)."
-                .to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("CreateVectorStoreFileRequest2")),
-            ),
-            response: ApiResponse::Json(Schema::new("VectorStoreFileObject")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetVectorStoreFile".to_string(),
-            method: RestMethod::Get,
-            path: "/vector_stores/{vector_store_id}/files/{file_id}".to_string(),
-            description: "Retrieves a vector store file.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("VectorStoreFileObject")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateVectorStoreFileAttributes".to_string(),
-            method: RestMethod::Post,
-            path: "/vector_stores/{vector_store_id}/files/{file_id}".to_string(),
-            description: "Update attributes on a vector store file.".to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("UpdateVectorStoreFileAttributesRequest2")),
-            ),
-            response: ApiResponse::Json(Schema::new("VectorStoreFileObject")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteVectorStoreFile".to_string(),
-            method: RestMethod::Delete,
-            path: "/vector_stores/{vector_store_id}/files/{file_id}".to_string(),
-            description: "Delete a vector store file. This will remove the file from the vector store but the file itself will not be deleted. To delete the file, use the [delete file](/docs/api-reference/files/delete) endpoint."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("DeleteVectorStoreFileResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveVectorStoreFileContent".to_string(),
-            method: RestMethod::Get,
-            path: "/vector_stores/{vector_store_id}/files/{file_id}/content".to_string(),
-            description: "Retrieve the parsed contents of a vector store file."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("VectorStoreFileContentResponse")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "SearchVectorStore".to_string(),
-            method: RestMethod::Post,
-            path: "/vector_stores/{vector_store_id}/search".to_string(),
-            description: "Search a vector store for relevant chunks based on a query and file attributes filter."
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("VectorStoreSearchRequest"))),
-            response: ApiResponse::Json(Schema::new("VectorStoreSearchResultsPage")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateConversation".to_string(),
-            method: RestMethod::Post,
-            path: "/conversations".to_string(),
-            description: "Create a conversation.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateConversationBody"))),
-            response: ApiResponse::Json(Schema::new("ConversationResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetConversation".to_string(),
-            method: RestMethod::Get,
-            path: "/conversations/{conversation_id}".to_string(),
-            description: "Get a conversation".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ConversationResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateConversation".to_string(),
-            method: RestMethod::Post,
-            path: "/conversations/{conversation_id}".to_string(),
-            description: "Update a conversation".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("UpdateConversationBody"))),
-            response: ApiResponse::Json(Schema::new("ConversationResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteConversation".to_string(),
-            method: RestMethod::Delete,
-            path: "/conversations/{conversation_id}".to_string(),
-            description: "Delete a conversation. Items in the conversation will not be deleted."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("DeletedConversationResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "Getorganizationspendlimit".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/spend_limit".to_string(),
-            description: "Get the organization's hard spend limit.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("OrganizationSpendLimitResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "Updateorganizationspendlimit".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/spend_limit".to_string(),
-            description: "Create or replace the organization's hard spend limit."
-                .to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("UpdateOrganizationSpendLimitBody")),
-            ),
-            response: ApiResponse::Json(Schema::new("OrganizationSpendLimitResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "Deleteorganizationspendlimit".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/spend_limit".to_string(),
-            description: "Delete the organization's hard spend limit.".to_string(),
-            request: None,
-            response: ApiResponse::Json(
-                Schema::new("OrganizationSpendLimitDeletedResource"),
-            ),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "Getprojectspendlimit".to_string(),
-            method: RestMethod::Get,
-            path: "/organization/projects/{project_id}/spend_limit".to_string(),
-            description: "Get a project's hard spend limit.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectSpendLimitResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "Updateprojectspendlimit".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/spend_limit".to_string(),
-            description: "Create or replace a project's hard spend limit.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("UpdateProjectSpendLimitBody"))),
-            response: ApiResponse::Json(Schema::new("ProjectSpendLimitResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "Deleteprojectspendlimit".to_string(),
-            method: RestMethod::Delete,
-            path: "/organization/projects/{project_id}/spend_limit".to_string(),
-            description: "Delete a project's hard spend limit.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ProjectSpendLimitDeletedResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateanAPIkeyforaserviceaccount".to_string(),
-            method: RestMethod::Post,
-            path: "/organization/projects/{project_id}/service_accounts/{service_account_id}/api_keys"
-                .to_string(),
-            description: "Creates an API key for a service account in the project."
-                .to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("CreateProjectServiceAccountApiKeyBody")),
-            ),
-            response: ApiResponse::Json(Schema::new("ServiceAccountApiKeyBody")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "Createcontentprovenancecheck".to_string(),
-            method: RestMethod::Post,
-            path: "/content_provenance_checks".to_string(),
-            description: "Check whether an image or audio file contains known OpenAI provenance signals. [Learn more about content provenance](/api/docs/guides/content-provenance).\n\nIf `not_detected`, it means the tool did not find supported signals in the uploaded file. The content could still have been generated by OpenAI if the metadata was stripped or has evidence of tampering, the watermark was degraded, it comes from a legacy generation model, or it was created before provenance signals were available. Content could also still be AI-generated by another company's model, which the tool currently does not detect."
-                .to_string(),
-            request: Some(ApiRequest::FormData {
-                fields: vec![
+                        .with_description("The chunk of bytes for this Part.\n"),
+                ]),
+            )
+            .build()
+    }
+    endpoints.push(endpoint_200(ctx)?);
+    fn endpoint_201(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListVectorStores", RestMethod::Get, "/vector_stores")
+            .describes("Returns a list of vector stores.")
+            .returns_json::<ListVectorStoresResponse>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "before".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_201(ctx)?);
+    fn endpoint_202(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateVectorStore", RestMethod::Post, "/vector_stores")
+            .describes("Create a vector store.")
+            .returns_json::<VectorStoreObject>(ctx)
+            .request_json::<CreateVectorStoreRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_202(ctx)?);
+    fn endpoint_203(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "GetVectorStore",
+                RestMethod::Get,
+                "/vector_stores/{vector_store_id}",
+            )
+            .describes("Retrieves a vector store.")
+            .returns_json::<VectorStoreObject>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_203(ctx)?);
+    fn endpoint_204(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ModifyVectorStore",
+                RestMethod::Post,
+                "/vector_stores/{vector_store_id}",
+            )
+            .describes("Modifies a vector store.")
+            .returns_json::<VectorStoreObject>(ctx)
+            .request_json::<UpdateVectorStoreRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_204(ctx)?);
+    fn endpoint_205(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteVectorStore",
+                RestMethod::Delete,
+                "/vector_stores/{vector_store_id}",
+            )
+            .describes("Delete a vector store.")
+            .returns_json::<DeleteVectorStoreResponse>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_205(ctx)?);
+    fn endpoint_206(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CreateVectorStoreFileBatch",
+                RestMethod::Post,
+                "/vector_stores/{vector_store_id}/file_batches",
+            )
+            .describes("Create a vector store file batch.")
+            .returns_json::<VectorStoreFileBatchObject>(ctx)
+            .request_json::<CreateVectorStoreFileBatchRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_206(ctx)?);
+    fn endpoint_207(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "GetVectorStoreFileBatch",
+                RestMethod::Get,
+                "/vector_stores/{vector_store_id}/file_batches/{batch_id}",
+            )
+            .describes("Retrieves a vector store file batch.")
+            .returns_json::<VectorStoreFileBatchObject>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_207(ctx)?);
+    fn endpoint_208(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CancelVectorStoreFileBatch",
+                RestMethod::Post,
+                "/vector_stores/{vector_store_id}/file_batches/{batch_id}/cancel",
+            )
+            .describes(
+                "Cancel a vector store file batch. This attempts to cancel the processing of files in this batch as soon as possible.",
+            )
+            .returns_json::<VectorStoreFileBatchObject>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_208(ctx)?);
+    fn endpoint_209(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListFilesInVectorStoreBatch",
+                RestMethod::Get,
+                "/vector_stores/{vector_store_id}/file_batches/{batch_id}/files",
+            )
+            .describes("Returns a list of vector store files in a batch.")
+            .returns_json::<ListVectorStoreFilesResponse>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "before".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "filter".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from([
+                        "in_progress".to_string(),
+                        "completed".to_string(),
+                        "failed".to_string(),
+                        "cancelled".to_string(),
+                    ]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_209(ctx)?);
+    fn endpoint_210(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListVectorStoreFiles",
+                RestMethod::Get,
+                "/vector_stores/{vector_store_id}/files",
+            )
+            .describes("Returns a list of vector store files.")
+            .returns_json::<ListVectorStoreFilesResponse>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A limit on the number of objects to be returned. Limit can range between 1 and 100, and the default is 20.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order by the `created_at` timestamp of the objects. `asc` for ascending order and `desc` for descending order.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<String>::from(["asc".to_string(), "desc".to_string()]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "before".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.\n"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "filter".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Filter by file status. One of `in_progress`, `completed`, `failed`, `cancelled`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Enum(
+                    Vec::<
+                        String,
+                    >::from([
+                        "in_progress".to_string(),
+                        "completed".to_string(),
+                        "failed".to_string(),
+                        "cancelled".to_string(),
+                    ]),
+                ),
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_210(ctx)?);
+    fn endpoint_211(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CreateVectorStoreFile",
+                RestMethod::Post,
+                "/vector_stores/{vector_store_id}/files",
+            )
+            .describes(
+                "Create a vector store file by attaching a [File](/docs/api-reference/files) to a [vector store](/docs/api-reference/vector-stores/object).",
+            )
+            .returns_json::<VectorStoreFileObject>(ctx)
+            .request_json::<CreateVectorStoreFileRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_211(ctx)?);
+    fn endpoint_212(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "GetVectorStoreFile",
+                RestMethod::Get,
+                "/vector_stores/{vector_store_id}/files/{file_id}",
+            )
+            .describes("Retrieves a vector store file.")
+            .returns_json::<VectorStoreFileObject>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_212(ctx)?);
+    fn endpoint_213(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UpdateVectorStoreFileAttributes",
+                RestMethod::Post,
+                "/vector_stores/{vector_store_id}/files/{file_id}",
+            )
+            .describes("Update attributes on a vector store file.")
+            .returns_json::<VectorStoreFileObject>(ctx)
+            .request_json::<UpdateVectorStoreFileAttributesRequest2>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_213(ctx)?);
+    fn endpoint_214(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteVectorStoreFile",
+                RestMethod::Delete,
+                "/vector_stores/{vector_store_id}/files/{file_id}",
+            )
+            .describes(
+                "Delete a vector store file. This will remove the file from the vector store but the file itself will not be deleted. To delete the file, use the [delete file](/docs/api-reference/files/delete) endpoint.",
+            )
+            .returns_json::<DeleteVectorStoreFileResponse>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_214(ctx)?);
+    fn endpoint_215(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveVectorStoreFileContent",
+                RestMethod::Get,
+                "/vector_stores/{vector_store_id}/files/{file_id}/content",
+            )
+            .describes("Retrieve the parsed contents of a vector store file.")
+            .returns_json::<VectorStoreFileContentResponse>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_215(ctx)?);
+    fn endpoint_216(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "SearchVectorStore",
+                RestMethod::Post,
+                "/vector_stores/{vector_store_id}/search",
+            )
+            .describes(
+                "Search a vector store for relevant chunks based on a query and file attributes filter.",
+            )
+            .returns_json::<VectorStoreSearchResultsPage>(ctx)
+            .request_json::<VectorStoreSearchRequest>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_216(ctx)?);
+    fn endpoint_217(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateConversation", RestMethod::Post, "/conversations")
+            .describes("Create a conversation.")
+            .returns_json::<ConversationResource>(ctx)
+            .request_json::<CreateConversationBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_217(ctx)?);
+    fn endpoint_218(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "GetConversation",
+                RestMethod::Get,
+                "/conversations/{conversation_id}",
+            )
+            .describes("Get a conversation")
+            .returns_json::<ConversationResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_218(ctx)?);
+    fn endpoint_219(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UpdateConversation",
+                RestMethod::Post,
+                "/conversations/{conversation_id}",
+            )
+            .describes("Update a conversation")
+            .returns_json::<ConversationResource>(ctx)
+            .request_json::<UpdateConversationBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_219(ctx)?);
+    fn endpoint_220(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteConversation",
+                RestMethod::Delete,
+                "/conversations/{conversation_id}",
+            )
+            .describes(
+                "Delete a conversation. Items in the conversation will not be deleted.",
+            )
+            .returns_json::<DeletedConversationResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_220(ctx)?);
+    fn endpoint_221(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "Getorganizationspendlimit",
+                RestMethod::Get,
+                "/organization/spend_limit",
+            )
+            .describes("Get the organization's hard spend limit.")
+            .returns_json::<OrganizationSpendLimitResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_221(ctx)?);
+    fn endpoint_222(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "Updateorganizationspendlimit",
+                RestMethod::Post,
+                "/organization/spend_limit",
+            )
+            .describes("Create or replace the organization's hard spend limit.")
+            .returns_json::<OrganizationSpendLimitResource>(ctx)
+            .request_json::<UpdateOrganizationSpendLimitBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_222(ctx)?);
+    fn endpoint_223(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "Deleteorganizationspendlimit",
+                RestMethod::Delete,
+                "/organization/spend_limit",
+            )
+            .describes("Delete the organization's hard spend limit.")
+            .returns_json::<OrganizationSpendLimitDeletedResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_223(ctx)?);
+    fn endpoint_224(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "Getprojectspendlimit",
+                RestMethod::Get,
+                "/organization/projects/{project_id}/spend_limit",
+            )
+            .describes("Get a project's hard spend limit.")
+            .returns_json::<ProjectSpendLimitResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_224(ctx)?);
+    fn endpoint_225(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "Updateprojectspendlimit",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/spend_limit",
+            )
+            .describes("Create or replace a project's hard spend limit.")
+            .returns_json::<ProjectSpendLimitResource>(ctx)
+            .request_json::<UpdateProjectSpendLimitBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_225(ctx)?);
+    fn endpoint_226(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "Deleteprojectspendlimit",
+                RestMethod::Delete,
+                "/organization/projects/{project_id}/spend_limit",
+            )
+            .describes("Delete a project's hard spend limit.")
+            .returns_json::<ProjectSpendLimitDeletedResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_226(ctx)?);
+    fn endpoint_227(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CreateanAPIkeyforaserviceaccount",
+                RestMethod::Post,
+                "/organization/projects/{project_id}/service_accounts/{service_account_id}/api_keys",
+            )
+            .describes("Creates an API key for a service account in the project.")
+            .returns_json::<ServiceAccountApiKeyBody>(ctx)
+            .request_json::<CreateProjectServiceAccountApiKeyBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_227(ctx)?);
+    fn endpoint_228(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "Createcontentprovenancecheck",
+                RestMethod::Post,
+                "/content_provenance_checks",
+            )
+            .describes(
+                "Check whether an image or audio file contains known OpenAI provenance signals. [Learn more about content provenance](/api/docs/guides/content-provenance).\n\nIf `not_detected`, it means the tool did not find supported signals in the uploaded file. The content could still have been generated by OpenAI if the metadata was stripped or has evidence of tampering, the watermark was degraded, it comes from a legacy generation model, or it was created before provenance signals were available. Content could also still be AI-generated by another company's model, which the tool currently does not detect.",
+            )
+            .returns_json::<ProvenanceResource>(ctx)
+            .request_form(
+                Vec::from([
                     FormField::file("file")
-                    .with_description("The image or audio file to check for supported OpenAI provenance signals.")
-                ],
-            }),
-            response: ApiResponse::Json(Schema::new("ProvenanceResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListVideos".to_string(),
-            method: RestMethod::Get,
-            path: "/videos".to_string(),
-            description: "List recently generated videos for the current project."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("VideoListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("Number of items to retrieve".to_string()), param_type :
-                    QueryParamType::Integer, explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "order".to_string(), required : false,
-                    description :
-                    Some("Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order."
-                    .to_string()), param_type : QueryParamType::Json, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("Identifier for the last item from the previous pagination request"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateVideo".to_string(),
-            method: RestMethod::Post,
-            path: "/videos".to_string(),
-            description: "Create a new video generation job from a prompt and optional reference assets."
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateVideoJsonBody"))),
-            response: ApiResponse::Json(Schema::new("VideoResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateVideoCharacter".to_string(),
-            method: RestMethod::Post,
-            path: "/videos/characters".to_string(),
-            description: "Create a character from an uploaded video.".to_string(),
-            request: Some(ApiRequest::FormData {
-                fields: vec![
+                        .with_description(
+                            "The image or audio file to check for supported OpenAI provenance signals.",
+                        ),
+                ]),
+            )
+            .build()
+    }
+    endpoints.push(endpoint_228(ctx)?);
+    fn endpoint_229(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListVideos", RestMethod::Get, "/videos")
+            .describes("List recently generated videos for the current project.")
+            .returns_json::<VideoListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Number of items to retrieve".to_string()),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Json,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Identifier for the last item from the previous pagination request"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_229(ctx)?);
+    fn endpoint_230(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateVideo", RestMethod::Post, "/videos")
+            .describes(
+                "Create a new video generation job from a prompt and optional reference assets.",
+            )
+            .returns_json::<VideoResource>(ctx)
+            .request_json::<CreateVideoJsonBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_230(ctx)?);
+    fn endpoint_231(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateVideoCharacter", RestMethod::Post, "/videos/characters")
+            .describes("Create a character from an uploaded video.")
+            .returns_json::<VideoCharacterResource>(ctx)
+            .request_form(
+                Vec::from([
                     FormField::file("video")
-                    .with_description("Video file used to create a character."),
+                        .with_description("Video file used to create a character."),
                     FormField::text("name")
-                    .with_description("Display name for this API character.")
-                ],
-            }),
-            response: ApiResponse::Json(Schema::new("VideoCharacterResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetVideoCharacter".to_string(),
-            method: RestMethod::Get,
-            path: "/videos/characters/{character_id}".to_string(),
-            description: "Fetch a character.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("VideoCharacterResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateVideoEdit".to_string(),
-            method: RestMethod::Post,
-            path: "/videos/edits".to_string(),
-            description: "Create a new video generation job by editing a source video or existing generated video."
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateVideoEditJsonBody"))),
-            response: ApiResponse::Json(Schema::new("VideoResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateVideoExtend".to_string(),
-            method: RestMethod::Post,
-            path: "/videos/extensions".to_string(),
-            description: "Create an extension of a completed video.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateVideoExtendJsonBody"))),
-            response: ApiResponse::Json(Schema::new("VideoResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetVideo".to_string(),
-            method: RestMethod::Get,
-            path: "/videos/{video_id}".to_string(),
-            description: "Fetch the latest metadata for a generated video.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("VideoResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteVideo".to_string(),
-            method: RestMethod::Delete,
-            path: "/videos/{video_id}".to_string(),
-            description: "Permanently delete a completed or failed video and its stored assets."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("DeletedVideoResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "RetrieveVideoContent".to_string(),
-            method: RestMethod::Get,
-            path: "/videos/{video_id}/content".to_string(),
-            description: "Download the generated video bytes or a derived preview asset.\n\nStreams the rendered video content for the specified video job."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("serde_json::Value")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "variant".to_string(), required : false,
-                    description :
-                    Some("Which downloadable asset to return. Defaults to the MP4 video."
-                    .to_string()), param_type : QueryParamType::Json, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateVideoRemix".to_string(),
-            method: RestMethod::Post,
-            path: "/videos/{video_id}/remix".to_string(),
-            description: "Create a remix of a completed video using a refreshed prompt."
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateVideoRemixBody"))),
-            response: ApiResponse::Json(Schema::new("VideoResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "Getinputtokencounts".to_string(),
-            method: RestMethod::Post,
-            path: "/responses/input_tokens".to_string(),
-            description: "Returns input token counts of the request.\n\nReturns an object with `object` set to `response.input_tokens` and an `input_tokens` count."
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("TokenCountsBody"))),
-            response: ApiResponse::Json(Schema::new("TokenCountsResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "Compactconversation".to_string(),
-            method: RestMethod::Post,
-            path: "/responses/compact".to_string(),
-            description: "Compact a conversation. Returns a compacted response object.\n\nLearn when and how to compact long-running conversations in the [conversation state guide](/docs/guides/conversation-state#managing-the-context-window). For ZDR-compatible compaction details, see [Compaction (advanced)](/docs/guides/conversation-state#compaction-advanced)."
-                .to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("CompactResponseMethodPublicBody")),
-            ),
-            response: ApiResponse::Json(Schema::new("CompactResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListSkills".to_string(),
-            method: RestMethod::Get,
-            path: "/skills".to_string(),
-            description: "List all skills for the current project.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("SkillListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("Number of items to retrieve".to_string()), param_type :
-                    QueryParamType::Integer, explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "order".to_string(), required : false,
-                    description :
-                    Some("Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order."
-                    .to_string()), param_type : QueryParamType::Json, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("Identifier for the last item from the previous pagination request"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateSkill".to_string(),
-            method: RestMethod::Post,
-            path: "/skills".to_string(),
-            description: "Create a new skill.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateSkillBody"))),
-            response: ApiResponse::Json(Schema::new("SkillResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetSkill".to_string(),
-            method: RestMethod::Get,
-            path: "/skills/{skill_id}".to_string(),
-            description: "Get a skill by its ID.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("SkillResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UpdateSkillDefaultVersion".to_string(),
-            method: RestMethod::Post,
-            path: "/skills/{skill_id}".to_string(),
-            description: "Update the default version pointer for a skill.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("SetDefaultSkillVersionBody"))),
-            response: ApiResponse::Json(Schema::new("SkillResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteSkill".to_string(),
-            method: RestMethod::Delete,
-            path: "/skills/{skill_id}".to_string(),
-            description: "Delete a skill by its ID.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("DeletedSkillResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetSkillContent".to_string(),
-            method: RestMethod::Get,
-            path: "/skills/{skill_id}/content".to_string(),
-            description: "Download a skill zip bundle by its ID.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("serde_json::Value")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListSkillVersions".to_string(),
-            method: RestMethod::Get,
-            path: "/skills/{skill_id}/versions".to_string(),
-            description: "List skill versions for a skill.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("SkillVersionListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("Number of versions to retrieve.".to_string()), param_type :
-                    QueryParamType::Integer, explode : false, style : ParamStyle::Form,
-                    }, ParamDef { name : "order".to_string(), required : false,
-                    description : Some("Sort order of results by version number."
-                    .to_string()), param_type : QueryParamType::Json, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("The skill version ID to start after.".to_string()), param_type
-                    : QueryParamType::String, explode : false, style : ParamStyle::Form,
-                    }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateSkillVersion".to_string(),
-            method: RestMethod::Post,
-            path: "/skills/{skill_id}/versions".to_string(),
-            description: "Create a new immutable skill version.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateSkillVersionBody"))),
-            response: ApiResponse::Json(Schema::new("SkillVersionResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetSkillVersion".to_string(),
-            method: RestMethod::Get,
-            path: "/skills/{skill_id}/versions/{version}".to_string(),
-            description: "Get a specific skill version.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("SkillVersionResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteSkillVersion".to_string(),
-            method: RestMethod::Delete,
-            path: "/skills/{skill_id}/versions/{version}".to_string(),
-            description: "Delete a skill version.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("DeletedSkillVersionResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetSkillVersionContent".to_string(),
-            method: RestMethod::Get,
-            path: "/skills/{skill_id}/versions/{version}/content".to_string(),
-            description: "Download a skill version zip bundle.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("serde_json::Value")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CancelChatSessionMethod".to_string(),
-            method: RestMethod::Post,
-            path: "/chatkit/sessions/{session_id}/cancel".to_string(),
-            description: "Cancel an active ChatKit session and return its most recent metadata.\n\nCancelling prevents new requests from using the issued client secret."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ChatSessionResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "CreateChatSessionMethod".to_string(),
-            method: RestMethod::Post,
-            path: "/chatkit/sessions".to_string(),
-            description: "Create a ChatKit session.".to_string(),
-            request: Some(ApiRequest::Json(Schema::new("CreateChatSessionBody"))),
-            response: ApiResponse::Json(Schema::new("ChatSessionResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListThreadItemsMethod".to_string(),
-            method: RestMethod::Get,
-            path: "/chatkit/threads/{thread_id}/items".to_string(),
-            description: "List items that belong to a ChatKit thread.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ThreadItemListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("Maximum number of thread items to return. Defaults to 20."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for results by creation time. Defaults to `desc`."
-                    .to_string()), param_type : QueryParamType::Json, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("List items created after this thread item ID. Defaults to null for the first page."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
-                    Some("List items created before this thread item ID. Defaults to null for the newest results."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetThreadMethod".to_string(),
-            method: RestMethod::Get,
-            path: "/chatkit/threads/{thread_id}".to_string(),
-            description: "Retrieve a ChatKit thread by its identifier.".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ThreadResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteThreadMethod".to_string(),
-            method: RestMethod::Delete,
-            path: "/chatkit/threads/{thread_id}".to_string(),
-            description: "Delete a ChatKit thread along with its items and stored attachments."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("DeletedThreadResource")),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListThreadsMethod".to_string(),
-            method: RestMethod::Get,
-            path: "/chatkit/threads".to_string(),
-            description: "List ChatKit threads with optional pagination and user filters."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("ThreadListResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    : Some("Maximum number of thread items to return. Defaults to 20."
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("Sort order for results by creation time. Defaults to `desc`."
-                    .to_string()), param_type : QueryParamType::Json, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "after".to_string(),
-                    required : false, description :
-                    Some("List items created after this thread item ID. Defaults to null for the first page."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "before".to_string(),
-                    required : false, description :
-                    Some("List items created before this thread item ID. Defaults to null for the newest results."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "user".to_string(),
-                    required : false, description :
-                    Some("Filter threads that belong to this user identifier. Defaults to null to return all users."
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "BetaCreateResponse".to_string(),
-            method: RestMethod::Post,
-            path: "/responses?beta=true".to_string(),
-            description: "Creates a model response. Provide [text](/docs/guides/text) or\n[image](/docs/guides/images) inputs to generate [text](/docs/guides/text)\nor [JSON](/docs/guides/structured-outputs) outputs. Have the model call\nyour own [custom code](/docs/guides/function-calling) or use built-in\n[tools](/docs/guides/tools) like [web search](/docs/guides/tools-web-search)\nor [file search](/docs/guides/tools-file-search) to use your own data\nas input for the model's response.\n"
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("BetaCreateResponse"))),
-            response: ApiResponse::Json(Schema::new("BetaResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![],
-                header: vec![
-                    ParamDef { name : "openai-beta".to_string(), required : false,
-                    description :
-                    Some("Optional beta features to enable for this request."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["responses_multi_agent=v1"
-                    .to_string()]))), explode : false, style : ParamStyle::Simple, }
-                ],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "BetaGetResponse".to_string(),
-            method: RestMethod::Get,
-            path: "/responses/{response_id}?beta=true".to_string(),
-            description: "Retrieves a model response with the given ID.\n".to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("BetaResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "include".to_string(), required : false,
-                    description :
-                    Some("Additional fields to include in the response. See the `include`\nparameter for Response creation above for more information.\n"
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
-                    false, style : ParamStyle::Form, }, ParamDef { name : "stream"
-                    .to_string(), required : false, description :
-                    Some("If set to true, the model response data will be streamed to the client\nas it is generated using [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#Event_stream_format).\nSee the [Streaming section below](/docs/api-reference/responses-streaming)\nfor more information.\n"
-                    .to_string()), param_type : QueryParamType::Boolean, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "starting_after"
-                    .to_string(), required : false, description :
-                    Some("The sequence number of the event after which to start streaming.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "include_obfuscation"
-                    .to_string(), required : false, description :
-                    Some("When true, stream obfuscation will be enabled. Stream obfuscation adds\nrandom characters to an `obfuscation` field on streaming delta events\nto normalize payload sizes as a mitigation to certain side-channel\nattacks. These obfuscation fields are included by default, but add a\nsmall amount of overhead to the data stream. You can set\n`include_obfuscation` to false to optimize for bandwidth if you trust\nthe network links between your application and the OpenAI API.\n"
-                    .to_string()), param_type : QueryParamType::Boolean, explode : false,
-                    style : ParamStyle::Form, }
-                ],
-                header: vec![
-                    ParamDef { name : "openai-beta".to_string(), required : false,
-                    description :
-                    Some("Optional beta features to enable for this request."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["responses_multi_agent=v1"
-                    .to_string()]))), explode : false, style : ParamStyle::Simple, }
-                ],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "BetaDeleteResponse".to_string(),
-            method: RestMethod::Delete,
-            path: "/responses/{response_id}?beta=true".to_string(),
-            description: "Deletes a model response with the given ID.\n".to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![],
-                header: vec![
-                    ParamDef { name : "openai-beta".to_string(), required : false,
-                    description :
-                    Some("Optional beta features to enable for this request."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["responses_multi_agent=v1"
-                    .to_string()]))), explode : false, style : ParamStyle::Simple, }
-                ],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "BetaCancelResponse".to_string(),
-            method: RestMethod::Post,
-            path: "/responses/{response_id}/cancel?beta=true".to_string(),
-            description: "Cancels a model response with the given ID. Only responses created with\nthe `background` parameter set to `true` can be cancelled. \n[Learn more](/docs/guides/background).\n"
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("BetaResponse")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![],
-                header: vec![
-                    ParamDef { name : "openai-beta".to_string(), required : false,
-                    description :
-                    Some("Optional beta features to enable for this request."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["responses_multi_agent=v1"
-                    .to_string()]))), explode : false, style : ParamStyle::Simple, }
-                ],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "BetaCompactconversation".to_string(),
-            method: RestMethod::Post,
-            path: "/responses/compact?beta=true".to_string(),
-            description: "Compact a conversation. Returns a compacted response object.\n\nLearn when and how to compact long-running conversations in the [conversation state guide](/docs/guides/conversation-state#managing-the-context-window). For ZDR-compatible compaction details, see [Compaction (advanced)](/docs/guides/conversation-state#compaction-advanced)."
-                .to_string(),
-            request: Some(
-                ApiRequest::Json(Schema::new("BetaCompactResponseMethodPublicBody")),
-            ),
-            response: ApiResponse::Json(Schema::new("BetaCompactResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![],
-                header: vec![
-                    ParamDef { name : "openai-beta".to_string(), required : false,
-                    description :
-                    Some("Optional beta features to enable for this request."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["responses_multi_agent=v1"
-                    .to_string()]))), explode : false, style : ParamStyle::Simple, }
-                ],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "BetaListInputItems".to_string(),
-            method: RestMethod::Get,
-            path: "/responses/{response_id}/input_items?beta=true".to_string(),
-            description: "Returns a list of input items for a given response."
-                .to_string(),
-            request: None,
-            response: ApiResponse::Json(Schema::new("BetaResponseItemList")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![
-                    ParamDef { name : "limit".to_string(), required : false, description
-                    :
-                    Some("A limit on the number of objects to be returned. Limit can range between\n1 and 100, and the default is 20.\n"
-                    .to_string()), param_type : QueryParamType::Integer, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "order".to_string(),
-                    required : false, description :
-                    Some("The order to return the input items in. Default is `desc`.\n- `asc`: Return the input items in ascending order.\n- `desc`: Return the input items in descending order.\n"
-                    .to_string()), param_type : QueryParamType::Enum(vec!["asc"
-                    .to_string(), "desc".to_string()]), explode : false, style :
-                    ParamStyle::Form, }, ParamDef { name : "after".to_string(), required
-                    : false, description :
-                    Some("An item ID to list items after, used in pagination.\n"
-                    .to_string()), param_type : QueryParamType::String, explode : false,
-                    style : ParamStyle::Form, }, ParamDef { name : "include".to_string(),
-                    required : false, description :
-                    Some("Additional fields to include in the response. See the `include`\nparameter for Response creation above for more information.\n"
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Json)), explode :
-                    false, style : ParamStyle::Form, }
-                ],
-                header: vec![
-                    ParamDef { name : "openai-beta".to_string(), required : false,
-                    description :
-                    Some("Optional beta features to enable for this request."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["responses_multi_agent=v1"
-                    .to_string()]))), explode : false, style : ParamStyle::Simple, }
-                ],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "BetaGetinputtokencounts".to_string(),
-            method: RestMethod::Post,
-            path: "/responses/input_tokens?beta=true".to_string(),
-            description: "Returns input token counts of the request.\n\nReturns an object with `object` set to `response.input_tokens` and an `input_tokens` count."
-                .to_string(),
-            request: Some(ApiRequest::Json(Schema::new("BetaTokenCountsBody"))),
-            response: ApiResponse::Json(Schema::new("BetaTokenCountsResource")),
-            headers: vec![],
-            params: Some(EndpointParams {
-                query: vec![],
-                header: vec![
-                    ParamDef { name : "openai-beta".to_string(), required : false,
-                    description :
-                    Some("Optional beta features to enable for this request."
-                    .to_string()), param_type :
-                    QueryParamType::Array(Box::new(QueryParamType::Enum(vec!["responses_multi_agent=v1"
-                    .to_string()]))), explode : false, style : ParamStyle::Simple, }
-                ],
-                cookie: vec![],
-                pagination: None,
-                response_pagination: None,
-            }),
-            oauth_scopes: None,
-        },
-    ]);
-    let api = RestApi {
-        name: "OpenAI".to_string(),
-        description: "The OpenAI REST API. Please see https://platform.openai.com/docs/api-reference for more details."
-            .to_string(),
-        base_url: "https://api.openai.com/v1".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::BearerToken {
-            header: None,
-        },
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        headers: vec![],
-        endpoints,
-        module_path: Some("openai".to_string()),
-        request_suffix: None,
-        version: None,
-        env_mapping: None,
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: Some("x-request-id".to_string()),
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    };
-    crate::openai_pagination::apply(api)
-}
-/// Builds a schema registry holding all 1394 generated model types.
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    SchemaRegistry::new()
-        .register::<AddUploadPartRequest2>("AddUploadPartRequest2")
-        .register::<AdminApiKey>("AdminApiKey")
-        .register::<AdminApiKeyCreateResponse>("AdminApiKeyCreateResponse")
-        .register::<ApiKeyList>("ApiKeyList")
-        .register::<AssignedRoleDetails>("AssignedRoleDetails")
-        .register::<AssistantObject>("AssistantObject")
-        .register::<AssistantStreamEvent>("AssistantStreamEvent")
-        .register::<AssistantSupportedModels>("AssistantSupportedModels")
-        .register::<AssistantToolsCode>("AssistantToolsCode")
-        .register::<AssistantToolsFileSearch>("AssistantToolsFileSearch")
-        .register::<AssistantToolsFileSearchTypeOnly>("AssistantToolsFileSearchTypeOnly")
-        .register::<AssistantToolsFunction>("AssistantToolsFunction")
-        .register::<
-            AssistantsApiResponseFormatOption,
-        >("AssistantsApiResponseFormatOption")
-        .register::<AssistantsApiToolChoiceOption>("AssistantsApiToolChoiceOption")
-        .register::<AssistantsNamedToolChoice>("AssistantsNamedToolChoice")
-        .register::<AudioResponseFormat>("AudioResponseFormat")
-        .register::<AudioTranscription>("AudioTranscription")
-        .register::<AudioTranscriptionResponse>("AudioTranscriptionResponse")
-        .register::<AuditLog>("AuditLog")
-        .register::<AuditLogActor>("AuditLogActor")
-        .register::<AuditLogActorApiKey>("AuditLogActorApiKey")
-        .register::<AuditLogActorServiceAccount>("AuditLogActorServiceAccount")
-        .register::<AuditLogActorSession>("AuditLogActorSession")
-        .register::<AuditLogActorUser>("AuditLogActorUser")
-        .register::<AuditLogEventType>("AuditLogEventType")
-        .register::<AutoChunkingStrategyRequestParam>("AutoChunkingStrategyRequestParam")
-        .register::<Batch>("Batch")
-        .register::<BatchError>("BatchError")
-        .register::<BatchFileExpirationAfter>("BatchFileExpirationAfter")
-        .register::<BatchRequestCounts>("BatchRequestCounts")
-        .register::<Certificate>("Certificate")
-        .register::<ChatCompletionAllowedTools>("ChatCompletionAllowedTools")
-        .register::<ChatCompletionAllowedToolsChoice>("ChatCompletionAllowedToolsChoice")
-        .register::<ChatCompletionDeleted>("ChatCompletionDeleted")
-        .register::<ChatCompletionFunctionCallOption>("ChatCompletionFunctionCallOption")
-        .register::<ChatCompletionFunctions>("ChatCompletionFunctions")
-        .register::<ChatCompletionList>("ChatCompletionList")
-        .register::<
-            ChatCompletionMessageCustomToolCall,
-        >("ChatCompletionMessageCustomToolCall")
-        .register::<ChatCompletionMessageList>("ChatCompletionMessageList")
-        .register::<ChatCompletionMessageToolCall>("ChatCompletionMessageToolCall")
-        .register::<
-            ChatCompletionMessageToolCallChunk,
-        >("ChatCompletionMessageToolCallChunk")
-        .register::<ChatCompletionMessageToolCalls>("ChatCompletionMessageToolCalls")
-        .register::<ChatCompletionModalities>("ChatCompletionModalities")
-        .register::<ChatCompletionModeration>("ChatCompletionModeration")
-        .register::<ChatCompletionModerationError>("ChatCompletionModerationError")
-        .register::<ChatCompletionModerationResults>("ChatCompletionModerationResults")
-        .register::<ChatCompletionNamedToolChoice>("ChatCompletionNamedToolChoice")
-        .register::<
-            ChatCompletionNamedToolChoiceCustom,
-        >("ChatCompletionNamedToolChoiceCustom")
-        .register::<
-            ChatCompletionRequestAssistantMessage,
-        >("ChatCompletionRequestAssistantMessage")
-        .register::<
-            ChatCompletionRequestAssistantMessageContentPart,
-        >("ChatCompletionRequestAssistantMessageContentPart")
-        .register::<
-            ChatCompletionRequestDeveloperMessage,
-        >("ChatCompletionRequestDeveloperMessage")
-        .register::<
-            ChatCompletionRequestFunctionMessage,
-        >("ChatCompletionRequestFunctionMessage")
-        .register::<ChatCompletionRequestMessage>("ChatCompletionRequestMessage")
-        .register::<
-            ChatCompletionRequestMessageContentPartAudio,
-        >("ChatCompletionRequestMessageContentPartAudio")
-        .register::<
-            ChatCompletionRequestMessageContentPartFile,
-        >("ChatCompletionRequestMessageContentPartFile")
-        .register::<
-            ChatCompletionRequestMessageContentPartImage,
-        >("ChatCompletionRequestMessageContentPartImage")
-        .register::<
-            ChatCompletionRequestMessageContentPartRefusal,
-        >("ChatCompletionRequestMessageContentPartRefusal")
-        .register::<
-            ChatCompletionRequestMessageContentPartText,
-        >("ChatCompletionRequestMessageContentPartText")
-        .register::<
-            ChatCompletionRequestSystemMessage,
-        >("ChatCompletionRequestSystemMessage")
-        .register::<
-            ChatCompletionRequestSystemMessageContentPart,
-        >("ChatCompletionRequestSystemMessageContentPart")
-        .register::<ChatCompletionRequestToolMessage>("ChatCompletionRequestToolMessage")
-        .register::<
-            ChatCompletionRequestToolMessageContentPart,
-        >("ChatCompletionRequestToolMessageContentPart")
-        .register::<ChatCompletionRequestUserMessage>("ChatCompletionRequestUserMessage")
-        .register::<
-            ChatCompletionRequestUserMessageContentPart,
-        >("ChatCompletionRequestUserMessageContentPart")
-        .register::<ChatCompletionResponseMessage>("ChatCompletionResponseMessage")
-        .register::<ChatCompletionRole>("ChatCompletionRole")
-        .register::<ChatCompletionStreamOptions>("ChatCompletionStreamOptions")
-        .register::<
-            ChatCompletionStreamResponseDelta,
-        >("ChatCompletionStreamResponseDelta")
-        .register::<ChatCompletionTokenLogprob>("ChatCompletionTokenLogprob")
-        .register::<ChatCompletionTool>("ChatCompletionTool")
-        .register::<ChatCompletionToolChoiceOption>("ChatCompletionToolChoiceOption")
-        .register::<ChunkingStrategyRequestParam>("ChunkingStrategyRequestParam")
-        .register::<CodeInterpreterFileOutput>("CodeInterpreterFileOutput")
-        .register::<CodeInterpreterTextOutput>("CodeInterpreterTextOutput")
-        .register::<CodeInterpreterTool>("CodeInterpreterTool")
-        .register::<CodeInterpreterToolCall>("CodeInterpreterToolCall")
-        .register::<ComparisonFilter>("ComparisonFilter")
-        .register::<CompleteUploadRequest2>("CompleteUploadRequest2")
-        .register::<CompletionUsage>("CompletionUsage")
-        .register::<CompoundFilter>("CompoundFilter")
-        .register::<ComputerAction>("ComputerAction")
-        .register::<ComputerActionList>("ComputerActionList")
-        .register::<ComputerScreenshotImage>("ComputerScreenshotImage")
-        .register::<ComputerToolCall>("ComputerToolCall")
-        .register::<ComputerToolCallOutput>("ComputerToolCallOutput")
-        .register::<ComputerToolCallOutputResource>("ComputerToolCallOutputResource")
-        .register::<ContainerFileListResource>("ContainerFileListResource")
-        .register::<ContainerFileResource>("ContainerFileResource")
-        .register::<ContainerListResource>("ContainerListResource")
-        .register::<ContainerResource>("ContainerResource")
-        .register::<Content>("Content")
-        .register::<ConversationItem>("ConversationItem")
-        .register::<ConversationItemList>("ConversationItemList")
-        .register::<ConversationParam>("ConversationParam")
-        .register::<CostsResult>("CostsResult")
-        .register::<CreateAssistantRequest2>("CreateAssistantRequest2")
-        .register::<CreateBatchRequest2>("CreateBatchRequest2")
-        .register::<CreateChatCompletionRequest2>("CreateChatCompletionRequest2")
-        .register::<CreateChatCompletionResponse>("CreateChatCompletionResponse")
-        .register::<
-            CreateChatCompletionStreamResponse,
-        >("CreateChatCompletionStreamResponse")
-        .register::<CreateCompletionRequest2>("CreateCompletionRequest2")
-        .register::<CreateCompletionResponse>("CreateCompletionResponse")
-        .register::<CreateContainerBody>("CreateContainerBody")
-        .register::<CreateContainerFileBody>("CreateContainerFileBody")
-        .register::<CreateEmbeddingRequest2>("CreateEmbeddingRequest2")
-        .register::<CreateEmbeddingResponse>("CreateEmbeddingResponse")
-        .register::<
-            CreateEvalCompletionsRunDataSource,
-        >("CreateEvalCompletionsRunDataSource")
-        .register::<CreateEvalCustomDataSourceConfig>("CreateEvalCustomDataSourceConfig")
-        .register::<CreateEvalItem>("CreateEvalItem")
-        .register::<CreateEvalJsonlRunDataSource>("CreateEvalJsonlRunDataSource")
-        .register::<CreateEvalLabelModelGrader>("CreateEvalLabelModelGrader")
-        .register::<CreateEvalLogsDataSourceConfig>("CreateEvalLogsDataSourceConfig")
-        .register::<CreateEvalRequest2>("CreateEvalRequest2")
-        .register::<CreateEvalResponsesRunDataSource>("CreateEvalResponsesRunDataSource")
-        .register::<CreateEvalRunRequest2>("CreateEvalRunRequest2")
-        .register::<
-            CreateEvalStoredCompletionsDataSourceConfig,
-        >("CreateEvalStoredCompletionsDataSourceConfig")
-        .register::<CreateFileRequest2>("CreateFileRequest2")
-        .register::<
-            CreateFineTuningCheckpointPermissionRequest2,
-        >("CreateFineTuningCheckpointPermissionRequest2")
-        .register::<CreateFineTuningJobRequest2>("CreateFineTuningJobRequest2")
-        .register::<CreateGroupBody>("CreateGroupBody")
-        .register::<CreateGroupUserBody>("CreateGroupUserBody")
-        .register::<CreateImageEditRequest2>("CreateImageEditRequest2")
-        .register::<CreateImageRequest2>("CreateImageRequest2")
-        .register::<CreateImageVariationRequest2>("CreateImageVariationRequest2")
-        .register::<CreateMessageRequest2>("CreateMessageRequest2")
-        .register::<CreateModelResponseProperties>("CreateModelResponseProperties")
-        .register::<CreateModerationRequest2>("CreateModerationRequest2")
-        .register::<CreateModerationResponse>("CreateModerationResponse")
-        .register::<CreateResponse>("CreateResponse")
-        .register::<CreateRunRequest2>("CreateRunRequest2")
-        .register::<CreateSpeechRequest2>("CreateSpeechRequest2")
-        .register::<CreateSpeechResponseStreamEvent>("CreateSpeechResponseStreamEvent")
-        .register::<CreateSpendAlertBody>("CreateSpendAlertBody")
-        .register::<CreateThreadAndRunRequest2>("CreateThreadAndRunRequest2")
-        .register::<CreateThreadRequest2>("CreateThreadRequest2")
-        .register::<CreateTranscriptionRequest2>("CreateTranscriptionRequest2")
-        .register::<
-            CreateTranscriptionResponseDiarizedJson,
-        >("CreateTranscriptionResponseDiarizedJson")
-        .register::<CreateTranscriptionResponseJson>("CreateTranscriptionResponseJson")
-        .register::<
-            CreateTranscriptionResponseStreamEvent,
-        >("CreateTranscriptionResponseStreamEvent")
-        .register::<
-            CreateTranscriptionResponseVerboseJson,
-        >("CreateTranscriptionResponseVerboseJson")
-        .register::<CreateTranslationRequest2>("CreateTranslationRequest2")
-        .register::<CreateTranslationResponseJson>("CreateTranslationResponseJson")
-        .register::<
-            CreateTranslationResponseVerboseJson,
-        >("CreateTranslationResponseVerboseJson")
-        .register::<CreateUploadRequest2>("CreateUploadRequest2")
-        .register::<
-            CreateVectorStoreFileBatchRequest2,
-        >("CreateVectorStoreFileBatchRequest2")
-        .register::<CreateVectorStoreFileRequest2>("CreateVectorStoreFileRequest2")
-        .register::<CreateVectorStoreRequest2>("CreateVectorStoreRequest2")
-        .register::<CreateVoiceConsentRequest2>("CreateVoiceConsentRequest2")
-        .register::<CreateVoiceRequest2>("CreateVoiceRequest2")
-        .register::<CustomToolCall>("CustomToolCall")
-        .register::<CustomToolCallOutput>("CustomToolCallOutput")
-        .register::<CustomToolCallOutputResource>("CustomToolCallOutputResource")
-        .register::<CustomToolCallResource>("CustomToolCallResource")
-        .register::<CustomToolChatCompletions>("CustomToolChatCompletions")
-        .register::<DeleteAssistantResponse>("DeleteAssistantResponse")
-        .register::<DeleteCertificateResponse>("DeleteCertificateResponse")
-        .register::<DeleteFileResponse>("DeleteFileResponse")
-        .register::<
-            DeleteFineTuningCheckpointPermissionResponse,
-        >("DeleteFineTuningCheckpointPermissionResponse")
-        .register::<DeleteMessageResponse>("DeleteMessageResponse")
-        .register::<DeleteModelResponse>("DeleteModelResponse")
-        .register::<DeleteThreadResponse>("DeleteThreadResponse")
-        .register::<DeleteVectorStoreFileResponse>("DeleteVectorStoreFileResponse")
-        .register::<DeleteVectorStoreResponse>("DeleteVectorStoreResponse")
-        .register::<DeletedConversation>("DeletedConversation")
-        .register::<DeletedRoleAssignmentResource>("DeletedRoleAssignmentResource")
-        .register::<DoneEvent>("DoneEvent")
-        .register::<EasyInputMessage>("EasyInputMessage")
-        .register::<EditImageBodyJsonParam>("EditImageBodyJsonParam")
-        .register::<Embedding>("Embedding")
-        .register::<Error>("Error")
-        .register::<ErrorEvent>("ErrorEvent")
-        .register::<ErrorResponse>("ErrorResponse")
-        .register::<Eval>("Eval")
-        .register::<EvalApiError>("EvalApiError")
-        .register::<EvalCustomDataSourceConfig>("EvalCustomDataSourceConfig")
-        .register::<EvalGraderLabelModel>("EvalGraderLabelModel")
-        .register::<EvalGraderPython>("EvalGraderPython")
-        .register::<EvalGraderScoreModel>("EvalGraderScoreModel")
-        .register::<EvalGraderStringCheck>("EvalGraderStringCheck")
-        .register::<EvalGraderTextSimilarity>("EvalGraderTextSimilarity")
-        .register::<EvalItem>("EvalItem")
-        .register::<EvalItemContent>("EvalItemContent")
-        .register::<EvalItemContentArray>("EvalItemContentArray")
-        .register::<EvalItemContentItem>("EvalItemContentItem")
-        .register::<EvalItemContentOutputText>("EvalItemContentOutputText")
-        .register::<EvalItemContentText>("EvalItemContentText")
-        .register::<EvalItemInputImage>("EvalItemInputImage")
-        .register::<EvalJsonlFileContentSource>("EvalJsonlFileContentSource")
-        .register::<EvalJsonlFileIdSource>("EvalJsonlFileIdSource")
-        .register::<EvalList>("EvalList")
-        .register::<EvalLogsDataSourceConfig>("EvalLogsDataSourceConfig")
-        .register::<EvalResponsesSource>("EvalResponsesSource")
-        .register::<EvalRun>("EvalRun")
-        .register::<EvalRunList>("EvalRunList")
-        .register::<EvalRunOutputItem>("EvalRunOutputItem")
-        .register::<EvalRunOutputItemList>("EvalRunOutputItemList")
-        .register::<EvalRunOutputItemResult>("EvalRunOutputItemResult")
-        .register::<
-            EvalStoredCompletionsDataSourceConfig,
-        >("EvalStoredCompletionsDataSourceConfig")
-        .register::<EvalStoredCompletionsSource>("EvalStoredCompletionsSource")
-        .register::<FileExpirationAfter>("FileExpirationAfter")
-        .register::<FilePath>("FilePath")
-        .register::<FileSearchRanker>("FileSearchRanker")
-        .register::<FileSearchRankingOptions>("FileSearchRankingOptions")
-        .register::<FileSearchToolCall>("FileSearchToolCall")
-        .register::<
-            FineTuneChatCompletionRequestAssistantMessage,
-        >("FineTuneChatCompletionRequestAssistantMessage")
-        .register::<FineTuneDPOHyperparameters>("FineTuneDPOHyperparameters")
-        .register::<FineTuneDPOMethod>("FineTuneDPOMethod")
-        .register::<FineTuneMethod>("FineTuneMethod")
-        .register::<
-            FineTuneReinforcementHyperparameters,
-        >("FineTuneReinforcementHyperparameters")
-        .register::<FineTuneReinforcementMethod>("FineTuneReinforcementMethod")
-        .register::<
-            FineTuneSupervisedHyperparameters,
-        >("FineTuneSupervisedHyperparameters")
-        .register::<FineTuneSupervisedMethod>("FineTuneSupervisedMethod")
-        .register::<FineTuningCheckpointPermission>("FineTuningCheckpointPermission")
-        .register::<FineTuningIntegration>("FineTuningIntegration")
-        .register::<FineTuningJob>("FineTuningJob")
-        .register::<FineTuningJobCheckpoint>("FineTuningJobCheckpoint")
-        .register::<FineTuningJobEvent>("FineTuningJobEvent")
-        .register::<FunctionAndCustomToolCallOutput>("FunctionAndCustomToolCallOutput")
-        .register::<FunctionObject>("FunctionObject")
-        .register::<FunctionParameters>("FunctionParameters")
-        .register::<FunctionToolCall>("FunctionToolCall")
-        .register::<FunctionToolCallOutput>("FunctionToolCallOutput")
-        .register::<FunctionToolCallOutputResource>("FunctionToolCallOutputResource")
-        .register::<FunctionToolCallResource>("FunctionToolCallResource")
-        .register::<GraderLabelModel>("GraderLabelModel")
-        .register::<GraderMulti>("GraderMulti")
-        .register::<GraderPython>("GraderPython")
-        .register::<GraderScoreModel>("GraderScoreModel")
-        .register::<GraderStringCheck>("GraderStringCheck")
-        .register::<GraderTextSimilarity>("GraderTextSimilarity")
-        .register::<Group>("Group")
-        .register::<GroupDeletedResource>("GroupDeletedResource")
-        .register::<GroupListResource>("GroupListResource")
-        .register::<GroupMemberUser>("GroupMemberUser")
-        .register::<GroupResourceWithSuccess>("GroupResourceWithSuccess")
-        .register::<GroupResponse>("GroupResponse")
-        .register::<GroupRoleAssignment>("GroupRoleAssignment")
-        .register::<GroupUser>("GroupUser")
-        .register::<GroupUserAssignment>("GroupUserAssignment")
-        .register::<GroupUserDeletedResource>("GroupUserDeletedResource")
-        .register::<HostedToolPermission>("HostedToolPermission")
-        .register::<HostedToolPermissionUpdate>("HostedToolPermissionUpdate")
-        .register::<Image>("Image")
-        .register::<ImageEditCompletedEvent>("ImageEditCompletedEvent")
-        .register::<ImageEditPartialImageEvent>("ImageEditPartialImageEvent")
-        .register::<ImageEditStreamEvent>("ImageEditStreamEvent")
-        .register::<ImageGenCompletedEvent>("ImageGenCompletedEvent")
-        .register::<ImageGenPartialImageEvent>("ImageGenPartialImageEvent")
-        .register::<ImageGenStreamEvent>("ImageGenStreamEvent")
-        .register::<ImageGenTool>("ImageGenTool")
-        .register::<ImageGenToolCall>("ImageGenToolCall")
-        .register::<ImageRefParam>("ImageRefParam")
-        .register::<ImagesResponse>("ImagesResponse")
-        .register::<ImagesUsage>("ImagesUsage")
-        .register::<InputAudio>("InputAudio")
-        .register::<InputContent>("InputContent")
-        .register::<InputItem>("InputItem")
-        .register::<InputMessage>("InputMessage")
-        .register::<InputMessageContentList>("InputMessageContentList")
-        .register::<InputMessageResource>("InputMessageResource")
-        .register::<InputParam>("InputParam")
-        .register::<Invite>("Invite")
-        .register::<InviteDeleteResponse>("InviteDeleteResponse")
-        .register::<InviteListResponse>("InviteListResponse")
-        .register::<InviteProjectGroupBody>("InviteProjectGroupBody")
-        .register::<InviteRequest>("InviteRequest")
-        .register::<Item>("Item")
-        .register::<ItemResource>("ItemResource")
-        .register::<ListAssistantsResponse>("ListAssistantsResponse")
-        .register::<ListAuditLogsResponse>("ListAuditLogsResponse")
-        .register::<ListBatchesResponse>("ListBatchesResponse")
-        .register::<ListCertificatesResponse>("ListCertificatesResponse")
-        .register::<ListFilesResponse>("ListFilesResponse")
-        .register::<
-            ListFineTuningCheckpointPermissionResponse,
-        >("ListFineTuningCheckpointPermissionResponse")
-        .register::<
-            ListFineTuningJobCheckpointsResponse,
-        >("ListFineTuningJobCheckpointsResponse")
-        .register::<ListFineTuningJobEventsResponse>("ListFineTuningJobEventsResponse")
-        .register::<ListMessagesResponse>("ListMessagesResponse")
-        .register::<ListModelsResponse>("ListModelsResponse")
-        .register::<
-            ListPaginatedFineTuningJobsResponse,
-        >("ListPaginatedFineTuningJobsResponse")
-        .register::<ListProjectCertificatesResponse>("ListProjectCertificatesResponse")
-        .register::<ListRunStepsResponse>("ListRunStepsResponse")
-        .register::<ListRunsResponse>("ListRunsResponse")
-        .register::<ListVectorStoreFilesResponse>("ListVectorStoreFilesResponse")
-        .register::<ListVectorStoresResponse>("ListVectorStoresResponse")
-        .register::<LocalShellToolCall>("LocalShellToolCall")
-        .register::<LocalShellToolCallOutput>("LocalShellToolCallOutput")
-        .register::<LogProbProperties>("LogProbProperties")
-        .register::<MCPApprovalRequest>("MCPApprovalRequest")
-        .register::<MCPApprovalResponse>("MCPApprovalResponse")
-        .register::<MCPApprovalResponseResource>("MCPApprovalResponseResource")
-        .register::<MCPListTools>("MCPListTools")
-        .register::<MCPListToolsTool>("MCPListToolsTool")
-        .register::<MCPTool>("MCPTool")
-        .register::<MCPToolCall>("MCPToolCall")
-        .register::<MCPToolFilter>("MCPToolFilter")
-        .register::<MessageContentImageFileObject>("MessageContentImageFileObject")
-        .register::<MessageContentImageUrlObject>("MessageContentImageUrlObject")
-        .register::<MessageContentRefusalObject>("MessageContentRefusalObject")
-        .register::<
-            MessageContentTextAnnotationsFileCitationObject,
-        >("MessageContentTextAnnotationsFileCitationObject")
-        .register::<
-            MessageContentTextAnnotationsFilePathObject,
-        >("MessageContentTextAnnotationsFilePathObject")
-        .register::<MessageContentTextObject>("MessageContentTextObject")
-        .register::<
-            MessageDeltaContentImageFileObject,
-        >("MessageDeltaContentImageFileObject")
-        .register::<
-            MessageDeltaContentImageUrlObject,
-        >("MessageDeltaContentImageUrlObject")
-        .register::<MessageDeltaContentRefusalObject>("MessageDeltaContentRefusalObject")
-        .register::<
-            MessageDeltaContentTextAnnotationsFileCitationObject,
-        >("MessageDeltaContentTextAnnotationsFileCitationObject")
-        .register::<
-            MessageDeltaContentTextAnnotationsFilePathObject,
-        >("MessageDeltaContentTextAnnotationsFilePathObject")
-        .register::<MessageDeltaContentTextObject>("MessageDeltaContentTextObject")
-        .register::<MessageDeltaObject>("MessageDeltaObject")
-        .register::<MessageObject>("MessageObject")
-        .register::<MessagePhase>("MessagePhase")
-        .register::<MessageRequestContentTextObject>("MessageRequestContentTextObject")
-        .register::<MessageStreamEvent>("MessageStreamEvent")
-        .register::<Metadata>("Metadata")
-        .register::<Model>("Model")
-        .register::<ModelIds>("ModelIds")
-        .register::<ModelIdsCompaction>("ModelIdsCompaction")
-        .register::<ModelIdsResponses>("ModelIdsResponses")
-        .register::<ModelIdsShared>("ModelIdsShared")
-        .register::<ModelResponseProperties>("ModelResponseProperties")
-        .register::<ModifyAssistantRequest2>("ModifyAssistantRequest2")
-        .register::<ModifyCertificateRequest2>("ModifyCertificateRequest2")
-        .register::<ModifyMessageRequest2>("ModifyMessageRequest2")
-        .register::<ModifyRunRequest2>("ModifyRunRequest2")
-        .register::<ModifyThreadRequest2>("ModifyThreadRequest2")
-        .register::<NoiseReductionType>("NoiseReductionType")
-        .register::<OpenAIFile>("OpenAIFile")
-        .register::<OrganizationCertificate>("OrganizationCertificate")
-        .register::<
-            OrganizationCertificateActivationResponse,
-        >("OrganizationCertificateActivationResponse")
-        .register::<
-            OrganizationCertificateDeactivationResponse,
-        >("OrganizationCertificateDeactivationResponse")
-        .register::<OrganizationDataRetention>("OrganizationDataRetention")
-        .register::<OrganizationProjectCertificate>("OrganizationProjectCertificate")
-        .register::<
-            OrganizationProjectCertificateActivationResponse,
-        >("OrganizationProjectCertificateActivationResponse")
-        .register::<
-            OrganizationProjectCertificateDeactivationResponse,
-        >("OrganizationProjectCertificateDeactivationResponse")
-        .register::<OrganizationSpendAlert>("OrganizationSpendAlert")
-        .register::<
-            OrganizationSpendAlertDeletedResource,
-        >("OrganizationSpendAlertDeletedResource")
-        .register::<
-            OrganizationSpendAlertListResource,
-        >("OrganizationSpendAlertListResource")
-        .register::<
-            OtherChunkingStrategyResponseParam,
-        >("OtherChunkingStrategyResponseParam")
-        .register::<OutputAudio>("OutputAudio")
-        .register::<OutputContent>("OutputContent")
-        .register::<OutputItem>("OutputItem")
-        .register::<OutputMessage>("OutputMessage")
-        .register::<OutputMessageContent>("OutputMessageContent")
-        .register::<ParallelToolCalls>("ParallelToolCalls")
-        .register::<PartialImages>("PartialImages")
-        .register::<PredictionContent>("PredictionContent")
-        .register::<Project>("Project")
-        .register::<ProjectApiKey>("ProjectApiKey")
-        .register::<ProjectApiKeyDeleteResponse>("ProjectApiKeyDeleteResponse")
-        .register::<ProjectApiKeyListResponse>("ProjectApiKeyListResponse")
-        .register::<ProjectApiKeyOwnerServiceAccount>("ProjectApiKeyOwnerServiceAccount")
-        .register::<ProjectApiKeyOwnerUser>("ProjectApiKeyOwnerUser")
-        .register::<ProjectCreateRequest>("ProjectCreateRequest")
-        .register::<ProjectDataRetention>("ProjectDataRetention")
-        .register::<ProjectGroup>("ProjectGroup")
-        .register::<ProjectGroupDeletedResource>("ProjectGroupDeletedResource")
-        .register::<ProjectGroupListResource>("ProjectGroupListResource")
-        .register::<ProjectHostedToolPermissions>("ProjectHostedToolPermissions")
-        .register::<
-            ProjectHostedToolPermissionsUpdateRequest,
-        >("ProjectHostedToolPermissionsUpdateRequest")
-        .register::<ProjectListResponse>("ProjectListResponse")
-        .register::<ProjectModelPermissions>("ProjectModelPermissions")
-        .register::<
-            ProjectModelPermissionsDeleteResponse,
-        >("ProjectModelPermissionsDeleteResponse")
-        .register::<
-            ProjectModelPermissionsUpdateRequest,
-        >("ProjectModelPermissionsUpdateRequest")
-        .register::<ProjectRateLimit>("ProjectRateLimit")
-        .register::<ProjectRateLimitListResponse>("ProjectRateLimitListResponse")
-        .register::<ProjectRateLimitUpdateRequest>("ProjectRateLimitUpdateRequest")
-        .register::<ProjectServiceAccount>("ProjectServiceAccount")
-        .register::<ProjectServiceAccountApiKey>("ProjectServiceAccountApiKey")
-        .register::<
-            ProjectServiceAccountCreateRequest,
-        >("ProjectServiceAccountCreateRequest")
-        .register::<
-            ProjectServiceAccountCreateResponse,
-        >("ProjectServiceAccountCreateResponse")
-        .register::<
-            ProjectServiceAccountDeleteResponse,
-        >("ProjectServiceAccountDeleteResponse")
-        .register::<
-            ProjectServiceAccountListResponse,
-        >("ProjectServiceAccountListResponse")
-        .register::<ProjectSpendAlert>("ProjectSpendAlert")
-        .register::<ProjectSpendAlertDeletedResource>("ProjectSpendAlertDeletedResource")
-        .register::<ProjectSpendAlertListResource>("ProjectSpendAlertListResource")
-        .register::<ProjectUpdateRequest>("ProjectUpdateRequest")
-        .register::<ProjectUser>("ProjectUser")
-        .register::<ProjectUserCreateRequest>("ProjectUserCreateRequest")
-        .register::<ProjectUserDeleteResponse>("ProjectUserDeleteResponse")
-        .register::<ProjectUserListResponse>("ProjectUserListResponse")
-        .register::<ProjectUserUpdateRequest>("ProjectUserUpdateRequest")
-        .register::<Prompt>("Prompt")
-        .register::<
-            PublicAssignOrganizationGroupRoleBody,
-        >("PublicAssignOrganizationGroupRoleBody")
-        .register::<PublicCreateOrganizationRoleBody>("PublicCreateOrganizationRoleBody")
-        .register::<PublicRoleListResource>("PublicRoleListResource")
-        .register::<PublicUpdateOrganizationRoleBody>("PublicUpdateOrganizationRoleBody")
-        .register::<RealtimeAudioFormats>("RealtimeAudioFormats")
-        .register::<
-            RealtimeBetaClientEventConversationItemCreate,
-        >("RealtimeBetaClientEventConversationItemCreate")
-        .register::<
-            RealtimeBetaClientEventConversationItemDelete,
-        >("RealtimeBetaClientEventConversationItemDelete")
-        .register::<
-            RealtimeBetaClientEventConversationItemRetrieve,
-        >("RealtimeBetaClientEventConversationItemRetrieve")
-        .register::<
-            RealtimeBetaClientEventConversationItemTruncate,
-        >("RealtimeBetaClientEventConversationItemTruncate")
-        .register::<
-            RealtimeBetaClientEventInputAudioBufferAppend,
-        >("RealtimeBetaClientEventInputAudioBufferAppend")
-        .register::<
-            RealtimeBetaClientEventInputAudioBufferClear,
-        >("RealtimeBetaClientEventInputAudioBufferClear")
-        .register::<
-            RealtimeBetaClientEventInputAudioBufferCommit,
-        >("RealtimeBetaClientEventInputAudioBufferCommit")
-        .register::<
-            RealtimeBetaClientEventOutputAudioBufferClear,
-        >("RealtimeBetaClientEventOutputAudioBufferClear")
-        .register::<
-            RealtimeBetaClientEventResponseCancel,
-        >("RealtimeBetaClientEventResponseCancel")
-        .register::<
-            RealtimeBetaClientEventResponseCreate,
-        >("RealtimeBetaClientEventResponseCreate")
-        .register::<
-            RealtimeBetaClientEventSessionUpdate,
-        >("RealtimeBetaClientEventSessionUpdate")
-        .register::<
-            RealtimeBetaClientEventTranscriptionSessionUpdate,
-        >("RealtimeBetaClientEventTranscriptionSessionUpdate")
-        .register::<RealtimeBetaResponse>("RealtimeBetaResponse")
-        .register::<RealtimeBetaResponseCreateParams>("RealtimeBetaResponseCreateParams")
-        .register::<
-            RealtimeBetaServerEventConversationItemCreated,
-        >("RealtimeBetaServerEventConversationItemCreated")
-        .register::<
-            RealtimeBetaServerEventConversationItemDeleted,
-        >("RealtimeBetaServerEventConversationItemDeleted")
-        .register::<
-            RealtimeBetaServerEventConversationItemInputAudioTranscriptionCompleted,
-        >("RealtimeBetaServerEventConversationItemInputAudioTranscriptionCompleted")
-        .register::<
-            RealtimeBetaServerEventConversationItemInputAudioTranscriptionDelta,
-        >("RealtimeBetaServerEventConversationItemInputAudioTranscriptionDelta")
-        .register::<
-            RealtimeBetaServerEventConversationItemInputAudioTranscriptionFailed,
-        >("RealtimeBetaServerEventConversationItemInputAudioTranscriptionFailed")
-        .register::<
-            RealtimeBetaServerEventConversationItemInputAudioTranscriptionSegment,
-        >("RealtimeBetaServerEventConversationItemInputAudioTranscriptionSegment")
-        .register::<
-            RealtimeBetaServerEventConversationItemRetrieved,
-        >("RealtimeBetaServerEventConversationItemRetrieved")
-        .register::<
-            RealtimeBetaServerEventConversationItemTruncated,
-        >("RealtimeBetaServerEventConversationItemTruncated")
-        .register::<RealtimeBetaServerEventError>("RealtimeBetaServerEventError")
-        .register::<
-            RealtimeBetaServerEventInputAudioBufferCleared,
-        >("RealtimeBetaServerEventInputAudioBufferCleared")
-        .register::<
-            RealtimeBetaServerEventInputAudioBufferCommitted,
-        >("RealtimeBetaServerEventInputAudioBufferCommitted")
-        .register::<
-            RealtimeBetaServerEventInputAudioBufferSpeechStarted,
-        >("RealtimeBetaServerEventInputAudioBufferSpeechStarted")
-        .register::<
-            RealtimeBetaServerEventInputAudioBufferSpeechStopped,
-        >("RealtimeBetaServerEventInputAudioBufferSpeechStopped")
-        .register::<
-            RealtimeBetaServerEventMCPListToolsCompleted,
-        >("RealtimeBetaServerEventMCPListToolsCompleted")
-        .register::<
-            RealtimeBetaServerEventMCPListToolsFailed,
-        >("RealtimeBetaServerEventMCPListToolsFailed")
-        .register::<
-            RealtimeBetaServerEventMCPListToolsInProgress,
-        >("RealtimeBetaServerEventMCPListToolsInProgress")
-        .register::<
-            RealtimeBetaServerEventRateLimitsUpdated,
-        >("RealtimeBetaServerEventRateLimitsUpdated")
-        .register::<
-            RealtimeBetaServerEventResponseAudioDelta,
-        >("RealtimeBetaServerEventResponseAudioDelta")
-        .register::<
-            RealtimeBetaServerEventResponseAudioDone,
-        >("RealtimeBetaServerEventResponseAudioDone")
-        .register::<
-            RealtimeBetaServerEventResponseAudioTranscriptDelta,
-        >("RealtimeBetaServerEventResponseAudioTranscriptDelta")
-        .register::<
-            RealtimeBetaServerEventResponseAudioTranscriptDone,
-        >("RealtimeBetaServerEventResponseAudioTranscriptDone")
-        .register::<
-            RealtimeBetaServerEventResponseContentPartAdded,
-        >("RealtimeBetaServerEventResponseContentPartAdded")
-        .register::<
-            RealtimeBetaServerEventResponseContentPartDone,
-        >("RealtimeBetaServerEventResponseContentPartDone")
-        .register::<
-            RealtimeBetaServerEventResponseCreated,
-        >("RealtimeBetaServerEventResponseCreated")
-        .register::<
-            RealtimeBetaServerEventResponseDone,
-        >("RealtimeBetaServerEventResponseDone")
-        .register::<
-            RealtimeBetaServerEventResponseFunctionCallArgumentsDelta,
-        >("RealtimeBetaServerEventResponseFunctionCallArgumentsDelta")
-        .register::<
-            RealtimeBetaServerEventResponseFunctionCallArgumentsDone,
-        >("RealtimeBetaServerEventResponseFunctionCallArgumentsDone")
-        .register::<
-            RealtimeBetaServerEventResponseMCPCallArgumentsDelta,
-        >("RealtimeBetaServerEventResponseMCPCallArgumentsDelta")
-        .register::<
-            RealtimeBetaServerEventResponseMCPCallArgumentsDone,
-        >("RealtimeBetaServerEventResponseMCPCallArgumentsDone")
-        .register::<
-            RealtimeBetaServerEventResponseMCPCallCompleted,
-        >("RealtimeBetaServerEventResponseMCPCallCompleted")
-        .register::<
-            RealtimeBetaServerEventResponseMCPCallFailed,
-        >("RealtimeBetaServerEventResponseMCPCallFailed")
-        .register::<
-            RealtimeBetaServerEventResponseMCPCallInProgress,
-        >("RealtimeBetaServerEventResponseMCPCallInProgress")
-        .register::<
-            RealtimeBetaServerEventResponseOutputItemAdded,
-        >("RealtimeBetaServerEventResponseOutputItemAdded")
-        .register::<
-            RealtimeBetaServerEventResponseOutputItemDone,
-        >("RealtimeBetaServerEventResponseOutputItemDone")
-        .register::<
-            RealtimeBetaServerEventResponseTextDelta,
-        >("RealtimeBetaServerEventResponseTextDelta")
-        .register::<
-            RealtimeBetaServerEventResponseTextDone,
-        >("RealtimeBetaServerEventResponseTextDone")
-        .register::<
-            RealtimeBetaServerEventSessionCreated,
-        >("RealtimeBetaServerEventSessionCreated")
-        .register::<
-            RealtimeBetaServerEventSessionUpdated,
-        >("RealtimeBetaServerEventSessionUpdated")
-        .register::<
-            RealtimeBetaServerEventTranscriptionSessionCreated,
-        >("RealtimeBetaServerEventTranscriptionSessionCreated")
-        .register::<
-            RealtimeBetaServerEventTranscriptionSessionUpdated,
-        >("RealtimeBetaServerEventTranscriptionSessionUpdated")
-        .register::<RealtimeCallCreateRequest>("RealtimeCallCreateRequest")
-        .register::<RealtimeCallReferRequest>("RealtimeCallReferRequest")
-        .register::<RealtimeCallRejectRequest>("RealtimeCallRejectRequest")
-        .register::<RealtimeClientEvent>("RealtimeClientEvent")
-        .register::<
-            RealtimeClientEventConversationItemCreate,
-        >("RealtimeClientEventConversationItemCreate")
-        .register::<
-            RealtimeClientEventConversationItemDelete,
-        >("RealtimeClientEventConversationItemDelete")
-        .register::<
-            RealtimeClientEventConversationItemRetrieve,
-        >("RealtimeClientEventConversationItemRetrieve")
-        .register::<
-            RealtimeClientEventConversationItemTruncate,
-        >("RealtimeClientEventConversationItemTruncate")
-        .register::<
-            RealtimeClientEventInputAudioBufferAppend,
-        >("RealtimeClientEventInputAudioBufferAppend")
-        .register::<
-            RealtimeClientEventInputAudioBufferClear,
-        >("RealtimeClientEventInputAudioBufferClear")
-        .register::<
-            RealtimeClientEventInputAudioBufferCommit,
-        >("RealtimeClientEventInputAudioBufferCommit")
-        .register::<
-            RealtimeClientEventOutputAudioBufferClear,
-        >("RealtimeClientEventOutputAudioBufferClear")
-        .register::<
-            RealtimeClientEventResponseCancel,
-        >("RealtimeClientEventResponseCancel")
-        .register::<
-            RealtimeClientEventResponseCreate,
-        >("RealtimeClientEventResponseCreate")
-        .register::<RealtimeClientEventSessionUpdate>("RealtimeClientEventSessionUpdate")
-        .register::<
-            RealtimeClientEventTranscriptionSessionUpdate,
-        >("RealtimeClientEventTranscriptionSessionUpdate")
-        .register::<RealtimeConversationItem>("RealtimeConversationItem")
-        .register::<
-            RealtimeConversationItemFunctionCall,
-        >("RealtimeConversationItemFunctionCall")
-        .register::<
-            RealtimeConversationItemFunctionCallOutput,
-        >("RealtimeConversationItemFunctionCallOutput")
-        .register::<
-            RealtimeConversationItemMessageAssistant,
-        >("RealtimeConversationItemMessageAssistant")
-        .register::<
-            RealtimeConversationItemMessageSystem,
-        >("RealtimeConversationItemMessageSystem")
-        .register::<
-            RealtimeConversationItemMessageUser,
-        >("RealtimeConversationItemMessageUser")
-        .register::<
-            RealtimeConversationItemWithReference,
-        >("RealtimeConversationItemWithReference")
-        .register::<
-            RealtimeCreateClientSecretRequest,
-        >("RealtimeCreateClientSecretRequest")
-        .register::<
-            RealtimeCreateClientSecretResponse,
-        >("RealtimeCreateClientSecretResponse")
-        .register::<RealtimeFunctionTool>("RealtimeFunctionTool")
-        .register::<RealtimeMCPApprovalRequest>("RealtimeMCPApprovalRequest")
-        .register::<RealtimeMCPApprovalResponse>("RealtimeMCPApprovalResponse")
-        .register::<RealtimeMCPHTTPError>("RealtimeMCPHTTPError")
-        .register::<RealtimeMCPListTools>("RealtimeMCPListTools")
-        .register::<RealtimeMCPProtocolError>("RealtimeMCPProtocolError")
-        .register::<RealtimeMCPToolCall>("RealtimeMCPToolCall")
-        .register::<RealtimeMCPToolExecutionError>("RealtimeMCPToolExecutionError")
-        .register::<RealtimeReasoning>("RealtimeReasoning")
-        .register::<RealtimeReasoningEffort>("RealtimeReasoningEffort")
-        .register::<RealtimeResponse>("RealtimeResponse")
-        .register::<RealtimeResponseCreateParams>("RealtimeResponseCreateParams")
-        .register::<RealtimeServerEvent>("RealtimeServerEvent")
-        .register::<
-            RealtimeServerEventConversationCreated,
-        >("RealtimeServerEventConversationCreated")
-        .register::<
-            RealtimeServerEventConversationItemAdded,
-        >("RealtimeServerEventConversationItemAdded")
-        .register::<
-            RealtimeServerEventConversationItemCreated,
-        >("RealtimeServerEventConversationItemCreated")
-        .register::<
-            RealtimeServerEventConversationItemDeleted,
-        >("RealtimeServerEventConversationItemDeleted")
-        .register::<
-            RealtimeServerEventConversationItemDone,
-        >("RealtimeServerEventConversationItemDone")
-        .register::<
-            RealtimeServerEventConversationItemInputAudioTranscriptionCompleted,
-        >("RealtimeServerEventConversationItemInputAudioTranscriptionCompleted")
-        .register::<
-            RealtimeServerEventConversationItemInputAudioTranscriptionDelta,
-        >("RealtimeServerEventConversationItemInputAudioTranscriptionDelta")
-        .register::<
-            RealtimeServerEventConversationItemInputAudioTranscriptionFailed,
-        >("RealtimeServerEventConversationItemInputAudioTranscriptionFailed")
-        .register::<
-            RealtimeServerEventConversationItemInputAudioTranscriptionSegment,
-        >("RealtimeServerEventConversationItemInputAudioTranscriptionSegment")
-        .register::<
-            RealtimeServerEventConversationItemRetrieved,
-        >("RealtimeServerEventConversationItemRetrieved")
-        .register::<
-            RealtimeServerEventConversationItemTruncated,
-        >("RealtimeServerEventConversationItemTruncated")
-        .register::<RealtimeServerEventError>("RealtimeServerEventError")
-        .register::<
-            RealtimeServerEventInputAudioBufferCleared,
-        >("RealtimeServerEventInputAudioBufferCleared")
-        .register::<
-            RealtimeServerEventInputAudioBufferCommitted,
-        >("RealtimeServerEventInputAudioBufferCommitted")
-        .register::<
-            RealtimeServerEventInputAudioBufferDtmfEventReceived,
-        >("RealtimeServerEventInputAudioBufferDtmfEventReceived")
-        .register::<
-            RealtimeServerEventInputAudioBufferSpeechStarted,
-        >("RealtimeServerEventInputAudioBufferSpeechStarted")
-        .register::<
-            RealtimeServerEventInputAudioBufferSpeechStopped,
-        >("RealtimeServerEventInputAudioBufferSpeechStopped")
-        .register::<
-            RealtimeServerEventInputAudioBufferTimeoutTriggered,
-        >("RealtimeServerEventInputAudioBufferTimeoutTriggered")
-        .register::<
-            RealtimeServerEventMCPListToolsCompleted,
-        >("RealtimeServerEventMCPListToolsCompleted")
-        .register::<
-            RealtimeServerEventMCPListToolsFailed,
-        >("RealtimeServerEventMCPListToolsFailed")
-        .register::<
-            RealtimeServerEventMCPListToolsInProgress,
-        >("RealtimeServerEventMCPListToolsInProgress")
-        .register::<
-            RealtimeServerEventOutputAudioBufferCleared,
-        >("RealtimeServerEventOutputAudioBufferCleared")
-        .register::<
-            RealtimeServerEventOutputAudioBufferStarted,
-        >("RealtimeServerEventOutputAudioBufferStarted")
-        .register::<
-            RealtimeServerEventOutputAudioBufferStopped,
-        >("RealtimeServerEventOutputAudioBufferStopped")
-        .register::<
-            RealtimeServerEventRateLimitsUpdated,
-        >("RealtimeServerEventRateLimitsUpdated")
-        .register::<
-            RealtimeServerEventResponseAudioDelta,
-        >("RealtimeServerEventResponseAudioDelta")
-        .register::<
-            RealtimeServerEventResponseAudioDone,
-        >("RealtimeServerEventResponseAudioDone")
-        .register::<
-            RealtimeServerEventResponseAudioTranscriptDelta,
-        >("RealtimeServerEventResponseAudioTranscriptDelta")
-        .register::<
-            RealtimeServerEventResponseAudioTranscriptDone,
-        >("RealtimeServerEventResponseAudioTranscriptDone")
-        .register::<
-            RealtimeServerEventResponseContentPartAdded,
-        >("RealtimeServerEventResponseContentPartAdded")
-        .register::<
-            RealtimeServerEventResponseContentPartDone,
-        >("RealtimeServerEventResponseContentPartDone")
-        .register::<
-            RealtimeServerEventResponseCreated,
-        >("RealtimeServerEventResponseCreated")
-        .register::<RealtimeServerEventResponseDone>("RealtimeServerEventResponseDone")
-        .register::<
-            RealtimeServerEventResponseFunctionCallArgumentsDelta,
-        >("RealtimeServerEventResponseFunctionCallArgumentsDelta")
-        .register::<
-            RealtimeServerEventResponseFunctionCallArgumentsDone,
-        >("RealtimeServerEventResponseFunctionCallArgumentsDone")
-        .register::<
-            RealtimeServerEventResponseMCPCallArgumentsDelta,
-        >("RealtimeServerEventResponseMCPCallArgumentsDelta")
-        .register::<
-            RealtimeServerEventResponseMCPCallArgumentsDone,
-        >("RealtimeServerEventResponseMCPCallArgumentsDone")
-        .register::<
-            RealtimeServerEventResponseMCPCallCompleted,
-        >("RealtimeServerEventResponseMCPCallCompleted")
-        .register::<
-            RealtimeServerEventResponseMCPCallFailed,
-        >("RealtimeServerEventResponseMCPCallFailed")
-        .register::<
-            RealtimeServerEventResponseMCPCallInProgress,
-        >("RealtimeServerEventResponseMCPCallInProgress")
-        .register::<
-            RealtimeServerEventResponseOutputItemAdded,
-        >("RealtimeServerEventResponseOutputItemAdded")
-        .register::<
-            RealtimeServerEventResponseOutputItemDone,
-        >("RealtimeServerEventResponseOutputItemDone")
-        .register::<
-            RealtimeServerEventResponseTextDelta,
-        >("RealtimeServerEventResponseTextDelta")
-        .register::<
-            RealtimeServerEventResponseTextDone,
-        >("RealtimeServerEventResponseTextDone")
-        .register::<
-            RealtimeServerEventSessionCreated,
-        >("RealtimeServerEventSessionCreated")
-        .register::<
-            RealtimeServerEventSessionUpdated,
-        >("RealtimeServerEventSessionUpdated")
-        .register::<
-            RealtimeServerEventTranscriptionSessionUpdated,
-        >("RealtimeServerEventTranscriptionSessionUpdated")
-        .register::<RealtimeSession>("RealtimeSession")
-        .register::<RealtimeSessionCreateRequest>("RealtimeSessionCreateRequest")
-        .register::<RealtimeSessionCreateRequestGA>("RealtimeSessionCreateRequestGA")
-        .register::<RealtimeSessionCreateResponse>("RealtimeSessionCreateResponse")
-        .register::<RealtimeSessionCreateResponseGA>("RealtimeSessionCreateResponseGA")
-        .register::<
-            RealtimeTranscriptionSessionCreateRequest,
-        >("RealtimeTranscriptionSessionCreateRequest")
-        .register::<
-            RealtimeTranscriptionSessionCreateRequestGA,
-        >("RealtimeTranscriptionSessionCreateRequestGA")
-        .register::<
-            RealtimeTranscriptionSessionCreateResponse,
-        >("RealtimeTranscriptionSessionCreateResponse")
-        .register::<
-            RealtimeTranscriptionSessionCreateResponseGA,
-        >("RealtimeTranscriptionSessionCreateResponseGA")
-        .register::<RealtimeTranslationClientEvent>("RealtimeTranslationClientEvent")
-        .register::<
-            RealtimeTranslationClientEventInputAudioBufferAppend,
-        >("RealtimeTranslationClientEventInputAudioBufferAppend")
-        .register::<
-            RealtimeTranslationClientEventSessionClose,
-        >("RealtimeTranslationClientEventSessionClose")
-        .register::<
-            RealtimeTranslationClientEventSessionUpdate,
-        >("RealtimeTranslationClientEventSessionUpdate")
-        .register::<
-            RealtimeTranslationClientSecretCreateRequest,
-        >("RealtimeTranslationClientSecretCreateRequest")
-        .register::<
-            RealtimeTranslationClientSecretCreateResponse,
-        >("RealtimeTranslationClientSecretCreateResponse")
-        .register::<RealtimeTranslationServerEvent>("RealtimeTranslationServerEvent")
-        .register::<
-            RealtimeTranslationServerEventSessionClosed,
-        >("RealtimeTranslationServerEventSessionClosed")
-        .register::<
-            RealtimeTranslationServerEventSessionCreated,
-        >("RealtimeTranslationServerEventSessionCreated")
-        .register::<
-            RealtimeTranslationServerEventSessionInputTranscriptDelta,
-        >("RealtimeTranslationServerEventSessionInputTranscriptDelta")
-        .register::<
-            RealtimeTranslationServerEventSessionOutputAudioDelta,
-        >("RealtimeTranslationServerEventSessionOutputAudioDelta")
-        .register::<
-            RealtimeTranslationServerEventSessionOutputTranscriptDelta,
-        >("RealtimeTranslationServerEventSessionOutputTranscriptDelta")
-        .register::<
-            RealtimeTranslationServerEventSessionUpdated,
-        >("RealtimeTranslationServerEventSessionUpdated")
-        .register::<RealtimeTranslationSession>("RealtimeTranslationSession")
-        .register::<
-            RealtimeTranslationSessionCreateRequest,
-        >("RealtimeTranslationSessionCreateRequest")
-        .register::<
-            RealtimeTranslationSessionUpdateRequest,
-        >("RealtimeTranslationSessionUpdateRequest")
-        .register::<RealtimeTruncation>("RealtimeTruncation")
-        .register::<RealtimeTurnDetection>("RealtimeTurnDetection")
-        .register::<Reasoning>("Reasoning")
-        .register::<ReasoningEffort>("ReasoningEffort")
-        .register::<ReasoningItem>("ReasoningItem")
-        .register::<Response>("Response")
-        .register::<ResponseAudioDeltaEvent>("ResponseAudioDeltaEvent")
-        .register::<ResponseAudioDoneEvent>("ResponseAudioDoneEvent")
-        .register::<
-            ResponseAudioTranscriptDeltaEvent,
-        >("ResponseAudioTranscriptDeltaEvent")
-        .register::<ResponseAudioTranscriptDoneEvent>("ResponseAudioTranscriptDoneEvent")
-        .register::<
-            ResponseCodeInterpreterCallCodeDeltaEvent,
-        >("ResponseCodeInterpreterCallCodeDeltaEvent")
-        .register::<
-            ResponseCodeInterpreterCallCodeDoneEvent,
-        >("ResponseCodeInterpreterCallCodeDoneEvent")
-        .register::<
-            ResponseCodeInterpreterCallCompletedEvent,
-        >("ResponseCodeInterpreterCallCompletedEvent")
-        .register::<
-            ResponseCodeInterpreterCallInProgressEvent,
-        >("ResponseCodeInterpreterCallInProgressEvent")
-        .register::<
-            ResponseCodeInterpreterCallInterpretingEvent,
-        >("ResponseCodeInterpreterCallInterpretingEvent")
-        .register::<ResponseCompletedEvent>("ResponseCompletedEvent")
-        .register::<ResponseContentPartAddedEvent>("ResponseContentPartAddedEvent")
-        .register::<ResponseContentPartDoneEvent>("ResponseContentPartDoneEvent")
-        .register::<ResponseCreatedEvent>("ResponseCreatedEvent")
-        .register::<
-            ResponseCustomToolCallInputDeltaEvent,
-        >("ResponseCustomToolCallInputDeltaEvent")
-        .register::<
-            ResponseCustomToolCallInputDoneEvent,
-        >("ResponseCustomToolCallInputDoneEvent")
-        .register::<ResponseError>("ResponseError")
-        .register::<ResponseErrorCode>("ResponseErrorCode")
-        .register::<ResponseErrorEvent>("ResponseErrorEvent")
-        .register::<ResponseFailedEvent>("ResponseFailedEvent")
-        .register::<
-            ResponseFileSearchCallCompletedEvent,
-        >("ResponseFileSearchCallCompletedEvent")
-        .register::<
-            ResponseFileSearchCallInProgressEvent,
-        >("ResponseFileSearchCallInProgressEvent")
-        .register::<
-            ResponseFileSearchCallSearchingEvent,
-        >("ResponseFileSearchCallSearchingEvent")
-        .register::<ResponseFormatJsonObject>("ResponseFormatJsonObject")
-        .register::<ResponseFormatJsonSchema>("ResponseFormatJsonSchema")
-        .register::<ResponseFormatJsonSchemaSchema>("ResponseFormatJsonSchemaSchema")
-        .register::<ResponseFormatText>("ResponseFormatText")
-        .register::<ResponseFormatTextGrammar>("ResponseFormatTextGrammar")
-        .register::<ResponseFormatTextPython>("ResponseFormatTextPython")
-        .register::<
-            ResponseFunctionCallArgumentsDeltaEvent,
-        >("ResponseFunctionCallArgumentsDeltaEvent")
-        .register::<
-            ResponseFunctionCallArgumentsDoneEvent,
-        >("ResponseFunctionCallArgumentsDoneEvent")
-        .register::<
-            ResponseImageGenCallCompletedEvent,
-        >("ResponseImageGenCallCompletedEvent")
-        .register::<
-            ResponseImageGenCallGeneratingEvent,
-        >("ResponseImageGenCallGeneratingEvent")
-        .register::<
-            ResponseImageGenCallInProgressEvent,
-        >("ResponseImageGenCallInProgressEvent")
-        .register::<
-            ResponseImageGenCallPartialImageEvent,
-        >("ResponseImageGenCallPartialImageEvent")
-        .register::<ResponseInProgressEvent>("ResponseInProgressEvent")
-        .register::<ResponseIncompleteEvent>("ResponseIncompleteEvent")
-        .register::<ResponseItemList>("ResponseItemList")
-        .register::<ResponseLogProb>("ResponseLogProb")
-        .register::<
-            ResponseMCPCallArgumentsDeltaEvent,
-        >("ResponseMCPCallArgumentsDeltaEvent")
-        .register::<
-            ResponseMCPCallArgumentsDoneEvent,
-        >("ResponseMCPCallArgumentsDoneEvent")
-        .register::<ResponseMCPCallCompletedEvent>("ResponseMCPCallCompletedEvent")
-        .register::<ResponseMCPCallFailedEvent>("ResponseMCPCallFailedEvent")
-        .register::<ResponseMCPCallInProgressEvent>("ResponseMCPCallInProgressEvent")
-        .register::<
-            ResponseMCPListToolsCompletedEvent,
-        >("ResponseMCPListToolsCompletedEvent")
-        .register::<ResponseMCPListToolsFailedEvent>("ResponseMCPListToolsFailedEvent")
-        .register::<
-            ResponseMCPListToolsInProgressEvent,
-        >("ResponseMCPListToolsInProgressEvent")
-        .register::<ResponseModalities>("ResponseModalities")
-        .register::<ResponseOutputItemAddedEvent>("ResponseOutputItemAddedEvent")
-        .register::<ResponseOutputItemDoneEvent>("ResponseOutputItemDoneEvent")
-        .register::<
-            ResponseOutputTextAnnotationAddedEvent,
-        >("ResponseOutputTextAnnotationAddedEvent")
-        .register::<ResponsePromptVariables>("ResponsePromptVariables")
-        .register::<ResponseProperties>("ResponseProperties")
-        .register::<ResponseQueuedEvent>("ResponseQueuedEvent")
-        .register::<
-            ResponseReasoningSummaryPartAddedEvent,
-        >("ResponseReasoningSummaryPartAddedEvent")
-        .register::<
-            ResponseReasoningSummaryPartDoneEvent,
-        >("ResponseReasoningSummaryPartDoneEvent")
-        .register::<
-            ResponseReasoningSummaryTextDeltaEvent,
-        >("ResponseReasoningSummaryTextDeltaEvent")
-        .register::<
-            ResponseReasoningSummaryTextDoneEvent,
-        >("ResponseReasoningSummaryTextDoneEvent")
-        .register::<ResponseReasoningTextDeltaEvent>("ResponseReasoningTextDeltaEvent")
-        .register::<ResponseReasoningTextDoneEvent>("ResponseReasoningTextDoneEvent")
-        .register::<ResponseRefusalDeltaEvent>("ResponseRefusalDeltaEvent")
-        .register::<ResponseRefusalDoneEvent>("ResponseRefusalDoneEvent")
-        .register::<ResponseStreamEvent>("ResponseStreamEvent")
-        .register::<ResponseStreamOptions>("ResponseStreamOptions")
-        .register::<ResponseTextDeltaEvent>("ResponseTextDeltaEvent")
-        .register::<ResponseTextDoneEvent>("ResponseTextDoneEvent")
-        .register::<ResponseTextParam>("ResponseTextParam")
-        .register::<ResponseUsage>("ResponseUsage")
-        .register::<
-            ResponseWebSearchCallCompletedEvent,
-        >("ResponseWebSearchCallCompletedEvent")
-        .register::<
-            ResponseWebSearchCallInProgressEvent,
-        >("ResponseWebSearchCallInProgressEvent")
-        .register::<
-            ResponseWebSearchCallSearchingEvent,
-        >("ResponseWebSearchCallSearchingEvent")
-        .register::<ResponsesClientEvent>("ResponsesClientEvent")
-        .register::<
-            ResponsesClientEventResponseCreate,
-        >("ResponsesClientEventResponseCreate")
-        .register::<ResponsesServerEvent>("ResponsesServerEvent")
-        .register::<Role>("Role")
-        .register::<RoleDeletedResource>("RoleDeletedResource")
-        .register::<RoleListResource>("RoleListResource")
-        .register::<RunCompletionUsage>("RunCompletionUsage")
-        .register::<RunGraderRequest2>("RunGraderRequest2")
-        .register::<RunGraderResponse>("RunGraderResponse")
-        .register::<RunObject>("RunObject")
-        .register::<RunStepCompletionUsage>("RunStepCompletionUsage")
-        .register::<RunStepDeltaObject>("RunStepDeltaObject")
-        .register::<
-            RunStepDeltaStepDetailsMessageCreationObject,
-        >("RunStepDeltaStepDetailsMessageCreationObject")
-        .register::<
-            RunStepDeltaStepDetailsToolCallsCodeObject,
-        >("RunStepDeltaStepDetailsToolCallsCodeObject")
-        .register::<
-            RunStepDeltaStepDetailsToolCallsCodeOutputImageObject,
-        >("RunStepDeltaStepDetailsToolCallsCodeOutputImageObject")
-        .register::<
-            RunStepDeltaStepDetailsToolCallsCodeOutputLogsObject,
-        >("RunStepDeltaStepDetailsToolCallsCodeOutputLogsObject")
-        .register::<
-            RunStepDeltaStepDetailsToolCallsFileSearchObject,
-        >("RunStepDeltaStepDetailsToolCallsFileSearchObject")
-        .register::<
-            RunStepDeltaStepDetailsToolCallsFunctionObject,
-        >("RunStepDeltaStepDetailsToolCallsFunctionObject")
-        .register::<
-            RunStepDeltaStepDetailsToolCallsObject,
-        >("RunStepDeltaStepDetailsToolCallsObject")
-        .register::<
-            RunStepDetailsMessageCreationObject,
-        >("RunStepDetailsMessageCreationObject")
-        .register::<
-            RunStepDetailsToolCallsCodeObject,
-        >("RunStepDetailsToolCallsCodeObject")
-        .register::<
-            RunStepDetailsToolCallsCodeOutputImageObject,
-        >("RunStepDetailsToolCallsCodeOutputImageObject")
-        .register::<
-            RunStepDetailsToolCallsCodeOutputLogsObject,
-        >("RunStepDetailsToolCallsCodeOutputLogsObject")
-        .register::<
-            RunStepDetailsToolCallsFileSearchObject,
-        >("RunStepDetailsToolCallsFileSearchObject")
-        .register::<
-            RunStepDetailsToolCallsFileSearchRankingOptionsObject,
-        >("RunStepDetailsToolCallsFileSearchRankingOptionsObject")
-        .register::<
-            RunStepDetailsToolCallsFileSearchResultObject,
-        >("RunStepDetailsToolCallsFileSearchResultObject")
-        .register::<
-            RunStepDetailsToolCallsFunctionObject,
-        >("RunStepDetailsToolCallsFunctionObject")
-        .register::<RunStepDetailsToolCallsObject>("RunStepDetailsToolCallsObject")
-        .register::<RunStepObject>("RunStepObject")
-        .register::<RunStepStreamEvent>("RunStepStreamEvent")
-        .register::<RunStreamEvent>("RunStreamEvent")
-        .register::<RunToolCallObject>("RunToolCallObject")
-        .register::<ServiceTier>("ServiceTier")
-        .register::<SpeechAudioDeltaEvent>("SpeechAudioDeltaEvent")
-        .register::<SpeechAudioDoneEvent>("SpeechAudioDoneEvent")
-        .register::<SpendAlertNotificationChannel>("SpendAlertNotificationChannel")
-        .register::<StaticChunkingStrategy>("StaticChunkingStrategy")
-        .register::<
-            StaticChunkingStrategyRequestParam,
-        >("StaticChunkingStrategyRequestParam")
-        .register::<
-            StaticChunkingStrategyResponseParam,
-        >("StaticChunkingStrategyResponseParam")
-        .register::<StopConfiguration>("StopConfiguration")
-        .register::<SubmitToolOutputsRunRequest>("SubmitToolOutputsRunRequest")
-        .register::<TextResponseFormatConfiguration>("TextResponseFormatConfiguration")
-        .register::<TextResponseFormatJsonSchema>("TextResponseFormatJsonSchema")
-        .register::<ThreadObject>("ThreadObject")
-        .register::<ThreadStreamEvent>("ThreadStreamEvent")
-        .register::<ToggleCertificatesRequest>("ToggleCertificatesRequest")
-        .register::<Tool>("Tool")
-        .register::<ToolChoiceAllowed>("ToolChoiceAllowed")
-        .register::<ToolChoiceCustom>("ToolChoiceCustom")
-        .register::<ToolChoiceFunction>("ToolChoiceFunction")
-        .register::<ToolChoiceMCP>("ToolChoiceMCP")
-        .register::<ToolChoiceOptions>("ToolChoiceOptions")
-        .register::<ToolChoiceParam>("ToolChoiceParam")
-        .register::<ToolChoiceTypes>("ToolChoiceTypes")
-        .register::<ToolsArray>("ToolsArray")
-        .register::<TranscriptTextDeltaEvent>("TranscriptTextDeltaEvent")
-        .register::<TranscriptTextDoneEvent>("TranscriptTextDoneEvent")
-        .register::<TranscriptTextSegmentEvent>("TranscriptTextSegmentEvent")
-        .register::<TranscriptTextUsageDuration>("TranscriptTextUsageDuration")
-        .register::<TranscriptTextUsageTokens>("TranscriptTextUsageTokens")
-        .register::<TranscriptionChunkingStrategy>("TranscriptionChunkingStrategy")
-        .register::<TranscriptionDiarizedSegment>("TranscriptionDiarizedSegment")
-        .register::<TranscriptionInclude>("TranscriptionInclude")
-        .register::<TranscriptionLanguage>("TranscriptionLanguage")
-        .register::<TranscriptionSegment>("TranscriptionSegment")
-        .register::<TranscriptionWord>("TranscriptionWord")
-        .register::<TruncationObject>("TruncationObject")
-        .register::<UpdateGroupBody>("UpdateGroupBody")
-        .register::<
-            UpdateOrganizationDataRetentionBody,
-        >("UpdateOrganizationDataRetentionBody")
-        .register::<UpdateProjectDataRetentionBody>("UpdateProjectDataRetentionBody")
-        .register::<UpdateProjectServiceAccountBody>("UpdateProjectServiceAccountBody")
-        .register::<
-            UpdateVectorStoreFileAttributesRequest2,
-        >("UpdateVectorStoreFileAttributesRequest2")
-        .register::<UpdateVectorStoreRequest>("UpdateVectorStoreRequest")
-        .register::<UpdateVoiceConsentRequest2>("UpdateVoiceConsentRequest2")
-        .register::<Upload>("Upload")
-        .register::<UploadCertificateRequest2>("UploadCertificateRequest2")
-        .register::<UploadPart>("UploadPart")
-        .register::<UsageAudioSpeechesResult>("UsageAudioSpeechesResult")
-        .register::<UsageAudioTranscriptionsResult>("UsageAudioTranscriptionsResult")
-        .register::<
-            UsageCodeInterpreterSessionsResult,
-        >("UsageCodeInterpreterSessionsResult")
-        .register::<UsageCompletionsResult>("UsageCompletionsResult")
-        .register::<UsageEmbeddingsResult>("UsageEmbeddingsResult")
-        .register::<UsageFileSearchCallsResult>("UsageFileSearchCallsResult")
-        .register::<UsageImagesResult>("UsageImagesResult")
-        .register::<UsageModerationsResult>("UsageModerationsResult")
-        .register::<UsageResponse>("UsageResponse")
-        .register::<UsageTimeBucket>("UsageTimeBucket")
-        .register::<UsageVectorStoresResult>("UsageVectorStoresResult")
-        .register::<UsageWebSearchCallsResult>("UsageWebSearchCallsResult")
-        .register::<User>("User")
-        .register::<UserDeleteResponse>("UserDeleteResponse")
-        .register::<UserListResource>("UserListResource")
-        .register::<UserListResponse>("UserListResponse")
-        .register::<UserRoleAssignment>("UserRoleAssignment")
-        .register::<UserRoleUpdateRequest>("UserRoleUpdateRequest")
-        .register::<VadConfig>("VadConfig")
-        .register::<ValidateGraderRequest2>("ValidateGraderRequest2")
-        .register::<ValidateGraderResponse>("ValidateGraderResponse")
-        .register::<VectorStoreExpirationAfter>("VectorStoreExpirationAfter")
-        .register::<VectorStoreFileAttributes>("VectorStoreFileAttributes")
-        .register::<VectorStoreFileBatchObject>("VectorStoreFileBatchObject")
-        .register::<VectorStoreFileContentResponse>("VectorStoreFileContentResponse")
-        .register::<VectorStoreFileObject>("VectorStoreFileObject")
-        .register::<VectorStoreObject>("VectorStoreObject")
-        .register::<VectorStoreSearchRequest>("VectorStoreSearchRequest")
-        .register::<
-            VectorStoreSearchResultContentObject,
-        >("VectorStoreSearchResultContentObject")
-        .register::<VectorStoreSearchResultItem>("VectorStoreSearchResultItem")
-        .register::<VectorStoreSearchResultsPage>("VectorStoreSearchResultsPage")
-        .register::<Verbosity>("Verbosity")
-        .register::<VoiceConsentDeletedResource>("VoiceConsentDeletedResource")
-        .register::<VoiceConsentListResource>("VoiceConsentListResource")
-        .register::<VoiceConsentResource>("VoiceConsentResource")
-        .register::<VoiceIdsOrCustomVoice>("VoiceIdsOrCustomVoice")
-        .register::<VoiceIdsShared>("VoiceIdsShared")
-        .register::<VoiceResource>("VoiceResource")
-        .register::<WebSearchActionFind>("WebSearchActionFind")
-        .register::<WebSearchActionOpenPage>("WebSearchActionOpenPage")
-        .register::<WebSearchActionSearch>("WebSearchActionSearch")
-        .register::<WebSearchApproximateLocation>("WebSearchApproximateLocation")
-        .register::<WebSearchContextSize>("WebSearchContextSize")
-        .register::<WebSearchLocation>("WebSearchLocation")
-        .register::<WebSearchTool>("WebSearchTool")
-        .register::<WebSearchToolCall>("WebSearchToolCall")
-        .register::<WebhookBatchCancelled>("WebhookBatchCancelled")
-        .register::<WebhookBatchCompleted>("WebhookBatchCompleted")
-        .register::<WebhookBatchExpired>("WebhookBatchExpired")
-        .register::<WebhookBatchFailed>("WebhookBatchFailed")
-        .register::<WebhookEvalRunCanceled>("WebhookEvalRunCanceled")
-        .register::<WebhookEvalRunFailed>("WebhookEvalRunFailed")
-        .register::<WebhookEvalRunSucceeded>("WebhookEvalRunSucceeded")
-        .register::<WebhookFineTuningJobCancelled>("WebhookFineTuningJobCancelled")
-        .register::<WebhookFineTuningJobFailed>("WebhookFineTuningJobFailed")
-        .register::<WebhookFineTuningJobSucceeded>("WebhookFineTuningJobSucceeded")
-        .register::<WebhookLiveCallIncoming>("WebhookLiveCallIncoming")
-        .register::<WebhookRealtimeCallIncoming>("WebhookRealtimeCallIncoming")
-        .register::<WebhookResponseCancelled>("WebhookResponseCancelled")
-        .register::<WebhookResponseCompleted>("WebhookResponseCompleted")
-        .register::<WebhookResponseFailed>("WebhookResponseFailed")
-        .register::<WebhookResponseIncomplete>("WebhookResponseIncomplete")
-        .register::<ModerationInputType>("ModerationInputType")
-        .register::<ModerationResultBody>("ModerationResultBody")
-        .register::<PromptCacheTTLEnum>("PromptCacheTTLEnum")
-        .register::<PromptCacheModeEnum>("PromptCacheModeEnum")
-        .register::<PromptCacheOptionsParam>("PromptCacheOptionsParam")
-        .register::<PromptCacheBreakpointParam>("PromptCacheBreakpointParam")
-        .register::<ModerationMode>("ModerationMode")
-        .register::<ModerationConfigParam>("ModerationConfigParam")
-        .register::<ModerationPolicyParam>("ModerationPolicyParam")
-        .register::<ModerationParam>("ModerationParam")
-        .register::<SkillReferenceParam>("SkillReferenceParam")
-        .register::<InlineSkillSourceParam>("InlineSkillSourceParam")
-        .register::<InlineSkillParam>("InlineSkillParam")
-        .register::<
-            ContainerNetworkPolicyDisabledParam,
-        >("ContainerNetworkPolicyDisabledParam")
-        .register::<
-            ContainerNetworkPolicyDomainSecretParam,
-        >("ContainerNetworkPolicyDomainSecretParam")
-        .register::<
-            ContainerNetworkPolicyAllowlistParam,
-        >("ContainerNetworkPolicyAllowlistParam")
-        .register::<IncludeEnum>("IncludeEnum")
-        .register::<MessageStatus>("MessageStatus")
-        .register::<MessageRole>("MessageRole")
-        .register::<PromptCacheBreakpointConfig>("PromptCacheBreakpointConfig")
-        .register::<InputTextContent>("InputTextContent")
-        .register::<FileCitationBody>("FileCitationBody")
-        .register::<UrlCitationBody>("UrlCitationBody")
-        .register::<ContainerFileCitationBody>("ContainerFileCitationBody")
-        .register::<Annotation>("Annotation")
-        .register::<TopLogProb>("TopLogProb")
-        .register::<LogProb>("LogProb")
-        .register::<OutputTextContent>("OutputTextContent")
-        .register::<TextContent>("TextContent")
-        .register::<SummaryTextContent>("SummaryTextContent")
-        .register::<ReasoningTextContent>("ReasoningTextContent")
-        .register::<RefusalContent>("RefusalContent")
-        .register::<ImageDetail>("ImageDetail")
-        .register::<InputImageContent>("InputImageContent")
-        .register::<ComputerScreenshotContent>("ComputerScreenshotContent")
-        .register::<FileInputDetail>("FileInputDetail")
-        .register::<InputFileContent>("InputFileContent")
-        .register::<MessagePhase2>("MessagePhase2")
-        .register::<Message>("Message")
-        .register::<DirectToolCallCaller>("DirectToolCallCaller")
-        .register::<ProgramToolCallCaller>("ProgramToolCallCaller")
-        .register::<ToolCallCaller>("ToolCallCaller")
-        .register::<FunctionCallStatus>("FunctionCallStatus")
-        .register::<DirectToolCallCallerParam>("DirectToolCallCallerParam")
-        .register::<ProgramToolCallCallerParam>("ProgramToolCallCallerParam")
-        .register::<ToolCallCallerParam>("ToolCallCallerParam")
-        .register::<FunctionCallOutputStatusEnum>("FunctionCallOutputStatusEnum")
-        .register::<ClickButtonType>("ClickButtonType")
-        .register::<ClickParam>("ClickParam")
-        .register::<DoubleClickAction>("DoubleClickAction")
-        .register::<CoordParam>("CoordParam")
-        .register::<DragParam>("DragParam")
-        .register::<KeyPressAction>("KeyPressAction")
-        .register::<MoveParam>("MoveParam")
-        .register::<ScreenshotParam>("ScreenshotParam")
-        .register::<ScrollParam>("ScrollParam")
-        .register::<TypeParam>("TypeParam")
-        .register::<WaitParam>("WaitParam")
-        .register::<ComputerCallSafetyCheckParam>("ComputerCallSafetyCheckParam")
-        .register::<ComputerCallOutputStatus>("ComputerCallOutputStatus")
-        .register::<ToolSearchExecutionType>("ToolSearchExecutionType")
-        .register::<ToolSearchCall>("ToolSearchCall")
-        .register::<CallableToolAllowedCaller>("CallableToolAllowedCaller")
-        .register::<FunctionTool>("FunctionTool")
-        .register::<RankerVersionType>("RankerVersionType")
-        .register::<HybridSearchOptions>("HybridSearchOptions")
-        .register::<RankingOptions>("RankingOptions")
-        .register::<Filters>("Filters")
-        .register::<FileSearchTool>("FileSearchTool")
-        .register::<ComputerTool>("ComputerTool")
-        .register::<ComputerEnvironment>("ComputerEnvironment")
-        .register::<ComputerUsePreviewTool>("ComputerUsePreviewTool")
-        .register::<ContainerMemoryLimit>("ContainerMemoryLimit")
-        .register::<AutoCodeInterpreterToolParam>("AutoCodeInterpreterToolParam")
-        .register::<ProgrammaticToolCallingParam>("ProgrammaticToolCallingParam")
-        .register::<InputFidelity>("InputFidelity")
-        .register::<ImageGenActionEnum>("ImageGenActionEnum")
-        .register::<LocalShellToolParam>("LocalShellToolParam")
-        .register::<ContainerAutoParam>("ContainerAutoParam")
-        .register::<LocalSkillParam>("LocalSkillParam")
-        .register::<LocalEnvironmentParam>("LocalEnvironmentParam")
-        .register::<ContainerReferenceParam>("ContainerReferenceParam")
-        .register::<FunctionShellToolParam>("FunctionShellToolParam")
-        .register::<CustomTextFormatParam>("CustomTextFormatParam")
-        .register::<GrammarSyntax1>("GrammarSyntax1")
-        .register::<CustomGrammarFormatParam>("CustomGrammarFormatParam")
-        .register::<CustomToolParam>("CustomToolParam")
-        .register::<EmptyModelParam>("EmptyModelParam")
-        .register::<FunctionToolParam>("FunctionToolParam")
-        .register::<NamespaceToolParam>("NamespaceToolParam")
-        .register::<ToolSearchToolParam>("ToolSearchToolParam")
-        .register::<ApproximateLocation>("ApproximateLocation")
-        .register::<SearchContextSize>("SearchContextSize")
-        .register::<SearchContentType>("SearchContentType")
-        .register::<WebSearchPreviewTool>("WebSearchPreviewTool")
-        .register::<ApplyPatchToolParam>("ApplyPatchToolParam")
-        .register::<ToolSearchOutput>("ToolSearchOutput")
-        .register::<AdditionalTools>("AdditionalTools")
-        .register::<Program>("Program")
-        .register::<ProgramOutputStatus>("ProgramOutputStatus")
-        .register::<ProgramOutput>("ProgramOutput")
-        .register::<CompactionBody>("CompactionBody")
-        .register::<CodeInterpreterOutputLogs>("CodeInterpreterOutputLogs")
-        .register::<CodeInterpreterOutputImage>("CodeInterpreterOutputImage")
-        .register::<LocalShellExecAction>("LocalShellExecAction")
-        .register::<FunctionShellAction>("FunctionShellAction")
-        .register::<FunctionShellCallStatus>("FunctionShellCallStatus")
-        .register::<LocalEnvironmentResource>("LocalEnvironmentResource")
-        .register::<ContainerReferenceResource>("ContainerReferenceResource")
-        .register::<FunctionShellCall>("FunctionShellCall")
-        .register::<
-            FunctionShellCallOutputStatusEnum,
-        >("FunctionShellCallOutputStatusEnum")
-        .register::<
-            FunctionShellCallOutputTimeoutOutcome,
-        >("FunctionShellCallOutputTimeoutOutcome")
-        .register::<
-            FunctionShellCallOutputExitOutcome,
-        >("FunctionShellCallOutputExitOutcome")
-        .register::<FunctionShellCallOutputContent>("FunctionShellCallOutputContent")
-        .register::<FunctionShellCallOutput>("FunctionShellCallOutput")
-        .register::<ApplyPatchCallStatus>("ApplyPatchCallStatus")
-        .register::<ApplyPatchCreateFileOperation>("ApplyPatchCreateFileOperation")
-        .register::<ApplyPatchDeleteFileOperation>("ApplyPatchDeleteFileOperation")
-        .register::<ApplyPatchUpdateFileOperation>("ApplyPatchUpdateFileOperation")
-        .register::<ApplyPatchToolCall>("ApplyPatchToolCall")
-        .register::<ApplyPatchCallOutputStatus>("ApplyPatchCallOutputStatus")
-        .register::<ApplyPatchToolCallOutput>("ApplyPatchToolCallOutput")
-        .register::<MCPToolCallStatus>("MCPToolCallStatus")
-        .register::<DetailEnum>("DetailEnum")
-        .register::<FunctionCallItemStatus>("FunctionCallItemStatus")
-        .register::<ComputerCallOutputItemParam>("ComputerCallOutputItemParam")
-        .register::<InputTextContentParam>("InputTextContentParam")
-        .register::<InputImageContentParamAutoParam>("InputImageContentParamAutoParam")
-        .register::<FileDetailEnum>("FileDetailEnum")
-        .register::<InputFileContentParam>("InputFileContentParam")
-        .register::<FunctionCallOutputItemParam>("FunctionCallOutputItemParam")
-        .register::<FileCitationParam>("FileCitationParam")
-        .register::<UrlCitationParam>("UrlCitationParam")
-        .register::<ContainerFileCitationParam>("ContainerFileCitationParam")
-        .register::<ToolSearchCallItemParam>("ToolSearchCallItemParam")
-        .register::<ToolSearchOutputItemParam>("ToolSearchOutputItemParam")
-        .register::<AdditionalToolsItemParam>("AdditionalToolsItemParam")
-        .register::<CompactionSummaryItemParam>("CompactionSummaryItemParam")
-        .register::<FunctionShellActionParam>("FunctionShellActionParam")
-        .register::<FunctionShellCallItemStatus>("FunctionShellCallItemStatus")
-        .register::<FunctionShellCallItemParam>("FunctionShellCallItemParam")
-        .register::<
-            FunctionShellCallOutputTimeoutOutcomeParam,
-        >("FunctionShellCallOutputTimeoutOutcomeParam")
-        .register::<
-            FunctionShellCallOutputExitOutcomeParam,
-        >("FunctionShellCallOutputExitOutcomeParam")
-        .register::<
-            FunctionShellCallOutputOutcomeParam,
-        >("FunctionShellCallOutputOutcomeParam")
-        .register::<
-            FunctionShellCallOutputContentParam,
-        >("FunctionShellCallOutputContentParam")
-        .register::<FunctionShellCallOutputItemParam>("FunctionShellCallOutputItemParam")
-        .register::<ApplyPatchCallStatusParam>("ApplyPatchCallStatusParam")
-        .register::<
-            ApplyPatchCreateFileOperationParam,
-        >("ApplyPatchCreateFileOperationParam")
-        .register::<
-            ApplyPatchDeleteFileOperationParam,
-        >("ApplyPatchDeleteFileOperationParam")
-        .register::<
-            ApplyPatchUpdateFileOperationParam,
-        >("ApplyPatchUpdateFileOperationParam")
-        .register::<ApplyPatchOperationParam>("ApplyPatchOperationParam")
-        .register::<ApplyPatchToolCallItemParam>("ApplyPatchToolCallItemParam")
-        .register::<ApplyPatchCallOutputStatusParam>("ApplyPatchCallOutputStatusParam")
-        .register::<
-            ApplyPatchToolCallOutputItemParam,
-        >("ApplyPatchToolCallOutputItemParam")
-        .register::<CompactionTriggerItemParam>("CompactionTriggerItemParam")
-        .register::<ItemReferenceParam>("ItemReferenceParam")
-        .register::<ProgramItemParam>("ProgramItemParam")
-        .register::<ProgramOutputItemStatus>("ProgramOutputItemStatus")
-        .register::<ProgramOutputItemParam>("ProgramOutputItemParam")
-        .register::<ConversationResource>("ConversationResource")
-        .register::<ImageGenOutputTokensDetails>("ImageGenOutputTokensDetails")
-        .register::<ImageGenInputUsageDetails>("ImageGenInputUsageDetails")
-        .register::<ImageGenUsage>("ImageGenUsage")
-        .register::<
-            SpecificProgrammaticToolCallingParam,
-        >("SpecificProgrammaticToolCallingParam")
-        .register::<SpecificApplyPatchParam>("SpecificApplyPatchParam")
-        .register::<SpecificFunctionShellParam>("SpecificFunctionShellParam")
-        .register::<ReasoningModeEnum>("ReasoningModeEnum")
-        .register::<ConversationParam2>("ConversationParam2")
-        .register::<ContextManagementParam>("ContextManagementParam")
-        .register::<PromptCacheOptions>("PromptCacheOptions")
-        .register::<ModerationErrorBody>("ModerationErrorBody")
-        .register::<Moderation>("Moderation")
-        .register::<ResponseConversation>("ResponseConversation")
-        .register::<CreateConversationBody>("CreateConversationBody")
-        .register::<UpdateConversationBody>("UpdateConversationBody")
-        .register::<DeletedConversationResource>("DeletedConversationResource")
-        .register::<SpendLimitCurrency>("SpendLimitCurrency")
-        .register::<SpendLimitInterval>("SpendLimitInterval")
-        .register::<SpendLimitEnforcementStatus>("SpendLimitEnforcementStatus")
-        .register::<SpendLimitEnforcement>("SpendLimitEnforcement")
-        .register::<OrganizationSpendLimitResource>("OrganizationSpendLimitResource")
-        .register::<UpdateOrganizationSpendLimitBody>("UpdateOrganizationSpendLimitBody")
-        .register::<
-            OrganizationSpendLimitDeletedResource,
-        >("OrganizationSpendLimitDeletedResource")
-        .register::<ProjectSpendLimitResource>("ProjectSpendLimitResource")
-        .register::<UpdateProjectSpendLimitBody>("UpdateProjectSpendLimitBody")
-        .register::<ProjectSpendLimitDeletedResource>("ProjectSpendLimitDeletedResource")
-        .register::<
-            CreateProjectServiceAccountApiKeyBody,
-        >("CreateProjectServiceAccountApiKeyBody")
-        .register::<ServiceAccountApiKeyBody>("ServiceAccountApiKeyBody")
-        .register::<CreateContentProvenanceBody>("CreateContentProvenanceBody")
-        .register::<ProvenanceCheckObject>("ProvenanceCheckObject")
-        .register::<ProvenanceDetectionResultApi>("ProvenanceDetectionResultApi")
-        .register::<C2PAValidationStateApi>("C2PAValidationStateApi")
-        .register::<C2PAProvenanceResult>("C2PAProvenanceResult")
-        .register::<SynthIDProvenanceResult>("SynthIDProvenanceResult")
-        .register::<ProvenanceResource>("ProvenanceResource")
-        .register::<OrderEnum>("OrderEnum")
-        .register::<VideoModel>("VideoModel")
-        .register::<VideoStatus>("VideoStatus")
-        .register::<VideoSize>("VideoSize")
-        .register::<Error2>("Error2")
-        .register::<VideoResource>("VideoResource")
-        .register::<VideoListResource>("VideoListResource")
-        .register::<ImageRefParam2>("ImageRefParam2")
-        .register::<VideoSeconds>("VideoSeconds")
-        .register::<CreateVideoMultipartBody>("CreateVideoMultipartBody")
-        .register::<CreateVideoJsonBody>("CreateVideoJsonBody")
-        .register::<CreateVideoCharacterBody>("CreateVideoCharacterBody")
-        .register::<VideoCharacterResource>("VideoCharacterResource")
-        .register::<VideoReferenceInputParam>("VideoReferenceInputParam")
-        .register::<CreateVideoEditMultipartBody>("CreateVideoEditMultipartBody")
-        .register::<CreateVideoEditJsonBody>("CreateVideoEditJsonBody")
-        .register::<CreateVideoExtendMultipartBody>("CreateVideoExtendMultipartBody")
-        .register::<CreateVideoExtendJsonBody>("CreateVideoExtendJsonBody")
-        .register::<DeletedVideoResource>("DeletedVideoResource")
-        .register::<VideoContentVariant>("VideoContentVariant")
-        .register::<CreateVideoRemixBody>("CreateVideoRemixBody")
-        .register::<TruncationEnum>("TruncationEnum")
-        .register::<PersonalityEnum>("PersonalityEnum")
-        .register::<TokenCountsBody>("TokenCountsBody")
-        .register::<TokenCountsResource>("TokenCountsResource")
-        .register::<PromptCacheRetentionEnum>("PromptCacheRetentionEnum")
-        .register::<ServiceTierEnum>("ServiceTierEnum")
-        .register::<CompactResponseMethodPublicBody>("CompactResponseMethodPublicBody")
-        .register::<ItemField>("ItemField")
-        .register::<CompactResource>("CompactResource")
-        .register::<SkillResource>("SkillResource")
-        .register::<SkillListResource>("SkillListResource")
-        .register::<CreateSkillBody>("CreateSkillBody")
-        .register::<SetDefaultSkillVersionBody>("SetDefaultSkillVersionBody")
-        .register::<DeletedSkillResource>("DeletedSkillResource")
-        .register::<SkillVersionResource>("SkillVersionResource")
-        .register::<SkillVersionListResource>("SkillVersionListResource")
-        .register::<CreateSkillVersionBody>("CreateSkillVersionBody")
-        .register::<DeletedSkillVersionResource>("DeletedSkillVersionResource")
-        .register::<ChatkitWorkflowTracing>("ChatkitWorkflowTracing")
-        .register::<ChatkitWorkflow>("ChatkitWorkflow")
-        .register::<ChatSessionRateLimits>("ChatSessionRateLimits")
-        .register::<ChatSessionStatus>("ChatSessionStatus")
-        .register::<
-            ChatSessionAutomaticThreadTitling,
-        >("ChatSessionAutomaticThreadTitling")
-        .register::<ChatSessionFileUpload>("ChatSessionFileUpload")
-        .register::<ChatSessionHistory>("ChatSessionHistory")
-        .register::<ChatSessionChatkitConfiguration>("ChatSessionChatkitConfiguration")
-        .register::<ChatSessionResource>("ChatSessionResource")
-        .register::<WorkflowTracingParam>("WorkflowTracingParam")
-        .register::<WorkflowParam>("WorkflowParam")
-        .register::<ExpiresAfterParam>("ExpiresAfterParam")
-        .register::<RateLimitsParam>("RateLimitsParam")
-        .register::<AutomaticThreadTitlingParam>("AutomaticThreadTitlingParam")
-        .register::<FileUploadParam>("FileUploadParam")
-        .register::<HistoryParam>("HistoryParam")
-        .register::<ChatkitConfigurationParam>("ChatkitConfigurationParam")
-        .register::<CreateChatSessionBody>("CreateChatSessionBody")
-        .register::<UserMessageInputText>("UserMessageInputText")
-        .register::<UserMessageQuotedText>("UserMessageQuotedText")
-        .register::<AttachmentType>("AttachmentType")
-        .register::<Attachment>("Attachment")
-        .register::<ToolChoice>("ToolChoice")
-        .register::<InferenceOptions>("InferenceOptions")
-        .register::<UserMessageItem>("UserMessageItem")
-        .register::<FileAnnotationSource>("FileAnnotationSource")
-        .register::<FileAnnotation>("FileAnnotation")
-        .register::<UrlAnnotationSource>("UrlAnnotationSource")
-        .register::<UrlAnnotation>("UrlAnnotation")
-        .register::<ResponseOutputText>("ResponseOutputText")
-        .register::<AssistantMessageItem>("AssistantMessageItem")
-        .register::<WidgetMessageItem>("WidgetMessageItem")
-        .register::<ClientToolCallStatus>("ClientToolCallStatus")
-        .register::<ClientToolCallItem>("ClientToolCallItem")
-        .register::<TaskType>("TaskType")
-        .register::<TaskItem>("TaskItem")
-        .register::<TaskGroupTask>("TaskGroupTask")
-        .register::<TaskGroupItem>("TaskGroupItem")
-        .register::<ThreadItem>("ThreadItem")
-        .register::<ThreadItemListResource>("ThreadItemListResource")
-        .register::<ActiveStatus>("ActiveStatus")
-        .register::<LockedStatus>("LockedStatus")
-        .register::<ClosedStatus>("ClosedStatus")
-        .register::<ThreadResource>("ThreadResource")
-        .register::<DeletedThreadResource>("DeletedThreadResource")
-        .register::<ThreadListResource>("ThreadListResource")
-        .register::<DragPoint>("DragPoint")
-        .register::<BetaTokenCountsResource>("BetaTokenCountsResource")
-        .register::<BetaTokenCountsBody>("BetaTokenCountsBody")
-        .register::<BetaToolChoiceParam>("BetaToolChoiceParam")
-        .register::<BetaSpecificFunctionShellParam>("BetaSpecificFunctionShellParam")
-        .register::<BetaSpecificApplyPatchParam>("BetaSpecificApplyPatchParam")
-        .register::<
-            BetaSpecificProgrammaticToolCallingParam,
-        >("BetaSpecificProgrammaticToolCallingParam")
-        .register::<BetaToolChoiceCustom>("BetaToolChoiceCustom")
-        .register::<BetaToolChoiceMCP>("BetaToolChoiceMCP")
-        .register::<BetaToolChoiceFunction>("BetaToolChoiceFunction")
-        .register::<BetaToolChoiceTypes>("BetaToolChoiceTypes")
-        .register::<BetaToolChoiceAllowed>("BetaToolChoiceAllowed")
-        .register::<BetaToolChoiceOptions>("BetaToolChoiceOptions")
-        .register::<BetaConversationParam>("BetaConversationParam")
-        .register::<BetaConversationParam2>("BetaConversationParam2")
-        .register::<BetaPersonalityEnum>("BetaPersonalityEnum")
-        .register::<BetaTruncationEnum>("BetaTruncationEnum")
-        .register::<BetaReasoning>("BetaReasoning")
-        .register::<BetaReasoningEffort>("BetaReasoningEffort")
-        .register::<BetaReasoningModeEnum>("BetaReasoningModeEnum")
-        .register::<BetaResponseTextParam>("BetaResponseTextParam")
-        .register::<BetaVerbosity>("BetaVerbosity")
-        .register::<
-            BetaTextResponseFormatConfiguration,
-        >("BetaTextResponseFormatConfiguration")
-        .register::<BetaResponseFormatJsonObject>("BetaResponseFormatJsonObject")
-        .register::<BetaTextResponseFormatJsonSchema>("BetaTextResponseFormatJsonSchema")
-        .register::<
-            BetaResponseFormatJsonSchemaSchema,
-        >("BetaResponseFormatJsonSchemaSchema")
-        .register::<BetaResponseFormatText>("BetaResponseFormatText")
-        .register::<BetaTool>("BetaTool")
-        .register::<BetaApplyPatchToolParam>("BetaApplyPatchToolParam")
-        .register::<BetaCallableToolAllowedCaller>("BetaCallableToolAllowedCaller")
-        .register::<BetaWebSearchPreviewTool>("BetaWebSearchPreviewTool")
-        .register::<BetaSearchContentType>("BetaSearchContentType")
-        .register::<BetaSearchContextSize>("BetaSearchContextSize")
-        .register::<BetaApproximateLocation>("BetaApproximateLocation")
-        .register::<BetaToolSearchToolParam>("BetaToolSearchToolParam")
-        .register::<BetaEmptyModelParam>("BetaEmptyModelParam")
-        .register::<BetaToolSearchExecutionType>("BetaToolSearchExecutionType")
-        .register::<BetaNamespaceToolParam>("BetaNamespaceToolParam")
-        .register::<BetaCustomToolParam>("BetaCustomToolParam")
-        .register::<BetaCustomGrammarFormatParam>("BetaCustomGrammarFormatParam")
-        .register::<BetaGrammarSyntax1>("BetaGrammarSyntax1")
-        .register::<BetaCustomTextFormatParam>("BetaCustomTextFormatParam")
-        .register::<BetaFunctionToolParam>("BetaFunctionToolParam")
-        .register::<BetaFunctionShellToolParam>("BetaFunctionShellToolParam")
-        .register::<BetaContainerReferenceParam>("BetaContainerReferenceParam")
-        .register::<BetaLocalEnvironmentParam>("BetaLocalEnvironmentParam")
-        .register::<BetaLocalSkillParam>("BetaLocalSkillParam")
-        .register::<BetaContainerAutoParam>("BetaContainerAutoParam")
-        .register::<BetaInlineSkillParam>("BetaInlineSkillParam")
-        .register::<BetaInlineSkillSourceParam>("BetaInlineSkillSourceParam")
-        .register::<BetaSkillReferenceParam>("BetaSkillReferenceParam")
-        .register::<
-            BetaContainerNetworkPolicyAllowlistParam,
-        >("BetaContainerNetworkPolicyAllowlistParam")
-        .register::<
-            BetaContainerNetworkPolicyDomainSecretParam,
-        >("BetaContainerNetworkPolicyDomainSecretParam")
-        .register::<
-            BetaContainerNetworkPolicyDisabledParam,
-        >("BetaContainerNetworkPolicyDisabledParam")
-        .register::<BetaContainerMemoryLimit>("BetaContainerMemoryLimit")
-        .register::<BetaLocalShellToolParam>("BetaLocalShellToolParam")
-        .register::<BetaImageGenTool>("BetaImageGenTool")
-        .register::<BetaImageGenActionEnum>("BetaImageGenActionEnum")
-        .register::<BetaInputFidelity>("BetaInputFidelity")
-        .register::<BetaProgrammaticToolCallingParam>("BetaProgrammaticToolCallingParam")
-        .register::<BetaCodeInterpreterTool>("BetaCodeInterpreterTool")
-        .register::<BetaAutoCodeInterpreterToolParam>("BetaAutoCodeInterpreterToolParam")
-        .register::<BetaMCPTool>("BetaMCPTool")
-        .register::<BetaMCPToolFilter>("BetaMCPToolFilter")
-        .register::<BetaWebSearchTool>("BetaWebSearchTool")
-        .register::<BetaWebSearchApproximateLocation>("BetaWebSearchApproximateLocation")
-        .register::<BetaComputerUsePreviewTool>("BetaComputerUsePreviewTool")
-        .register::<BetaComputerEnvironment>("BetaComputerEnvironment")
-        .register::<BetaComputerTool>("BetaComputerTool")
-        .register::<BetaFileSearchTool>("BetaFileSearchTool")
-        .register::<BetaFilters>("BetaFilters")
-        .register::<BetaCompoundFilter>("BetaCompoundFilter")
-        .register::<BetaComparisonFilter>("BetaComparisonFilter")
-        .register::<BetaRankingOptions>("BetaRankingOptions")
-        .register::<BetaHybridSearchOptions>("BetaHybridSearchOptions")
-        .register::<BetaRankerVersionType>("BetaRankerVersionType")
-        .register::<BetaFunctionTool>("BetaFunctionTool")
-        .register::<BetaInputItem>("BetaInputItem")
-        .register::<BetaProgramOutputItemParam>("BetaProgramOutputItemParam")
-        .register::<BetaProgramOutputItemStatus>("BetaProgramOutputItemStatus")
-        .register::<BetaAgentTagParam>("BetaAgentTagParam")
-        .register::<BetaProgramItemParam>("BetaProgramItemParam")
-        .register::<BetaItemReferenceParam>("BetaItemReferenceParam")
-        .register::<BetaCompactionTriggerItemParam>("BetaCompactionTriggerItemParam")
-        .register::<BetaItem>("BetaItem")
-        .register::<BetaCustomToolCall>("BetaCustomToolCall")
-        .register::<BetaToolCallCaller>("BetaToolCallCaller")
-        .register::<BetaProgramToolCallCaller>("BetaProgramToolCallCaller")
-        .register::<BetaDirectToolCallCaller>("BetaDirectToolCallCaller")
-        .register::<BetaAgentTag>("BetaAgentTag")
-        .register::<BetaCustomToolCallOutput>("BetaCustomToolCallOutput")
-        .register::<
-            BetaFunctionAndCustomToolCallOutput,
-        >("BetaFunctionAndCustomToolCallOutput")
-        .register::<BetaInputFileContent>("BetaInputFileContent")
-        .register::<BetaFileInputDetail>("BetaFileInputDetail")
-        .register::<BetaPromptCacheBreakpointConfig>("BetaPromptCacheBreakpointConfig")
-        .register::<BetaInputImageContent>("BetaInputImageContent")
-        .register::<BetaImageDetail>("BetaImageDetail")
-        .register::<BetaInputTextContent>("BetaInputTextContent")
-        .register::<BetaToolCallCallerParam>("BetaToolCallCallerParam")
-        .register::<BetaProgramToolCallCallerParam>("BetaProgramToolCallCallerParam")
-        .register::<BetaDirectToolCallCallerParam>("BetaDirectToolCallCallerParam")
-        .register::<BetaMCPToolCall>("BetaMCPToolCall")
-        .register::<BetaMCPToolCallStatus>("BetaMCPToolCallStatus")
-        .register::<BetaMCPApprovalResponse>("BetaMCPApprovalResponse")
-        .register::<BetaMCPApprovalRequest>("BetaMCPApprovalRequest")
-        .register::<BetaMCPListTools>("BetaMCPListTools")
-        .register::<BetaMCPListToolsTool>("BetaMCPListToolsTool")
-        .register::<
-            BetaApplyPatchToolCallOutputItemParam,
-        >("BetaApplyPatchToolCallOutputItemParam")
-        .register::<
-            BetaApplyPatchCallOutputStatusParam,
-        >("BetaApplyPatchCallOutputStatusParam")
-        .register::<BetaApplyPatchToolCallItemParam>("BetaApplyPatchToolCallItemParam")
-        .register::<BetaApplyPatchOperationParam>("BetaApplyPatchOperationParam")
-        .register::<
-            BetaApplyPatchUpdateFileOperationParam,
-        >("BetaApplyPatchUpdateFileOperationParam")
-        .register::<
-            BetaApplyPatchDeleteFileOperationParam,
-        >("BetaApplyPatchDeleteFileOperationParam")
-        .register::<
-            BetaApplyPatchCreateFileOperationParam,
-        >("BetaApplyPatchCreateFileOperationParam")
-        .register::<BetaApplyPatchCallStatusParam>("BetaApplyPatchCallStatusParam")
-        .register::<
-            BetaFunctionShellCallOutputItemParam,
-        >("BetaFunctionShellCallOutputItemParam")
-        .register::<BetaFunctionShellCallItemStatus>("BetaFunctionShellCallItemStatus")
-        .register::<
-            BetaFunctionShellCallOutputContentParam,
-        >("BetaFunctionShellCallOutputContentParam")
-        .register::<
-            BetaFunctionShellCallOutputOutcomeParam,
-        >("BetaFunctionShellCallOutputOutcomeParam")
-        .register::<
-            BetaFunctionShellCallOutputExitOutcomeParam,
-        >("BetaFunctionShellCallOutputExitOutcomeParam")
-        .register::<
-            BetaFunctionShellCallOutputTimeoutOutcomeParam,
-        >("BetaFunctionShellCallOutputTimeoutOutcomeParam")
-        .register::<BetaFunctionShellCallItemParam>("BetaFunctionShellCallItemParam")
-        .register::<BetaFunctionShellActionParam>("BetaFunctionShellActionParam")
-        .register::<BetaLocalShellToolCallOutput>("BetaLocalShellToolCallOutput")
-        .register::<BetaLocalShellToolCall>("BetaLocalShellToolCall")
-        .register::<BetaLocalShellExecAction>("BetaLocalShellExecAction")
-        .register::<BetaCodeInterpreterToolCall>("BetaCodeInterpreterToolCall")
-        .register::<BetaCodeInterpreterOutputImage>("BetaCodeInterpreterOutputImage")
-        .register::<BetaCodeInterpreterOutputLogs>("BetaCodeInterpreterOutputLogs")
-        .register::<BetaImageGenToolCall>("BetaImageGenToolCall")
-        .register::<BetaCompactionSummaryItemParam>("BetaCompactionSummaryItemParam")
-        .register::<BetaReasoningItem>("BetaReasoningItem")
-        .register::<BetaReasoningTextContent>("BetaReasoningTextContent")
-        .register::<BetaSummaryTextContent>("BetaSummaryTextContent")
-        .register::<BetaAdditionalToolsItemParam>("BetaAdditionalToolsItemParam")
-        .register::<BetaToolSearchOutputItemParam>("BetaToolSearchOutputItemParam")
-        .register::<BetaFunctionCallItemStatus>("BetaFunctionCallItemStatus")
-        .register::<BetaToolSearchCallItemParam>("BetaToolSearchCallItemParam")
-        .register::<
-            BetaMultiAgentCallOutputItemParam,
-        >("BetaMultiAgentCallOutputItemParam")
-        .register::<BetaOutputTextContentParam>("BetaOutputTextContentParam")
-        .register::<BetaContainerFileCitationParam>("BetaContainerFileCitationParam")
-        .register::<BetaUrlCitationParam>("BetaUrlCitationParam")
-        .register::<BetaFileCitationParam>("BetaFileCitationParam")
-        .register::<BetaMultiAgentAction1>("BetaMultiAgentAction1")
-        .register::<BetaMultiAgentCallItemParam>("BetaMultiAgentCallItemParam")
-        .register::<BetaAgentMessageItemParam>("BetaAgentMessageItemParam")
-        .register::<BetaEncryptedContentParam>("BetaEncryptedContentParam")
-        .register::<
-            BetaInputImageContentParamAutoParam,
-        >("BetaInputImageContentParamAutoParam")
-        .register::<BetaPromptCacheBreakpointParam>("BetaPromptCacheBreakpointParam")
-        .register::<BetaDetailEnum>("BetaDetailEnum")
-        .register::<BetaInputTextContentParam>("BetaInputTextContentParam")
-        .register::<BetaFunctionCallOutputItemParam>("BetaFunctionCallOutputItemParam")
-        .register::<BetaInputFileContentParam>("BetaInputFileContentParam")
-        .register::<BetaFileDetailEnum>("BetaFileDetailEnum")
-        .register::<BetaFunctionToolCall>("BetaFunctionToolCall")
-        .register::<BetaWebSearchToolCall>("BetaWebSearchToolCall")
-        .register::<BetaWebSearchActionFind>("BetaWebSearchActionFind")
-        .register::<BetaWebSearchActionOpenPage>("BetaWebSearchActionOpenPage")
-        .register::<BetaWebSearchActionSearch>("BetaWebSearchActionSearch")
-        .register::<BetaComputerCallOutputItemParam>("BetaComputerCallOutputItemParam")
-        .register::<BetaComputerCallSafetyCheckParam>("BetaComputerCallSafetyCheckParam")
-        .register::<BetaComputerScreenshotImage>("BetaComputerScreenshotImage")
-        .register::<BetaComputerToolCall>("BetaComputerToolCall")
-        .register::<BetaComputerActionList>("BetaComputerActionList")
-        .register::<BetaComputerAction>("BetaComputerAction")
-        .register::<BetaWaitParam>("BetaWaitParam")
-        .register::<BetaTypeParam>("BetaTypeParam")
-        .register::<BetaScrollParam>("BetaScrollParam")
-        .register::<BetaScreenshotParam>("BetaScreenshotParam")
-        .register::<BetaMoveParam>("BetaMoveParam")
-        .register::<BetaKeyPressAction>("BetaKeyPressAction")
-        .register::<BetaDragParam>("BetaDragParam")
-        .register::<BetaCoordParam>("BetaCoordParam")
-        .register::<BetaDoubleClickAction>("BetaDoubleClickAction")
-        .register::<BetaClickParam>("BetaClickParam")
-        .register::<BetaClickButtonType>("BetaClickButtonType")
-        .register::<BetaFileSearchToolCall>("BetaFileSearchToolCall")
-        .register::<BetaVectorStoreFileAttributes>("BetaVectorStoreFileAttributes")
-        .register::<BetaOutputMessage>("BetaOutputMessage")
-        .register::<BetaMessagePhase>("BetaMessagePhase")
-        .register::<BetaOutputMessageContent>("BetaOutputMessageContent")
-        .register::<BetaRefusalContent>("BetaRefusalContent")
-        .register::<BetaOutputTextContent>("BetaOutputTextContent")
-        .register::<BetaLogProb>("BetaLogProb")
-        .register::<BetaTopLogProb>("BetaTopLogProb")
-        .register::<BetaAnnotation>("BetaAnnotation")
-        .register::<BetaFilePath>("BetaFilePath")
-        .register::<BetaContainerFileCitationBody>("BetaContainerFileCitationBody")
-        .register::<BetaUrlCitationBody>("BetaUrlCitationBody")
-        .register::<BetaFileCitationBody>("BetaFileCitationBody")
-        .register::<BetaInputMessage>("BetaInputMessage")
-        .register::<BetaInputMessageContentList>("BetaInputMessageContentList")
-        .register::<BetaInputContent>("BetaInputContent")
-        .register::<BetaEasyInputMessage>("BetaEasyInputMessage")
-        .register::<
-            BetaCompactResponseMethodPublicBody,
-        >("BetaCompactResponseMethodPublicBody")
-        .register::<BetaServiceTierEnum>("BetaServiceTierEnum")
-        .register::<BetaPromptCacheOptionsParam>("BetaPromptCacheOptionsParam")
-        .register::<BetaPromptCacheModeEnum>("BetaPromptCacheModeEnum")
-        .register::<BetaPromptCacheTTLEnum>("BetaPromptCacheTTLEnum")
-        .register::<BetaPromptCacheRetentionEnum>("BetaPromptCacheRetentionEnum")
-        .register::<BetaModelIdsCompaction>("BetaModelIdsCompaction")
-        .register::<BetaModelIdsResponses>("BetaModelIdsResponses")
-        .register::<BetaModelIdsShared>("BetaModelIdsShared")
-        .register::<BetaError>("BetaError")
-        .register::<BetaResponseItemList>("BetaResponseItemList")
-        .register::<BetaItemResource>("BetaItemResource")
-        .register::<BetaCustomToolCallOutputResource>("BetaCustomToolCallOutputResource")
-        .register::<BetaFunctionCallOutputStatusEnum>("BetaFunctionCallOutputStatusEnum")
-        .register::<BetaCustomToolCallResource>("BetaCustomToolCallResource")
-        .register::<BetaFunctionCallStatus>("BetaFunctionCallStatus")
-        .register::<BetaMCPApprovalResponseResource>("BetaMCPApprovalResponseResource")
-        .register::<BetaApplyPatchToolCallOutput>("BetaApplyPatchToolCallOutput")
-        .register::<BetaApplyPatchCallOutputStatus>("BetaApplyPatchCallOutputStatus")
-        .register::<BetaApplyPatchToolCall>("BetaApplyPatchToolCall")
-        .register::<
-            BetaApplyPatchUpdateFileOperation,
-        >("BetaApplyPatchUpdateFileOperation")
-        .register::<
-            BetaApplyPatchDeleteFileOperation,
-        >("BetaApplyPatchDeleteFileOperation")
-        .register::<
-            BetaApplyPatchCreateFileOperation,
-        >("BetaApplyPatchCreateFileOperation")
-        .register::<BetaApplyPatchCallStatus>("BetaApplyPatchCallStatus")
-        .register::<BetaFunctionShellCallOutput>("BetaFunctionShellCallOutput")
-        .register::<
-            BetaFunctionShellCallOutputContent,
-        >("BetaFunctionShellCallOutputContent")
-        .register::<
-            BetaFunctionShellCallOutputExitOutcome,
-        >("BetaFunctionShellCallOutputExitOutcome")
-        .register::<
-            BetaFunctionShellCallOutputTimeoutOutcome,
-        >("BetaFunctionShellCallOutputTimeoutOutcome")
-        .register::<
-            BetaFunctionShellCallOutputStatusEnum,
-        >("BetaFunctionShellCallOutputStatusEnum")
-        .register::<BetaFunctionShellCall>("BetaFunctionShellCall")
-        .register::<BetaContainerReferenceResource>("BetaContainerReferenceResource")
-        .register::<BetaLocalEnvironmentResource>("BetaLocalEnvironmentResource")
-        .register::<BetaFunctionShellCallStatus>("BetaFunctionShellCallStatus")
-        .register::<BetaFunctionShellAction>("BetaFunctionShellAction")
-        .register::<BetaCompactionBody>("BetaCompactionBody")
-        .register::<BetaProgramOutput>("BetaProgramOutput")
-        .register::<BetaProgramOutputStatus>("BetaProgramOutputStatus")
-        .register::<BetaProgram>("BetaProgram")
-        .register::<BetaAdditionalTools>("BetaAdditionalTools")
-        .register::<BetaMessageRole>("BetaMessageRole")
-        .register::<BetaToolSearchOutput>("BetaToolSearchOutput")
-        .register::<BetaToolSearchCall>("BetaToolSearchCall")
-        .register::<BetaMultiAgentCallOutput>("BetaMultiAgentCallOutput")
-        .register::<BetaMultiAgentAction>("BetaMultiAgentAction")
-        .register::<BetaMultiAgentCall>("BetaMultiAgentCall")
-        .register::<BetaAgentMessage>("BetaAgentMessage")
-        .register::<BetaEncryptedContent>("BetaEncryptedContent")
-        .register::<BetaComputerScreenshotContent>("BetaComputerScreenshotContent")
-        .register::<BetaTextContent>("BetaTextContent")
-        .register::<
-            BetaFunctionToolCallOutputResource,
-        >("BetaFunctionToolCallOutputResource")
-        .register::<BetaFunctionToolCallOutput>("BetaFunctionToolCallOutput")
-        .register::<BetaFunctionToolCallResource>("BetaFunctionToolCallResource")
-        .register::<
-            BetaComputerToolCallOutputResource,
-        >("BetaComputerToolCallOutputResource")
-        .register::<BetaComputerCallOutputStatus>("BetaComputerCallOutputStatus")
-        .register::<BetaComputerToolCallOutput>("BetaComputerToolCallOutput")
-        .register::<BetaInputMessageResource>("BetaInputMessageResource")
-        .register::<BetaCompactResource>("BetaCompactResource")
-        .register::<BetaResponseUsage>("BetaResponseUsage")
-        .register::<BetaItemField>("BetaItemField")
-        .register::<BetaMessage>("BetaMessage")
-        .register::<BetaMessagePhase2>("BetaMessagePhase2")
-        .register::<BetaMessageStatus>("BetaMessageStatus")
-        .register::<
-            BetaResponseCustomToolCallInputDoneEvent,
-        >("BetaResponseCustomToolCallInputDoneEvent")
-        .register::<
-            BetaResponseCustomToolCallInputDeltaEvent,
-        >("BetaResponseCustomToolCallInputDeltaEvent")
-        .register::<BetaResponseQueuedEvent>("BetaResponseQueuedEvent")
-        .register::<BetaResponse>("BetaResponse")
-        .register::<BetaResponseConversation>("BetaResponseConversation")
-        .register::<BetaModeration>("BetaModeration")
-        .register::<BetaModerationErrorBody>("BetaModerationErrorBody")
-        .register::<BetaModerationResultBody>("BetaModerationResultBody")
-        .register::<BetaModerationInputType>("BetaModerationInputType")
-        .register::<BetaPromptCacheOptions>("BetaPromptCacheOptions")
-        .register::<BetaOutputItem>("BetaOutputItem")
-        .register::<BetaResponseError>("BetaResponseError")
-        .register::<BetaResponseErrorCode>("BetaResponseErrorCode")
-        .register::<BetaResponseProperties>("BetaResponseProperties")
-        .register::<BetaPrompt>("BetaPrompt")
-        .register::<BetaResponsePromptVariables>("BetaResponsePromptVariables")
-        .register::<BetaToolsArray>("BetaToolsArray")
-        .register::<BetaModelResponseProperties>("BetaModelResponseProperties")
-        .register::<BetaServiceTier>("BetaServiceTier")
-        .register::<BetaMetadata>("BetaMetadata")
-        .register::<
-            BetaResponseOutputTextAnnotationAddedEvent,
-        >("BetaResponseOutputTextAnnotationAddedEvent")
-        .register::<
-            BetaResponseMCPListToolsInProgressEvent,
-        >("BetaResponseMCPListToolsInProgressEvent")
-        .register::<
-            BetaResponseMCPListToolsFailedEvent,
-        >("BetaResponseMCPListToolsFailedEvent")
-        .register::<
-            BetaResponseMCPListToolsCompletedEvent,
-        >("BetaResponseMCPListToolsCompletedEvent")
-        .register::<
-            BetaResponseMCPCallInProgressEvent,
-        >("BetaResponseMCPCallInProgressEvent")
-        .register::<BetaResponseMCPCallFailedEvent>("BetaResponseMCPCallFailedEvent")
-        .register::<
-            BetaResponseMCPCallCompletedEvent,
-        >("BetaResponseMCPCallCompletedEvent")
-        .register::<
-            BetaResponseMCPCallArgumentsDoneEvent,
-        >("BetaResponseMCPCallArgumentsDoneEvent")
-        .register::<
-            BetaResponseMCPCallArgumentsDeltaEvent,
-        >("BetaResponseMCPCallArgumentsDeltaEvent")
-        .register::<
-            BetaResponseImageGenCallPartialImageEvent,
-        >("BetaResponseImageGenCallPartialImageEvent")
-        .register::<
-            BetaResponseImageGenCallInProgressEvent,
-        >("BetaResponseImageGenCallInProgressEvent")
-        .register::<
-            BetaResponseImageGenCallGeneratingEvent,
-        >("BetaResponseImageGenCallGeneratingEvent")
-        .register::<
-            BetaResponseImageGenCallCompletedEvent,
-        >("BetaResponseImageGenCallCompletedEvent")
-        .register::<
-            BetaResponseReasoningTextDoneEvent,
-        >("BetaResponseReasoningTextDoneEvent")
-        .register::<
-            BetaResponseReasoningTextDeltaEvent,
-        >("BetaResponseReasoningTextDeltaEvent")
-        .register::<
-            BetaResponseReasoningSummaryTextDoneEvent,
-        >("BetaResponseReasoningSummaryTextDoneEvent")
-        .register::<
-            BetaResponseReasoningSummaryTextDeltaEvent,
-        >("BetaResponseReasoningSummaryTextDeltaEvent")
-        .register::<
-            BetaResponseReasoningSummaryPartDoneEvent,
-        >("BetaResponseReasoningSummaryPartDoneEvent")
-        .register::<
-            BetaResponseReasoningSummaryPartAddedEvent,
-        >("BetaResponseReasoningSummaryPartAddedEvent")
-        .register::<BetaResponseTextDoneEvent>("BetaResponseTextDoneEvent")
-        .register::<BetaResponseLogProb>("BetaResponseLogProb")
-        .register::<BetaResponseTextDeltaEvent>("BetaResponseTextDeltaEvent")
-        .register::<BetaResponseRefusalDoneEvent>("BetaResponseRefusalDoneEvent")
-        .register::<BetaResponseRefusalDeltaEvent>("BetaResponseRefusalDeltaEvent")
-        .register::<BetaResponseOutputItemDoneEvent>("BetaResponseOutputItemDoneEvent")
-        .register::<BetaResponseOutputItemAddedEvent>("BetaResponseOutputItemAddedEvent")
-        .register::<BetaResponseInProgressEvent>("BetaResponseInProgressEvent")
-        .register::<
-            BetaResponseFunctionCallArgumentsDoneEvent,
-        >("BetaResponseFunctionCallArgumentsDoneEvent")
-        .register::<
-            BetaResponseFunctionCallArgumentsDeltaEvent,
-        >("BetaResponseFunctionCallArgumentsDeltaEvent")
-        .register::<
-            BetaResponseFileSearchCallSearchingEvent,
-        >("BetaResponseFileSearchCallSearchingEvent")
-        .register::<
-            BetaResponseFileSearchCallInProgressEvent,
-        >("BetaResponseFileSearchCallInProgressEvent")
-        .register::<
-            BetaResponseFileSearchCallCompletedEvent,
-        >("BetaResponseFileSearchCallCompletedEvent")
-        .register::<BetaResponseErrorEvent>("BetaResponseErrorEvent")
-        .register::<BetaResponseCreatedEvent>("BetaResponseCreatedEvent")
-        .register::<BetaResponseContentPartDoneEvent>("BetaResponseContentPartDoneEvent")
-        .register::<BetaOutputContent>("BetaOutputContent")
-        .register::<
-            BetaResponseContentPartAddedEvent,
-        >("BetaResponseContentPartAddedEvent")
-        .register::<BetaResponseCompletedEvent>("BetaResponseCompletedEvent")
-        .register::<
-            BetaResponseCodeInterpreterCallInterpretingEvent,
-        >("BetaResponseCodeInterpreterCallInterpretingEvent")
-        .register::<
-            BetaResponseCodeInterpreterCallInProgressEvent,
-        >("BetaResponseCodeInterpreterCallInProgressEvent")
-        .register::<
-            BetaResponseCodeInterpreterCallCompletedEvent,
-        >("BetaResponseCodeInterpreterCallCompletedEvent")
-        .register::<
-            BetaResponseCodeInterpreterCallCodeDoneEvent,
-        >("BetaResponseCodeInterpreterCallCodeDoneEvent")
-        .register::<
-            BetaResponseCodeInterpreterCallCodeDeltaEvent,
-        >("BetaResponseCodeInterpreterCallCodeDeltaEvent")
-        .register::<
-            BetaResponseAudioTranscriptDoneEvent,
-        >("BetaResponseAudioTranscriptDoneEvent")
-        .register::<
-            BetaResponseAudioTranscriptDeltaEvent,
-        >("BetaResponseAudioTranscriptDeltaEvent")
-        .register::<BetaResponseAudioDoneEvent>("BetaResponseAudioDoneEvent")
-        .register::<BetaResponseAudioDeltaEvent>("BetaResponseAudioDeltaEvent")
-        .register::<BetaResponseIncompleteEvent>("BetaResponseIncompleteEvent")
-        .register::<BetaResponseFailedEvent>("BetaResponseFailedEvent")
-        .register::<
-            BetaResponseWebSearchCallCompletedEvent,
-        >("BetaResponseWebSearchCallCompletedEvent")
-        .register::<
-            BetaResponseWebSearchCallSearchingEvent,
-        >("BetaResponseWebSearchCallSearchingEvent")
-        .register::<
-            BetaResponseWebSearchCallInProgressEvent,
-        >("BetaResponseWebSearchCallInProgressEvent")
-        .register::<BetaOutputAudio>("BetaOutputAudio")
-        .register::<BetaInputAudio>("BetaInputAudio")
-        .register::<BetaInputParam>("BetaInputParam")
-        .register::<BetaContent>("BetaContent")
-        .register::<BetaIncludeEnum>("BetaIncludeEnum")
-        .register::<BetaResponsesServerEvent>("BetaResponsesServerEvent")
-        .register::<BetaResponseInjectFailedEvent>("BetaResponseInjectFailedEvent")
-        .register::<BetaResponseInjectCreatedEvent>("BetaResponseInjectCreatedEvent")
-        .register::<BetaResponseStreamEvent>("BetaResponseStreamEvent")
-        .register::<BetaResponsesClientEvent>("BetaResponsesClientEvent")
-        .register::<BetaResponseInjectEvent>("BetaResponseInjectEvent")
-        .register::<
-            BetaResponsesClientEventResponseCreate,
-        >("BetaResponsesClientEventResponseCreate")
-        .register::<BetaCreateResponse>("BetaCreateResponse")
-        .register::<BetaMultiAgentParam>("BetaMultiAgentParam")
-        .register::<BetaContextManagementParam>("BetaContextManagementParam")
-        .register::<BetaResponseStreamOptions>("BetaResponseStreamOptions")
-        .register::<BetaModerationParam>("BetaModerationParam")
-        .register::<BetaModerationPolicyParam>("BetaModerationPolicyParam")
-        .register::<BetaModerationConfigParam>("BetaModerationConfigParam")
-        .register::<BetaModerationMode>("BetaModerationMode")
-        .register::<
-            BetaCreateModelResponseProperties,
-        >("BetaCreateModelResponseProperties")
+                        .with_description("Display name for this API character.")
+                        .constraints(
+                            schematic_define::constraints::Constraints::new()
+                                .min_length(1u64)
+                                .max_length(80u64),
+                        ),
+                ]),
+            )
+            .build()
+    }
+    endpoints.push(endpoint_231(ctx)?);
+    fn endpoint_232(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "GetVideoCharacter",
+                RestMethod::Get,
+                "/videos/characters/{character_id}",
+            )
+            .describes("Fetch a character.")
+            .returns_json::<VideoCharacterResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_232(ctx)?);
+    fn endpoint_233(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateVideoEdit", RestMethod::Post, "/videos/edits")
+            .describes(
+                "Create a new video generation job by editing a source video or existing generated video.",
+            )
+            .returns_json::<VideoResource>(ctx)
+            .request_json::<CreateVideoEditJsonBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_233(ctx)?);
+    fn endpoint_234(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateVideoExtend", RestMethod::Post, "/videos/extensions")
+            .describes("Create an extension of a completed video.")
+            .returns_json::<VideoResource>(ctx)
+            .request_json::<CreateVideoExtendJsonBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_234(ctx)?);
+    fn endpoint_235(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("GetVideo", RestMethod::Get, "/videos/{video_id}")
+            .describes("Fetch the latest metadata for a generated video.")
+            .returns_json::<VideoResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_235(ctx)?);
+    fn endpoint_236(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("DeleteVideo", RestMethod::Delete, "/videos/{video_id}")
+            .describes(
+                "Permanently delete a completed or failed video and its stored assets.",
+            )
+            .returns_json::<DeletedVideoResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_236(ctx)?);
+    fn endpoint_237(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "RetrieveVideoContent",
+                RestMethod::Get,
+                "/videos/{video_id}/content",
+            )
+            .describes(
+                "Download the generated video bytes or a derived preview asset.\n\nStreams the rendered video content for the specified video job.",
+            )
+            .returns(Success::binary().content_type("video/mp4"))
+            .returns(Success::binary().content_type("image/webp"))
+            .returns(Success::json(ctx.register::<serde_json::Value>()?))
+            .query(ParamDef {
+                name: "variant".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Which downloadable asset to return. Defaults to the MP4 video."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Json,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_237(ctx)?);
+    fn endpoint_238(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateVideoRemix", RestMethod::Post, "/videos/{video_id}/remix")
+            .describes("Create a remix of a completed video using a refreshed prompt.")
+            .returns_json::<VideoResource>(ctx)
+            .request_json::<CreateVideoRemixBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_238(ctx)?);
+    fn endpoint_239(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("Getinputtokencounts", RestMethod::Post, "/responses/input_tokens")
+            .describes(
+                "Returns input token counts of the request.\n\nReturns an object with `object` set to `response.input_tokens` and an `input_tokens` count.",
+            )
+            .returns_json::<BetaTokenCountsResource>(ctx)
+            .request_json::<BetaTokenCountsBody>(ctx)
+            .query(ParamDef {
+                name: "beta".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: None,
+                param_type: QueryParamType::Boolean,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .header_param(ParamDef {
+                name: "openai-beta".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Optional beta features to enable for this request.".to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<String>::from(["responses_multi_agent=v1".to_string()]),
+                        ),
+                    ),
+                ),
+                explode: false,
+                style: ParamStyle::Simple,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["responses_multi_agent=v1"]),
+                            ),
+                    ),
+                ),
+            })
+            .build()
+    }
+    endpoints.push(endpoint_239(ctx)?);
+    fn endpoint_240(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("Compactconversation", RestMethod::Post, "/responses/compact")
+            .describes(
+                "Compact a conversation. Returns a compacted response object.\n\nLearn when and how to compact long-running conversations in the [conversation state guide](/docs/guides/conversation-state#managing-the-context-window). For ZDR-compatible compaction details, see [Compaction (advanced)](/docs/guides/conversation-state#compaction-advanced).",
+            )
+            .returns_json::<BetaCompactResource>(ctx)
+            .request_json::<BetaCompactResponseMethodPublicBody>(ctx)
+            .query(ParamDef {
+                name: "beta".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: None,
+                param_type: QueryParamType::Boolean,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .header_param(ParamDef {
+                name: "openai-beta".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Optional beta features to enable for this request.".to_string(),
+                ),
+                param_type: QueryParamType::Array(
+                    Box::new(
+                        QueryParamType::Enum(
+                            Vec::<String>::from(["responses_multi_agent=v1".to_string()]),
+                        ),
+                    ),
+                ),
+                explode: false,
+                style: ParamStyle::Simple,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .items(
+                                schematic_define::constraints::Constraints::new()
+                                    .allowed_values(["responses_multi_agent=v1"]),
+                            ),
+                    ),
+                ),
+            })
+            .build()
+    }
+    endpoints.push(endpoint_240(ctx)?);
+    fn endpoint_241(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListSkills", RestMethod::Get, "/skills")
+            .describes("List all skills for the current project.")
+            .returns_json::<SkillListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Number of items to retrieve".to_string()),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order of results by timestamp. Use `asc` for ascending order or `desc` for descending order."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Json,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Identifier for the last item from the previous pagination request"
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_241(ctx)?);
+    fn endpoint_242(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateSkill", RestMethod::Post, "/skills")
+            .describes("Create a new skill.")
+            .returns_json::<SkillResource>(ctx)
+            .request_json::<CreateSkillBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_242(ctx)?);
+    fn endpoint_243(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("GetSkill", RestMethod::Get, "/skills/{skill_id}")
+            .describes("Get a skill by its ID.")
+            .returns_json::<SkillResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_243(ctx)?);
+    fn endpoint_244(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "UpdateSkillDefaultVersion",
+                RestMethod::Post,
+                "/skills/{skill_id}",
+            )
+            .describes("Update the default version pointer for a skill.")
+            .returns_json::<SkillResource>(ctx)
+            .request_json::<SetDefaultSkillVersionBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_244(ctx)?);
+    fn endpoint_245(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("DeleteSkill", RestMethod::Delete, "/skills/{skill_id}")
+            .describes("Delete a skill by its ID.")
+            .returns_json::<DeletedSkillResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_245(ctx)?);
+    fn endpoint_246(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("GetSkillContent", RestMethod::Get, "/skills/{skill_id}/content")
+            .describes("Download a skill zip bundle by its ID.")
+            .returns(Success::binary().content_type("application/zip"))
+            .returns(Success::json(ctx.register::<serde_json::Value>()?))
+            .build()
+    }
+    endpoints.push(endpoint_246(ctx)?);
+    fn endpoint_247(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListSkillVersions",
+                RestMethod::Get,
+                "/skills/{skill_id}/versions",
+            )
+            .describes("List skill versions for a skill.")
+            .returns_json::<SkillVersionListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("Number of versions to retrieve.".to_string()),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order of results by version number.".to_string(),
+                ),
+                param_type: QueryParamType::Json,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some("The skill version ID to start after.".to_string()),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_247(ctx)?);
+    fn endpoint_248(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CreateSkillVersion",
+                RestMethod::Post,
+                "/skills/{skill_id}/versions",
+            )
+            .describes("Create a new immutable skill version.")
+            .returns_json::<SkillVersionResource>(ctx)
+            .request_json::<CreateSkillVersionBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_248(ctx)?);
+    fn endpoint_249(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "GetSkillVersion",
+                RestMethod::Get,
+                "/skills/{skill_id}/versions/{version}",
+            )
+            .describes("Get a specific skill version.")
+            .returns_json::<SkillVersionResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_249(ctx)?);
+    fn endpoint_250(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteSkillVersion",
+                RestMethod::Delete,
+                "/skills/{skill_id}/versions/{version}",
+            )
+            .describes("Delete a skill version.")
+            .returns_json::<DeletedSkillVersionResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_250(ctx)?);
+    fn endpoint_251(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "GetSkillVersionContent",
+                RestMethod::Get,
+                "/skills/{skill_id}/versions/{version}/content",
+            )
+            .describes("Download a skill version zip bundle.")
+            .returns(Success::binary().content_type("application/zip"))
+            .returns(Success::json(ctx.register::<serde_json::Value>()?))
+            .build()
+    }
+    endpoints.push(endpoint_251(ctx)?);
+    fn endpoint_252(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "CancelChatSessionMethod",
+                RestMethod::Post,
+                "/chatkit/sessions/{session_id}/cancel",
+            )
+            .describes(
+                "Cancel an active ChatKit session and return its most recent metadata.\n\nCancelling prevents new requests from using the issued client secret.",
+            )
+            .returns_json::<ChatSessionResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_252(ctx)?);
+    fn endpoint_253(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("CreateChatSessionMethod", RestMethod::Post, "/chatkit/sessions")
+            .describes("Create a ChatKit session.")
+            .returns_json::<ChatSessionResource>(ctx)
+            .request_json::<CreateChatSessionBody>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_253(ctx)?);
+    fn endpoint_254(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "ListThreadItemsMethod",
+                RestMethod::Get,
+                "/chatkit/threads/{thread_id}/items",
+            )
+            .describes("List items that belong to a ChatKit thread.")
+            .returns_json::<ThreadItemListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Maximum number of thread items to return. Defaults to 20."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order for results by creation time. Defaults to `desc`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Json,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "List items created after this thread item ID. Defaults to null for the first page."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "before".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "List items created before this thread item ID. Defaults to null for the newest results."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .build()
+    }
+    endpoints.push(endpoint_254(ctx)?);
+    fn endpoint_255(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("GetThreadMethod", RestMethod::Get, "/chatkit/threads/{thread_id}")
+            .describes("Retrieve a ChatKit thread by its identifier.")
+            .returns_json::<ThreadResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_255(ctx)?);
+    fn endpoint_256(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new(
+                "DeleteThreadMethod",
+                RestMethod::Delete,
+                "/chatkit/threads/{thread_id}",
+            )
+            .describes(
+                "Delete a ChatKit thread along with its items and stored attachments.",
+            )
+            .returns_json::<DeletedThreadResource>(ctx)
+            .build()
+    }
+    endpoints.push(endpoint_256(ctx)?);
+    fn endpoint_257(ctx: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+        Endpoint::new("ListThreadsMethod", RestMethod::Get, "/chatkit/threads")
+            .describes("List ChatKit threads with optional pagination and user filters.")
+            .returns_json::<ThreadListResource>(ctx)
+            .query(ParamDef {
+                name: "limit".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Maximum number of thread items to return. Defaults to 20."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Integer,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .minimum("0")
+                            .maximum("100"),
+                    ),
+                ),
+            })
+            .query(ParamDef {
+                name: "order".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Sort order for results by creation time. Defaults to `desc`."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::Json,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "after".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "List items created after this thread item ID. Defaults to null for the first page."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "before".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "List items created before this thread item ID. Defaults to null for the newest results."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: None,
+            })
+            .query(ParamDef {
+                name: "user".to_string(),
+                required: false,
+                secret: false,
+                rust_name: None,
+                pager_managed: false,
+                deprecated: false,
+                description: Some(
+                    "Filter threads that belong to this user identifier. Defaults to null to return all users."
+                        .to_string(),
+                ),
+                param_type: QueryParamType::String,
+                explode: true,
+                style: ParamStyle::Form,
+                constraints: Some(
+                    Box::new(
+                        schematic_define::constraints::Constraints::new()
+                            .min_length(1u64)
+                            .max_length(512u64),
+                    ),
+                ),
+            })
+            .build()
+    }
+    endpoints.push(endpoint_257(ctx)?);
+    let api = RestApi::builder(ctx, "OpenAI", "https://api.openai.com/v1")
+        .describes(
+            "The OpenAI REST API. Please see https://platform.openai.com/docs/api-reference for more details.",
+        )
+        .authentication(
+            AuthStrategy::BearerToken {
+                header: None,
+            },
+            Vec::<String>::from([]),
+        )
+        .module_path("openai")
+        .request_id_header("x-request-id")
+        .cross_origin(CrossOrigin::same_origin())
+        .endpoints(endpoints)
+        .build()?;
+    Ok(crate::openai_pagination::apply(api))
 }

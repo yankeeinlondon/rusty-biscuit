@@ -3,7 +3,6 @@
 //! Provides an RAII guard for entering/exiting raw terminal mode and a global
 //! mutex to serialize all terminal queries (OSC, DSR, CSI 14 t, etc.).
 
-#[cfg(unix)]
 use std::sync::Mutex;
 
 /// Global mutex to serialize terminal queries.
@@ -11,7 +10,6 @@ use std::sync::Mutex;
 /// Multiple concurrent queries (OSC color probes, DSR cursor position,
 /// CSI 14 t window size) would race on stdin/stdout and corrupt responses.
 /// All query functions must hold this lock.
-#[cfg(unix)]
 pub static TERMINAL_QUERY_MUTEX: Mutex<()> = Mutex::new(());
 
 /// RAII guard that enters raw terminal mode on creation and restores the

@@ -8,7 +8,8 @@ use bytes::Bytes;
 use http::Method;
 use schematic_runtime::{
     ApiDefinition, AuthConfig, AuthMethod, BuildError, Client, Credential, CredentialPlacement, EnvFallback, FullCall,
-    ErrorKind, Json, NoDeclaredError, RequestParts, Response, TransportError, TransportErrorKind,
+    ErrorKind, Json, NoDeclaredError, QueryDelimiter, QueryValue, RequestParts, Response, TransportError,
+    TransportErrorKind,
 };
 use test_toolkit::EnvGuard;
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -451,6 +452,23 @@ async fn ordinary_duplicate_query_values_stay_beside_a_query_credential() {
     send(&client, parts).credential(Credential::api_key("k1")).await.expect("head");
 
     assert_eq!(received(&server).await[0].url.query(), Some("tag=a&tag=b&key=k1"));
+}
+
+#[tokio::test]
+async fn stripping_a_query_credential_keeps_the_other_pairs_byte_for_byte() {
+    let api = ApiDefinition::new(UNUSED).auth(AuthConfig::none().accept(CredentialPlacement::ApiKeyQuery { name: "key".into() }));
+    let server = ok_server().await;
+    let client = builder(api, &server.uri()).build().expect("client");
+    let mut parts = get();
+    parts.query = vec![
+        ("tags".into(), QueryValue::delimited(["a,b", "c d"], QueryDelimiter::Comma)),
+        ("key".into(), SENTINEL.into()),
+        ("q".into(), "x+y".into()),
+    ];
+
+    send(&client, parts).anonymous().await.expect("head");
+
+    assert_eq!(received(&server).await[0].url.query(), Some("tags=a%2Cb,c%20d&q=x%2By"));
 }
 
 #[tokio::test]

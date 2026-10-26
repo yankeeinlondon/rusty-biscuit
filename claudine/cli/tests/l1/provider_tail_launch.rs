@@ -340,35 +340,56 @@ const FLAG_SEPARATE: &str = "sk-proj-flagseparate0123456789";
 /// sensitive-flag and short-attachment rules cover, on every surface of all
 /// three composition commands and the direct wrapper, while the child gets
 /// the original tokens.
-#[test]
-fn embedded_credentials_reach_the_child_and_no_display_surface() {
-    let assignment = format!("api_key={EMBEDDED}");
-    let long = format!("--config={LONG_ATTACHED}");
-    let short = format!("-c{SHORT_ATTACHED}");
-    let token = format!("--token={FLAG_ATTACHED}");
-    let composition_tail = [
-        "-c",
-        assignment.as_str(),
-        long.as_str(),
-        short.as_str(),
-        token.as_str(),
-        "--api-key",
-        FLAG_SEPARATE,
-    ];
-    // The direct wrapper reads a separate word as its prompt, so its
-    // sensitive flag carries the value attached.
-    let api_key = format!("--api-key={FLAG_SEPARATE}");
-    let direct_tail = [
-        "-c",
-        assignment.as_str(),
-        long.as_str(),
-        short.as_str(),
-        token.as_str(),
-        api_key.as_str(),
-    ];
-    let secrets = [EMBEDDED, LONG_ATTACHED, SHORT_ATTACHED, FLAG_ATTACHED, FLAG_SEPARATE];
+mod embedded_credentials_reach_the_child_and_no_display_surface {
+    use super::*;
 
-    for command in ["compose", "inline-compose", "sequence", "codex"] {
+    const COMMANDS: [&str; 4] = ["compose", "inline-compose", "sequence", "codex"];
+
+    macro_rules! command_tests {
+        ($($test:ident => $command:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_credentials_masked($command); })*
+
+            #[test]
+            fn every_row_has_a_listed_test() {
+                assert_eq!(COMMANDS, [$($command),*]);
+            }
+        };
+    }
+
+    command_tests! {
+        compose => "compose",
+        inline_compose => "inline-compose",
+        sequence => "sequence",
+        direct_wrapper => "codex",
+    }
+
+    fn assert_credentials_masked(command: &str) {
+        let assignment = format!("api_key={EMBEDDED}");
+        let long = format!("--config={LONG_ATTACHED}");
+        let short = format!("-c{SHORT_ATTACHED}");
+        let token = format!("--token={FLAG_ATTACHED}");
+        let composition_tail = [
+            "-c",
+            assignment.as_str(),
+            long.as_str(),
+            short.as_str(),
+            token.as_str(),
+            "--api-key",
+            FLAG_SEPARATE,
+        ];
+        // The direct wrapper reads a separate word as its prompt, so its
+        // sensitive flag carries the value attached.
+        let api_key = format!("--api-key={FLAG_SEPARATE}");
+        let direct_tail = [
+            "-c",
+            assignment.as_str(),
+            long.as_str(),
+            short.as_str(),
+            token.as_str(),
+            api_key.as_str(),
+        ];
+        let secrets = [EMBEDDED, LONG_ATTACHED, SHORT_ATTACHED, FLAG_ATTACHED, FLAG_SEPARATE];
+
         let fixture = CliProcessFixture::named(&format!("tail-embedded-{command}"));
         let body = fixture.cwd().join("inline.md");
         let log = stub(
@@ -554,9 +575,12 @@ fn an_operand_only_explicit_tail_rejection_is_reported_once() {
 
 /// Failures that are not a rejection of the forwarded tail are never
 /// attributed to it, and the exit code is preserved.
-#[test]
-fn other_failures_are_not_attributed_to_the_tail() {
-    let cases: &[(&str, &str, &[&str])] = &[
+mod other_failures_are_not_attributed_to_the_tail {
+    use super::*;
+
+    /// Each failure's name, the stub provider's behavior, and any extra
+    /// arguments it needs.
+    const ROWS: [(&str, &str, &[&str]); 6] = [
         ("injected", "echo \"error: unexpected argument '--output-last-message' found\" >&2\nexit 2", &[]),
         ("auth", "echo 'Error: authentication failed' >&2\nexit 2", &[]),
         ("api", "echo 'API Error: 500 internal' >&2\nexit 2", &[]),
@@ -564,7 +588,30 @@ fn other_failures_are_not_attributed_to_the_tail() {
         ("interrupted", "echo \"error: unexpected argument '-c' found\" >&2\nexit 130", &[]),
         ("timeout", "sleep 5\nexit 0", &["--timeout", "1s"]),
     ];
-    for (name, behavior, extra) in cases {
+
+    macro_rules! failure_tests {
+        ($($test:ident => $name:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_not_attributed($name); })*
+
+            #[test]
+            fn every_row_has_a_listed_test() {
+                let rows: Vec<&str> = ROWS.iter().map(|(name, _, _)| *name).collect();
+                assert_eq!(rows, [$($name),*]);
+            }
+        };
+    }
+
+    failure_tests! {
+        an_injected_switch_rejection => "injected",
+        an_authentication_failure => "auth",
+        an_api_error => "api",
+        an_ambiguous_failure => "ambiguous",
+        an_interrupted_run => "interrupted",
+        a_timeout => "timeout",
+    }
+
+    fn assert_not_attributed(name: &str) {
+        let (name, behavior, extra) = ROWS.iter().find(|(row, _, _)| *row == name).expect("a listed row");
         let fixture = CliProcessFixture::named(&format!("tail-correlate-{name}"));
         stub(&fixture, "goose", behavior);
         let file = doc(&fixture, "plan.md", "---\ntitle: plan\n---\nBody\n");

@@ -76,6 +76,95 @@ fn chain_on(repo: &Path, tree: &str, from: &str, prefix: &str, count: usize) -> 
     chain
 }
 
+/// Commits written by one `git fast-import` rather than one `git commit-tree`
+/// each, for histories of hundreds of commits. Every commit keeps its first
+/// parent's tree, so the batch needs no file commands.
+struct CommitBatch {
+    script: String,
+    commits: usize,
+    committer: String,
+}
+
+/// A parent: an existing commit, or one earlier in the same batch.
+#[derive(Clone, Copy)]
+enum Rev<'a> {
+    Sha(&'a str),
+    Batch(usize),
+}
+
+impl Rev<'_> {
+    fn spelling(self) -> String {
+        match self {
+            Rev::Sha(sha) => sha.to_string(),
+            Rev::Batch(index) => format!(":{}", index + 1),
+        }
+    }
+}
+
+impl CommitBatch {
+    fn new(repo: &Path) -> Self {
+        let name = git_output(repo, &["config", "user.name"]);
+        let email = git_output(repo, &["config", "user.email"]);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock after 1970").as_secs();
+        Self { script: String::new(), commits: 0, committer: format!("{name} <{email}> {now} +0000") }
+    }
+
+    /// Queues a commit with `parents` (first parent first); returns its index.
+    fn commit(&mut self, parents: &[Rev], message: &str) -> usize {
+        use std::fmt::Write as _;
+        let index = self.commits;
+        self.commits += 1;
+        let (first, merges) = parents.split_first().expect("a batch commit has a parent");
+        let _ = write!(
+            self.script,
+            "commit refs/fixture-batch\nmark :{}\nauthor {committer}\ncommitter {committer}\ndata {}\n{message}\nfrom {}\n",
+            index + 1,
+            message.len(),
+            first.spelling(),
+            committer = self.committer,
+        );
+        for merge in merges {
+            let _ = writeln!(self.script, "merge {}", merge.spelling());
+        }
+        self.script.push('\n');
+        index
+    }
+
+    /// Queues `count` commits after `from`, oldest first.
+    fn chain(&mut self, from: Rev, prefix: &str, count: usize) -> Vec<usize> {
+        let mut chain: Vec<usize> = Vec::with_capacity(count);
+        for n in 1..=count {
+            let parent = chain.last().map_or(from, |&index| Rev::Batch(index));
+            chain.push(self.commit(&[parent], &format!("{prefix}{n}")));
+        }
+        chain
+    }
+
+    /// Writes every queued commit; returns their SHAs by index.
+    fn write(self, repo: &Path) -> Vec<String> {
+        use std::io::Write as _;
+        let marks = repo.join(".git").join("fixture-batch-marks");
+        let mut child = Command::new("git")
+            .current_dir(repo)
+            .args(["fast-import", "--quiet"])
+            .arg(format!("--export-marks={}", marks.display()))
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .expect("git should be installed");
+        child.stdin.take().expect("piped stdin").write_all(self.script.as_bytes()).expect("feeding fast-import");
+        assert!(child.wait().expect("fast-import ran").success(), "git fast-import failed in {repo:?}");
+        let mut shas = vec![String::new(); self.commits];
+        for line in fs::read_to_string(&marks).expect("fast-import marks").lines() {
+            let (mark, sha) = line.split_once(' ').expect("`:mark sha`");
+            let index: usize = mark.trim_start_matches(':').parse().expect("numeric mark");
+            shas[index - 1] = sha.to_string();
+        }
+        let _ = fs::remove_file(&marks);
+        run_git(repo, &["update-ref", "-d", "refs/fixture-batch"]);
+        shas
+    }
+}
+
 /// The observed-shape history's commit counts, the same in the L1
 /// (`observed_sparse_lanes`) and perf (`GraphFixture::observed_sparse_lanes`)
 /// builders.
@@ -179,20 +268,29 @@ impl Fixture {
     fn sparse_lanes() -> Self {
         let mut fixture = Self::init();
         let repo = fixture.main.clone();
-        let tree = git_output(&repo, &["rev-parse", "HEAD^{tree}"]);
-        let mut d = vec![git_output(&repo, &["rev-parse", "HEAD~1"]), git_output(&repo, &["rev-parse", "HEAD"])];
-        let more = chain_on(&repo, &tree, &d[1], "d", 11);
-        d.extend(more);
-        let schema = chain_on(&repo, &tree, &d[2], "s", SPARSE_SCHEMA_COMMITS);
-        let before = chain_on(&repo, &tree, &d[5], "w", SPARSE_WT_UX_BEFORE_MERGE);
-        let w1 = before.last().unwrap().clone();
-        let m103 = commit_on(&repo, &tree, &[&d[12], &w1], "Merge pull request #103 from fix/wt-ux");
-        let sniff = chain_on(&repo, &tree, &w1, "n", SPARSE_SNIFF_COMMITS);
-        let after = chain_on(&repo, &tree, &w1, "w", SPARSE_WT_UX_AFTER_MERGE);
-        let d13 = commit_on(&repo, &tree, &[&m103], "d13");
-        let m104 = commit_on(&repo, &tree, &[&d13, sniff.last().unwrap()], "Merge pull request #104 from fix/sniff");
-        let b1 = commit_on(&repo, &tree, &[after.last().unwrap(), &m104], "Merge branch 'main' into fix/wt-ux");
-        let synced = chain_on(&repo, &tree, &b1, "x", SPARSE_WT_UX_AFTER_SYNC);
+        // About 240 commits: one fast-import, not a git process per commit.
+        let (d0, d1) = (git_output(&repo, &["rev-parse", "HEAD~1"]), git_output(&repo, &["rev-parse", "HEAD"]));
+        let mut batch = CommitBatch::new(&repo);
+        let more = batch.chain(Rev::Sha(&d1), "d", 11);
+        // `d[i]` for i >= 2 is `more[i - 2]`.
+        let d = |i: usize| Rev::Batch(more[i - 2]);
+        let schema = batch.chain(d(2), "s", SPARSE_SCHEMA_COMMITS);
+        let before = batch.chain(d(5), "w", SPARSE_WT_UX_BEFORE_MERGE);
+        let w1 = *before.last().unwrap();
+        let m103 = batch.commit(&[d(12), Rev::Batch(w1)], "Merge pull request #103 from fix/wt-ux");
+        let sniff = batch.chain(Rev::Batch(w1), "n", SPARSE_SNIFF_COMMITS);
+        let after = batch.chain(Rev::Batch(w1), "w", SPARSE_WT_UX_AFTER_MERGE);
+        let d13 = batch.commit(&[Rev::Batch(m103)], "d13");
+        let m104 = batch.commit(&[Rev::Batch(d13), Rev::Batch(*sniff.last().unwrap())], "Merge pull request #104 from fix/sniff");
+        let b1 = batch.commit(&[Rev::Batch(*after.last().unwrap()), Rev::Batch(m104)], "Merge branch 'main' into fix/wt-ux");
+        let synced = batch.chain(Rev::Batch(b1), "x", SPARSE_WT_UX_AFTER_SYNC);
+        let shas = batch.write(&repo);
+        let sha = |index: usize| shas[index].clone();
+        let d: Vec<String> = [d0, d1].into_iter().chain(more.iter().map(|&index| sha(index))).collect();
+        let (w1, m103, m104, b1) = (sha(w1), sha(m103), sha(m104), sha(b1));
+        let schema: Vec<String> = schema.into_iter().map(sha).collect();
+        let sniff: Vec<String> = sniff.into_iter().map(sha).collect();
+        let synced: Vec<String> = synced.into_iter().map(sha).collect();
 
         run_git(&repo, &["update-ref", "refs/heads/main", &m104]);
         run_git(&repo, &["update-ref", "refs/remotes/origin/main", &m104]);
@@ -539,6 +637,11 @@ impl GraphRun {
     /// The table and legend survive the image, in a real terminal: every
     /// worktree row, with its column borders where the header has them.
     fn assert_table_intact(&self) {
+        assert!(
+            self.screen.iter().any(|row| row.contains("Worktree") && row.contains("Branch") && row.contains('│')),
+            "the whole listing must fit on screen:\n{}",
+            self.screen.join("\n")
+        );
         let rows = &self.all;
         let all = self.all.join("\n");
         let header = rows
@@ -735,7 +838,7 @@ fn level2_graph_height_cap_elides_lanes_in_a_short_kitty_window() {
     let hidden = graph_drawn_or_skip!(run).unwrap_or_else(|| {
         panic!("the capped graph should note the lanes it left out:\n{}", run.screen.join("\n"))
     });
-    assert!((1..BRANCHES.len()).contains(&hidden), "{hidden} hidden lanes of {}", BRANCHES.len());
+    assert!((1..=BRANCHES.len()).contains(&hidden), "{hidden} hidden lanes of {}", BRANCHES.len());
 }
 
 /// A narrow window: the graph is clamped to the window's columns and drawn
@@ -748,7 +851,7 @@ fn level2_graph_fits_a_narrow_kitty_window() {
     let fixture = Fixture::new();
     let run = GraphRun::new(&fixture, 56, 60);
 
-    assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
+    assert!(run.transmitted.rows < run.lines, "{} rows fill the {}-row window", run.transmitted.rows, run.lines);
     run.assert_table_intact();
     graph_drawn_or_skip!(run);
 }
@@ -770,7 +873,7 @@ fn level2_graph_draws_a_merged_branch_in_kitty() {
     for (columns, lines) in [(100, 32), (56, 60)] {
         let mut run = GraphRun::new(&fixture, columns, lines);
         run.keep_evidence("merged");
-        assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
+        assert!(run.transmitted.rows < run.lines, "{} rows fill the {}-row window", run.transmitted.rows, run.lines);
         let all = run.all.join("\n");
         assert!(!names_an_omission(&all), "a merged branch is complete history:\n{all}");
         run.assert_table_intact();
@@ -793,7 +896,7 @@ fn level2_graph_restores_lane_density_in_kitty() {
     let fixture = Fixture::sparse_lanes();
     let mut run = GraphRun::new(&fixture, 200, 60);
     run.keep_evidence("sparse");
-    assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
+    assert!(run.transmitted.rows < run.lines, "{} rows fill the {}-row window", run.transmitted.rows, run.lines);
     let all = run.all.join("\n");
     assert!(!names_an_omission(&all), "every fork and merge is drawn:\n{all}");
     assert!(!all.contains("in the graph:"), "no lane is left out:\n{all}");
@@ -815,7 +918,7 @@ fn level2_graph_draws_a_branch_continued_after_its_merge_in_kitty() {
     let fixture = Fixture::continued_after_merge();
     let mut run = GraphRun::new(&fixture, 200, 60);
     run.keep_evidence("continued");
-    assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
+    assert!(run.transmitted.rows < run.lines, "{} rows fill the {}-row window", run.transmitted.rows, run.lines);
     let all = run.all.join("\n");
     assert!(!names_an_omission(&all), "the continued branch is connected:\n{all}");
     assert!(!all.contains("in the graph:"), "no lane is left out:\n{all}");

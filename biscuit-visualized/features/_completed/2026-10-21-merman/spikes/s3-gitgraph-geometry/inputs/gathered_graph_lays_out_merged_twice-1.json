@@ -1,0 +1,110 @@
+{
+  "call": 1,
+  "commit_step": 34.0,
+  "commits": [
+    {
+      "id": "+1",
+      "index": 0,
+      "lane": "main",
+      "parents": [],
+      "tags": [],
+      "x": 8.0
+    },
+    {
+      "id": "7f70539",
+      "index": 1,
+      "lane": "main",
+      "parents": [
+        "+1"
+      ],
+      "tags": [],
+      "x": 50.0
+    },
+    {
+      "id": "d49f6a8",
+      "index": 2,
+      "lane": "b",
+      "parents": [
+        "7f70539"
+      ],
+      "tags": [],
+      "x": 92.0
+    },
+    {
+      "id": "+1 ",
+      "index": 3,
+      "lane": "main",
+      "parents": [
+        "7f70539"
+      ],
+      "tags": [],
+      "x": 134.0
+    },
+    {
+      "id": "0eb2494",
+      "index": 4,
+      "lane": "main",
+      "parents": [
+        "+1 ",
+        "d49f6a8"
+      ],
+      "tags": [],
+      "x": 176.0
+    },
+    {
+      "id": "feb7076",
+      "index": 5,
+      "lane": "b",
+      "parents": [
+        "d49f6a8"
+      ],
+      "tags": [],
+      "x": 218.0
+    },
+    {
+      "id": "+1  ",
+      "index": 6,
+      "lane": "main",
+      "parents": [
+        "0eb2494"
+      ],
+      "tags": [],
+      "x": 260.0
+    },
+    {
+      "id": "ec82b00",
+      "index": 7,
+      "lane": "main",
+      "parents": [
+        "+1  ",
+        "feb7076"
+      ],
+      "tags": [
+        {
+          "text": "main",
+          "x1": 281.56494140625,
+          "x2": 315.93505859375,
+          "y1": -23.5,
+          "y2": -8.5
+        }
+      ],
+      "x": 302.0
+    },
+    {
+      "id": "7a1bfcc",
+      "index": 8,
+      "lane": "b",
+      "parents": [
+        "feb7076"
+      ],
+      "tags": [],
+      "x": 344.0
+    }
+  ],
+  "default_commit_step": 34.0,
+  "height": 160.91627502441406,
+  "mermaid": "gitGraph\n    commit id: \"+1\" type: HIGHLIGHT\n    commit id: \"7f70539\"\n    branch b\n    checkout b\n    commit id: \"d49f6a8\"\n    checkout main\n    commit id: \"+1 \" type: HIGHLIGHT\n    merge b id: \"0eb2494\"\n    checkout b\n    commit id: \"feb7076\"\n    checkout main\n    commit id: \"+1  \" type: HIGHLIGHT\n    merge b id: \"ec82b00\" tag: \"main\"\n    checkout b\n    commit id: \"7a1bfcc\"\n    checkout main",
+  "tag_gap": 16.0,
+  "test": "commands__git_graph__tests__gathered_graph_lays_out_merged_twice",
+  "width": 467.9921875
+}

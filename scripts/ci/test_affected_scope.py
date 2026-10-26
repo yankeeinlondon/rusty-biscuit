@@ -8943,9 +8943,30 @@ class RealWorkspaceTestInputTests(unittest.TestCase):
         # would read as coverage while providing none.
         declared = affected_scope.declared_source_inputs(self.policy)
         self.assertTrue(declared, "the workspace declares no source-inputs")
+        packages = affected_scope.workspace_packages(self.metadata)
         for path, declarers in declared.items():
             for declarer in declarers:
                 with self.subTest(path=path, declarer=declarer):
+                    if not self.policy[declarer]["gates"]:
+                        # A `gates = false` package schedules no cell, so its
+                        # declaration is held for promotion: a test must still
+                        # name the path for it to take effect then.
+                        references = affected_scope.test_input_references(
+                            [path],
+                            ROOT,
+                            packages,
+                            affected_scope.worktree_reader(ROOT),
+                            frozenset(),
+                            declared,
+                        )
+                        self.assertTrue(
+                            any(
+                                reference.package == declarer and reference.unit is not None
+                                for reference in references
+                            ),
+                            f"{declarer} declares {path} but no L1 test of it names the path",
+                        )
+                        continue
                     plan = self.plan(path)
                     self.assertTrue(
                         any(

@@ -23,7 +23,6 @@ import "../just/notify.just"
 import "../just/ai.just"
 import "../just/devops.just"
 import "../just/spec.just"
-import "../just/flow.just"
 
 PACKAGE := "Playa"
 LIB_NAME := PACKAGE + " Library"

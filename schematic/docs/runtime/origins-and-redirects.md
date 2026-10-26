@@ -2,7 +2,7 @@
 
 A redirect or a next-page link can point anywhere, including a host that
 should never see your API key. The runtime therefore checks every URL a send
-is about to request against the API's **cross-origin policy**, and decides
+is about to request against the endpoint's effective **cross-origin policy**, and decides
 separately whether the credential may go with it.
 
 ## Origins
@@ -22,7 +22,10 @@ The client's **base origin** is the origin of its base URL.
 ## Policies
 
 Each API definition sets one policy (`CrossOrigin` in `schematic-define`,
-`OriginPolicy` at run time); the default is `same_origin`.
+`OriginPolicy` at run time); the default is `same_origin`. An endpoint's
+`cross_origin(policy)` replaces that policy for its redirects and followed links.
+For example, a download endpoint can allow `https://files.example.com` while
+its sibling endpoints retain `same_origin`.
 
 | Policy | Redirect to base | Redirect elsewhere | Link to base | Link elsewhere |
 | --- | --- | --- | --- | --- |
@@ -43,7 +46,8 @@ Each API definition sets one policy (`CrossOrigin` in `schematic-define`,
 
 A caller can only **tighten** the policy, with
 `cross_origin(..)`: `deny` over anything, `same_origin` over anything but
-`deny`, and an `allow_origins` list that is a subset of the API's own list.
+`deny`, and an `allow_origins` list that is a subset of the definition's own list.
+The caller setting must tighten the API default and every endpoint override.
 Anything else is refused with `BuildError::OriginPolicyNotPermitted`, at
 `build()` or else on the client's first call:
 
@@ -91,8 +95,10 @@ Details that matter in practice:
   assembled it, so a credential is never carried over by accident. When the
   policy allows the credential for the target, it is attached again; when
   it does not, every secret header (including `Cookie`) and secret query
-  value is removed. A relative `Location` is resolved before any credential
-  is added, so it never inherits a query-string key.
+  pair is removed; the other query pairs are kept byte for byte, so a
+  delimited value such as `tags=a%2Cb,c` keeps its literal `,`. A relative
+  `Location` is resolved before any credential is added, so it never
+  inherits a query-string key.
 - **Methods.** A 301 or 302 in reply to `POST`, and a 303 in reply to
   anything but `HEAD`, continue as `GET` without the body. A 307 or 308
   replays the same method and body.
@@ -130,9 +136,9 @@ even though nothing has been sent yet:
 
 - a refusal's `TransportError` reports that endpoint's id and HTTP method,
   rather than an invented one; and
-- the answer can depend on the endpoint once API definitions can set an
-  origin policy per endpoint (**planned**); today every endpoint of an API
-  shares the API's policy.
+- the answer uses the endpoint's replacement policy when present, otherwise
+  the API policy. For example, an upload endpoint can allow an exact storage
+  origin while a sibling retains `same_origin`.
 
 A same-origin URL passes under every policy, including `deny`. A pager
 calls `check_link` with its listing request's type on every next-page link,

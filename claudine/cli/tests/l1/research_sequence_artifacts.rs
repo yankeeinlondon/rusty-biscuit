@@ -195,40 +195,80 @@ fn shipped_fleet_graphs_resolve_per_row_prompt_lifecycles() {
     assert_eq!(count, 22);
 }
 
+/// A shipped fleet over two roster rows: the fresh first row skips, and the
+/// stale second row launches and must leave a validated research document.
+/// Re-running it skips both, including the row just validated.
 #[cfg(unix)]
-#[test]
-fn shipped_research_fleet_runs_row_freshness_and_success_through_normal_cli() {
-    let coordinator = include_str!("../../../../claudine/docs/research/hooks/_fleet.md");
-    let prompt = include_str!("../../../../claudine/docs/research/hooks/_research.md");
-    let roster = include_str!("../../../../claudine/docs/research/_provider-tasks.yaml");
-    let fixture = CliProcessFixture::named("shipped-research-fleet");
-    fixture.initialize_repository();
-    let directory = fixture.cwd().join("claudine/docs/research/hooks");
-    std::fs::create_dir_all(&directory).unwrap();
-    let source = directory.join("_fleet.md");
-    std::fs::write(&source, coordinator).unwrap();
-    // The output style dependency is unrelated to lifecycle behavior and is an internal draft.
-    std::fs::write(directory.join("_research.md"), prompt.replace("::file @prompts/make-it-markdown.md", "Write clear Markdown.")).unwrap();
-    let mut roster: serde_json::Value = yaml_value(roster);
-    roster["sequence"].as_array_mut().unwrap().truncate(2);
-    std::fs::write(directory.parent().unwrap().join("_provider-tasks.yaml"), serde_json::to_string_pretty(&roster).unwrap()).unwrap();
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    std::fs::write(directory.join("claude.md"), format!("---\nlast_updated: '{today}'\n---\nCurrent research.\n")).unwrap();
-    let recordings = crate::common::launch_recorder::install(&fixture, "claude", &format!(
-        "printf '%s\n' '---' \"last_updated: '{today}'\" '---' 'Updated research.' > '{}'\nprintf 'research complete\n'", directory.join("codex.md").display(),
-    ));
-    for _ in 0..2 {
+mod shipped_research_fleet_runs_row_freshness_and_success_through_normal_cli {
+    use super::*;
+
+    /// What the codex row's provider stub writes on `today`.
+    fn written_research(today: &str) -> String {
+        format!("---\nlast_updated: '{today}'\n---\nUpdated research.\n")
+    }
+
+    /// The fleet, its row prompt, and a two-row roster under the fixture's
+    /// repository, with a current `claude.md`; returns the fixture, the fleet
+    /// source, the research directory, and `today`.
+    fn staged(
+        coordinator: &str,
+        prompt: &str,
+        roster: &str,
+    ) -> (CliProcessFixture, std::path::PathBuf, std::path::PathBuf, String) {
+        let fixture = CliProcessFixture::named("shipped-research-fleet");
+        fixture.initialize_repository();
+        let directory = fixture.cwd().join("claudine/docs/research/hooks");
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("_fleet.md");
+        std::fs::write(&source, coordinator).unwrap();
+        // The output style dependency is unrelated to lifecycle behavior and is an internal draft.
+        std::fs::write(directory.join("_research.md"), prompt.replace("::file @prompts/make-it-markdown.md", "Write clear Markdown.")).unwrap();
+        let mut roster: serde_json::Value = yaml_value(roster);
+        roster["sequence"].as_array_mut().unwrap().truncate(2);
+        std::fs::write(directory.parent().unwrap().join("_provider-tasks.yaml"), serde_json::to_string_pretty(&roster).unwrap()).unwrap();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        std::fs::write(directory.join("claude.md"), format!("---\nlast_updated: '{today}'\n---\nCurrent research.\n")).unwrap();
+        (fixture, source, directory, today)
+    }
+
+    #[test]
+    fn the_stale_row_launches_and_is_validated() {
+        let coordinator = include_str!("../../../../claudine/docs/research/hooks/_fleet.md");
+        let prompt = include_str!("../../../../claudine/docs/research/hooks/_research.md");
+        let roster = include_str!("../../../../claudine/docs/research/_provider-tasks.yaml");
+        let (fixture, source, directory, today) = staged(coordinator, prompt, roster);
+        let recordings = crate::common::launch_recorder::install(&fixture, "claude", &format!(
+            "printf '%s\n' '---' \"last_updated: '{today}'\" '---' 'Updated research.' > '{}'\nprintf 'research complete\n'", directory.join("codex.md").display(),
+        ));
         fixture.command().args(["sequence", "--claude", "--yolo", "--silent"])
             .arg(&source).assert().success();
+        let prompts = crate::common::launch_recorder::prompts(&recordings);
+        assert_eq!(prompts.len(), 1, "the fresh row must skip");
+        assert!(prompts[0].contains("Hooks Research on Codex CLI"), "{}", prompts[0]);
+        assert!(!prompts[0].contains("{{seq."));
+        let written = std::fs::read_to_string(directory.join("codex.md")).unwrap();
+        assert_eq!(written, written_research(&today), "the stub's write is the row's whole state");
+        assert!(!fixture.audio_spool().exists());
     }
-    let prompts = crate::common::launch_recorder::prompts(&recordings);
-    assert_eq!(prompts.len(), 1, "fresh rows must skip, including the just-validated row on reread");
-    assert!(prompts[0].contains("Hooks Research on Codex CLI"), "{}", prompts[0]);
-    assert!(!prompts[0].contains("{{seq."));
-    let written = std::fs::read_to_string(directory.join("codex.md")).unwrap();
-    assert!(written.contains(&today));
-    assert!(written.contains("Updated research."));
-    assert!(!fixture.audio_spool().exists());
+
+    /// The re-run's starting state is exactly what the run above leaves: the
+    /// provider's write is the only change it makes that freshness reads.
+    #[test]
+    fn a_rerun_skips_every_fresh_row_including_the_one_just_validated() {
+        let coordinator = include_str!("../../../../claudine/docs/research/hooks/_fleet.md");
+        let prompt = include_str!("../../../../claudine/docs/research/hooks/_research.md");
+        let roster = include_str!("../../../../claudine/docs/research/_provider-tasks.yaml");
+        let (fixture, source, directory, today) = staged(coordinator, prompt, roster);
+        std::fs::write(directory.join("codex.md"), written_research(&today)).unwrap();
+        let recordings = crate::common::launch_recorder::install(&fixture, "claude", "exit 0");
+        fixture.command().args(["sequence", "--claude", "--yolo", "--silent"])
+            .arg(&source).assert().success();
+        assert!(
+            crate::common::launch_recorder::prompts(&recordings).is_empty(),
+            "fresh rows must skip, including the just-validated row on reread"
+        );
+        assert!(!fixture.audio_spool().exists());
+    }
 }
 
 #[cfg(unix)]

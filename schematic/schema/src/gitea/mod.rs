@@ -12,8 +12,7 @@
 //!
 //! **GET**:
 //! - `GetRepository` - Get repository metadata including default branch
-//! - `GetGitTree` - Get a Git tree (non-recursive, single level)
-//! - `GetGitTreeRecursive` - Get a Git tree recursively (may be paginated for large repos)
+//! - `GetGitTree` - Get a Git tree; set recursive to include nested entries
 //! - `GetRepositoryContentRaw` - Get raw file content from repository
 //! - `ListPullRequests` - List pull requests with metadata
 //! - `ListPullRequestFiles` - List files changed in a pull request
@@ -30,24 +29,27 @@
 //!
 //! ## Examples
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
+//! use schematic_schema::gitea::GetRepositoryRequest;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = Gitea::new();
-//!     let data = client.get_repository("owner", "repo").await?;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = Gitea::new();
+//! let data = client.get_repository("owner", "repo").await?;
 //!
-//!     // the whole response: status, headers, and request id as well
-//!     let response = client.get_repository("owner", "repo").full().await?;
-//!     println!("{}", response.meta);
-//!     Ok(())
-//! }
+//! // the same request, built as a typed request and sent
+//! let data = client.send(GetRepositoryRequest::new("owner", "repo")).await?;
+//!
+//! // the whole response: status, headers, and request id as well
+//! let response = client.get_repository("owner", "repo").full().await?;
+//! println!("{}", response.meta);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ### Override Base URL
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
 //!
 //! let client = Gitea::new().base_url("https://staging.example.com/v1");

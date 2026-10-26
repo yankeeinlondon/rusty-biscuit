@@ -13,7 +13,7 @@ mod common;
 use common::EnvGuard;
 use schematic_schema::github::{
     GetIssueRequest, GetRepositoryCall, GetRepositoryContentRawRequest, GetRepositoryRequest, GetTagReferenceRequest,
-    ListOrgReposRequest, ListPullRequestsRequest,
+    ListOrgReposRequest, ListPullRequestsRequest, ListPullRequestsRequestState,
 };
 use schematic_schema::prelude::*;
 use schematic_schema::schematic_runtime::{
@@ -547,13 +547,13 @@ async fn endpoint_method_and_generic_send_of_its_request_agree() {
 
     let by_method = client
         .list_pull_requests("octo", "widgets")
-        .state("closed".to_string())
+        .state(ListPullRequestsRequestState::Closed)
         .page_size(5)
         .fetch_page()
         .await
         .expect("the endpoint method decodes the list");
     let by_request = client
-        .send(ListPullRequestsRequest::new("octo", "widgets").with_state("closed".to_string()))
+        .send(ListPullRequestsRequest::new("octo", "widgets").with_state(ListPullRequestsRequestState::Closed))
         .pager()
         .page_size(5)
         .fetch_page()

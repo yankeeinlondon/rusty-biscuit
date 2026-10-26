@@ -14,6 +14,61 @@
       "key": "apiKey",
       "value": "",
       "description": "API key value"
+    },
+    {
+      "key": "path_voice_id",
+      "value": "",
+      "description": "Value of the `voice_id` path parameter"
+    },
+    {
+      "key": "query_page_size",
+      "value": "",
+      "description": "Value of the `page_size` query parameter"
+    },
+    {
+      "key": "query_page_token",
+      "value": "",
+      "description": "Value of the `page_token` query parameter"
+    },
+    {
+      "key": "path_sample_id",
+      "value": "",
+      "description": "Value of the `sample_id` path parameter"
+    },
+    {
+      "key": "path_public_user_id",
+      "value": "",
+      "description": "Value of the `public_user_id` path parameter"
+    },
+    {
+      "key": "path_token_type",
+      "value": "",
+      "description": "Value of the `token_type` path parameter"
+    },
+    {
+      "key": "path_history_item_id",
+      "value": "",
+      "description": "Value of the `history_item_id` path parameter"
+    },
+    {
+      "key": "path_resource_id",
+      "value": "",
+      "description": "Value of the `resource_id` path parameter"
+    },
+    {
+      "key": "path_service_account_user_id",
+      "value": "",
+      "description": "Value of the `service_account_user_id` path parameter"
+    },
+    {
+      "key": "path_api_key_id",
+      "value": "",
+      "description": "Value of the `api_key_id` path parameter"
+    },
+    {
+      "key": "path_webhook_id",
+      "value": "",
+      "description": "Value of the `webhook_id` path parameter"
     }
   ],
   "auth": {
@@ -52,7 +107,21 @@
               ]
             },
             "description": "Gets generated items history"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"has_more\": false,\n  \"history\": []\n}"
+            }
+          ]
         },
         {
           "name": "GetHistoryItem",
@@ -71,12 +140,26 @@
               "variable": [
                 {
                   "key": "history_item_id",
-                  "value": "<history_item_id>"
+                  "value": "{{path_history_item_id}}"
                 }
               ]
             },
             "description": "Gets a specific history item"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"date_unix\": 0,\n  \"history_item_id\": \"string\",\n  \"voice_id\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DeleteHistoryItem",
@@ -95,12 +178,26 @@
               "variable": [
                 {
                   "key": "history_item_id",
-                  "value": "<history_item_id>"
+                  "value": "{{path_history_item_id}}"
                 }
               ]
             },
             "description": "Deletes a history item"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "GetHistoryItemAudio",
@@ -120,12 +217,26 @@
               "variable": [
                 {
                   "key": "history_item_id",
-                  "value": "<history_item_id>"
+                  "value": "{{path_history_item_id}}"
                 }
               ]
             },
             "description": "Gets audio for a history item"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/octet-stream)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/octet-stream"
+                }
+              ],
+              "body": "<binary application/octet-stream body; not representable as an example>"
+            }
+          ]
         },
         {
           "name": "DownloadHistoryItems",
@@ -144,7 +255,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"history_item_ids\": []\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -152,7 +263,21 @@
               }
             },
             "description": "Downloads multiple history items as ZIP"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/octet-stream)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/octet-stream"
+                }
+              ],
+              "body": "<binary application/octet-stream body; not representable as an example>"
+            }
+          ]
         }
       ]
     },
@@ -174,7 +299,21 @@
               ]
             },
             "description": "Lists all available models"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[]"
+            }
+          ]
         }
       ]
     },
@@ -196,7 +335,21 @@
               ]
             },
             "description": "Lists service accounts"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"service-accounts\": []\n}"
+            }
+          ]
         },
         {
           "name": "ListServiceAccountApiKeys",
@@ -216,12 +369,26 @@
               "variable": [
                 {
                   "key": "service_account_user_id",
-                  "value": "<service_account_user_id>"
+                  "value": "{{path_service_account_user_id}}"
                 }
               ]
             },
             "description": "Lists API keys for a service account"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"api-keys\": []\n}"
+            }
+          ]
         },
         {
           "name": "CreateApiKey",
@@ -241,13 +408,13 @@
               "variable": [
                 {
                   "key": "service_account_user_id",
-                  "value": "<service_account_user_id>"
+                  "value": "{{path_service_account_user_id}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"name\": \"string\",\n  \"permissions\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -255,7 +422,21 @@
               }
             },
             "description": "Creates an API key for a service account"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"key-id\": \"string\",\n  \"xi-api-key\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "UpdateApiKey",
@@ -276,11 +457,11 @@
               "variable": [
                 {
                   "key": "service_account_user_id",
-                  "value": "<service_account_user_id>"
+                  "value": "{{path_service_account_user_id}}"
                 },
                 {
                   "key": "api_key_id",
-                  "value": "<api_key_id>"
+                  "value": "{{path_api_key_id}}"
                 }
               ]
             },
@@ -294,7 +475,21 @@
               }
             },
             "description": "Updates an API key"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DeleteApiKey",
@@ -315,16 +510,30 @@
               "variable": [
                 {
                   "key": "service_account_user_id",
-                  "value": "<service_account_user_id>"
+                  "value": "{{path_service_account_user_id}}"
                 },
                 {
                   "key": "api_key_id",
-                  "value": "<api_key_id>"
+                  "value": "{{path_api_key_id}}"
                 }
               ]
             },
             "description": "Deletes an API key"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         }
       ]
     },
@@ -346,7 +555,21 @@
               ]
             },
             "description": "Lists voices from the public library"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"has_more\": false,\n  \"voices\": []\n}"
+            }
+          ]
         }
       ]
     },
@@ -370,12 +593,26 @@
               "variable": [
                 {
                   "key": "token_type",
-                  "value": "<token_type>"
+                  "value": "{{path_token_type}}"
                 }
               ]
             },
             "description": "Creates a single-use token for WebSocket auth"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"token\": \"string\"\n}"
+            }
+          ]
         }
       ]
     },
@@ -398,7 +635,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"text\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -406,7 +643,21 @@
               }
             },
             "description": "Generates a sound effect from text"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/octet-stream)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/octet-stream"
+                }
+              ],
+              "body": "<binary application/octet-stream body; not representable as an example>"
+            }
+          ]
         }
       ]
     },
@@ -430,13 +681,13 @@
               "variable": [
                 {
                   "key": "voice_id",
-                  "value": "<voice_id>"
+                  "value": "{{path_voice_id}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"text\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -444,7 +695,21 @@
               }
             },
             "description": "Converts text into speech and returns audio"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/octet-stream)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/octet-stream"
+                }
+              ],
+              "body": "<binary application/octet-stream body; not representable as an example>"
+            }
+          ]
         },
         {
           "name": "StreamSpeech",
@@ -464,21 +729,35 @@
               "variable": [
                 {
                   "key": "voice_id",
-                  "value": "<voice_id>"
+                  "value": "{{path_voice_id}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"text\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Streams audio as it's generated"
-          }
+            "description": "Streams audio as it's generated\n\nResponse content type: `application/octet-stream`."
+          },
+          "response": [
+            {
+              "name": "200 OK (application/octet-stream)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/octet-stream"
+                }
+              ],
+              "body": "<binary application/octet-stream body; not representable as an example>"
+            }
+          ]
         },
         {
           "name": "CreateSpeechWithTimestamps",
@@ -498,13 +777,13 @@
               "variable": [
                 {
                   "key": "voice_id",
-                  "value": "<voice_id>"
+                  "value": "{{path_voice_id}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"text\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -512,7 +791,21 @@
               }
             },
             "description": "Returns audio with character-level timing information"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"audio_base64\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "StreamSpeechWithTimestamps",
@@ -533,21 +826,35 @@
               "variable": [
                 {
                   "key": "voice_id",
-                  "value": "<voice_id>"
+                  "value": "{{path_voice_id}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"text\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Streams audio chunks with timing information"
-          }
+            "description": "Streams audio chunks with timing information\n\nResponse content type: `application/x-ndjson`."
+          },
+          "response": [
+            {
+              "name": "200 OK (application/x-ndjson)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/x-ndjson"
+                }
+              ],
+              "body": "{\"audio_base64\":\"string\"}\n"
+            }
+          ]
         }
       ]
     },
@@ -570,7 +877,21 @@
               ]
             },
             "description": "Gets usage statistics"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"time\": [],\n  \"usage\": {}\n}"
+            }
+          ]
         }
       ]
     },
@@ -592,7 +913,21 @@
               ]
             },
             "description": "Gets current user information"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"is_new_user\": false,\n  \"is_onboarding_completed\": false,\n  \"user_id\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "GetUserSubscription",
@@ -610,7 +945,21 @@
               ]
             },
             "description": "Gets user subscription information"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"character_count\": 0,\n  \"character_limit\": 0,\n  \"tier\": \"string\"\n}"
+            }
+          ]
         }
       ]
     },
@@ -633,16 +982,34 @@
               "query": [
                 {
                   "key": "page_size",
+                  "value": "{{query_page_size}}",
+                  "disabled": true,
                   "description": "Voices per page (at most 100)"
                 },
                 {
                   "key": "page_token",
+                  "value": "{{query_page_token}}",
+                  "disabled": true,
                   "description": "The previous page's `next_page_token`"
                 }
               ]
             },
             "description": "Lists all available voices"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"has_more\": false,\n  \"voices\": []\n}"
+            }
+          ]
         },
         {
           "name": "GetVoice",
@@ -661,12 +1028,26 @@
               "variable": [
                 {
                   "key": "voice_id",
-                  "value": "<voice_id>"
+                  "value": "{{path_voice_id}}"
                 }
               ]
             },
             "description": "Retrieves a voice by ID"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"is_legacy\": false,\n  \"is_mixed\": false,\n  \"name\": \"string\",\n  \"voice_id\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DeleteVoice",
@@ -685,12 +1066,26 @@
               "variable": [
                 {
                   "key": "voice_id",
-                  "value": "<voice_id>"
+                  "value": "{{path_voice_id}}"
                 }
               ]
             },
             "description": "Deletes a voice"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "GetDefaultVoiceSettings",
@@ -709,7 +1104,21 @@
               ]
             },
             "description": "Gets default voice settings"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"similarity_boost\": 0.75,\n  \"stability\": 0.5,\n  \"use_speaker_boost\": true\n}"
+            }
+          ]
         },
         {
           "name": "GetVoiceSettings",
@@ -729,12 +1138,26 @@
               "variable": [
                 {
                   "key": "voice_id",
-                  "value": "<voice_id>"
+                  "value": "{{path_voice_id}}"
                 }
               ]
             },
             "description": "Gets voice settings for a specific voice"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"similarity_boost\": 0.75,\n  \"stability\": 0.5,\n  \"use_speaker_boost\": true\n}"
+            }
+          ]
         },
         {
           "name": "UpdateVoiceSettings",
@@ -755,13 +1178,13 @@
               "variable": [
                 {
                   "key": "voice_id",
-                  "value": "<voice_id>"
+                  "value": "{{path_voice_id}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"similarity_boost\": 0.75,\n  \"stability\": 0.5,\n  \"use_speaker_boost\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -769,7 +1192,21 @@
               }
             },
             "description": "Updates voice settings"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "GetVoiceSampleAudio",
@@ -791,16 +1228,30 @@
               "variable": [
                 {
                   "key": "voice_id",
-                  "value": "<voice_id>"
+                  "value": "{{path_voice_id}}"
                 },
                 {
                   "key": "sample_id",
-                  "value": "<sample_id>"
+                  "value": "{{path_sample_id}}"
                 }
               ]
             },
             "description": "Gets audio for a voice sample"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/octet-stream)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/octet-stream"
+                }
+              ],
+              "body": "<binary application/octet-stream body; not representable as an example>"
+            }
+          ]
         },
         {
           "name": "DeleteVoiceSample",
@@ -821,16 +1272,30 @@
               "variable": [
                 {
                   "key": "voice_id",
-                  "value": "<voice_id>"
+                  "value": "{{path_voice_id}}"
                 },
                 {
                   "key": "sample_id",
-                  "value": "<sample_id>"
+                  "value": "{{path_sample_id}}"
                 }
               ]
             },
             "description": "Deletes a voice sample"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "AddVoiceSample",
@@ -850,7 +1315,7 @@
               "variable": [
                 {
                   "key": "voice_id",
-                  "value": "<voice_id>"
+                  "value": "{{path_voice_id}}"
                 }
               ]
             },
@@ -871,7 +1336,21 @@
               ]
             },
             "description": "Upload audio sample for voice cloning"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"sample_id\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "AddSharedVoice",
@@ -892,17 +1371,17 @@
               "variable": [
                 {
                   "key": "public_user_id",
-                  "value": "<public_user_id>"
+                  "value": "{{path_public_user_id}}"
                 },
                 {
                   "key": "voice_id",
-                  "value": "<voice_id>"
+                  "value": "{{path_voice_id}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"new_name\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -910,7 +1389,21 @@
               }
             },
             "description": "Adds a shared voice to your library"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"voice_id\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "CreatePvcVoice",
@@ -929,7 +1422,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"language\": \"string\",\n  \"name\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -937,7 +1430,21 @@
               }
             },
             "description": "Creates a professional voice clone"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"voice_id\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "UpdatePvcVoice",
@@ -957,13 +1464,13 @@
               "variable": [
                 {
                   "key": "voice_id",
-                  "value": "<voice_id>"
+                  "value": "{{path_voice_id}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"language\": \"string\",\n  \"name\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -971,7 +1478,21 @@
               }
             },
             "description": "Updates a PVC voice"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "TrainPvcVoice",
@@ -992,7 +1513,7 @@
               "variable": [
                 {
                   "key": "voice_id",
-                  "value": "<voice_id>"
+                  "value": "{{path_voice_id}}"
                 }
               ]
             },
@@ -1006,7 +1527,21 @@
               }
             },
             "description": "Starts training a PVC voice"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         }
       ]
     },
@@ -1031,12 +1566,26 @@
               "variable": [
                 {
                   "key": "resource_id",
-                  "value": "<resource_id>"
+                  "value": "{{path_resource_id}}"
                 }
               ]
             },
             "description": "Gets resource information"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"resource_id\": \"string\",\n  \"resource_type\": \"voice\"\n}"
+            }
+          ]
         },
         {
           "name": "ShareResource",
@@ -1057,13 +1606,13 @@
               "variable": [
                 {
                   "key": "resource_id",
-                  "value": "<resource_id>"
+                  "value": "{{path_resource_id}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"resource_type\": \"voice\",\n  \"role\": \"admin\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1071,7 +1620,21 @@
               }
             },
             "description": "Shares a resource"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "UnshareResource",
@@ -1092,13 +1655,13 @@
               "variable": [
                 {
                   "key": "resource_id",
-                  "value": "<resource_id>"
+                  "value": "{{path_resource_id}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"resource_type\": \"voice\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1106,7 +1669,21 @@
               }
             },
             "description": "Removes sharing for a resource"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "CopyResourceToWorkspace",
@@ -1127,13 +1704,13 @@
               "variable": [
                 {
                   "key": "resource_id",
-                  "value": "<resource_id>"
+                  "value": "{{path_resource_id}}"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"resource_type\": \"voice\",\n  \"target_user_id\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1141,7 +1718,21 @@
               }
             },
             "description": "Copies a resource to another workspace"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "ListWebhooks",
@@ -1159,7 +1750,21 @@
               ]
             },
             "description": "Lists webhooks"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"webhooks\": []\n}"
+            }
+          ]
         },
         {
           "name": "CreateWebhook",
@@ -1178,7 +1783,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"settings\": {\n    \"auth_type\": \"hmac\",\n    \"name\": \"\",\n    \"webhook_url\": \"string\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1186,7 +1791,21 @@
               }
             },
             "description": "Creates a webhook"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"webhook_id\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "UpdateWebhook",
@@ -1206,7 +1825,7 @@
               "variable": [
                 {
                   "key": "webhook_id",
-                  "value": "<webhook_id>"
+                  "value": "{{path_webhook_id}}"
                 }
               ]
             },
@@ -1220,7 +1839,21 @@
               }
             },
             "description": "Updates a webhook"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DeleteWebhook",
@@ -1240,12 +1873,26 @@
               "variable": [
                 {
                   "key": "webhook_id",
-                  "value": "<webhook_id>"
+                  "value": "{{path_webhook_id}}"
                 }
               ]
             },
             "description": "Deletes a webhook"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         }
       ]
     }

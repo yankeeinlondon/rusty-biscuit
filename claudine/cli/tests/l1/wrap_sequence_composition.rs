@@ -16,11 +16,34 @@ use common::{CliProcessFixture, strip_ansi, write_executable};
 /// chain silently bails when the prompt arrives via the composition
 /// body, this test fails.
 #[cfg(unix)]
-#[test]
-fn sequence_composition_dry_run_for_every_provider() {
-    for provider_slug in [
-        "claude", "codex", "gemini", "kimi", "opencode", "qwen", "goose",
-    ] {
+mod sequence_composition_dry_run_for_every_provider {
+    use super::*;
+
+    /// The providers this regression guard covers, one test each.
+    const ROWS: [&str; 7] = ["claude", "codex", "gemini", "kimi", "opencode", "qwen", "goose"];
+
+    macro_rules! provider_tests {
+        ($($test:ident => $slug:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_sequence_dry_run_composes($slug); })*
+
+            #[test]
+            fn every_row_has_a_listed_test() {
+                assert_eq!(ROWS, [$($slug),*]);
+            }
+        };
+    }
+
+    provider_tests! {
+        claude => "claude",
+        codex => "codex",
+        gemini => "gemini",
+        kimi => "kimi",
+        opencode => "opencode",
+        qwen => "qwen",
+        goose => "goose",
+    }
+
+    fn assert_sequence_dry_run_composes(provider_slug: &str) {
         let fixture = CliProcessFixture::named("wrap-sequence-composition");
         fixture.seed_user_config();
 

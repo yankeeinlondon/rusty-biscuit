@@ -1,5 +1,8 @@
 # Multipart Form-Data Support
 
+> Historical design research. Its constructor sketches are not current authoring guidance.
+> Use [definition builders](../definition-builders.md) for supported REST construction.
+
 Technical design document for adding multipart/form-data endpoint definitions to the `schematic-define` package.
 
 ## Overview

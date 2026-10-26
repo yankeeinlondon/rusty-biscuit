@@ -9,6 +9,7 @@ code blocks, and browser safety.
 - [Style authority](#style-authority)
 - [Code blocks](#code-blocks)
 - [Disclosure blocks](#disclosure-blocks)
+- [Embedded Mermaid font](#embedded-mermaid-font)
 - [Browser contract](#browser-contract)
 
 ## Render pipeline
@@ -104,6 +105,35 @@ Targets preserve one semantic node:
 Malformed directives produce a ranged `MarkdownError::MalformedDisclosure`.
 Inline style tokens override `style.disclosure.*`; unknown tokens remain part
 of the summary rather than disappearing.
+
+## Embedded Mermaid font
+
+Full doc: `darkmatter/docs/rendering/mermaid.md#embedded-font`.
+
+- `HtmlOptions::embed_mermaid_font` / `DarkmatterPage::with_embed_mermaid_font`
+  (default `false`; MarkdownPlus keeps it off). Acts only with
+  `MermaidMode::Image` or `Automatic` (both static SVG in the browser). No
+  frontmatter key. `md --feature
+  embed-mermaid-font` (`args::Feature`, lowered by
+  `render::apply_features` inside `artifact::html_page`) sets it on every
+  HTML page `md` builds (`render`, implicit render, `compose --output html`);
+  `md`'s HTML is never static SVG today, so the output is unchanged.
+- `code_renderer.rs` renders each static diagram with
+  `with_embedded_font(true)` + `render_to_svg_with_font` and collects its
+  `DiagramFont`; the first writes `PAGE_FONT_PLACEHOLDER` before its SVG.
+  Both HTML entry points replace it via `render_tree/mermaid_font.rs`
+  (`page_font_markup`): comments + `<style>` in the body before the first
+  diagram, or nothing on `Err` or a failed `style_sheet_is_safe` (warning).
+- `svg_sanitizer.rs::style_sheet_is_safe` (cssparser tokenizer) admits
+  `data:` only as `url(data:font/ttf;base64,…) format("truetype")` in a
+  top-level `@font-face` `src`; attributes keep `css_is_safe` (no `data:`).
+- Tests: `tests/l1/mermaid_embedded_font.rs`, sanitizer unit tests,
+  `tests/browser/browser_render.rs::browser_embedded_mermaid_font_draws_every_label`.
+- On macOS, the `coretext-small-bundle` nextest setup script
+  (`.config/nextest.toml`) selects Darkmatter tests **by name**: any test
+  whose path contains `mermaid` or `merman`, apart from tier-marked ones. A
+  test that renders a diagram over host fonts must say so in its name, or it
+  pays CoreText's 1-10 s scan of `target/debug/deps` (`os` skill, `macos.md`).
 
 ## Browser contract
 

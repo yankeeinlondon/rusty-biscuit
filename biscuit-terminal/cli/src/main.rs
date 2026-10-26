@@ -14,6 +14,7 @@ use biscuit_terminal::{
 
 pub mod args;
 pub mod commands;
+pub mod hints;
 pub mod output;
 pub mod types;
 
@@ -116,7 +117,7 @@ pub fn font_completer(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
 
     static FONTS: OnceLock<Vec<String>> = OnceLock::new();
     let fonts =
-        FONTS.get_or_init(biscuit_terminal::components::graph_expression::available_font_families);
+        FONTS.get_or_init(biscuit_visualized::components::graph_expression::available_font_families);
 
     let prefix = current.to_str().unwrap_or("");
     let prefix_lower = prefix.to_lowercase();

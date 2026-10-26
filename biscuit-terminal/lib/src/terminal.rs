@@ -2,19 +2,21 @@ use std::path::{Path, PathBuf};
 
 use crate::discovery::config_paths::get_terminal_config_path;
 use crate::discovery::detection::{
-    ColorDepth, ColorMode, Connection, DEFAULT_TAB_WIDTH, ImageSupport, TerminalApp,
-    UnderlineSupport, color_depth, color_mode, detect_connection, get_terminal_app, image_support,
+    ColorDepth, ColorMode, Connection, DEFAULT_TAB_WIDTH, GraphicsRoute, ImageSupport, ProbeMode,
+    TerminalApp, UnderlineSupport, color_depth, color_mode, detect_connection, get_terminal_app,
     is_tty, italics_support, osc8_link_support, tab_width, terminal_height, terminal_width,
     underline_support,
 };
 use crate::discovery::fonts::{
-    CellSize, FontLigature, cell_size, detect_nerd_font, font_ligatures, font_name, font_size,
+    CellSize, FontLigature, detect_nerd_font, font_ligatures, font_name, font_size,
 };
 use crate::discovery::locale::{CharEncoding, TerminalLocale};
 use crate::discovery::os_detection::{
     LinuxDistro, OsType, detect_linux_distro, detect_os_type, is_ci,
 };
-use crate::discovery::osc_queries::{RgbValue, bg_color, text_color};
+use crate::discovery::detection::color::color_mode_for_background;
+use crate::discovery::osc_queries::query::heuristic_color;
+use crate::discovery::osc_queries::{ColorSource, RgbValue, bg_color_with_source, text_color};
 
 /// Walk up from `start` looking for a `.git` directory. Returns the repo root if found.
 fn find_git_root(start: &Path) -> Option<PathBuf> {
@@ -33,24 +35,54 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
     }
 }
 
-#[tracing::instrument(name = "Terminal::new")]
 fn new_terminal() -> Terminal {
+    detect_terminal(ProbeMode::Auto, None)
+}
+
+/// Detects the terminal. With [`ProbeMode::Off`] nothing is written to the
+/// terminal: colors come from the environment's fallbacks and the graphics
+/// route from the environment alone. A supplied `route` is never re-resolved
+/// and never probed for.
+#[tracing::instrument(name = "Terminal::new", skip(route))]
+fn detect_terminal(probe_mode: ProbeMode, route: Option<GraphicsRoute>) -> Terminal {
     let app = get_terminal_app();
     let config_file = get_terminal_config_path(&app);
     let repo_root = find_git_root(Path::new("."));
     let in_repo = repo_root.is_some();
+    // The route first: when it needs the graphics probe, the color queries
+    // ride in the same exchange. Reading colors first would send them alone,
+    // consuming waiting input the probe's busy-input check exists to protect.
+    let graphics_route = route
+        .unwrap_or_else(|| crate::discovery::detection::route::graphics_route_with(probe_mode));
+    let (color_mode, text_color, background_color, background_source) = match probe_mode {
+        ProbeMode::Auto => {
+            let background = bg_color_with_source();
+            let source = background.map_or(ColorSource::Estimated, |(_, source)| source);
+            (color_mode(), text_color(), background.map(|(color, _)| color), source)
+        }
+        ProbeMode::Off => {
+            let background = heuristic_color(11);
+            (
+                color_mode_for_background(background),
+                heuristic_color(10),
+                background,
+                ColorSource::Estimated,
+            )
+        }
+    };
 
     let terminal = Terminal {
         app,
         supports_italic: italics_support(),
-        image_support: image_support(),
+        graphics_route,
         underline_support: underline_support(),
         osc_link_support: osc8_link_support(),
         is_tty: is_tty(),
         color_depth: color_depth(),
-        color_mode: color_mode(),
-        text_color: text_color(),
-        background_color: bg_color(),
+        color_mode,
+        text_color,
+        background_color,
+        background_source,
         os: detect_os_type(),
         distro: detect_linux_distro(),
         config_file,
@@ -80,7 +112,7 @@ fn new_terminal() -> Terminal {
 
     tracing::debug!(
         app = ?terminal.app,
-        image_support = ?terminal.image_support,
+        graphics_route = ?terminal.graphics_route.format,
         color_depth = ?terminal.color_depth,
         tab_width = terminal.tab_width,
         is_tty = terminal.is_tty,
@@ -119,7 +151,7 @@ fn new_terminal() -> Terminal {
 /// let term = Terminal::new();
 ///
 /// // Only send image data to terminals that support it
-/// if matches!(term.image_support, ImageSupport::Kitty) {
+/// if matches!(term.image_support(), ImageSupport::Kitty) {
 ///     // Render using Kitty protocol
 /// }
 ///
@@ -149,10 +181,11 @@ fn new_terminal() -> Terminal {
 ///     println!("Italics are supported!");
 /// }
 ///
-/// match term.image_support {
+/// match term.image_support() {
 ///     ImageSupport::Kitty => println!("Using Kitty graphics protocol"),
 ///     ImageSupport::ITerm => println!("Using iTerm2 protocol"),
-///     ImageSupport::None => println!("No image support"),
+///     ImageSupport::Sixel => println!("Using Sixel"),
+///     ImageSupport::None => println!("No image support: {}", term.graphics_route.reason),
 /// }
 /// ```
 ///
@@ -166,7 +199,7 @@ fn new_terminal() -> Terminal {
 ///
 /// // Creates a terminal with all modern features enabled
 /// let term = Terminal::new_optimistic(80);
-/// assert!(term.image_support == ImageSupport::Kitty);
+/// assert!(term.image_support() == ImageSupport::Kitty);
 /// assert!(term.color_depth == ColorDepth::TrueColor);
 /// ```
 #[derive(Debug, Clone)]
@@ -176,8 +209,10 @@ pub struct Terminal {
 
     /// Whether the terminal supports italicizing text
     pub supports_italic: bool,
-    /// The type of image support (if any) the terminal provides
-    pub image_support: ImageSupport,
+    /// How images reach this terminal, or why they cannot. Authoritative for
+    /// every image rendered with this terminal;
+    /// [`image_support`](Self::image_support) is its projection.
+    pub graphics_route: GraphicsRoute,
     /// The kind of **underlining** support the terminal provides
     pub underline_support: UnderlineSupport,
     /// Whether the terminal supports OSC8 Links
@@ -193,6 +228,10 @@ pub struct Terminal {
     pub text_color: Option<RgbValue>,
     /// The detected terminal background color, when available.
     pub background_color: Option<RgbValue>,
+    /// Whether the terminal reported [`background_color`](Self::background_color)
+    /// (an OSC 11 reply) or it is an estimate. `Estimated` when there is no
+    /// color.
+    pub background_source: ColorSource,
 
     /// The operating system type
     pub os: OsType,
@@ -252,9 +291,9 @@ pub struct Terminal {
     pub tab_width: usize,
 
     /// Cached cell size in pixels. When `Some`, `cell_size()` returns this value
-    /// instead of querying the terminal via CSI 14t. This starts as `None` for
-    /// normal detection so ordinary rendering does not perform live `/dev/tty`
-    /// queries unless a caller explicitly asks for cell dimensions.
+    /// instead of measuring it (see [`Terminal::cell_size`]). This starts as
+    /// `None` for normal detection so ordinary rendering does not perform live
+    /// terminal queries unless a caller explicitly asks for cell dimensions.
     pub cell_size: Option<CellSize>,
 
     /// Whether the terminal is expected to render Unicode glyphs correctly.
@@ -281,7 +320,7 @@ impl From<&Terminal> for Terminal {
         Terminal {
             app: value.app.clone(),
             supports_italic: value.supports_italic,
-            image_support: value.image_support.clone(),
+            graphics_route: value.graphics_route.clone(),
             underline_support: value.underline_support,
             osc_link_support: value.osc_link_support,
             is_tty: value.is_tty,
@@ -289,6 +328,7 @@ impl From<&Terminal> for Terminal {
             color_mode: value.color_mode,
             text_color: value.text_color,
             background_color: value.background_color,
+            background_source: value.background_source,
             os: value.os,
             distro: value.distro.clone(),
             config_file: value.config_file.clone(),
@@ -411,7 +451,7 @@ impl Terminal {
     ///
     /// let term = Terminal::new_optimistic(80);
     /// assert_eq!(term.width(), 80);
-    /// assert_eq!(term.image_support, ImageSupport::Kitty);
+    /// assert_eq!(term.image_support(), ImageSupport::Kitty);
     /// assert_eq!(term.color_depth, ColorDepth::TrueColor);
     /// assert!(term.supports_italic);
     /// assert!(term.osc_link_support);
@@ -420,7 +460,7 @@ impl Terminal {
         Terminal {
             app: TerminalApp::Other("Optimistic".to_string()),
             supports_italic: true,
-            image_support: ImageSupport::Kitty,
+            graphics_route: GraphicsRoute::from(ImageSupport::Kitty),
             underline_support: UnderlineSupport {
                 straight: true,
                 double: true,
@@ -435,6 +475,7 @@ impl Terminal {
             color_mode: ColorMode::Dark,
             text_color: None,
             background_color: None,
+            background_source: ColorSource::Estimated,
             os: OsType::Unknown,
             distro: None,
             config_file: None,
@@ -456,6 +497,13 @@ impl Terminal {
             cell_size: None,
             supports_unicode: true,
         }
+    }
+
+    /// The pixel format this terminal's [`graphics_route`](Self::graphics_route)
+    /// uses.
+    #[must_use]
+    pub fn image_support(&self) -> ImageSupport {
+        self.graphics_route.image_support()
     }
 
     /// Get the terminal width in columns.
@@ -499,10 +547,18 @@ impl Terminal {
     /// Get the cell size in pixels.
     ///
     /// Returns the cached cell size if available (set during detection or via builder),
-    /// otherwise queries live: the `TIOCGWINSZ` pixel fields first, then CSI 14t.
-    /// Always `None` on native Windows.
+    /// otherwise [`discovery::fonts::cell_size`](crate::discovery::fonts::cell_size):
+    /// on Unix the `TIOCGWINSZ` pixel fields first, then CSI 14t; on native
+    /// Windows the terminal's CSI 16t answer, read only if construction's
+    /// startup exchange received it (never sent here, so
+    /// [`ProbeMode::Off`] keeps console input untouched).
+    /// `None` when nothing was measured; callers then use [`CellSize::FALLBACK`].
     pub fn cell_size(&self) -> Option<CellSize> {
-        self.cell_size.or_else(cell_size)
+        #[cfg(windows)]
+        let measured = crate::discovery::startup_exchange::received_cell_size;
+        #[cfg(not(windows))]
+        let measured = crate::discovery::fonts::cell_size;
+        self.cell_size.or_else(measured)
     }
 
     /// Returns the cached color mode for this terminal instance.
@@ -569,7 +625,7 @@ impl Terminal {
     ///     .build();
     ///
     /// assert!(term.is_tty);
-    /// assert_eq!(term.image_support, ImageSupport::Kitty);
+    /// assert_eq!(term.image_support(), ImageSupport::Kitty);
     /// ```
     pub fn builder() -> TerminalBuilder {
         TerminalBuilder::default()
@@ -597,7 +653,7 @@ impl Terminal {
 pub struct TerminalBuilder {
     app: Option<TerminalApp>,
     supports_italic: Option<bool>,
-    image_support: Option<ImageSupport>,
+    graphics_route: Option<GraphicsRoute>,
     underline_support: Option<UnderlineSupport>,
     osc_link_support: Option<bool>,
     is_tty: Option<bool>,
@@ -610,9 +666,21 @@ pub struct TerminalBuilder {
     tab_width: Option<usize>,
     cell_size: Option<CellSize>,
     supports_unicode: Option<bool>,
+    probe_mode: ProbeMode,
 }
 
 impl TerminalBuilder {
+    /// Set whether construction may query the terminal (colors and the
+    /// graphics probe). An application with its own input loop passes
+    /// [`ProbeMode::Off`], or supplies a [`graphics_route`](Self::graphics_route),
+    /// so no reply races its reader. Probe results are cached per process,
+    /// so only the first construction can probe: build before any input loop
+    /// starts.
+    pub fn probe(mut self, value: ProbeMode) -> Self {
+        self.probe_mode = value;
+        self
+    }
+
     /// Set the terminal application.
     pub fn app(mut self, value: TerminalApp) -> Self {
         self.app = Some(value);
@@ -625,9 +693,17 @@ impl TerminalBuilder {
         self
     }
 
-    /// Set the image support level.
+    /// Set the image support level, as a caller-supplied direct route (see
+    /// [`GraphicsRoute`]'s `From<ImageSupport>`).
     pub fn image_support(mut self, value: ImageSupport) -> Self {
-        self.image_support = Some(value);
+        self.graphics_route = Some(GraphicsRoute::from(value));
+        self
+    }
+
+    /// Set the graphics route. A supplied route is authoritative: it is
+    /// never re-resolved, and construction sends no graphics probe.
+    pub fn graphics_route(mut self, value: GraphicsRoute) -> Self {
+        self.graphics_route = Some(value);
         self
     }
 
@@ -712,8 +788,8 @@ impl TerminalBuilder {
     /// Set the cell size in pixels.
     ///
     /// When set, `Terminal::cell_size()` returns this value instead of
-    /// querying the terminal via CSI 14t. Prevents `/dev/tty` races
-    /// in multi-threaded test environments.
+    /// measuring it. Prevents terminal-query races in multi-threaded test
+    /// environments.
     pub fn cell_size(mut self, value: CellSize) -> Self {
         self.cell_size = Some(value);
         self
@@ -730,11 +806,11 @@ impl TerminalBuilder {
 
     /// Build the Terminal, using auto-detected values for unset fields.
     pub fn build(self) -> Terminal {
-        let detected = new_terminal();
+        let detected = detect_terminal(self.probe_mode, self.graphics_route.clone());
         Terminal {
             app: self.app.unwrap_or(detected.app),
             supports_italic: self.supports_italic.unwrap_or(detected.supports_italic),
-            image_support: self.image_support.unwrap_or(detected.image_support),
+            graphics_route: self.graphics_route.unwrap_or(detected.graphics_route),
             underline_support: self.underline_support.unwrap_or(detected.underline_support),
             osc_link_support: self.osc_link_support.unwrap_or(detected.osc_link_support),
             is_tty: self.is_tty.unwrap_or(detected.is_tty),
@@ -742,6 +818,7 @@ impl TerminalBuilder {
             color_mode: self.color_mode.unwrap_or(detected.color_mode),
             text_color: detected.text_color,
             background_color: detected.background_color,
+            background_source: detected.background_source,
             is_ci: self.is_ci.unwrap_or(detected.is_ci),
             is_nerd_font: self.is_nerd_font.unwrap_or(detected.is_nerd_font),
             fixed_width: self.fixed_width,
@@ -878,12 +955,12 @@ mod tests {
         let term = Terminal::builder()
             .image_support(ImageSupport::Kitty)
             .build();
-        assert_eq!(term.image_support, ImageSupport::Kitty);
+        assert_eq!(term.image_support(), ImageSupport::Kitty);
 
         let term = Terminal::builder()
             .image_support(ImageSupport::None)
             .build();
-        assert_eq!(term.image_support, ImageSupport::None);
+        assert_eq!(term.image_support(), ImageSupport::None);
     }
 
     #[test]
@@ -910,7 +987,7 @@ mod tests {
             .build();
 
         assert!(term.is_tty);
-        assert_eq!(term.image_support, ImageSupport::Kitty);
+        assert_eq!(term.image_support(), ImageSupport::Kitty);
         assert_eq!(term.color_depth, ColorDepth::TrueColor);
         assert!(!term.is_ci);
     }
@@ -954,7 +1031,7 @@ mod tests {
     #[test]
     fn test_terminal_new_optimistic_has_full_capabilities() {
         let term = Terminal::new_optimistic(80);
-        assert_eq!(term.image_support, ImageSupport::Kitty);
+        assert_eq!(term.image_support(), ImageSupport::Kitty);
         assert_eq!(term.color_depth, ColorDepth::TrueColor);
         // All underline styles enabled
         assert!(term.underline_support.straight);

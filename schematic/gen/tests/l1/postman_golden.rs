@@ -8,6 +8,7 @@
 //! 3. Multipart `type: "file"` for file-upload form fields (Phase 1, Finding 3).
 //! 4. Path + query parameter shapes for a `GET` endpoint.
 //! 5. Grouped-module base-URL aliasing (`baseUrl`, `baseUrl2`).
+//! 6. OAuth2 grants with their URLs and scopes (R22).
 //!
 //! The expected JSON for each scenario lives in
 //! `tests/fixtures/postman/golden/`. The fixture files are committed; this
@@ -29,8 +30,9 @@ use jsonschema::Validator;
 use schematic_define::auth::ApiKeyLocation;
 use schematic_define::params::{EndpointParams, QueryParamType};
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, FormField, RestApi, RestMethod,
-    Schema,
+    ApiRequest, AuthMethod, AuthPolicy, AuthorizationCodeGrant, ClientCredentialsGrant, DeviceCodeGrant, EndpointAuth,
+    OAuth2ClientAuthMethod, OAuth2Config, PkceRequirement, SuccessShape, AuthStrategy, CrossOrigin, Endpoint, EnvList,
+    FormField, RestApi, RestMethod,
 };
 use schematic_gen::export::postman::{build_postman_collection, build_postman_collection_grouped};
 use serde_json::Value;
@@ -129,27 +131,7 @@ fn rest_api(
     module_path: Option<&str>,
     endpoints: Vec<Endpoint>,
 ) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{} test API", name),
-        base_url: base_url.to_string(),
-        docs_url: None,
-        auth,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        headers: vec![],
-        endpoints,
-        module_path: module_path.map(str::to_string),
-        request_suffix: None,
-        version: None,
-        env_mapping: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} test API", name); fixture.base_url = base_url.to_string(); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = module_path.map(str::to_string); fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::common::components::with_referenced_components(fixture) }
 }
 
 fn endpoint(
@@ -158,20 +140,10 @@ fn endpoint(
     path: &str,
     description: &str,
     request: Option<ApiRequest>,
-    response: ApiResponse,
+    response: Vec<SuccessShape>,
     params: Option<EndpointParams>,
 ) -> Endpoint {
-    Endpoint {
-        id: id.to_string(),
-        method,
-        path: path.to_string(),
-        description: description.to_string(),
-        request,
-        response,
-        headers: vec![],
-        params,
-        oauth_scopes: None,
-    }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = description.to_string(); fixture.request = request; fixture.response = response; fixture.headers = vec![]; fixture.params = params; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 // --- Scenario builders -----------------------------------------------------
@@ -183,7 +155,7 @@ fn build_mixed_auth_emqx() -> Value {
     let basic_api = rest_api(
         "EmqxBasic",
         "http://localhost:18083/api/v5",
-        AuthStrategy::Basic,
+        AuthStrategy::Basic { username_env: EnvList::new(vec![]), password_env: EnvList::new(vec![]) },
         Some("emqx"),
         vec![
             endpoint(
@@ -192,7 +164,7 @@ fn build_mixed_auth_emqx() -> Value {
                 "/alarms",
                 "List active alarms (basic auth)",
                 None,
-                ApiResponse::json_type("AlarmList"),
+                vec![SuccessShape::json_type("AlarmList")],
                 None,
             ),
             endpoint(
@@ -201,7 +173,7 @@ fn build_mixed_auth_emqx() -> Value {
                 "/settings",
                 "Read EMQX settings",
                 None,
-                ApiResponse::json_type("Settings"),
+                vec![SuccessShape::json_type("Settings")],
                 None,
             ),
         ],
@@ -219,7 +191,7 @@ fn build_mixed_auth_emqx() -> Value {
                 "/alarms",
                 "List active alarms (bearer auth)",
                 None,
-                ApiResponse::json_type("AlarmList"),
+                vec![SuccessShape::json_type("AlarmList")],
                 None,
             ),
             endpoint(
@@ -227,8 +199,8 @@ fn build_mixed_auth_emqx() -> Value {
                 RestMethod::Post,
                 "/login",
                 "Exchange credentials for a bearer token",
-                Some(ApiRequest::Json(Schema::new("LoginRequest"))),
-                ApiResponse::json_type("LoginResponse"),
+                Some(ApiRequest::json_type("LoginRequest")),
+                vec![SuccessShape::json_type("LoginResponse")],
                 None,
             ),
         ],
@@ -252,7 +224,7 @@ fn build_auth_variables_openai() -> Value {
             "/models",
             "List available models",
             None,
-            ApiResponse::json_type("ListModelsResponse"),
+            vec![SuccessShape::json_type("ListModelsResponse")],
             None,
         )],
     );
@@ -284,7 +256,7 @@ fn build_file_upload_elevenlabs() -> Value {
                     .optional()
                     .with_description("Optional sample name"),
             ])),
-            ApiResponse::json_type("UploadSampleResponse"),
+            vec![SuccessShape::json_type("UploadSampleResponse")],
             None,
         )],
     );
@@ -320,7 +292,7 @@ fn build_path_query_params_github() -> Value {
             "/repos/{owner}/{repo}/issues",
             "List issues for a repository",
             None,
-            ApiResponse::json_type("IssueList"),
+            vec![SuccessShape::json_type("IssueList")],
             Some(params),
         )],
     );
@@ -346,13 +318,61 @@ fn build_api_key_query_auth() -> Value {
             "/items",
             "List all items",
             None,
-            ApiResponse::json_type("ItemList"),
+            vec![SuccessShape::json_type("ItemList")],
             None,
         )],
     );
 
     let collection = build_postman_collection(&api);
     serde_json::to_value(&collection).expect("serialize collection")
+}
+
+/// An API whose OAuth2 authorization-code grant keeps its URLs and scopes,
+/// with one endpoint replacing it by a client-credentials grant (its own
+/// credential, so endpoint-suffixed variables) and one by a public-client
+/// device-code grant, which Postman cannot run.
+fn build_oauth2_grants() -> Value {
+    let pkce = OAuth2Config::AuthorizationCodePkce(AuthorizationCodeGrant {
+        authorization_url: "https://auth.example.com/authorize".to_string(),
+        token_url: "https://auth.example.com/token".to_string(),
+        revocation_url: Some("https://auth.example.com/revoke".to_string()),
+        default_scopes: vec!["repo".to_string(), "read:user".to_string()],
+        pkce: PkceRequirement::Required,
+        client_auth: OAuth2ClientAuthMethod::ClientSecretPost,
+    });
+    let service = OAuth2Config::ClientCredentials(ClientCredentialsGrant {
+        token_url: "https://auth.example.com/token".to_string(),
+        revocation_url: None,
+        default_scopes: vec!["admin".to_string()],
+        client_auth: OAuth2ClientAuthMethod::ClientSecretBasic,
+    });
+    let device = OAuth2Config::DeviceCode(DeviceCodeGrant {
+        device_authorization_url: "https://auth.example.com/device".to_string(),
+        token_url: "https://auth.example.com/token".to_string(),
+        revocation_url: None,
+        default_scopes: vec![],
+        client_auth: OAuth2ClientAuthMethod::None,
+    });
+    let policy = |config: OAuth2Config| AuthPolicy { explicit: vec![AuthMethod::OAuth2(config)], env_fallback: None };
+    let mut admin = endpoint("GetAdmin", RestMethod::Get, "/admin", "Service access", None, vec![SuccessShape::empty()], None);
+    admin.auth = Some(EndpointAuth::Policy {
+        policy: policy(service),
+        env_mapping: Some(schematic_define::EnvMapping::default()),
+    });
+    let mut tv = endpoint("PairDevice", RestMethod::Post, "/devices", "Device sign-in", None, vec![SuccessShape::empty()], None);
+    tv.auth = Some(EndpointAuth::Policy { policy: policy(device), env_mapping: None });
+    let api = rest_api(
+        "OAuthHub",
+        "https://api.example.com",
+        AuthStrategy::OAuth2(pkce),
+        None,
+        vec![
+            endpoint("GetUser", RestMethod::Get, "/user", "The signed-in user", None, vec![SuccessShape::empty()], None),
+            admin,
+            tv,
+        ],
+    );
+    serde_json::to_value(build_postman_collection(&api)).expect("serialize collection")
 }
 
 /// Two APIs grouped under one Ollama module sharing a base URL prefix
@@ -371,7 +391,7 @@ fn build_grouped_module_ollama() -> Value {
             "/api/tags",
             "List locally installed models",
             None,
-            ApiResponse::json_type("TagsResponse"),
+            vec![SuccessShape::json_type("TagsResponse")],
             None,
         )],
     );
@@ -387,7 +407,7 @@ fn build_grouped_module_ollama() -> Value {
             "/models",
             "OpenAI-compatible model listing",
             None,
-            ApiResponse::json_type("ListModelsResponse"),
+            vec![SuccessShape::json_type("ListModelsResponse")],
             None,
         )],
     );
@@ -543,6 +563,45 @@ fn golden_api_key_query_auth() {
     );
 
     assert_golden("api_key_query_auth", &value);
+}
+
+#[test]
+fn golden_oauth2_grants() {
+    let value = build_oauth2_grants();
+    let attributes = |auth: &Value| -> Vec<(String, String)> {
+        auth["oauth2"].as_array().expect("oauth2 attributes").iter()
+            .map(|a| (a["key"].as_str().unwrap().to_string(), a["value"].as_str().unwrap().to_string())).collect()
+    };
+    let pair = |key: &str, value: &str| (key.to_string(), value.to_string());
+    // The API's grant is an `oauth2` auth, not a bearer token.
+    assert_eq!(value["auth"]["type"], "oauth2");
+    assert_eq!(attributes(&value["auth"]), [
+        pair("grant_type", "authorization_code_with_pkce"),
+        pair("authUrl", "https://auth.example.com/authorize"),
+        pair("accessTokenUrl", "https://auth.example.com/token"),
+        pair("challengeAlgorithm", "S256"),
+        pair("scope", "repo read:user"),
+        pair("clientId", "{{oauth2ClientId}}"),
+        pair("clientSecret", "{{oauth2ClientSecret}}"),
+        pair("client_authentication", "body"),
+        pair("addTokenTo", "header"),
+    ]);
+    let admin = find_request_by_name(&value, "GetAdmin").expect("GetAdmin");
+    assert_eq!(attributes(&admin["auth"])[0], pair("grant_type", "client_credentials"));
+    assert!(attributes(&admin["auth"]).contains(&pair("clientSecret", "{{oauth2ClientSecret_GetAdmin}}")));
+    assert!(attributes(&admin["auth"]).contains(&pair("client_authentication", "header")));
+    let device = find_request_by_name(&value, "PairDevice").expect("PairDevice");
+    assert_eq!(attributes(&device["auth"]), [
+        pair("accessTokenUrl", "https://auth.example.com/token"),
+        pair("accessToken", "{{oauth2AccessToken}}"),
+        pair("clientId", "{{oauth2ClientId}}"),
+        pair("client_authentication", "body"),
+        pair("addTokenTo", "header"),
+    ]);
+    let keys: Vec<&str> = value["variable"].as_array().unwrap().iter().map(|v| v["key"].as_str().unwrap()).collect();
+    assert_eq!(keys, ["baseUrl", "oauth2ClientId", "oauth2ClientSecret", "oauth2ClientId_GetAdmin", "oauth2ClientSecret_GetAdmin", "oauth2AccessToken"]);
+
+    assert_golden("oauth2_grants", &value);
 }
 
 #[test]

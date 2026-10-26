@@ -6,8 +6,8 @@
 //! children exercise the lookup and the live Win32 calls.
 
 use super::backend::{
-    InspectionContext, InspectionResult, MechanismInspection, ProcessCandidate, ProcessDetails,
-    UsageBackend,
+    InspectionContext, InspectionResult, LinkError, MechanismInspection, ProcessCandidate,
+    ProcessDetails, UsageBackend,
 };
 use super::budget::Budget;
 use super::win32::{
@@ -18,6 +18,7 @@ use crate::performance::counters;
 use crate::performance::testing::measure;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
@@ -125,6 +126,10 @@ struct Fake {
     path_reads: Vec<(u32, usize)>,
     /// [`Source::loader_paths`] by PID: the indexes the one-pass read covers.
     walked: HashMap<u32, Option<Vec<usize>>>,
+    /// Parent PIDs; with none scripted the source reads no parents.
+    parents: HashMap<u32, u32>,
+    descriptions: HashMap<PathBuf, String>,
+    description_reads: Vec<PathBuf>,
 }
 
 /// Records its own close.
@@ -231,6 +236,22 @@ impl Source for &mut Fake {
         self.path_reads.push((process.pid, module.0));
         let modules = self.process(process.pid)?.modules.clone()?;
         modules.get(module.0).cloned().unwrap_or(Err(Fault::Gone))
+    }
+
+    fn parent_pid(&mut self, process: &FakeHandle) -> Result<u32, LinkError> {
+        if self.parents.is_empty() {
+            return Err(LinkError::Unsupported);
+        }
+        self.parents.get(&process.pid).copied().ok_or(LinkError::Gone)
+    }
+
+    fn image(&mut self, process: &FakeHandle) -> Option<PathBuf> {
+        self.process(process.pid).ok()?.open.clone().ok()?.0
+    }
+
+    fn description(&mut self, image: &Path) -> Option<OsString> {
+        self.description_reads.push(image.to_path_buf());
+        self.descriptions.get(image).map(OsString::from)
     }
 }
 
@@ -1095,6 +1116,10 @@ mod live {
         let record = records[0];
         assert!(record.creation_token.is_some());
         assert!(record.start_time.is_some());
+        let own = std::process::id();
+        assert_eq!(record.parent_pid, Some(own), "{record:#?}");
+        assert_eq!(record.ancestors.first().map(|a| a.pid), Some(own), "{record:#?}");
+        assert!(record.ancestors.len() <= MAX_ANCESTORS);
         assert!(!record.identity_uncertain);
         assert_eq!(record.name.as_ref().map(|n| n.as_os_str().to_owned()), Some("usage-child.exe".into()));
         assert_eq!(module_paths(record), vec![indexed(&image)]);
@@ -1177,6 +1202,18 @@ mod live {
     }
 
     #[test]
+    fn a_system_image_has_a_file_description_and_a_parent() {
+        let mut source = super::super::win32::ffi::Win32;
+        let root = std::env::var_os("SystemRoot").expect("SystemRoot");
+        let cmd = PathBuf::from(root).join("System32").join("cmd.exe");
+        let description = source.description(&cmd).expect("cmd.exe has a FileDescription");
+        assert!(!description.is_empty());
+        let opened = source.open(std::process::id()).expect("open this process");
+        let parent = source.parent_pid(&opened.process).expect("this process's parent");
+        assert_ne!(parent, std::process::id());
+    }
+
+    #[test]
     fn the_shipped_windows_backend_inventories_loaded_modules() {
         let scene = scene();
         let report = live_query(&scene.root);
@@ -1199,4 +1236,64 @@ mod live {
             assert!(record.reason.as_deref().is_some_and(|r| !r.is_empty()));
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Process context
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_translation_table_is_read_as_little_endian_language_and_code_page_pairs() {
+    let bytes = [0x09, 0x04, 0xB0, 0x04, 0x07, 0x04, 0xE4, 0x04, 0xFF];
+    assert_eq!(win32::parse_translations(&bytes), vec![(0x0409, 0x04B0), (0x0407, 0x04E4)]);
+    assert!(win32::parse_translations(&[]).is_empty());
+}
+
+#[test]
+fn description_queries_try_each_translation_then_us_english_fallbacks_once() {
+    assert_eq!(
+        win32::description_queries(&[(0x0407, 0x04E4), (0x0409, 0x04B0)]),
+        vec![
+            r"\StringFileInfo\040704E4\FileDescription".to_string(),
+            r"\StringFileInfo\040904B0\FileDescription".to_string(),
+            r"\StringFileInfo\040904E4\FileDescription".to_string(),
+        ]
+    );
+    assert_eq!(win32::description_queries(&[]).len(), 2);
+}
+
+#[test]
+fn a_description_drops_its_terminator_and_a_blank_one_is_none() {
+    let units: Vec<u16> = "Visual Studio Code\0".encode_utf16().collect();
+    assert_eq!(win32::description_text(&units), Some(OsString::from("Visual Studio Code")));
+    let blank: Vec<u16> = "  \0".encode_utf16().collect();
+    assert_eq!(win32::description_text(&blank), None);
+    assert_eq!(win32::description_text(&[]), None);
+}
+
+#[test]
+fn a_holder_reports_its_parent_with_descriptions_read_once_per_image() {
+    let scene = scene();
+    let tool = scene.root.join("bin").join("tool.exe");
+    let shell = scene.sibling.join("tool.exe");
+    let mut fake = Fake::default()
+        .with(PID, Scripted::new().image(&tool))
+        .with(OTHER_PID, Scripted::new().image(&shell));
+    fake.parents = HashMap::from([(PID, OTHER_PID), (OTHER_PID, 0)]);
+    fake.descriptions.insert(shell.clone(), "Tool Shell".to_string());
+    let report = fake.query(&scene.root, &PathUsageOptions::default());
+
+    let record = report.processes.iter().find(|p| p.pid == PID).expect("holder");
+    assert_eq!(record.parent_pid, Some(OTHER_PID));
+    assert_eq!(record.app_name, None, "the holder's image has no description");
+    assert_eq!(
+        record.ancestors,
+        vec![Ancestor {
+            pid: OTHER_PID,
+            name: Some("tool.exe".into()),
+            app_name: Some("Tool Shell".into()),
+        }]
+    );
+    assert_eq!(record.ancestry_end, AncestryEnd::Root);
+    assert_eq!(fake.description_reads, vec![tool, shell]);
 }

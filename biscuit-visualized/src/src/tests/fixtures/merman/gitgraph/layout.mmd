@@ -1,0 +1,10 @@
+gitGraph
+    commit id: "init"
+    branch feature
+    checkout feature
+    commit id: "f1"
+    commit id: "f2" tag: "v0.1"
+    checkout main
+    commit id: "m1"
+    merge feature id: "M" tag: "v1.0" tag: "stable"
+    commit id: "m2"

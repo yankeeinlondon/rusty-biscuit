@@ -1,0 +1,3779 @@
+{
+  "asyncapi": "2.2.0",
+  "channels": {
+    "/intg": {
+      "publish": {
+        "description": "Integration API for the UC Remote to interact with custom devices.  \nThe publish channel lists all messages that the UC Remote sends to an integration driver server.\n",
+        "message": {
+          "oneOf": [
+            {
+              "$ref": "#/components/messages/auth"
+            },
+            {
+              "$ref": "#/components/messages/get_driver_version"
+            },
+            {
+              "$ref": "#/components/messages/get_driver_metadata"
+            },
+            {
+              "$ref": "#/components/messages/connect"
+            },
+            {
+              "$ref": "#/components/messages/disconnect"
+            },
+            {
+              "$ref": "#/components/messages/get_device_state"
+            },
+            {
+              "$ref": "#/components/messages/setup_driver"
+            },
+            {
+              "$ref": "#/components/messages/set_driver_user_data"
+            },
+            {
+              "$ref": "#/components/messages/abort_driver_setup"
+            },
+            {
+              "$ref": "#/components/messages/get_available_entities"
+            },
+            {
+              "$ref": "#/components/messages/subscribe_events"
+            },
+            {
+              "$ref": "#/components/messages/unsubscribe_events"
+            },
+            {
+              "$ref": "#/components/messages/get_entity_states"
+            },
+            {
+              "$ref": "#/components/messages/entity_command"
+            },
+            {
+              "$ref": "#/components/messages/enter_standby"
+            },
+            {
+              "$ref": "#/components/messages/exit_standby"
+            },
+            {
+              "$ref": "#/components/messages/version"
+            },
+            {
+              "$ref": "#/components/messages/supported_entity_types"
+            },
+            {
+              "$ref": "#/components/messages/configured_entities"
+            },
+            {
+              "$ref": "#/components/messages/localization_cfg"
+            },
+            {
+              "$ref": "#/components/messages/runtime_info"
+            }
+          ]
+        },
+        "operationId": "pubIntegrationMessage"
+      },
+      "subscribe": {
+        "description": "Integration API for the UC Remote to receive messages from integration drivers.  \nThe subscribe channel lists all messages that the integration driver server sends to the UC Remote.\n",
+        "message": {
+          "oneOf": [
+            {
+              "$ref": "#/components/messages/auth_required"
+            },
+            {
+              "$ref": "#/components/messages/authentication"
+            },
+            {
+              "$ref": "#/components/messages/result"
+            },
+            {
+              "$ref": "#/components/messages/driver_version"
+            },
+            {
+              "$ref": "#/components/messages/driver_metadata"
+            },
+            {
+              "$ref": "#/components/messages/device_state"
+            },
+            {
+              "$ref": "#/components/messages/driver_setup_change"
+            },
+            {
+              "$ref": "#/components/messages/entity_states"
+            },
+            {
+              "$ref": "#/components/messages/available_entities"
+            },
+            {
+              "$ref": "#/components/messages/entity_change"
+            },
+            {
+              "$ref": "#/components/messages/entity_available"
+            },
+            {
+              "$ref": "#/components/messages/entity_removed"
+            },
+            {
+              "$ref": "#/components/messages/assistant_event"
+            },
+            {
+              "$ref": "#/components/messages/get_version"
+            },
+            {
+              "$ref": "#/components/messages/get_supported_entity_types"
+            },
+            {
+              "$ref": "#/components/messages/get_configured_entities"
+            },
+            {
+              "$ref": "#/components/messages/get_localization_cfg"
+            },
+            {
+              "$ref": "#/components/messages/get_runtime_info"
+            }
+          ]
+        },
+        "operationId": "subIntegrationMessage"
+      }
+    }
+  },
+  "components": {
+    "messages": {
+      "abort_driver_setup": {
+        "description": "If the user aborts the setup process, the UC Remote sends this event. Further messages from the integration\nfrom the setup process will be ignored afterwards.\n",
+        "payload": {
+          "$ref": "#/components/schemas/abortDriverSetupEvent"
+        },
+        "summary": "🚀 Abort a driver setup.",
+        "tags": [
+          {
+            "name": "setup"
+          },
+          {
+            "name": "event"
+          }
+        ]
+      },
+      "assistant_event": {
+        "description": "The `assistant_event` message must be emitted by the integration driver to start the audio\nstream and for providing optional feedback about the voice command processing and outcome.\n",
+        "payload": {
+          "$ref": "#/components/schemas/assistantEventMsg"
+        },
+        "summary": "🔍 Assistant event.",
+        "tags": [
+          {
+            "name": "event"
+          }
+        ]
+      },
+      "auth": {
+        "description": "Sent by the UC Remote after an `auth_required` request by the integration driver.\n",
+        "payload": {
+          "$ref": "#/components/schemas/authRequestMsg"
+        },
+        "summary": "🚀 Authenticate a connection.",
+        "x-response": {
+          "$ref": "#/components/messages/authentication"
+        }
+      },
+      "auth_required": {
+        "description": "This event is only sent if the integration doesn't support header based authentication during connection setup.  \nThe UC Remote will then authenticate with the `auth` request message.\n",
+        "payload": {
+          "$ref": "#/components/schemas/authRequiredEvent"
+        },
+        "summary": "🚀 Authentication request event after connection is established.",
+        "tags": [
+          {
+            "name": "event"
+          }
+        ]
+      },
+      "authentication": {
+        "description": "The authentication result is provided in the `code` attribute:\n- `200`: success, API can be used and message requests are accepted.\n- `401`: authentication failed, the provided token is not valid.  \n  The UC Remote will close the connection. The driver should also close the connection after sending this\n  response.\n\nIf the driver doesn't support or require authentication, it still needs to send the `authentication` message\nwith `code: 200` and `req_id: 0` after the WebSocket connection has been established by the UC Remote.\n\nIt's recommended to send the optional driver version object in the the msg_data payload to avoid eventual\nadditional message exchanges.\n",
+        "payload": {
+          "$ref": "#/components/schemas/authMsg"
+        },
+        "summary": "🚀 🍕 Authentication response.",
+        "tags": [
+          {
+            "name": "required"
+          }
+        ]
+      },
+      "available_entities": {
+        "description": "This message contains the available entities from the integration driver the UC Remote can configure.\n\nIf the `get_available_entities` request included a filter, it is returned in the message data with only the \nmatching entities.\n",
+        "payload": {
+          "$ref": "#/components/schemas/availableEntitiesMsg"
+        },
+        "summary": "🚀 🍕 Available entities response.",
+        "tags": [
+          {
+            "name": "entity"
+          },
+          {
+            "name": "required"
+          }
+        ]
+      },
+      "configured_entities": {
+        "description": "The returned entity identifiers are configured in the Remote.\n",
+        "payload": {
+          "$ref": "#/components/schemas/configuredEntitiesMsg"
+        },
+        "summary": "🚀 Configured entities response.",
+        "tags": [
+          {
+            "name": "entity"
+          }
+        ]
+      },
+      "connect": {
+        "description": "Optional: this event instructs the integration to establish the required connections to interact with the\nprovided entities or devices.\n\nThe integration should send `device_state` events to inform the UC Remote about the connection state.\n",
+        "payload": {
+          "$ref": "#/components/schemas/connectEvent"
+        },
+        "summary": "🧪 Event to establish connection to entities or devices.",
+        "tags": [
+          {
+            "name": "device"
+          },
+          {
+            "name": "event"
+          }
+        ]
+      },
+      "device_state": {
+        "description": "If there's a device communication issue or other error, this state will inform the user with a UI notification\nabout the issue.\n\nThis event should be triggered by the integration driver whenever the state changes. Furthermore, the UC Remote\ncan request the current state with the `get_device_state` request.\n",
+        "payload": {
+          "$ref": "#/components/schemas/deviceStateEventMsg"
+        },
+        "summary": "🚀 🍕 Current integration driver or device state event.",
+        "tags": [
+          {
+            "name": "device"
+          },
+          {
+            "name": "required"
+          }
+        ]
+      },
+      "disconnect": {
+        "description": "Optional: this event instructs the integration to stop the interactions with the provided entities or devices,\nbecause the UC Remote temporarily doesn't need the entities. It's up to the integration what to do, but it\nneeds to be prepared to react on a `connect` event.\n\nThe integration should send `device_state` events to inform the UC Remote about the connection state.\n",
+        "payload": {
+          "$ref": "#/components/schemas/disconnectEvent"
+        },
+        "summary": "🧪 Event to stop the connection to entities or devices.",
+        "tags": [
+          {
+            "name": "device"
+          },
+          {
+            "name": "event"
+          }
+        ]
+      },
+      "driver_metadata": {
+        "payload": {
+          "$ref": "#/components/schemas/driverMetadataMsg"
+        },
+        "summary": "🧪 🍕 Integration driver metadata response.",
+        "tags": [
+          {
+            "name": "metadata"
+          },
+          {
+            "name": "required"
+          }
+        ]
+      },
+      "driver_setup_change": {
+        "description": "Emitted for all driver setup flow state changes.\n\nDifferent change events:\n- `SETUP`: send progress, setup is still running \n- `WAIT_USER_ACTION`: integration driver requires user input\n- `OK`: integration setup successfully completed\n- `ERROR`: integration setup failed\n",
+        "payload": {
+          "$ref": "#/components/schemas/driverSetupChangeEvent"
+        },
+        "summary": "🚀 Driver setup state change event.",
+        "tags": [
+          {
+            "name": "setup"
+          },
+          {
+            "name": "event"
+          }
+        ]
+      },
+      "driver_version": {
+        "payload": {
+          "$ref": "#/components/schemas/driverVersionMsg"
+        },
+        "summary": "🚀 🍕 Integration driver version information response.",
+        "tags": [
+          {
+            "name": "required"
+          }
+        ]
+      },
+      "enter_standby": {
+        "description": "Notification event that the UC Remote goes into standby mode and won't process incoming events anymore.\n",
+        "payload": {
+          "$ref": "#/components/schemas/enterStandbyEvent"
+        },
+        "summary": "🚀 UC Remote goes into standby event.",
+        "tags": [
+          {
+            "name": "device"
+          },
+          {
+            "name": "entity"
+          },
+          {
+            "name": "event"
+          }
+        ]
+      },
+      "entity_available": {
+        "description": "Optional event to notify the UC Remote that new entities are available.\n",
+        "payload": {
+          "$ref": "#/components/schemas/entityAvailableEvent"
+        },
+        "summary": "🔍 New entity available event.",
+        "tags": [
+          {
+            "name": "entity"
+          },
+          {
+            "name": "event"
+          }
+        ]
+      },
+      "entity_change": {
+        "description": "Emitted when an attribute of an entity changes, e.g. is switched off. Either after an `entity_command` or if the\nentity is updated manually through a user or an external system. This keeps the UC Remote in sync with the real\nstate of the entity without the need of constant polling.\n",
+        "payload": {
+          "$ref": "#/components/schemas/entityStateChangedEvent"
+        },
+        "summary": "🚀 🍕 Entity state change event.",
+        "tags": [
+          {
+            "name": "entity"
+          },
+          {
+            "name": "event"
+          },
+          {
+            "name": "required"
+          }
+        ]
+      },
+      "entity_command": {
+        "description": "Instruct the integration driver to execute a command like \"turn on\" or \"change temperature\". \nOptional command data like temperature value or channel number can be provided in the `params` array.\nThe parameter objects are described in the entity feature definitions.\n\nThe `result` response is to acknowledge the command and to return any immediate failures in case the driver\nalready knows it's unable to perform the command due to invalid data, device communication issues etc.\n\nAfter successfully executing a command, the UC Remote expects an `entity_change` event with the updated feature \nvalue(s).\n",
+        "examples": [
+          {
+            "payload": {
+              "id": 123,
+              "kind": "req",
+              "msg": "entity_command",
+              "msg_data": {
+                "cmd_id": "press",
+                "entity_id": "button-1",
+                "entity_type": "button"
+              }
+            }
+          },
+          {
+            "payload": {
+              "id": 124,
+              "kind": "req",
+              "msg": "entity_command",
+              "msg_data": {
+                "cmd_id": "on",
+                "entity_id": "switch-1",
+                "entity_type": "switch"
+              }
+            }
+          },
+          {
+            "payload": {
+              "id": 124,
+              "kind": "req",
+              "msg": "entity_command",
+              "msg_data": {
+                "cmd_id": "off",
+                "entity_id": "switch-1",
+                "entity_type": "switch"
+              }
+            }
+          },
+          {
+            "payload": {
+              "id": 125,
+              "kind": "req",
+              "msg": "entity_command",
+              "msg_data": {
+                "cmd_id": "on",
+                "entity_id": "light-1",
+                "entity_type": "light"
+              }
+            }
+          },
+          {
+            "payload": {
+              "id": 125,
+              "kind": "req",
+              "msg": "entity_command",
+              "msg_data": {
+                "cmd_id": "on",
+                "entity_id": "light-1",
+                "entity_type": "light",
+                "params": {
+                  "brightness": 50,
+                  "temperature": 70
+                }
+              }
+            }
+          },
+          {
+            "payload": {
+              "id": 126,
+              "kind": "req",
+              "msg": "entity_command",
+              "msg_data": {
+                "cmd_id": "up",
+                "entity_id": "blind-1",
+                "entity_type": "cover"
+              }
+            }
+          },
+          {
+            "payload": {
+              "id": 126,
+              "kind": "req",
+              "msg": "entity_command",
+              "msg_data": {
+                "cmd_id": "position",
+                "entity_id": "blind-1",
+                "entity_type": "cover",
+                "params": {
+                  "position": 50
+                }
+              }
+            }
+          },
+          {
+            "payload": {
+              "id": 127,
+              "kind": "req",
+              "msg": "entity_command",
+              "msg_data": {
+                "cmd_id": "open",
+                "entity_id": "blind-2_cover-only",
+                "entity_type": "cover"
+              }
+            }
+          },
+          {
+            "payload": {
+              "id": 127,
+              "kind": "req",
+              "msg": "entity_command",
+              "msg_data": {
+                "cmd_id": "close",
+                "entity_id": "blind-2_cover-only",
+                "entity_type": "cover"
+              }
+            }
+          },
+          {
+            "payload": {
+              "id": 128,
+              "kind": "req",
+              "msg": "entity_command",
+              "msg_data": {
+                "cmd_id": "select_option",
+                "entity_id": "select-1",
+                "entity_type": "select",
+                "params": {
+                  "option": "Option 1"
+                }
+              }
+            }
+          }
+        ],
+        "payload": {
+          "$ref": "#/components/schemas/entityCommandMsg"
+        },
+        "summary": "🚀 🍕 Execute an entity command.",
+        "tags": [
+          {
+            "name": "entity"
+          },
+          {
+            "name": "required"
+          }
+        ],
+        "x-response": {
+          "$ref": "#/components/messages/result"
+        }
+      },
+      "entity_removed": {
+        "description": "Optional event to notify the UC Remote that entities were removed and no longer available.\n",
+        "payload": {
+          "$ref": "#/components/schemas/entityRemovedEvent"
+        },
+        "summary": "🔍 Entity removed event.",
+        "tags": [
+          {
+            "name": "entity"
+          },
+          {
+            "name": "event"
+          }
+        ]
+      },
+      "entity_states": {
+        "description": "Response message of the `get_entity_states` request. Contains the dynamic attributes of all entities.\n",
+        "payload": {
+          "$ref": "#/components/schemas/entityStatesMsg"
+        },
+        "summary": "🚀 🍕 Current state of the entities.",
+        "tags": [
+          {
+            "name": "entity"
+          },
+          {
+            "name": "required"
+          }
+        ]
+      },
+      "event": {
+        "payload": {
+          "$ref": "#/components/schemas/commonEvent"
+        },
+        "summary": "🚀 Generic event message."
+      },
+      "exit_standby": {
+        "description": "Notification event that the UC Remote is out of standby. The integration should resume operation if it\nsuspended it while receiving the `enter_standby` event.  \nThis allows the integration to submit any entity state changes. Otherwise the UC Remote will likely request an\nentity state update.\n",
+        "payload": {
+          "$ref": "#/components/schemas/exitStandbyEvent"
+        },
+        "summary": "🚀 UC Remote leaves standby event.",
+        "tags": [
+          {
+            "name": "device"
+          },
+          {
+            "name": "entity"
+          },
+          {
+            "name": "event"
+          }
+        ]
+      },
+      "get_available_entities": {
+        "description": "Called while configuring profiles and assigning entities to pages or groups in the web-configurator or the\nembedded editor of the remote UI.\n\nWith the optional filter, only entities of a given type can be requested.\n",
+        "payload": {
+          "$ref": "#/components/schemas/getAvailableEntitiesMsg"
+        },
+        "summary": "🚀 🍕 Retrieve the available entities from the integration driver.",
+        "tags": [
+          {
+            "name": "entity"
+          },
+          {
+            "name": "required"
+          }
+        ],
+        "x-response": {
+          "$ref": "#/components/messages/available_entities"
+        }
+      },
+      "get_configured_entities": {
+        "description": "ℹ️️ implemented in firmware 0.9.2.\n\nRequest the configured entities in the UC Remote originating from this integration. These are all the entities\nwhich have been configured in the UC Remote.  \n⚠️ This doesn't mean that all entities are actively being used (assigned in a profile and shown in the user\ninterface).\n\nThis allows the driver e.g. to optimize its device communication and only consider actively used entities.  \nAnother option for the driver to be notified about used entities is through the `subscribe_events` requests.\n",
+        "payload": {
+          "$ref": "#/components/schemas/getConfiguredEntitiesMsg"
+        },
+        "summary": "🧪 Retrieve configured entities from this integration.",
+        "tags": [
+          {
+            "name": "entity"
+          }
+        ],
+        "x-response": {
+          "$ref": "#/components/messages/configured_entities"
+        }
+      },
+      "get_device_state": {
+        "description": "Called by the UC Remote when it needs to synchronize the device state, e.g. after waking up from standby, or if\nit doesn't receive regular `device_state` events.\n\nThe `device_id` property is only required if the driver supports multiple device instances.\n\nNote: this request will not be answered with a response message but with an event.\n",
+        "payload": {
+          "$ref": "#/components/schemas/getDeviceStateMsg"
+        },
+        "summary": "🚀 🍕 Get the current integration driver or device state.",
+        "tags": [
+          {
+            "name": "device"
+          },
+          {
+            "name": "required"
+          }
+        ],
+        "x-response": {
+          "$ref": "#/components/messages/device_state"
+        }
+      },
+      "get_driver_metadata": {
+        "description": "The metadata is used to setup the driver in the remote / web-configurator and start the setup flow.\n",
+        "payload": {
+          "$ref": "#/components/schemas/getDriverMetadataMsg"
+        },
+        "summary": "🚀 🍕 Retrieve the integration driver metadata.",
+        "tags": [
+          {
+            "name": "metadata"
+          },
+          {
+            "name": "required"
+          }
+        ],
+        "x-response": {
+          "$ref": "#/components/messages/driver_metadata"
+        }
+      },
+      "get_driver_version": {
+        "payload": {
+          "$ref": "#/components/schemas/getDriverVersionMsg"
+        },
+        "summary": "🚀 🍕 Get version information about the integration driver.",
+        "tags": [
+          {
+            "name": "required"
+          }
+        ],
+        "x-response": {
+          "$ref": "#/components/messages/driver_version"
+        }
+      },
+      "get_entity_states": {
+        "description": "Called by the UC Remote when it needs to synchronize the dynamic entity attributes, e.g. after connection setup\nor waking up from standby.\n\nThe integration should only send the state of the configured entities to reduce communication overhead,\nespecially if there are many available entities, from which only a few are getting configured on the remote.  \nAny additional data will be ignored.\n\nFurthermore, the integration driver is free to decide which entity states it wants to send back. It's even\nadvisable to use dirty flags in the integration driver if there are a lot of entities, and only return the\nchanged data.\n\n⚠️ Future change announcement: this request will be enhanced with a `force` flag (or the like) to signal that\nall entity states are required, and no data should be suppressed. This will happen for example after the\nremote is restarted.\n",
+        "payload": {
+          "$ref": "#/components/schemas/getEntityStatesMsg"
+        },
+        "summary": "🚀 🍕 Get the current state of the configured entities.",
+        "tags": [
+          {
+            "name": "entity"
+          },
+          {
+            "name": "required"
+          }
+        ],
+        "x-response": {
+          "$ref": "#/components/messages/entity_states"
+        }
+      },
+      "get_localization_cfg": {
+        "description": "ℹ️️ implemented in firmware 0.9.2.\n\nThe active localization settings of the UC Remote can be used if the integration driver requires localized\nsettings for texts or units of measurements. \n\nFor language texts the driver should always provide an english option in addition to any localized texts.\n",
+        "payload": {
+          "$ref": "#/components/schemas/getLocalizationMsg"
+        },
+        "summary": "🧪 Retrieve the localization settings of the UC Remote.",
+        "tags": [
+          {
+            "name": "metadata"
+          }
+        ],
+        "x-response": {
+          "$ref": "#/components/messages/localization_cfg"
+        }
+      },
+      "get_runtime_info": {
+        "description": "ℹ️️ implemented in firmware 0.9.2.\n\nRequest driver runtime information from the Remote. This returns driver and instance identifiers for advanced\nusage of the REST Core-API. These identifiers could also be propagated to a home automation system to interact\nwith the Remote and REST Core-API.\n",
+        "payload": {
+          "$ref": "#/components/schemas/getRuntimeInfoMsg"
+        },
+        "summary": "🔍 Retrieve driver runtime information from the Remote.",
+        "tags": [
+          {
+            "name": "metadata"
+          }
+        ],
+        "x-response": {
+          "$ref": "#/components/messages/runtime_info"
+        }
+      },
+      "get_supported_entity_types": {
+        "description": "ℹ️️ implemented in firmware 0.9.2.\n\nThis is a metadata request for supported entities in the UC Remote and allows the client to check if it's still\ncompatible. New releases can support new entities or entities might get renamed in major updates.\n",
+        "payload": {
+          "$ref": "#/components/schemas/getSupportedEntityTypesMsg"
+        },
+        "summary": "🧪 Get supported entities in the UC Remote.",
+        "tags": [
+          {
+            "name": "entity"
+          },
+          {
+            "name": "metadata"
+          }
+        ],
+        "x-response": {
+          "$ref": "#/components/messages/supported_entity_types"
+        }
+      },
+      "get_version": {
+        "description": "ℹ️️ implemented in firmware 0.9.2.\n",
+        "payload": {
+          "$ref": "#/components/schemas/getVersionMsg"
+        },
+        "summary": "🧪  Get UC Remote version information.",
+        "x-response": {
+          "$ref": "#/components/messages/version"
+        }
+      },
+      "localization_cfg": {
+        "payload": {
+          "$ref": "#/components/schemas/localizationMsg"
+        },
+        "summary": "🧪 Active localization settings of the UC Remote.",
+        "tags": [
+          {
+            "name": "metadata"
+          }
+        ]
+      },
+      "request": {
+        "description": "This message defines the common structure of a request message. The receiver must reply with a response message.\n",
+        "payload": {
+          "$ref": "#/components/schemas/commonReq"
+        },
+        "summary": "🚀 Generic request message."
+      },
+      "response": {
+        "description": "This message defines the common structure of a response message which is sent back after receiving a request\nmessage.\n",
+        "payload": {
+          "$ref": "#/components/schemas/commonResp"
+        },
+        "summary": "🚀 Generic response message."
+      },
+      "result": {
+        "description": "A result message is a response message containing a result code and optional error information without further\npayload.\n",
+        "examples": [
+          {
+            "payload": {
+              "code": 200,
+              "kind": "resp",
+              "msg": "result",
+              "req_id": 123
+            }
+          },
+          {
+            "payload": {
+              "code": 400,
+              "kind": "resp",
+              "msg": "result",
+              "msg_data": {
+                "code": "INV_ARGUMENT",
+                "message": "Invalid argument. Foo must be a positive number."
+              },
+              "req_id": 124
+            }
+          }
+        ],
+        "payload": {
+          "$ref": "#/components/schemas/commonResp"
+        },
+        "summary": "🚀 🍕 Command result message.",
+        "tags": [
+          {
+            "name": "required"
+          }
+        ]
+      },
+      "runtime_info": {
+        "payload": {
+          "$ref": "#/components/schemas/runtimeInfoMsg"
+        },
+        "summary": "🔍 Driver runtime information from the UC Remote.",
+        "tags": [
+          {
+            "name": "metadata"
+          }
+        ]
+      },
+      "set_driver_user_data": {
+        "description": "Set required data to configure the integration driver or continue the setup process.\n\nDefined user actions to set in the request body `action` field:\n- `input_values`: if the user was requested to enter settings, e.g. connection or credential parameters to a\n  device or service.\n- `confirm`: response to the user action `confirmation`. Set to `true` if the user had to perform an action like\n  pressing a button on a device and then confirms the action with continuing the setup process.  \n  ⚠️ The `false` value is not yet used but might be used in the future for yes / no choices.\n\nThe `state` field in the response message indicate the current state of the setup process.\n",
+        "payload": {
+          "$ref": "#/components/schemas/setDriverUserDataMsg"
+        },
+        "summary": "🚀 Provide requested driver setup data.",
+        "tags": [
+          {
+            "name": "setup"
+          }
+        ],
+        "x-response": {
+          "$ref": "#/components/messages/result"
+        }
+      },
+      "setup_driver": {
+        "description": "If a driver includes a `setup_data_schema` object in its driver metadata, it enables the dynamic driver setup\nprocess. The setup process can be a simple \"start-confirm-done\" between the UC Remote and the integration\ndriver, or a fully dynamic, multi-step process with user interactions, where the user has to provide additional\ndata or select different options.\n\nThe `reconfigure` flag indicates if the user wants to reconfigure an already configured driver in the Remote.\nIt's up to the driver on how to handle a reconfiguration request and run a different logic. For example, this\nallows to show an options screen to change certain values, or present the option to modify, add or delete\nprovided device entities.\n\nAfter confirming the `setup_driver` request, the integration driver has to send `driver_setup_change` events:\n\n- `event_type: SETUP` with `state: SETUP` is a progress event to keep the process running, see below.\n- `event_type: SETUP` with `state: WAIT_USER_ACTION` can be sent to the UC Remote to request a user\n  interaction: either a confirmation to press next to continue the process, or input values.\n- `event_type: STOP` with `event: OK` finishes the setup process and the UC Remote creates an integration instance.\n- `event_type: STOP` with `event: ERROR` aborts the setup process.\n\n⚠️ If the setup process takes more than a few seconds, the integration should send `driver_setup_change` events\nwith `state: SETUP` to the UC Remote to show a setup progress to the user and prevent an inactivity timeout.  \nDefault setup timeouts:\n- Setup progress (watchdog): 60 seconds. If no setup message is received within that time, the setup process\n  is aborted.\n- User action timeout: 3 minutes. If there's no user response within that time, the setup process is aborted.\n- Overall setup timeout: 5 minutes. The setup process is automatically aborted if it is still running after\n  that time.\n\nIf no setup is needed, but the integration driver requires to show additional information to the user before\nthe integration is setup (e.g. terms & conditions, further help information or web links, etc.), it can define\nan \"information settings page\" with text labels in `setup_data_schema` without any input fields. In this case\nthe integration simply has to respond with a `driver_setup_change` event message with\n`event_type: STOP` and `state: OK` after confirming the `setup_driver` request message.\n",
+        "payload": {
+          "$ref": "#/components/schemas/setupDriverMsg"
+        },
+        "summary": "🚀 Start driver setup.",
+        "tags": [
+          {
+            "name": "setup"
+          }
+        ],
+        "x-response": {
+          "$ref": "#/components/messages/result"
+        }
+      },
+      "subscribe_events": {
+        "description": "Subscribe to entity state change events to receive `entity_change` events from the integration driver.\n\nIf no entity IDs are specified then events for all available entities are sent to the UC Remote.\n",
+        "payload": {
+          "$ref": "#/components/schemas/subscribeEventsMsg"
+        },
+        "summary": "🚀 🍕 Subscribe to events.",
+        "tags": [
+          {
+            "name": "entity"
+          },
+          {
+            "name": "required"
+          }
+        ],
+        "x-response": {
+          "$ref": "#/components/messages/result"
+        }
+      },
+      "supported_entity_types": {
+        "payload": {
+          "$ref": "#/components/schemas/supportedEntityTypesMsg"
+        },
+        "summary": "🚀 Supported entity types response.",
+        "tags": [
+          {
+            "name": "entity"
+          },
+          {
+            "name": "metadata"
+          }
+        ]
+      },
+      "unsubscribe_events": {
+        "description": "If no entity IDs are specified then all events for all available entities are stopped. \n\nThis message is sent by the UC Remote if a previously configured entity is no longer used and therefore no\nlonger interested in entity updates. If the integration driver keeps sending events for the unsubscribed\nentities then they are simply discarded.\n",
+        "payload": {
+          "$ref": "#/components/schemas/unsubscribeEventsMsg"
+        },
+        "summary": "🧪 Unsubscribe from events.",
+        "tags": [
+          {
+            "name": "entity"
+          }
+        ],
+        "x-response": {
+          "$ref": "#/components/messages/result"
+        }
+      },
+      "version": {
+        "payload": {
+          "$ref": "#/components/schemas/versionMsg"
+        },
+        "summary": "🧪 Remote version information response."
+      }
+    },
+    "schemas": {
+      "AssistantError": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/AssistantErrorCode"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "AssistantErrorCode": {
+        "enum": [
+          "SERVICE_UNAVAILABLE",
+          "INVALID_AUDIO",
+          "NO_TEXT_RECOGNIZED",
+          "INTENT_FAILED",
+          "TTS_FAILED",
+          "TIMEOUT",
+          "UNEXPECTED_ERROR"
+        ],
+        "type": "string"
+      },
+      "AssistantEvent": {
+        "discriminator": "type",
+        "oneOf": [
+          {
+            "properties": {
+              "type": {
+                "const": "ready"
+              }
+            },
+            "title": "Ready"
+          },
+          {
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/AssistantSttResponse"
+              },
+              "type": {
+                "const": "stt_response"
+              }
+            },
+            "required": [
+              "data"
+            ],
+            "title": "SttResponse"
+          },
+          {
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/AssistantTextResponse"
+              },
+              "type": {
+                "const": "text_response"
+              }
+            },
+            "required": [
+              "data"
+            ],
+            "title": "TextResponse"
+          },
+          {
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/AssistantSpeechResponse"
+              },
+              "type": {
+                "const": "speech_response"
+              }
+            },
+            "required": [
+              "data"
+            ],
+            "title": "SpeechResponse"
+          },
+          {
+            "properties": {
+              "type": {
+                "const": "finished"
+              }
+            },
+            "title": "Finished"
+          },
+          {
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/AssistantError"
+              },
+              "type": {
+                "const": "error"
+              }
+            },
+            "required": [
+              "data"
+            ],
+            "title": "Error"
+          }
+        ],
+        "properties": {
+          "data": {
+            "type": "object"
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "ready",
+              "stt_response",
+              "text_response",
+              "speech_response",
+              "finished",
+              "error"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "entity_id",
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "AssistantSpeechResponse": {
+        "properties": {
+          "mime_type": {
+            "description": "MIME type of the audio stream. Supported mime types in the UI application:\n- `audio/mpeg`\n- `audio/mp3`\n- `audio/wav`\n- `audio/x-wav`\n- `audio/ogg`\n- `audio/opus`\n- `audio/webm`\n- `audio/flac`\n- `audio/aac`\nUnsupported types will be ignored by the UI.\n",
+            "type": "string"
+          },
+          "url": {
+            "format": "url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "mime_type"
+        ],
+        "type": "object"
+      },
+      "AssistantSttResponse": {
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "AssistantTextResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "text"
+        ],
+        "type": "object"
+      },
+      "ConfirmationPage": {
+        "description": "Confirmation screen",
+        "properties": {
+          "image": {
+            "description": "Optional base64-encoded image.\n\nTODO maximum encoded length to avoid WebSocket continuation frames, supported image formats\n(png & svg?), max height & width\n",
+            "format": "byte",
+            "maxLength": 32768,
+            "type": "string"
+          },
+          "message1": {
+            "$ref": "#/components/schemas/languageText",
+            "description": "Message to display between title and image (if supplied). Supports Markdown formatting."
+          },
+          "message2": {
+            "$ref": "#/components/schemas/languageText",
+            "description": "Message to display below message1 or image (if supplied). Supports Markdown formatting."
+          },
+          "title": {
+            "$ref": "#/components/schemas/languageText"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "DeviceButtonMapping": {
+        "properties": {
+          "button": {
+            "description": "Physical button identifier",
+            "type": "string"
+          },
+          "long_press": {
+            "$ref": "#/components/schemas/EntityCommand"
+          },
+          "short_press": {
+            "$ref": "#/components/schemas/EntityCommand"
+          }
+        },
+        "required": [
+          "button"
+        ],
+        "type": "object"
+      },
+      "EmitterPort": {
+        "properties": {
+          "id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 50,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "EntityCommand": {
+        "example": {
+          "cmd_id": "remote.on"
+        },
+        "properties": {
+          "cmd_id": {
+            "description": "Simple command name or entity command identifier, as returned in the entity command metadata.\n",
+            "type": "string"
+          },
+          "params": {
+            "description": "For entity commands: optional command parameters as key / value pairs.\nSee entity documentation for available parameters.\n",
+            "type": "object"
+          }
+        },
+        "required": [
+          "cmd_id"
+        ],
+        "type": "object"
+      },
+      "Grid": {
+        "description": "Grid layout size.",
+        "properties": {
+          "height": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "width": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "width",
+          "height"
+        ],
+        "type": "object"
+      },
+      "GridItemSize": {
+        "description": "Item size in the button grid. Default size if not specified: 1 x 1",
+        "properties": {
+          "height": {
+            "default": 1,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "width": {
+            "default": 1,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "GridLocation": {
+        "description": "Button placement in the grid with 0-based coordinates.",
+        "properties": {
+          "x": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "y": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "type": "object"
+      },
+      "IrFormat": {
+        "description": "Supported IR formats by the emitter",
+        "enum": [
+          "PRONTO",
+          "HEX"
+        ],
+        "type": "string"
+      },
+      "Setting": {
+        "description": "An input setting is of a specific type defined in `field.type` which defines how it is presented to the user.\n\nInspired by the [Homey SDK settings](https://apps.developer.homey.app/the-basics/devices/settings) concept.\n",
+        "properties": {
+          "field": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SettingTypeNumber"
+              },
+              {
+                "$ref": "#/components/schemas/SettingTypeText"
+              },
+              {
+                "$ref": "#/components/schemas/SettingTypeTextArea"
+              },
+              {
+                "$ref": "#/components/schemas/SettingTypePassword"
+              },
+              {
+                "$ref": "#/components/schemas/SettingTypeCheckbox"
+              },
+              {
+                "$ref": "#/components/schemas/SettingTypeDropdown"
+              },
+              {
+                "$ref": "#/components/schemas/SettingTypeLabel"
+              }
+            ]
+          },
+          "id": {
+            "description": "Unique identifier of the setting to be returned with the entered value.",
+            "maximum": 50,
+            "type": "string"
+          },
+          "label": {
+            "$ref": "#/components/schemas/languageText"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "field"
+        ],
+        "type": "object"
+      },
+      "SettingTypeCheckbox": {
+        "description": "Checkbox setting with `true` / `false` values.",
+        "properties": {
+          "checkbox": {
+            "properties": {
+              "value": {
+                "description": "Initial setting.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "checkbox"
+        ],
+        "type": "object"
+      },
+      "SettingTypeDropdown": {
+        "description": "Dropdown setting to pick a single value from a list. All values must be strings.",
+        "properties": {
+          "dropdown": {
+            "properties": {
+              "items": {
+                "items": {
+                  "properties": {
+                    "id": {
+                      "description": "Selection identifier.",
+                      "type": "string"
+                    },
+                    "label": {
+                      "$ref": "#/components/schemas/languageText"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "value": {
+                "description": "Pre-selected dropdown id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "items"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "dropdown"
+        ],
+        "type": "object"
+      },
+      "SettingTypeLabel": {
+        "description": "Additional read-only text for information purpose between other settings. Supports Markdown formatting.\n",
+        "properties": {
+          "label": {
+            "properties": {
+              "value": {
+                "$ref": "#/components/schemas/languageText"
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "type": "object"
+      },
+      "SettingTypeNumber": {
+        "description": "Number input with optional `min`, `max`, `steps` and `decimals` properties. The default value must be specified\nin `value`. An optional unit of the number setting can be specified in `units`, which will be displayed next to\nthe input field.\n",
+        "properties": {
+          "number": {
+            "properties": {
+              "decimals": {
+                "default": 0,
+                "description": "Number of decimal places. 0 = integer value",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "max": {
+                "description": "Optional validation: maximum allowed value (inclusive).",
+                "type": "number"
+              },
+              "min": {
+                "description": "Optional validation: minimum allowed value (inclusive).",
+                "type": "number"
+              },
+              "steps": {
+                "description": "Optional validation: allowed step increment between values. Might also be used in the UI for input helpers.\n",
+                "type": "number"
+              },
+              "unit": {
+                "$ref": "#/components/schemas/languageText"
+              },
+              "value": {
+                "description": "Default value for input field.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "number"
+        ],
+        "type": "object"
+      },
+      "SettingTypePassword": {
+        "description": "Password or pin entry field with the input text hidden from the user. Otherwise the same as text input.\n",
+        "properties": {
+          "password": {
+            "properties": {
+              "regex": {
+                "description": "Optional regex validation pattern for the input value.",
+                "type": "string"
+              },
+              "value": {
+                "description": "Optional default value.",
+                "format": "password",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "type": "object"
+      },
+      "SettingTypeText": {
+        "description": "Single line of text input.\n\nTODO: format specifier for e.g. email, url, date, datetime etc.?\n",
+        "properties": {
+          "text": {
+            "properties": {
+              "regex": {
+                "description": "Optional regex validation pattern for the input value.",
+                "type": "string"
+              },
+              "value": {
+                "description": "Optional default value.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "SettingTypeTextArea": {
+        "description": "Multi-line text input, e.g. for providing a description.",
+        "properties": {
+          "textarea": {
+            "properties": {
+              "value": {
+                "description": "Optional default value.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "textarea"
+        ],
+        "type": "object"
+      },
+      "SettingsPage": {
+        "description": "Settings definition page, e.g. to configure an integration driver.",
+        "properties": {
+          "settings": {
+            "description": "One or multiple input field definitions, with optional pre-set values.",
+            "items": {
+              "$ref": "#/components/schemas/Setting"
+            },
+            "type": "array"
+          },
+          "title": {
+            "$ref": "#/components/schemas/languageText"
+          }
+        },
+        "required": [
+          "title",
+          "settings"
+        ],
+        "type": "object"
+      },
+      "SettingsValues": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "User input result of a SettingsPage as key values.\n- key: id of the field\n- value: entered user value as string. This is either the entered text or number, selected checkbox state or the\n  selected dropdown item id.  \n  ⚠️ Non native string values as numbers or booleans are represented as string values!\n",
+        "type": "object"
+      },
+      "SimpleCommand": {
+        "format": "^[A-Z0-9/_.:+#*°@%()?-]{1,20}$",
+        "type": "string"
+      },
+      "SimpleRemoteCommand": {
+        "format": "^\\S{1,20}$",
+        "type": "string"
+      },
+      "UserInterface": {
+        "properties": {
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/UserInterfacePage"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "UserInterfaceItem": {
+        "description": "A user interface item is either an icon, text or media information from a media-player entity.\n- Icon and text items can be static or linked to a command specified in the `command` field.\n- Default size is 1x1 if not specified.\n",
+        "properties": {
+          "command": {
+            "$ref": "#/components/schemas/EntityCommand"
+          },
+          "icon": {
+            "description": "Optional icon identifier. The identifier consists of a prefix and a resource identifier, separated by `:`.\nAvailable prefixes:\n  - `uc:` - integrated icon font\n  - `custom:` - custom resource\n",
+            "type": "string"
+          },
+          "location": {
+            "$ref": "#/components/schemas/GridLocation"
+          },
+          "size": {
+            "$ref": "#/components/schemas/GridItemSize"
+          },
+          "text": {
+            "type": "string"
+          },
+          "type": {
+            "description": "Type of the user interface item:\n- `icon`: show an icon, either a UC icon or a custom icon. Field `icon` must contain the icon identifier.\n- `text`: show text only from field `text`.\n",
+            "enum": [
+              "icon",
+              "text",
+              "numpad"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "location"
+        ],
+        "type": "object"
+      },
+      "UserInterfacePage": {
+        "properties": {
+          "grid": {
+            "$ref": "#/components/schemas/Grid"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UserInterfaceItem"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "Optional page name",
+            "type": "string"
+          },
+          "page_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "page_id",
+          "grid",
+          "items"
+        ],
+        "type": "object"
+      },
+      "VaAudioConfiguration": {
+        "description": "The audio format to be sent to the integration.\n\nIf an unsupported audio stream is requested, the default setting is used. For example, if a sample rate of\n4 kHz is requested, the default sample rate of 16 kHz is used.\n",
+        "properties": {
+          "channels": {
+            "default": 1,
+            "description": "Number of audio channels",
+            "maximum": 2,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "sample_format": {
+            "default": "I16",
+            "description": "Audio frame format.",
+            "enum": [
+              "I16",
+              "I32",
+              "U16",
+              "U32",
+              "F32"
+            ],
+            "type": "string"
+          },
+          "sample_rate": {
+            "default": 16000,
+            "description": "Sample rate of the audio stream in Hz.\n",
+            "enum": [
+              8000,
+              11025,
+              16000,
+              22050,
+              24000,
+              44100,
+              48000
+            ],
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "VoiceAssistantFeature": {
+        "description": "Supported voice assistant or profile features.\n- transcription: Supports voice command transcription.\n- response_text: Supports textual response about the performed action.\n- response_speech: Supports speech response about the performed action.\n",
+        "enum": [
+          "transcription",
+          "response_text",
+          "response_speech"
+        ],
+        "type": "string"
+      },
+      "VoiceAssistantFeatures": {
+        "items": {
+          "$ref": "#/components/schemas/VoiceAssistantFeature"
+        },
+        "type": "array"
+      },
+      "VoiceAssistantOptions": {
+        "properties": {
+          "audio_cfg": {
+            "$ref": "#/components/schemas/VaAudioConfiguration"
+          },
+          "preferred_profile": {
+            "$ref": "#/components/schemas/simpleId"
+          },
+          "profiles": {
+            "$ref": "#/components/schemas/VoiceAssistantProfiles"
+          }
+        },
+        "type": "object"
+      },
+      "VoiceAssistantProfile": {
+        "description": "Profiles are optional and allow parameterizing voice input. A regular voice-capable device usually just accepts voice\ninput without additional parameters. Home automation systems can offer multi-language support or an option to use\nlocal or cloud processing.\n\nFor example, Home Assistant allows configuring multiple Assist pipelines for voice commands.\nThese pipelines can offer different languages or speech recognition engines.\n\n- `language` is an optional language code if the profile represents a specific language for speech recognition.\n- `features` is optional and overwrites the voice assistant features, for example, if a profile has less or more features.\n- An empty `features` array means \"no features\".\n",
+        "properties": {
+          "features": {
+            "$ref": "#/components/schemas/VoiceAssistantFeatures"
+          },
+          "id": {
+            "$ref": "#/components/schemas/simpleId"
+          },
+          "language": {
+            "$ref": "#/components/schemas/languageCode"
+          },
+          "name": {
+            "description": "Friendly name to show in UI.",
+            "maxLength": 50,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "VoiceAssistantProfiles": {
+        "items": {
+          "$ref": "#/components/schemas/VoiceAssistantProfile"
+        },
+        "type": "array"
+      },
+      "abortDriverSetupEvent": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonEvent"
+          },
+          {
+            "properties": {
+              "cat": {
+                "const": "DEVICE",
+                "type": "string"
+              },
+              "msg": {
+                "const": "abort_driver_setup",
+                "type": "string"
+              },
+              "msg_data": {
+                "properties": {
+                  "error": {
+                    "$ref": "#/components/schemas/integrationSetupError"
+                  }
+                },
+                "required": [
+                  "error"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "assistantEventMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonEvent"
+          },
+          {
+            "properties": {
+              "cat": {
+                "const": "ENTITY",
+                "type": "string"
+              },
+              "msg": {
+                "const": "assistant_event",
+                "type": "string"
+              },
+              "msg_data": {
+                "$ref": "#/components/schemas/AssistantEvent"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "authMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonResp"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "authentication",
+                "type": "string"
+              },
+              "msg_data": {
+                "$ref": "#/components/schemas/driverVersion"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "authRequestMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "auth",
+                "type": "string"
+              },
+              "msg_data": {
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "authRequiredEvent": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonEvent"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "auth_required",
+                "type": "string"
+              },
+              "msg_data": {
+                "$ref": "#/components/schemas/driverVersion"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "availableEntitiesMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonResp"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "available_entities",
+                "type": "string"
+              },
+              "msg_data": {
+                "properties": {
+                  "available_entities": {
+                    "items": {
+                      "$ref": "#/components/schemas/entity"
+                    },
+                    "type": "array"
+                  },
+                  "filter": {
+                    "$ref": "#/components/schemas/availableEntityFilter"
+                  }
+                },
+                "required": [
+                  "available_entities"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "availableEntityFilter": {
+        "description": "Optional filters",
+        "properties": {
+          "device_id": {
+            "description": "Optional device instance filter if driver supports multi instances.",
+            "type": "string"
+          },
+          "entity_type": {
+            "$ref": "#/components/schemas/entityType"
+          }
+        },
+        "type": "object"
+      },
+      "button": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/entity"
+          },
+          {
+            "properties": {
+              "features": {
+                "items": {
+                  "enum": [
+                    "press"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          }
+        ],
+        "description": "A button entity can fire an event or start an action which cannot be further controlled once started.\n\nThis can be used for \"fire and forget\" commands, e.g. running a system command, sending an IR code, restart a\ndevice, reset something etc.\n\nA button is stateless. To represent something that can be turned on and off, then the `switch` entity should be\nused.\n\nSee [button entity documentation](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_button.md)\nfor more information.\n"
+      },
+      "climate": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/entity"
+          },
+          {
+            "properties": {
+              "features": {
+                "description": "Climate features:\n- `on_off`: The device can be turned on and off. The active HVAC mode after power on is device specific\n   and must be reflected in the `state` attribute.\n- `heat`: The device supports heating.\n- `cool`: The device supports cooling. \n- `current_temperature`: The device can measure the current temperature\n- `target_temperature`: The device supports a target temperature for heating or cooling.\n- 🚧 `target_temperature_range`: The device supports a target temperature range.\n- 🚧 `fan`: The device has a controllable fan.\n",
+                "items": {
+                  "enum": [
+                    "on_off",
+                    "heat",
+                    "cool",
+                    "current_temperature",
+                    "target_temperature",
+                    "target_temperature_range",
+                    "fan"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "options": {
+                "properties": {
+                  "max_temperature": {
+                    "default": 30,
+                    "description": "Maximum temperature to show in the UI for the target temperature range. Defaults: `CELSIUS` = 30,\n`FAHRENHEIT` = 90.\n",
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "min_temperature": {
+                    "default": 10,
+                    "description": "Minimum temperature to show in the UI for the target temperature range. Defaults: `CELSIUS` = 10,\n`FAHRENHEIT` = 50.\n",
+                    "format": "int32",
+                    "type": "integer"
+                  },
+                  "target_temperature_step": {
+                    "default": 0.5,
+                    "description": "Step value for the UI for setting the target temperature. Defaults: `CELSIUS` = 0.5,\n`FAHRENHEIT` = 1. Smallest step size: 0.1\n",
+                    "minimum": 0.1,
+                    "type": "number"
+                  },
+                  "temperature_unit": {
+                    "default": "CELSIUS",
+                    "enum": [
+                      "CELSIUS",
+                      "FAHRENHEIT"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          }
+        ],
+        "description": "A climate entity controls heating, ventilation and air conditioning (HVAC) devices. This can range from simple\nfans to personal air conditioning units to integrated building devices.\n\nSee [climate entity documentation](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_climate.md)\nfor more information.\n"
+      },
+      "commonEvent": {
+        "description": "Common event message properties.",
+        "properties": {
+          "cat": {
+            "description": "Event category.",
+            "type": "string"
+          },
+          "kind": {
+            "const": "event",
+            "description": "Event message identifier.",
+            "type": "string"
+          },
+          "msg": {
+            "description": "One of the defined API event message types.",
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "msg_data": {
+            "description": "Wrapper for event data object.",
+            "type": "object"
+          },
+          "ts": {
+            "description": "Optional timestamp when the event was generated.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "msg",
+          "msg_data"
+        ],
+        "type": "object"
+      },
+      "commonReq": {
+        "description": "Common request message properties.",
+        "properties": {
+          "id": {
+            "default": 0,
+            "description": "Request ID which must be increased for every new request. This ID will be returned in the response message.\n",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "kind": {
+            "const": "req",
+            "description": "Request message identifier.",
+            "type": "string"
+          },
+          "msg": {
+            "description": "One of the defined API request message types.",
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "msg"
+        ],
+        "type": "object"
+      },
+      "commonResp": {
+        "description": "Common response message properties.",
+        "properties": {
+          "code": {
+            "default": 200,
+            "description": "Response code of the operation according to HTTP status codes.",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "resp",
+            "description": "Response message identifier.",
+            "type": "string"
+          },
+          "msg": {
+            "description": "One of the defined API response message types.",
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "msg_data": {
+            "description": "Wrapper for response data object.",
+            "type": "object"
+          },
+          "req_id": {
+            "$ref": "#/components/schemas/msgId"
+          }
+        },
+        "required": [
+          "kind",
+          "req_id",
+          "msg",
+          "code"
+        ],
+        "type": "object"
+      },
+      "configuredEntitiesMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonResp"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "configured_entities",
+                "type": "string"
+              },
+              "msg_data": {
+                "description": "Array of configured entity IDs.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "connectEvent": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonEvent"
+          },
+          {
+            "properties": {
+              "cat": {
+                "const": "DEVICE",
+                "type": "string"
+              },
+              "msg": {
+                "const": "connect",
+                "type": "string"
+              },
+              "msg_data": {
+                "properties": {
+                  "device_id": {
+                    "documentation": "Only required for multi device drivers.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "description": "For simple drivers without dynamic devices the `msg_data` object can be omitted. In this case, the connect event\nis for the overall integration driver and not for a specific device.\n",
+        "type": "object"
+      },
+      "countryCode": {
+        "description": "Two-letter country codes defined in [ISO-3166-1-alpha-2](https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2)\n",
+        "format": "iso-3166",
+        "type": "string"
+      },
+      "cover": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/entity"
+          },
+          {
+            "properties": {
+              "device_class": {
+                "description": "Optional cover classification. If not specified, the entity will be treated as a window blind.  \nThe device class is used by the UI to represent the cover with a different icon, behaviour etc.\n",
+                "enum": [
+                  "blind",
+                  "curtain",
+                  "garage",
+                  "shade",
+                  "door",
+                  "gate",
+                  "window"
+                ],
+                "type": "string"
+              },
+              "features": {
+                "description": "Cover features:\n- `open`: The cover can can be opened.\n- `close`: The cover can can be closed.\n- `stop`: Opening, closing or setting the position can be stopped.\n- `position`: The cover can be moved to a specific position, e.g. 30% open.\n- 🚧 `tilt`: The cover supports being tilted up and down.\n- 🚧 `tilt_stop`: Tilting the cover can be stopped.\n- 🚧 `tilt_position`: The cover can be moved to a specific tilt position.\n",
+                "items": {
+                  "enum": [
+                    "open",
+                    "close",
+                    "stop",
+                    "position",
+                    "tilt",
+                    "tilt_stop",
+                    "tilt_position"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          }
+        ],
+        "description": "Entity for covering or opening things like blinds, window covers, curtains, etc. The entity `features` specify\nthe abilities of the cover and the controllable properties, whereas the `device_class` specifies the UI\nrepresentation.\n\nSee [cover entity documentation](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_cover.md)\nfor more information.\n"
+      },
+      "deviceState": {
+        "properties": {
+          "device_id": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "CONNECTED",
+              "CONNECTING",
+              "DISCONNECTED",
+              "ERROR"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
+      "deviceStateEventMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonEvent"
+          },
+          {
+            "properties": {
+              "cat": {
+                "const": "DEVICE",
+                "type": "string"
+              },
+              "msg": {
+                "const": "device_state",
+                "type": "string"
+              },
+              "msg_data": {
+                "$ref": "#/components/schemas/deviceState"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "disconnectEvent": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonEvent"
+          },
+          {
+            "properties": {
+              "cat": {
+                "const": "DEVICE",
+                "type": "string"
+              },
+              "msg": {
+                "const": "disconnect",
+                "type": "string"
+              },
+              "msg_data": {
+                "properties": {
+                  "device_id": {
+                    "documentation": "Only required for multi device drivers.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "description": "For simple drivers without dynamic devices the `msg_data` object can be omitted. In this case, the disconnect\nevent is for the overall integration driver and not for a specific device.\n",
+        "type": "object"
+      },
+      "driverDeveloper": {
+        "description": "Optional information about the integration developer.",
+        "properties": {
+          "email": {
+            "description": "Optional developer contact email.",
+            "format": "email",
+            "maxLength": 100,
+            "type": "string"
+          },
+          "name": {
+            "description": "Optional developer information to display in UI / web-configurator.",
+            "maxLength": 50,
+            "type": "string"
+          },
+          "url": {
+            "description": "Optional developer home page.",
+            "format": "uri",
+            "maxLength": 255,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "driverMetadata": {
+        "description": "Integration driver metadata.\n",
+        "properties": {
+          "auth_method": {
+            "$ref": "#/components/schemas/intgAuthMethod"
+          },
+          "description": {
+            "$ref": "#/components/schemas/languageText"
+          },
+          "developer": {
+            "$ref": "#/components/schemas/driverDeveloper"
+          },
+          "device_discovery": {
+            "description": "Driver supports multi-device discovery. **Not yet supported**.",
+            "type": "boolean"
+          },
+          "driver_id": {
+            "type": "string"
+          },
+          "driver_url": {
+            "description": "Optional WebSocket URL of the driver to override mDNS information.",
+            "format": "uri",
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "home_page": {
+            "description": "Optional home page url for more information.",
+            "format": "uri",
+            "maxLength": 255,
+            "type": "string"
+          },
+          "icon": {
+            "$ref": "#/components/schemas/iconIdentifier"
+          },
+          "min_core_api": {
+            "description": "Optional version check: minimum required Core-API version in the remote.\n",
+            "maxLength": 20,
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/languageText"
+          },
+          "release_date": {
+            "description": "Release date of the driver.",
+            "format": "date",
+            "type": "string"
+          },
+          "setup_data_schema": {
+            "$ref": "#/components/schemas/SettingsPage"
+          },
+          "version": {
+            "description": "Driver version, [SemVer](https://semver.org/) preferred.",
+            "maxLength": 20,
+            "type": "string"
+          }
+        },
+        "required": [
+          "driver_id",
+          "name",
+          "version"
+        ],
+        "type": "object"
+      },
+      "driverMetadataMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonResp"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "driver_metadata",
+                "type": "string"
+              },
+              "msg_data": {
+                "$ref": "#/components/schemas/driverMetadata"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "driverSetupChange": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/integrationSetupError"
+          },
+          "event_type": {
+            "description": "- `START`: setup started\n- `SETUP`: setup in progress. See `state` enum for current setup state.\n- `STOP`: setup finished, either with: `state: OK` for successful setup, or `state: ERROR` if setup \n          didn't completed successfully.\n",
+            "enum": [
+              "START",
+              "SETUP",
+              "STOP"
+            ],
+            "type": "string"
+          },
+          "require_user_action": {
+            "description": "If set, the setup process waits for the specified user action.",
+            "oneOf": [
+              {
+                "properties": {
+                  "input": {
+                    "$ref": "#/components/schemas/SettingsPage",
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "input"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "confirmation": {
+                    "$ref": "#/components/schemas/ConfirmationPage",
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "confirmation"
+                ],
+                "type": "object"
+              }
+            ],
+            "type": "object"
+          },
+          "state": {
+            "$ref": "#/components/schemas/integrationSetupState"
+          }
+        },
+        "required": [
+          "event_type",
+          "state"
+        ],
+        "type": "object"
+      },
+      "driverSetupChangeEvent": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonEvent"
+          },
+          {
+            "properties": {
+              "cat": {
+                "const": "DEVICE",
+                "type": "string"
+              },
+              "msg": {
+                "const": "driver_setup_change",
+                "type": "string"
+              },
+              "msg_data": {
+                "$ref": "#/components/schemas/driverSetupChange"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "driverVersion": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "properties": {
+              "api": {
+                "type": "string"
+              },
+              "driver": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "driverVersionMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonResp"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "driver_version",
+                "type": "string"
+              },
+              "msg_data": {
+                "$ref": "#/components/schemas/driverVersion"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "enterStandbyEvent": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonEvent"
+          },
+          {
+            "properties": {
+              "cat": {
+                "const": "REMOTE",
+                "type": "string"
+              },
+              "msg": {
+                "const": "enter_standby",
+                "type": "string"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "description": "TODO add standby type in msg_data? E.g. \"screen off\" & \"sleep\" for the integration to be notified that the\nUC Remote is no longer reachable? While the screen is off, the remote API is still running, but might soon go\ninto sleep state.\n",
+        "type": "object"
+      },
+      "entity": {
+        "description": "Common definition of an entity. Concrete entities are: `button`, `switch`, `light`, `cover`, `media_player`,\n`climate`, `sensor`, `remote`, `ir_emitter`, `select`, `voice_assistant`. \n\nSee [entity documentation](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/)\nfor more information.\n\nThe `entity_type` value acts as discriminator for the entity type, which defines the supported features and\noptions of an entity.  \nE.g. a simple `button` entity supports on / off, whereas a `cover` entity can be a simple window cover with only\nthe ability to open / close, or a venetian blind with position and tilting features.  \nSee [polymorphism support in AsyncAPI specification](https://www.asyncapi.com/docs/specifications/v2.2.0#schemaComposition)\nfor more information.\n\nIf no icon identifier is specified, the default icon for the entity type is used.\n",
+        "discriminator": "entity_type",
+        "properties": {
+          "area": {
+            "description": "Optional area if supported by the integration, e.g. `Living room`. This information might be used by the UI\nin the setup process to automatically create profile pages for all areas returned in the available entities.\n",
+            "type": "string"
+          },
+          "device_id": {
+            "description": "Optional associated device, if the integration driver supports multiple devices.",
+            "type": "string"
+          },
+          "entity_id": {
+            "description": "Unique entity identifier.",
+            "type": "string"
+          },
+          "entity_type": {
+            "description": "Discriminator value for the concrete entity device type.",
+            "type": "string"
+          },
+          "features": {
+            "description": "Supported features of the entity. See concrete entity definition for available features.\n",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "icon": {
+            "$ref": "#/components/schemas/iconIdentifier"
+          },
+          "name": {
+            "$ref": "#/components/schemas/languageText",
+            "description": "Display name of the entity in the UI. An english text should always be provided as fallback option.\n"
+          }
+        },
+        "required": [
+          "entity_id",
+          "entity_type",
+          "name"
+        ],
+        "type": "object"
+      },
+      "entityAvailableEvent": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonEvent"
+          },
+          {
+            "properties": {
+              "cat": {
+                "const": "ENTITY",
+                "type": "string"
+              },
+              "msg": {
+                "const": "entity_available",
+                "type": "string"
+              },
+              "msg_data": {
+                "$ref": "#/components/schemas/entity"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "entityCommandMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "entity_command",
+                "type": "string"
+              },
+              "msg_data": {
+                "properties": {
+                  "cmd_id": {
+                    "type": "string"
+                  },
+                  "device_id": {
+                    "type": "string"
+                  },
+                  "entity_id": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "description": "See <https://github.com/unfoldedcircle/core-api/tree/main/doc/entities> for command parameter\ndefinitions.\n",
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "entity_type",
+                  "entity_id",
+                  "cmd_id"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "entityRemovedEvent": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonEvent"
+          },
+          {
+            "properties": {
+              "cat": {
+                "const": "ENTITY",
+                "type": "string"
+              },
+              "msg": {
+                "const": "entity_removed",
+                "type": "string"
+              },
+              "msg_data": {
+                "properties": {
+                  "device_id": {
+                    "type": "string"
+                  },
+                  "entity_id": {
+                    "type": "string"
+                  },
+                  "entity_type": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "entity_type",
+                  "entity_id"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "entityStateChanged": {
+        "description": "See entity documentation for `attributes` payload.",
+        "properties": {
+          "attributes": {
+            "type": "object"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "entity_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_type",
+          "entity_id",
+          "attributes"
+        ],
+        "type": "object"
+      },
+      "entityStateChangedEvent": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonEvent"
+          },
+          {
+            "properties": {
+              "cat": {
+                "const": "ENTITY",
+                "type": "string"
+              },
+              "msg": {
+                "const": "entity_change",
+                "type": "string"
+              },
+              "msg_data": {
+                "$ref": "#/components/schemas/entityStateChanged"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "description": "An entity attribute has changed.",
+        "type": "object"
+      },
+      "entityStatesMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonResp"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "entity_states",
+                "type": "string"
+              },
+              "msg_data": {
+                "items": {
+                  "$ref": "#/components/schemas/entityStateChanged"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "description": "The `msg_data` payload is an array of the `entity_change` event.\n",
+        "type": "object"
+      },
+      "entityType": {
+        "anyOf": [
+          {
+            "enum": [
+              "button",
+              "switch",
+              "light",
+              "cover",
+              "media_player",
+              "climate",
+              "sensor",
+              "remote",
+              "ir_emitter",
+              "select",
+              "voice_assistant"
+            ]
+          },
+          {}
+        ],
+        "description": "Supported entities, defined as extensible enum: already known entity types are in the enum, but other string\nvalues are allowed for forward compatability.\n",
+        "type": "string"
+      },
+      "error": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "exitStandbyEvent": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonEvent"
+          },
+          {
+            "properties": {
+              "cat": {
+                "const": "REMOTE",
+                "type": "string"
+              },
+              "msg": {
+                "const": "exit_standby",
+                "type": "string"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "getAvailableEntitiesMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "get_available_entities",
+                "type": "string"
+              },
+              "msg_data": {
+                "properties": {
+                  "filter": {
+                    "$ref": "#/components/schemas/availableEntityFilter"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "description": "- TODO add paging: worst case this could include hundreds if not thousands of entities!\n",
+        "type": "object"
+      },
+      "getConfiguredEntitiesMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "get_configured_entities",
+                "type": "string"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "getDeviceStateMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "get_device_state",
+                "type": "string"
+              },
+              "msg_data": {
+                "properties": {
+                  "device_id": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "description": "For simple drivers without dynamic devices the `msg_data` object can be omitted. In this case, the request\nis for the overall integration driver and not for a specific device.\n",
+        "type": "object"
+      },
+      "getDriverMetadataMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "get_driver_metadata",
+                "type": "string"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "getDriverVersionMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "get_driver_version",
+                "type": "string"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "getEntityStatesMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "get_entity_states",
+                "type": "string"
+              },
+              "msg_data": {
+                "properties": {
+                  "device_id": {
+                    "description": "Only required for multi-device integrations.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "description": "For simple drivers without dynamic devices the `msg_data.device_id` property can be omitted.\nIn this case, the request is for the overall integration driver and not for a specific device.\n",
+        "type": "object"
+      },
+      "getLocalizationMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "get_localization_cfg",
+                "type": "string"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "getRuntimeInfoMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "get_runtime_info",
+                "type": "string"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "getSupportedEntityTypesMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "get_supported_entity_types",
+                "type": "string"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "getVersionMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "get_version",
+                "type": "string"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "iconIdentifier": {
+        "description": "Optional icon identifier. If specified the icon will be set. An empty identifier while updating the object\nremoves the existing icon.\n",
+        "maxLength": 255,
+        "type": "string"
+      },
+      "integrationSetupError": {
+        "description": "More detailed error reason for `state: ERROR` condition.\n",
+        "enum": [
+          "NONE",
+          "NOT_FOUND",
+          "CONNECTION_REFUSED",
+          "AUTHORIZATION_ERROR",
+          "TIMEOUT",
+          "OTHER"
+        ],
+        "type": "string"
+      },
+      "integrationSetupState": {
+        "description": "- `SETUP`: setup in progress\n- `WAIT_USER_ACTION`: setup flow is waiting for user input. See `require_user_action` for requested input.\n- `OK`: setup finished successfully\n- `ERROR`: setup error\n",
+        "enum": [
+          "SETUP",
+          "WAIT_USER_ACTION",
+          "OK",
+          "ERROR"
+        ],
+        "type": "string"
+      },
+      "intgAuthMethod": {
+        "description": "Integration driver authentication method if a token is required.\n\nThe JSON `auth` message is used if a token is configured but no authentication method is set.\n",
+        "enum": [
+          "HEADER",
+          "MESSAGE"
+        ],
+        "type": "string"
+      },
+      "ir_emitter": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/entity"
+          },
+          {
+            "properties": {
+              "features": {
+                "items": {
+                  "enum": [
+                    "send_ir"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "options": {
+                "properties": {
+                  "ir_formats": {
+                    "description": "Supported IR formats besides `PRONTO`. The PRONTO hex format must always be supported.\n",
+                    "items": {
+                      "$ref": "#/components/schemas/IrFormat"
+                    },
+                    "type": "array"
+                  },
+                  "ports": {
+                    "description": "List of individual emitter ports which can be selected for sending IR commands.\n",
+                    "items": {
+                      "$ref": "#/components/schemas/EmitterPort"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          }
+        ],
+        "description": "An IR-emitter entity allows to send IR commands in PRONTO hex format.\n\nThis entity allows to integrate external IR blasters and emitters. Once added to a Remote, a new IR-emitter\noutput is registered which can be used for IR-remote entities. Similar as adding a new dock.\n\nSee [IR-emitter entity documentation](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_ir_emitter.md)\nfor more information.\n"
+      },
+      "languageCode": {
+        "description": "Language culture code: starting with the two-letter [ISO-639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes)\ncode, followed by an optional [ISO-3166 country code](https://en.wikipedia.org/wiki/List_of_ISO_3166_country_codes),\nseparated by an underscore.\nExamples: `en`, `en_UK`, `en_US`, `de`, `de_DE`, `de_CH` etc.\n",
+        "pattern": "^[a-z]{2}(_\\w+)?$",
+        "type": "string"
+      },
+      "languageText": {
+        "additionalProperties": false,
+        "patternProperties": {
+          "^[a-z]{2}(_\\w+)?$": {
+            "description": "Key value pairs of language texts. Key: ISO 639-1 code with optional country suffix to represent a `culture\ncode`. Examples: `en`, `en_UK`, `en_US`, `de`, `de_CH`.   \nIf we need to support more regional differences within a country, then the\n[IETF language tag](https://en.wikipedia.org/wiki/IETF_language_tag) might be a solution. This would even\nsupport the various Swiss German dialects!\n",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "light": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/entity"
+          },
+          {
+            "properties": {
+              "features": {
+                "items": {
+                  "enum": [
+                    "on_off",
+                    "toggle",
+                    "dim",
+                    "color",
+                    "color_temperature"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "options": {
+                "properties": {
+                  "color_temperature_steps": {
+                    "default": 100,
+                    "description": "Number of color temperature steps of the light source. Some lamps only support 3 modes, where\nothers can be adjusted freely.\n",
+                    "maximum": 100,
+                    "minimum": 2,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          }
+        ],
+        "description": "A light entity can be switched on and off and depending on its features, the light source can be further\ncontrolled like setting brightness, hue, color saturation and color temperature.\n\nThe [HSV color model](https://en.wikipedia.org/wiki/HSL_and_HSV) is used for adjusting color and brightness.\n\nSee [light entity documentation](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_light.md)\nfor more information.\n"
+      },
+      "localizationMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonResp"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "localization_cfg",
+                "type": "string"
+              },
+              "msg_data": {
+                "$ref": "#/components/schemas/localizationSettings"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ]
+      },
+      "localizationSettings": {
+        "properties": {
+          "country_code": {
+            "$ref": "#/components/schemas/countryCode"
+          },
+          "language_code": {
+            "$ref": "#/components/schemas/languageCode"
+          },
+          "measurement_unit": {
+            "$ref": "#/components/schemas/measurementUnit"
+          },
+          "time_format_24h": {
+            "default": true,
+            "type": "boolean"
+          },
+          "time_zone": {
+            "description": "Time zone name according to IANA <https://www.iana.org/time-zones>, e.g. `Europe/Copenhagen`.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "measurementUnit": {
+        "enum": [
+          "METRIC",
+          "US",
+          "UK"
+        ],
+        "type": "string"
+      },
+      "media_player": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/entity"
+          },
+          {
+            "properties": {
+              "features": {
+                "items": {
+                  "enum": [
+                    "on_off",
+                    "toggle",
+                    "volume",
+                    "volume_up_down",
+                    "mute_toggle",
+                    "mute",
+                    "unmute",
+                    "play_pause",
+                    "stop",
+                    "next",
+                    "previous",
+                    "fast_forward",
+                    "rewind",
+                    "repeat",
+                    "shuffle",
+                    "seek",
+                    "media_duration",
+                    "media_position",
+                    "media_position_updated_at",
+                    "media_title",
+                    "media_artist",
+                    "media_album",
+                    "media_image_url",
+                    "media_type",
+                    "dpad",
+                    "numpad",
+                    "home",
+                    "menu",
+                    "context_menu",
+                    "guide",
+                    "info",
+                    "color_buttons",
+                    "channel_switcher",
+                    "select_source",
+                    "select_sound_mode",
+                    "eject",
+                    "open_close",
+                    "audio_track",
+                    "subtitle",
+                    "record",
+                    "settings"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "options": {
+                "properties": {
+                  "simple_commands": {
+                    "description": "Additional commands the media-player supports, which are not covered in the feature list.  \nExample: `[\"EXIT\", \"THUMBS_UP\", \"THUMBS_DOWN\"]`\n",
+                    "items": {
+                      "$ref": "#/components/schemas/SimpleCommand"
+                    },
+                    "type": "array"
+                  },
+                  "volume_steps": {
+                    "default": 100,
+                    "description": "Number of available volume steps for the set volume command and UI controls. Examples:\n- 100 = any value between 0..100\n- 50 = only odd numbers\n- 3 = \\[33, 67, 100]\n- etc.\n\nValue 0 = mute.\n\nNote: if the integration receives an \"unexpected\" number it is required to round up or down to the\nnext matching value.\n",
+                    "maximum": 100,
+                    "minimum": 2,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          }
+        ],
+        "description": "A media player entity controls playback of media on a device. This could be an online music streaming service,\na TV, a stereo or a video player.\n\nSee [media player entity documentation](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_media_player.md)\nfor more information.\n"
+      },
+      "msgId": {
+        "default": 0,
+        "description": "Request message ID which is reflected in response message.",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "remote": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/entity"
+          },
+          {
+            "properties": {
+              "features": {
+                "items": {
+                  "enum": [
+                    "send_cmd",
+                    "on_off",
+                    "toggle"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "options": {
+                "properties": {
+                  "button_mapping": {
+                    "items": {
+                      "$ref": "#/components/schemas/DeviceButtonMapping"
+                    },
+                    "type": "array"
+                  },
+                  "simple_commands": {
+                    "description": "Optional list of supported commands. If not provided, the integration driver has to document the\navailable commands for the user.  \nExample: `[\"EXIT\", \"CHANNEL_UP\", \"CHANNEL_DOWN\"]`\n",
+                    "items": {
+                      "$ref": "#/components/schemas/SimpleRemoteCommand"
+                    },
+                    "type": "array"
+                  },
+                  "user_interface": {
+                    "$ref": "#/components/schemas/UserInterface"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          }
+        ],
+        "description": "A remote entity can send commands to a controllable device.\n\nSee [remote entity documentation](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_remote.md)\nfor more information.\n"
+      },
+      "runtimeInfo": {
+        "properties": {
+          "driver_id": {
+            "description": "Identifier under which this integration driver is accessible in the Remote.",
+            "type": "string"
+          },
+          "intg_ids": {
+            "description": "Defined integration instance identifiers of this integration driver in the Remote.  \nℹ️ Only single-device integration drivers are supported at the moment, i.e. there's maximum one integration\n   instance per driver.\n",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "log_id": {
+            "description": "Log service identifier for a custom integration driver running on the Remote.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "driver_id"
+        ],
+        "type": "object"
+      },
+      "runtimeInfoMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonResp"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "runtime_info",
+                "type": "string"
+              },
+              "msg_data": {
+                "$ref": "#/components/schemas/runtimeInfo"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ]
+      },
+      "select": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/entity"
+          },
+          {
+            "properties": {
+              "features": {
+                "description": "The select entity has no features.",
+                "type": "array"
+              },
+              "options": {
+                "description": "The select entity has no options.",
+                "type": "object"
+              }
+            },
+            "type": "object"
+          }
+        ],
+        "description": "The select entity offers a limited set of selectable options.\nThe available options are defined by the integration driver. They can be a static list or dynamically generated\nand changed at runtime.\n\nSee [select entity documentation](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_select.md)\nfor more information.\n"
+      },
+      "sensor": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/entity"
+          },
+          {
+            "properties": {
+              "device_class": {
+                "description": "Sensor type. This is used by the UI to represent the sensor with a matching icon, default unit etc.  \nTo use a custom unit\n",
+                "enum": [
+                  "custom",
+                  "temperature",
+                  "humidity",
+                  "power",
+                  "energy",
+                  "voltage",
+                  "current",
+                  "battery"
+                ],
+                "type": "string"
+              },
+              "options": {
+                "properties": {
+                  "custom_label": {
+                    "$ref": "#/components/schemas/languageText",
+                    "description": "Label for a custom sensor if `device_class` is not specified or to override a default unit.\n"
+                  },
+                  "custom_unit": {
+                    "$ref": "#/components/schemas/languageText",
+                    "description": "Unit label for a custom sensor if `device_class` is not specified or to override a default unit.\n"
+                  },
+                  "decimals": {
+                    "default": 0,
+                    "description": "Number of decimal places to show in the UI if the sensor provides the measurement as a number.\nNot applicable to string values.\n",
+                    "type": "integer"
+                  },
+                  "max_value": {
+                    "description": "🚧 Optional maximum value of the sensor output. This can be used in the UI for graphs or gauges.\n",
+                    "type": "number"
+                  },
+                  "min_value": {
+                    "description": "🚧 Optional minimum value of the sensor output. This can be used in the UI for graphs or gauges.\n",
+                    "type": "number"
+                  },
+                  "native_unit": {
+                    "description": "The sensor's native unit of measurement to perform automatic conversion. Applicable to device\nclasses: `temperature`\n"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          }
+        ],
+        "description": "A sensor entity provides measured values from devices or dedicated hardware sensors.  \nThe device class specifies the type of sensor and links it with a default unit of measurement to display in the user\ninterface.\n\n- The `custom` device class allows arbitrary UI labels and units.\n- The `temperature` device class performs automatic conversion between °C and °F.\n\nSee [sensor entity documentation](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_sensor.md)\nfor more information.\n"
+      },
+      "setDriverUserDataMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "set_driver_user_data",
+                "type": "string"
+              },
+              "msg_data": {
+                "oneOf": [
+                  {
+                    "properties": {
+                      "input_values": {
+                        "$ref": "#/components/schemas/SettingsValues"
+                      }
+                    },
+                    "required": [
+                      "input_values"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "confirm": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "confirm"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "setupDriverMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "setup_driver",
+                "type": "string"
+              },
+              "msg_data": {
+                "properties": {
+                  "reconfigure": {
+                    "description": "If set to `true`: reconfigure an already configured driver.\n",
+                    "type": "boolean"
+                  },
+                  "setup_data": {
+                    "$ref": "#/components/schemas/SettingsValues"
+                  }
+                },
+                "required": [
+                  "setup_data"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "simpleId": {
+        "description": "Simple string identifier, also usable as URL parameter or file identifier.",
+        "format": "^[a-zA-Z0-9\\-_\\.]+$",
+        "maxLength": 36,
+        "minLength": 1,
+        "type": "string"
+      },
+      "subscribeEventsMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "subscribe_events",
+                "type": "string"
+              },
+              "msg_data": {
+                "properties": {
+                  "device_id": {
+                    "description": "Only required for multi-device integrations.",
+                    "type": "string"
+                  },
+                  "entity_ids": {
+                    "descriptions": "Subscribe to events only for specified entities.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "supportedEntityTypesMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonResp"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "supported_entity_types",
+                "type": "string"
+              },
+              "msg_data": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "switch": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/entity"
+          },
+          {
+            "properties": {
+              "device_class": {
+                "description": "Optional device type. This can be used by the UI to represent the entity with a different icon,\nbehaviour etc.\n",
+                "enum": [
+                  "switch",
+                  "outlet"
+                ],
+                "type": "string"
+              },
+              "features": {
+                "items": {
+                  "enum": [
+                    "on_off",
+                    "toggle"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "options": {
+                "properties": {
+                  "readable": {
+                    "default": true,
+                    "description": "If set to false the current state of the switch cannot be read. This will make the switch stateless\nand the UI might ask the user for the current state.\n",
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          }
+        ],
+        "description": "A switch entity can turn something on or off and the current state should be readable by the integration driver.\n\nIf the state can't be read, the `readable` option property can be set to `false`. This should be avoided\nwhenever possible, because the UC Remote either has to assume the current state, or the UI needs to ask the\nuser for the current state.\n\nIf the switch controls a light source, then the 'light' entity is usually a better choice.\n\nSee [switch entity documentation](https://github.com/unfoldedcircle/core-api/blob/main/doc/entities/entity_switch.md)\nfor more information.\n"
+      },
+      "unsubscribeEventsMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonReq"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "unsubscribe_events",
+                "type": "string"
+              },
+              "msg_data": {
+                "properties": {
+                  "device_id": {
+                    "description": "Only required for multi-device integrations.",
+                    "type": "string"
+                  },
+                  "entity_ids": {
+                    "descriptions": "Unsubscribe from events only for specified entities.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "msg"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "versionInfo": {
+        "properties": {
+          "address": {
+            "description": "MAC address of the remote",
+            "type": "string"
+          },
+          "api": {
+            "description": "API version",
+            "type": "string"
+          },
+          "core": {
+            "description": "Core app version",
+            "type": "string"
+          },
+          "device_name": {
+            "description": "Custom name of the remote",
+            "type": "string"
+          },
+          "hostname": {
+            "description": "Hostname of the remote",
+            "type": "string"
+          },
+          "model": {
+            "description": "Short model identifier of the remote (UCR2 for Remote Two, UCR3 for Remote 3).\n",
+            "type": "string"
+          },
+          "os": {
+            "description": "Operating system version",
+            "type": "string"
+          },
+          "ui": {
+            "description": "Frontend app version",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "versionMsg": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/commonResp"
+          },
+          {
+            "properties": {
+              "msg": {
+                "const": "version",
+                "type": "string"
+              },
+              "msg_data": {
+                "$ref": "#/components/schemas/versionInfo"
+              }
+            },
+            "required": [
+              "msg",
+              "msg_data"
+            ]
+          }
+        ],
+        "type": "object"
+      },
+      "voice_assistant": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/entity"
+          },
+          {
+            "properties": {
+              "features": {
+                "$ref": "#/components/schemas/VoiceAssistantFeatures"
+              },
+              "options": {
+                "$ref": "#/components/schemas/VoiceAssistantOptions"
+              }
+            },
+            "type": "object"
+          }
+        ],
+        "description": "A voice assistant entity can be used to receive a microphone input stream suitable to send voice commands\nto a voice assistant.\n"
+      }
+    },
+    "securitySchemes": {
+      "token": {
+        "description": "The API token is either provided in the `auth-token` header while upgrading to a WebSocket connection,\nor with an authentication message.\n- If the integration driver doesn't support header based authentication, it must send the `auth_required`\n  message event after the WebSocket connection is established. The UC Remote will then authenticate with the\n  `auth` request message.\n- If the driver doesn't support or require authentication, it still needs to send the `authentication` message\n  with `code: 200` and `req_id: 0` after the WebSocket connection has been established by the UC Remote.\n",
+        "in": "header",
+        "name": "auth-token",
+        "type": "httpApiKey"
+      }
+    }
+  },
+  "defaultContentType": "application/json",
+  "externalDocs": {
+    "description": "Find out more about the Remotes",
+    "url": "https://www.unfoldedcircle.com/"
+  },
+  "id": "urn:com:unfoldedcircle:integration",
+  "info": {
+    "contact": {
+      "email": "support@unfoldedcircle.com",
+      "name": "API Support",
+      "url": "https://github.com/unfoldedcircle/core-api/issues"
+    },
+    "description": "API definition of the Unfolded Circle WebSocket Integration-API for Remote Two/3 (_UCR Integration-API_ in short).\n\nAPI message status legend:\n\n| Icon | Description                                                                     |\n|------|---------------------------------------------------------------------------------|\n| 💡   | Idea, not yet official part of API definition.                                  |\n| 🚧   | Planned feature and most likely not (fully) implemented in the initial release. |\n| 👷   | API definition is work in progress, not ready yet for implementation.           |\n| 🔍   | Api definition review & implementation.                                         |\n| 🧪   | API has been implemented in the UC Remote and is currently being tested.        |\n| 🚀   | Ready to use - feedback welcomed.                                               |\n\nSimple integrations with static entities don't need to implement all messages.  \n**All required messages are tagged with the 🍕 emoji.**\n\n## Overview\n\nThe UCR Integration-API allows writing device integration drivers for the Unfolded Circle Remotes.  \n\nℹ️ Starting with the UCR2 firmware beta release 1.9.0, custom integration drivers can be installed on the UC Remote.\n\nThe integration driver acts as server and the UC Remote as client. The remote connects to the integration when an\nintegration instance is configured. Whenever the remote enters standby it may choose to disconnect and connect again\nafter wakeup.\n\nThe goal of the Integration-API is to cover simple static drivers like controlling GPIOs on a Raspberry Pi, up to\nintegrating existing home automation hubs like Home Assistant, Homey, ioBroker, openHAB etc.  \nThe focus of the integration API is on entity integration, not on controlling or configuring the UC Remote. Please\nrefer to the Core-API for other functionality: <https://github.com/unfoldedcircle/core-api>\n\n## API Versioning\n\nThe API is versioned according to [SemVer](https://semver.org/).  \nThe initial public release will be `1.0.0` once it is considered stable enough with some initial integration\nimplementations and developer examples.\n\n**Any major version zero (`0.y.z`) is for initial development and may change at any time!**  \nI.e. backward compatibility for minor releases is not yet established, anything MAY change at any time!\n",
+    "license": {
+      "name": "Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)",
+      "url": "https://creativecommons.org/licenses/by-sa/4.0/"
+    },
+    "title": "Remote Two/3 WebSocket Integration API",
+    "version": "0.14.0-beta"
+  },
+  "servers": {
+    "test": {
+      "description": "Local test server.\n",
+      "protocol": "ws",
+      "security": [
+        {
+          "token": []
+        }
+      ],
+      "url": "localhost:8001"
+    },
+    "test-wss": {
+      "description": "Local test server.\n",
+      "protocol": "wss",
+      "security": [
+        {
+          "token": []
+        }
+      ],
+      "url": "localhost:8443"
+    }
+  },
+  "tags": [
+    {
+      "description": "Integration driver registration",
+      "name": "registration"
+    },
+    {
+      "description": "Device handling",
+      "name": "device"
+    },
+    {
+      "description": "Integration discovery and setup",
+      "externalDocs": {
+        "url": "https://github.com/unfoldedcircle/core-api/blob/main/doc/integration-driver/driver-setup.md"
+      },
+      "name": "setup"
+    },
+    {
+      "description": "Entity handling",
+      "externalDocs": {
+        "url": "https://github.com/unfoldedcircle/core-api/tree/main/doc/entities"
+      },
+      "name": "entity"
+    },
+    {
+      "description": "Event initiated by the integration driver",
+      "name": "event"
+    },
+    {
+      "description": "Metadata information",
+      "name": "metadata"
+    },
+    {
+      "description": "This message needs be handled / supported by an integration driver.",
+      "name": "required"
+    }
+  ]
+}

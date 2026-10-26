@@ -27,6 +27,8 @@ fn summarize(description: &str) -> String {
 /// - Introduction paragraph with API name and description
 /// - Authentication section explaining the auth strategy
 /// - Features section listing endpoints grouped by HTTP method
+/// - Rate limit and retry guidance sections, when the API declares them
+///   (documentation only; the client acts on neither)
 /// - Example section with a basic usage example
 ///
 /// ## Examples
@@ -54,22 +56,27 @@ impl<'a> ModuleDocBuilder<'a> {
     /// The generated tokens are `//!` style line doc comments rather than
     /// `#![doc = "..."]` attributes, for consistency with hand-written code.
     pub fn build(&self) -> TokenStream {
+        lines_to_doc_comments(&self.markdown())
+    }
+
+    /// The module documentation as Markdown: the introduction, then the
+    /// `##` sections.
+    pub(crate) fn markdown(&self) -> String {
         let intro = self.intro_paragraph();
         let auth_section = self.auth_section();
         let features_section = self.features_section();
+        let metadata_section = self.metadata_section();
         let example_section = self.example_section();
 
         // Combine all sections with blank lines between them
-        let full_doc = format!(
-            "{}\n\n{}\n\n{}\n\n{}",
+        format!(
+            "{}\n\n{}\n\n{}\n\n{}{}",
             intro.trim(),
             auth_section.trim(),
             features_section.trim(),
+            metadata_section,
             example_section.trim()
-        );
-
-        // Convert to //! style line comments
-        lines_to_doc_comments(&full_doc)
+        )
     }
 
     /// Generates the introduction paragraph.
@@ -107,9 +114,9 @@ impl<'a> ModuleDocBuilder<'a> {
             AuthStrategy::ApiKey { header, .. } => {
                 format!("Uses API key authentication via the `{}` header.", header)
             }
-            AuthStrategy::Basic => "Uses HTTP Basic authentication.".to_string(),
+            AuthStrategy::Basic { .. } => "Uses HTTP Basic authentication.".to_string(),
             AuthStrategy::OAuth2(config) => {
-                let flow = match config.grant_type {
+                let flow = match config.grant_type() {
                     schematic_define::OAuth2GrantType::AuthorizationCodePkce => {
                         "Authorization Code with PKCE"
                     }
@@ -117,10 +124,10 @@ impl<'a> ModuleDocBuilder<'a> {
                     schematic_define::OAuth2GrantType::DeviceCode => "Device Code",
                     _ => "OAuth2",
                 };
-                let scopes_info = if config.default_scopes.is_empty() {
+                let scopes_info = if config.default_scopes().is_empty() {
                     String::new()
                 } else {
-                    format!(" Default scopes: `{}`.", config.default_scopes.join("`, `"))
+                    format!(" Default scopes: `{}`.", config.default_scopes().join("`, `"))
                 };
                 format!("Uses OAuth2 authentication ({} flow).{}", flow, scopes_info)
             }
@@ -146,6 +153,24 @@ impl<'a> ModuleDocBuilder<'a> {
         };
 
         format!("## Authentication\n\n{}{}", auth_desc, env_info)
+    }
+
+    /// The API-level rate-limit and retry guidance sections, each followed
+    /// by a blank line, or nothing when the API declares neither. An
+    /// endpoint's own value is documented on its request type instead.
+    fn metadata_section(&self) -> String {
+        use crate::codegen::request_structs::endpoint_docs::{rate_limit_lines, retry_guidance_lines};
+
+        let mut sections = String::new();
+        if let Some(rate_limit) = &self.api.rate_limit {
+            sections.push_str(&rate_limit_lines(rate_limit).join("\n"));
+            sections.push_str("\n\n");
+        }
+        if let Some(guidance) = &self.api.retry_guidance {
+            sections.push_str(&retry_guidance_lines(guidance).join("\n"));
+            sections.push_str("\n\n");
+        }
+        sections
     }
 
     /// Groups endpoints by their HTTP method.
@@ -190,20 +215,11 @@ impl<'a> ModuleDocBuilder<'a> {
     /// Creates a usage example using the first GET endpoint, or the first
     /// endpoint if no GET endpoint exists.
     fn example_section(&self) -> String {
-        // Find first GET endpoint, or fallback to first endpoint
-        let endpoint = self
-            .api
-            .endpoints
-            .iter()
-            .find(|e| e.method == RestMethod::Get)
-            .or_else(|| self.api.endpoints.first());
-
-        let Some(endpoint) = endpoint else {
+        let Some(endpoint) = example_endpoint(self.api) else {
             return "## Example\n\nNo endpoints available for example.".to_string();
         };
 
         let api_name = &self.api.name;
-        let call = crate::codegen::endpoint_methods::example_invocation(self.api, endpoint, "client");
         let custom_base_url = if self.api.base_url == "http://192.168.1.1:9529" {
             "http://192.168.1.50:9529"
         } else {
@@ -213,30 +229,78 @@ impl<'a> ModuleDocBuilder<'a> {
         format!(
             r#"## Examples
 
-```text
-use schematic_schema::prelude::*;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {{
-    let client = {api_name}::new();
-    let data = {call}.await?;
-
-    // the whole response: status, headers, and request id as well
-    let response = {call}.full().await?;
-    println!("{{}}", response.meta);
-    Ok(())
-}}
-```
+{}
 
 ### Override Base URL
 
-```text
+```no_run
 use schematic_schema::prelude::*;
 
 let client = {api_name}::new().base_url("{custom_base_url}");
-```"#
+```"#,
+            client_example_lines(self.api, endpoint).join("\n")
         )
     }
+}
+
+/// The endpoint a doc example calls: `api`'s first GET endpoint, or else
+/// its first endpoint.
+pub(crate) fn example_endpoint(api: &RestApi) -> Option<&schematic_define::Endpoint> {
+    api.endpoints
+        .iter()
+        .find(|endpoint| endpoint.method == RestMethod::Get)
+        .or_else(|| api.endpoints.first())
+}
+
+/// The lines of a `no_run` doctest that calls `endpoint` of `api` through
+/// its endpoint method and as a typed `client.send(Request::new(..))`, then
+/// reads the whole response.
+///
+/// The example imports the request type, and any enum an argument names,
+/// from the API's module in `schematic_schema`, so it compiles wherever that
+/// module's feature is enabled.
+pub(crate) fn client_example_lines(api: &RestApi, endpoint: &schematic_define::Endpoint) -> Vec<String> {
+    let call = crate::codegen::endpoint_methods::example_call(api, endpoint);
+    let module = schematic_definitions::naming::resolve_module_name(api);
+    let mut imports = call.imports.clone();
+    // A generated form struct lives in the API's module; every other body
+    // type is a std type or spelled from the crate root.
+    if let Some(body) = &call.body_type
+        && !matches!(body.as_str(), "String" | "Vec<u8>")
+        && body.chars().all(|c| c.is_alphanumeric() || c == '_')
+    {
+        imports.push(body.clone());
+    }
+    let import = match imports.as_slice() {
+        [only] => only.clone(),
+        _ => format!("{{{}}}", imports.join(", ")),
+    };
+
+    let mut lines = vec![
+        "```no_run".to_string(),
+        "use schematic_schema::prelude::*;".to_string(),
+        format!("use schematic_schema::{module}::{import};"),
+        String::new(),
+        "# async fn example() -> Result<(), Box<dyn std::error::Error>> {".to_string(),
+        format!("let client = {}::new();", api.name),
+    ];
+    if let Some(body) = &call.body_type {
+        lines.push(format!("let body: {body} = Default::default();"));
+    }
+    lines.extend([
+        format!("let data = {}.await?;", call.method_call("client", "body.clone()")),
+        String::new(),
+        "// the same request, built as a typed request and sent".to_string(),
+        format!("let data = {}.await?;", call.typed_send("client", "body.clone()")),
+        String::new(),
+        "// the whole response: status, headers, and request id as well".to_string(),
+        format!("let response = {}.full().await?;", call.method_call("client", "body")),
+        "println!(\"{}\", response.meta);".to_string(),
+        "# Ok(())".to_string(),
+        "# }".to_string(),
+        "```".to_string(),
+    ]);
+    lines
 }
 
 /// Converts a multi-line documentation string into `//!` style line comments.
@@ -274,39 +338,24 @@ pub(crate) fn lines_to_doc_comments(doc: &str) -> TokenStream {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::{ApiResponse, CrossOrigin, Endpoint};
+    use schematic_define::{SuccessShape, Endpoint};
 
     fn make_test_api() -> RestApi {
-        RestApi {
-            name: "TestApi".to_string(),
-            description: "A test API for documentation.".to_string(),
-            base_url: "https://api.test.com".to_string(),
-            docs_url: Some("https://docs.test.com".to_string()),
-            auth: AuthStrategy::BearerToken { header: None },
-            auth_policy: None,
-            env_auth: vec!["TEST_API_KEY".to_string()],
-            env_username: None,
-            env_mapping: None,
-            headers: vec![],
-            endpoints: vec![Endpoint {
-                id: "ListItems".to_string(),
-                method: RestMethod::Get,
-                path: "/items".to_string(),
-                description: "List all items".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListItemsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            }],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "TestApi".to_string(), "https://api.test.com".to_string())
+                .describes("A test API for documentation.".to_string())
+                .authentication(AuthStrategy::BearerToken { header: None }, vec!["TEST_API_KEY".to_string()])
+                .build().expect("valid API fixture");
+            api.docs_url = Some("https://docs.test.com".to_string());
+            api.endpoints = vec![{
+                let mut endpoint = Endpoint::new("ListItems".to_string(), RestMethod::Get, "/items".to_string())
+                    .describes("List all items".to_string())
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = vec![SuccessShape::json_type("ListItemsResponse")];
+                endpoint
+            }];
+            api
         }
     }
 
@@ -384,7 +433,7 @@ mod tests {
     #[test]
     fn auth_section_basic() {
         let mut api = make_test_api();
-        api.auth = AuthStrategy::Basic;
+        api.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
         let builder = ModuleDocBuilder::new(&api);
         let auth = builder.auth_section();
         assert!(auth.contains("Basic authentication"));
@@ -403,27 +452,21 @@ mod tests {
     #[test]
     fn features_section_groups_by_method() {
         let mut api = make_test_api();
-        api.endpoints.push(Endpoint {
-            id: "CreateItem".to_string(),
-            method: RestMethod::Post,
-            path: "/items".to_string(),
-            description: "Create a new item".to_string(),
-            request: None,
-            response: ApiResponse::json_type("CreateItemResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
+        api.endpoints.push({
+            let mut endpoint = Endpoint::new("CreateItem".to_string(), RestMethod::Post, "/items".to_string())
+                .describes("Create a new item".to_string())
+                .returns_empty()
+                .build().expect("valid endpoint fixture");
+            endpoint.response = vec![SuccessShape::json_type("CreateItemResponse")];
+            endpoint
         });
-        api.endpoints.push(Endpoint {
-            id: "GetItem".to_string(),
-            method: RestMethod::Get,
-            path: "/items/{id}".to_string(),
-            description: "Get a specific item".to_string(),
-            request: None,
-            response: ApiResponse::json_type("Item"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
+        api.endpoints.push({
+            let mut endpoint = Endpoint::new("GetItem".to_string(), RestMethod::Get, "/items/{id}".to_string())
+                .describes("Get a specific item".to_string())
+                .returns_empty()
+                .build().expect("valid endpoint fixture");
+            endpoint.response = vec![SuccessShape::json_type("Item")];
+            endpoint
         });
 
         let builder = ModuleDocBuilder::new(&api);
@@ -450,16 +493,13 @@ mod tests {
         let mut api = make_test_api();
         api.endpoints.insert(
             0,
-            Endpoint {
-                id: "CreateItem".to_string(),
-                method: RestMethod::Post,
-                path: "/items".to_string(),
-                description: "Create a new item".to_string(),
-                request: None,
-                response: ApiResponse::json_type("CreateItemResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
+            {
+                let mut endpoint = Endpoint::new("CreateItem".to_string(), RestMethod::Post, "/items".to_string())
+                    .describes("Create a new item".to_string())
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = vec![SuccessShape::json_type("CreateItemResponse")];
+                endpoint
             },
         );
 
@@ -480,16 +520,13 @@ mod tests {
     #[test]
     fn example_section_fallback_to_first_endpoint() {
         let mut api = make_test_api();
-        api.endpoints = vec![Endpoint {
-            id: "CreateItem".to_string(),
-            method: RestMethod::Post,
-            path: "/items".to_string(),
-            description: "Create a new item".to_string(),
-            request: None,
-            response: ApiResponse::json_type("CreateItemResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
+        api.endpoints = vec![{
+            let mut endpoint = Endpoint::new("CreateItem".to_string(), RestMethod::Post, "/items".to_string())
+                .describes("Create a new item".to_string())
+                .returns_empty()
+                .build().expect("valid endpoint fixture");
+            endpoint.response = vec![SuccessShape::json_type("CreateItemResponse")];
+            endpoint
         }];
 
         let builder = ModuleDocBuilder::new(&api);
@@ -546,16 +583,103 @@ mod tests {
     }
 
     #[test]
-    fn build_preserves_code_block_indentation() {
-        let api = make_test_api();
-        let builder = ModuleDocBuilder::new(&api);
-        let tokens = builder.build();
-        let code = tokens.to_string();
+    fn doc_comments_preserve_code_block_indentation() {
+        let code = lines_to_doc_comments("```no_run\nfn f() {\n    body();\n}\n```").to_string();
 
-        // The code block should have indented lines preserved
-        assert!(
-            code.contains("    let client"),
-            "Expected indented 'let client' in code block"
+        assert!(code.contains("\"     body();\""), "{code}");
+    }
+
+    /// The module doc text, one entry per `//!` line.
+    fn doc_text(api: &RestApi) -> String {
+        let file: syn::File = syn::parse2(ModuleDocBuilder::new(api).build()).expect("module docs parse");
+        file.attrs
+            .iter()
+            .filter_map(|attr| match &attr.meta {
+                syn::Meta::NameValue(doc) => match &doc.value {
+                    syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(text), .. }) => Some(text.value()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn the_example_is_a_no_run_doctest_calling_the_method_and_the_typed_send() {
+        let docs = doc_text(&make_test_api());
+
+        let expected = " ```no_run
+ use schematic_schema::prelude::*;
+ use schematic_schema::test::ListItemsRequest;
+
+ # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+ let client = TestApi::new();
+ let data = client.list_items().await?;
+
+ // the same request, built as a typed request and sent
+ let data = client.send(ListItemsRequest::default()).await?;
+";
+        assert!(docs.contains(expected), "{docs}");
+        assert!(!docs.contains("```text") && !docs.contains("tokio::main"), "{docs}");
+    }
+
+    #[test]
+    fn an_example_with_a_body_binds_a_default_body_and_clones_it_until_its_last_use() {
+        let mut api = make_test_api();
+        api.endpoints[0].method = RestMethod::Post;
+        api.endpoints[0].request = Some(schematic_define::ApiRequest::text("text/plain"));
+
+        let docs = doc_text(&api);
+
+        assert!(docs.contains(" let body: String = Default::default();"), "{docs}");
+        assert!(docs.contains(" use schematic_schema::test::ListItemsRequest;"), "a std body type is not imported: {docs}");
+        assert!(docs.contains(" let data = client.list_items(body.clone()).await?;"), "{docs}");
+        assert!(docs.contains(" let data = client.send(ListItemsRequest::new(body.clone())).await?;"), "{docs}");
+        assert!(docs.contains(" let response = client.list_items(body).full().await?;"), "{docs}");
+    }
+
+    #[test]
+    fn api_rate_limit_and_retry_guidance_are_documented_before_the_example() {
+        use schematic_define::metadata::{Backoff, RateLimit, ResetUnit, RetryGuidance, StatusSelector};
+
+        let mut api = make_test_api();
+        api.rate_limit = Some(
+            RateLimit::new("x-rate-limit", "x-rate-remaining", "x-rate-reset", ResetUnit::Seconds).unwrap(),
         );
+        api.retry_guidance = Some(
+            RetryGuidance::new([StatusSelector::Code(429)], false, 4, Backoff::Fixed { delay_ms: 100 }).unwrap(),
+        );
+
+        let docs = doc_text(&api);
+
+        let expected = " ## Rate limit
+
+ Response headers reporting the rate limit (documentation only; the client does not act on them):
+
+ - limit: `x-rate-limit`
+ - remaining: `x-rate-remaining`
+ - reset: `x-rate-reset`, as seconds until the window resets
+
+ ## Retry guidance
+
+ The provider's retry guidance (documentation only; the client does not retry):
+
+ - retry on: `429`
+ - honor Retry-After: no
+ - max attempts: 4, including the first
+ - backoff: fixed, 100 ms
+
+ ## Examples";
+        assert!(docs.contains(expected), "{docs}");
+    }
+
+    #[test]
+    fn an_api_without_metadata_has_no_metadata_sections() {
+        let docs = doc_text(&make_test_api());
+
+        assert!(!docs.contains("## Rate limit"), "{docs}");
+        assert!(!docs.contains("## Retry guidance"), "{docs}");
+        assert!(docs.contains("- `ListItems` - List all items\n\n ## Examples"), "{docs}");
     }
 }

@@ -31,12 +31,13 @@ use tokio::time::Instant;
 use url::Url;
 
 use crate::call::Call;
-use crate::codec::{BodyReadError, Decode, DecodeFailureKind, LiveBody, StreamBounds};
+use crate::codec::{BodyReadError, DEFAULT_MAX_FRAME_BYTES, Decode, DecodeFailureKind, LiveBody, StreamBounds};
 use crate::credentials::{AuthConfig, Credential, CredentialPlacement, Resolved};
 use crate::deadline::{Deadline, Expiration, Limit};
 use crate::encode::{self, EncodedBody};
-use crate::endpoint::{Api, EndpointSpec, ErrorBody, RequestParts};
+use crate::endpoint::{Address, Api, EndpointSpec, ErrorBody, ErrorRoute, QueryValue, RequestParts, encode_query_component};
 use crate::hooks::{HookError, HookStage, Hooks, SupportsHooks};
+use crate::graphql::{AddressRule, derive_address};
 use crate::error::{BuildError, InvalidArgument, TransportError, TransportErrorKind};
 use crate::meta::{AuthMethod, RequestMeta, ResponseMeta};
 use crate::options::{CallAuth, CallOptions};
@@ -64,6 +65,29 @@ pub struct ApiDefinition {
     secret_names: Vec<String>,
     request_id_header: Option<String>,
     cross_origin: OriginPolicy,
+    endpoint_cross_origin: Vec<(String, OriginPolicy)>,
+    endpoint_auth: Vec<(String, EndpointAuth)>,
+    graphql: Option<&'static [AddressRule]>,
+}
+
+/// One endpoint's authentication, replacing the API's.
+#[derive(Debug, Clone)]
+enum EndpointAuth {
+    /// No credential is resolved or sent.
+    Public,
+    /// This policy instead of the API's; nothing resolving is an error.
+    Replaced(AuthConfig),
+}
+
+impl EndpointAuth {
+    fn placements(&self) -> impl Iterator<Item = &CredentialPlacement> {
+        match self {
+            Self::Public => None,
+            Self::Replaced(auth) => Some(auth.placements()),
+        }
+        .into_iter()
+        .flatten()
+    }
 }
 
 impl ApiDefinition {
@@ -75,7 +99,20 @@ impl ApiDefinition {
             secret_names: Vec::new(),
             request_id_header: None,
             cross_origin: OriginPolicy::SameOrigin,
+            endpoint_cross_origin: Vec::new(),
+            endpoint_auth: Vec::new(),
+            graphql: None,
         }
+    }
+
+    /// Declares the API's GraphQL address rules: a client derives its
+    /// GraphQL address from its effective base URL with the first rule that
+    /// matches (see [`derive_address`]). A
+    /// [`Client::graphql_url`] beats them.
+    #[must_use]
+    pub fn graphql(mut self, rules: &'static [AddressRule]) -> Self {
+        self.graphql = Some(rules);
+        self
     }
 
     /// Sets the API's cross-origin policy (default
@@ -87,10 +124,42 @@ impl ApiDefinition {
         self
     }
 
+    /// Replaces the API policy for one endpoint. Caller overrides must still
+    /// tighten this endpoint's policy.
+    #[must_use]
+    pub fn endpoint_cross_origin(mut self, endpoint: impl Into<String>, policy: OriginPolicy) -> Self {
+        self.endpoint_cross_origin.push((endpoint.into(), policy));
+        self
+    }
+
     /// Sets how the API accepts credentials.
     #[must_use]
     pub fn auth(mut self, auth: AuthConfig) -> Self {
         self.auth = auth;
+        self
+    }
+
+    /// Makes one endpoint public: its sends resolve no credential from any
+    /// source, and every value in a location where this API or any of its
+    /// endpoint policies places a credential (header, query parameter, or
+    /// cookie) is removed from the request, including one the request sets
+    /// itself. Other headers and cookies are kept.
+    #[must_use]
+    pub fn endpoint_public(mut self, endpoint: impl Into<String>) -> Self {
+        self.endpoint_auth.push((endpoint.into(), EndpointAuth::Public));
+        self
+    }
+
+    /// Replaces the API's policy for one endpoint; the two are never merged.
+    ///
+    /// A per-call credential must be of a kind `auth` accepts. A client-level
+    /// credential is sent only when `auth` accepts its kind, and is otherwise
+    /// passed over for `auth`'s environment fallback. When nothing resolves,
+    /// the send is refused with [`InvalidArgument`] before any request,
+    /// unless the call asked for no credential.
+    #[must_use]
+    pub fn endpoint_auth(mut self, endpoint: impl Into<String>, auth: AuthConfig) -> Self {
+        self.endpoint_auth.push((endpoint.into(), EndpointAuth::Replaced(auth)));
         self
     }
 
@@ -145,7 +214,7 @@ impl<A: Api> Clone for Client<A> {
 impl<A: Api> fmt::Debug for Client<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let settings = &*self.settings;
-        let secrets = secret_names(&settings.definition, &settings.definition.auth);
+        let secrets = secret_names(&settings.definition);
         f.debug_struct("Client")
             .field("api", &A::NAME)
             .field("base_url", &secrets.redact_url_reference(&settings.definition.base_url))
@@ -172,6 +241,8 @@ struct Settings {
     credential: Option<ClientCredential>,
     env_order: Option<Vec<String>>,
     cross_origin: Option<OriginPolicy>,
+    max_frame_bytes: usize,
+    graphql_url: Option<String>,
     hooks: Hooks,
 }
 
@@ -196,6 +267,15 @@ struct Inner {
     secrets: SecretNames,
     request_id_header: Option<String>,
     origins: OriginRules,
+    endpoint_origins: Vec<(String, OriginRules)>,
+    endpoint_auth: Vec<(String, EndpointAuth)>,
+    /// Every placement of the API's policy and of each endpoint replacement:
+    /// what a public endpoint's send strips.
+    public_placements: Vec<CredentialPlacement>,
+    max_frame_bytes: usize,
+    /// Where [`Address::GraphQl`] endpoints are sent; `None` when the API
+    /// declares no rules and the caller set no override.
+    graphql_url: Option<Url>,
     hooks: Hooks,
 }
 
@@ -213,6 +293,8 @@ impl<A: Api> Client<A> {
                 credential: None,
                 env_order: None,
                 cross_origin: None,
+                max_frame_bytes: DEFAULT_MAX_FRAME_BYTES,
+                graphql_url: None,
                 hooks: Hooks::default(),
             }),
             built: Arc::default(),
@@ -238,9 +320,39 @@ impl<A: Api> Client<A> {
     /// The per-request timeout (default 30 s). Under a shared
     /// [`Deadline`] a send is bounded by the earlier of the
     /// two.
+    ///
+    /// For a streamed body it bounds the wait for the head, then each wait
+    /// for the next item (an idle bound, not a total lifetime); only the
+    /// shared deadline bounds a whole stream.
     #[must_use]
     pub fn timeout(self, timeout: Duration) -> Self {
         self.update(|settings| settings.timeout = timeout)
+    }
+
+    /// The largest SSE event or NDJSON line the streaming codecs assemble
+    /// (default [`DEFAULT_MAX_FRAME_BYTES`], 16 MiB). A pending frame that
+    /// grows past it ends its stream with
+    /// [`StreamError::FrameLimitExceeded`](crate::StreamError::FrameLimitExceeded);
+    /// raw byte streams assemble no frame and ignore it.
+    ///
+    /// Zero is refused when the client is validated.
+    #[must_use]
+    pub fn max_frame_bytes(self, limit: usize) -> Self {
+        self.update(|settings| settings.max_frame_bytes = limit)
+    }
+
+    /// Sends GraphQL operations to `url` instead of the address the API's
+    /// rules derive from the base URL.
+    ///
+    /// The address is checked against the endpoint's cross-origin policy
+    /// like any absolute URL: under the default same-origin policy an
+    /// address on another origin than the base URL is refused at send. A URL
+    /// that is not HTTP(S) with a host, carries user information, or carries
+    /// a fragment fails validation with [`BuildError::InvalidGraphQlUrl`].
+    #[must_use]
+    pub fn graphql_url(self, url: impl Into<String>) -> Self {
+        let url = url.into();
+        self.update(|settings| settings.graphql_url = Some(url))
     }
 
     /// Bounds how long establishing a connection may take.
@@ -301,6 +413,10 @@ impl<A: Api> Client<A> {
     /// Sends `credential` when a call supplies none, before the environment
     /// fallback is read. It replaces any credential set before, including
     /// one from [`api_key`](Self::api_key).
+    ///
+    /// It is accepted when the API or any endpoint policy that replaces the
+    /// API's accepts its kind, and each send uses it only where the
+    /// endpoint's policy does; it is never sent in another kind's placement.
     #[must_use]
     pub fn credentials(self, credential: Credential) -> Self {
         self.update(|settings| settings.credential = Some(ClientCredential::Given(credential)))
@@ -311,17 +427,21 @@ impl<A: Api> Client<A> {
     /// list that is a bearer token or an API key in a header, query
     /// parameter, or cookie. It replaces any credential set before.
     ///
-    /// An API that accepts only Basic credentials, or none, fails validation
-    /// with [`BuildError::IncompatibleCredential`].
+    /// When the API itself takes no single secret, the first endpoint policy
+    /// replacing the API's that does decides the key's kind. The key is sent
+    /// only to endpoints whose policy accepts that kind, as with
+    /// [`credentials`](Self::credentials). With no such placement anywhere,
+    /// validation fails with [`BuildError::IncompatibleCredential`].
     #[must_use]
     pub fn api_key(self, key: impl Into<String>) -> Self {
         let key = Credential::api_key(key);
         self.update(|settings| settings.credential = Some(ClientCredential::Key(key)))
     }
 
-    /// Reads the environment fallback's variables in this order instead of
-    /// the definition's. For Basic authentication these are the password
-    /// variables.
+    /// Reads the API's environment fallback variables in this order instead
+    /// of the definition's. For Basic authentication these are the password
+    /// variables. An endpoint policy that replaces the API's keeps its own
+    /// order.
     #[must_use]
     pub fn env_order<I, S>(self, vars: I) -> Self
     where
@@ -332,11 +452,11 @@ impl<A: Api> Client<A> {
         self.update(|settings| settings.env_order = Some(vars))
     }
 
-    /// Tightens the API's cross-origin policy for this client.
+    /// Tightens the API's default and every endpoint policy for this client.
     ///
     /// [`OriginPolicy::Deny`] and [`OriginPolicy::SameOrigin`] are accepted,
     /// and so is an [`OriginPolicy::AllowOrigins`] list that is a subset of
-    /// the API's own list. Over a `Deny` API only `Deny` is accepted. Any
+    /// every applicable authored list. Over a `Deny` policy only `Deny` is accepted. Any
     /// other choice fails validation.
     #[must_use]
     pub fn cross_origin(self, policy: OriginPolicy) -> Self {
@@ -348,7 +468,8 @@ impl<A: Api> Client<A> {
     ///
     /// It runs only for a 2xx reply to an endpoint whose codec supports
     /// hooks, and only once the body has parsed as JSON; registering again
-    /// replaces it. See [`crate::hooks`] for the full order.
+    /// replaces it. Paging runs it before extracting items and continuations.
+    /// See [`crate::hooks`] for the full order.
     #[must_use]
     pub fn pre_response_json<F>(self, hook: F) -> Self
     where
@@ -358,7 +479,8 @@ impl<A: Api> Client<A> {
     }
 
     /// Runs `hook` on the decoded success value of endpoint `R`, after the
-    /// global JSON hook; registering again for `R` replaces it.
+    /// global JSON hook; registering again for `R` replaces it. Paging skips
+    /// this hook, including single-page fetches and collection.
     ///
     /// `R` must be an endpoint of this client's API whose codec supports
     /// hooks; a text, binary, or empty endpoint does not compile.
@@ -381,7 +503,8 @@ impl<A: Api> Client<A> {
     /// ## Errors
     ///
     /// Returns [`BuildError`] when the base URL is not a plain HTTP(S) URL,
-    /// a default header is invalid or carries a credential, the client
+    /// the GraphQL address override is invalid or the API's GraphQL rules
+    /// cannot derive one from the base URL, a default header is invalid or carries a credential, the client
     /// credential is of a kind the API does not accept, an allowed origin is
     /// not a bare HTTP(S) origin, the requested cross-origin policy loosens
     /// the API's, a connection option is set on a client attached to a shared
@@ -402,34 +525,62 @@ impl<A: Api> Client<A> {
     fn validated_for<R: EndpointSpec>(&self, start: Instant) -> Result<&Inner, TransportError> {
         self.validated().map_err(|error| {
             let settings = &*self.settings;
-            let secrets = secret_names(&settings.definition, &settings.definition.auth);
+            let secrets = secret_names(&settings.definition);
             let meta = RequestMeta::unassembled(&secrets, R::ENDPOINT_ID, R::METHOD, &settings.definition.base_url);
             TransportError::new(meta, TransportErrorKind::InvalidClient(error), start.elapsed())
         })
     }
 }
 
-/// The names whose values are never stored for an API with `definition` and
-/// the effective `auth`.
-fn secret_names(definition: &ApiDefinition, auth: &AuthConfig) -> SecretNames {
+/// The names whose values are never stored for an API with `definition`:
+/// every placement of the API's policy and of each endpoint replacement.
+fn secret_names(definition: &ApiDefinition) -> SecretNames {
     SecretNames::builtin()
-        .with_names(auth.placements().map(CredentialPlacement::secret_name))
+        .with_names(all_placements(definition).map(CredentialPlacement::secret_name))
         .with_names(&definition.secret_names)
+}
+
+/// Every placement of the API's policy and of each endpoint replacement.
+fn all_placements(definition: &ApiDefinition) -> impl Iterator<Item = &CredentialPlacement> {
+    definition
+        .auth
+        .placements()
+        .chain(definition.endpoint_auth.iter().flat_map(|(_, auth)| auth.placements()))
 }
 
 /// Validates `settings` into the state every send reads.
 fn validate(settings: &Settings) -> Result<Inner, BuildError> {
     let definition = &settings.definition;
+    if settings.max_frame_bytes == 0 {
+        return Err(BuildError::InvalidMaxFrameBytes);
+    }
     let base_url = parse_base_url(&definition.base_url)?;
+    let graphql_url = match (&settings.graphql_url, definition.graphql) {
+        (Some(url), _) => Some(parse_graphql_url(url)?),
+        (None, Some(rules)) => Some(
+            derive_address(&base_url, rules).map_err(|error| BuildError::InvalidGraphQlUrl { reason: error.reason() })?,
+        ),
+        (None, None) => None,
+    };
     let origins = OriginRules::new(&base_url, &definition.cross_origin, settings.cross_origin.as_ref())?;
+    let endpoint_origins = definition.endpoint_cross_origin.iter().map(|(endpoint, policy)| {
+        OriginRules::new(&base_url, policy, settings.cross_origin.as_ref())
+            .map(|rules| (endpoint.clone(), rules))
+    }).collect::<Result<Vec<_>, _>>()?;
     let mut auth = definition.auth.clone();
     if let Some(vars) = &settings.env_order {
         auth.replace_env_order(vars.clone());
     }
+    let policies = || {
+        std::iter::once(&auth).chain(definition.endpoint_auth.iter().filter_map(|(_, endpoint)| match endpoint {
+            EndpointAuth::Replaced(auth) => Some(auth),
+            EndpointAuth::Public => None,
+        }))
+    };
     let credential = match settings.credential.clone() {
         None => None,
         Some(ClientCredential::Given(credential)) => {
-            if auth.placement_for(credential.kind()).is_none() {
+            if policies().all(|auth| auth.placement_for(credential.kind()).is_none()) {
                 return Err(BuildError::IncompatibleCredential {
                     supplied: credential.kind().name(),
                 });
@@ -437,13 +588,13 @@ fn validate(settings: &Settings) -> Result<Inner, BuildError> {
             Some(credential)
         }
         Some(ClientCredential::Key(key)) => {
-            let placement = auth.key_placement().ok_or(BuildError::IncompatibleCredential {
+            let placement = policies().find_map(AuthConfig::key_placement).ok_or(BuildError::IncompatibleCredential {
                 supplied: key.kind().name(),
             })?;
             Some(key.for_placement(placement))
         }
     };
-    let secrets = secret_names(definition, &auth);
+    let secrets = secret_names(definition);
 
     let mut default_headers = HeaderMap::new();
     for (name, value) in &settings.default_headers {
@@ -480,6 +631,11 @@ fn validate(settings: &Settings) -> Result<Inner, BuildError> {
         secrets,
         request_id_header: definition.request_id_header.clone(),
         origins,
+        endpoint_origins,
+        endpoint_auth: definition.endpoint_auth.clone(),
+        public_placements: all_placements(definition).cloned().collect(),
+        max_frame_bytes: settings.max_frame_bytes,
+        graphql_url,
         hooks: settings.hooks.clone(),
     })
 }
@@ -500,6 +656,24 @@ fn parse_base_url(text: &str) -> Result<Url, BuildError> {
         return Err(BuildError::InvalidBaseUrl {
             reason: "carries user information",
         });
+    }
+    Ok(url)
+}
+
+fn parse_graphql_url(text: &str) -> Result<Url, BuildError> {
+    let invalid = |reason| BuildError::InvalidGraphQlUrl { reason };
+    let url = Url::parse(text).map_err(|_| invalid("not an absolute URL"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(invalid("scheme is not http or https"));
+    }
+    if url.host_str().is_none_or(str::is_empty) {
+        return Err(invalid("no host"));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(invalid("carries user information"));
+    }
+    if url.fragment().is_some() {
+        return Err(invalid("carries a fragment"));
     }
     Ok(url)
 }
@@ -534,7 +708,7 @@ struct FirstHop {
 enum Exchange {
     /// A reply that is not a followable redirect, with its body unread, and
     /// the URL of the hop that received it, before any credential.
-    Final { meta: ResponseMeta, body: LiveBody, url: Url },
+    Final { meta: ResponseMeta, body: Box<LiveBody>, url: Url },
     /// A redirect that stopped the send, with its body read.
     Stopped { meta: ResponseMeta, body: Bytes, stop: Stop },
 }
@@ -603,7 +777,7 @@ impl<A: Api> Client<A> {
         let inner = self.validated_for::<R>(start)?;
         let (mut meta, outcome, url) = match inner.execute(request, options, start).await? {
             Exchange::Final { meta, body, url } => {
-                let outcome = classify_reply::<R>(body, inner.hooks.stage::<R>(&meta)).await;
+                let outcome = classify_reply::<R>(*body, inner.hooks.stage::<R>(&meta)).await;
                 (meta, outcome, Some(url))
             }
             Exchange::Stopped { meta, body, stop } => {
@@ -654,7 +828,7 @@ impl<A: Api> Client<A> {
         let start = Instant::now();
         let inner = self.validated_for::<R>(start)?;
         let (mut meta, body, completion) = match inner.execute(request, options, start).await? {
-            Exchange::Final { meta, body, .. } => match body.collect().await {
+            Exchange::Final { meta, body, .. } => match (*body).collect().await {
                 Ok(bytes) => (meta, bytes, RawCompletion::Complete),
                 Err(failure) => (meta, failure.retained, RawCompletion::BodyInterrupted),
             },
@@ -717,7 +891,7 @@ impl<A: Api> Client<A> {
         R: EndpointSpec<Api = A>,
     {
         let inner = self.validated_for::<R>(Instant::now())?;
-        match inner.origins.link(url) {
+        match inner.origins_for::<R>().link(url) {
             Decision::Follow { .. } => Ok(()),
             Decision::Refuse => {
                 let meta = inner.meta_for::<R>(&R::METHOD, url, &HeaderMap::new(), AuthMethod::Anonymous);
@@ -729,6 +903,42 @@ impl<A: Api> Client<A> {
 }
 
 impl Inner {
+    fn origins_for<R: EndpointSpec>(&self) -> &OriginRules {
+        self.endpoint_origins.iter().rev()
+            .find(|(endpoint, _)| endpoint == R::ENDPOINT_ID)
+            .map(|(_, rules)| rules)
+            .unwrap_or(&self.origins)
+    }
+
+    /// The endpoint's own authentication, or `None` when it uses the API's.
+    fn auth_for<R: EndpointSpec>(&self) -> Option<&EndpointAuth> {
+        self.endpoint_auth.iter().rev()
+            .find(|(endpoint, _)| endpoint == R::ENDPOINT_ID)
+            .map(|(_, auth)| auth)
+    }
+
+    /// Resolves the credential of one send of `R` and removes from
+    /// `assembled` whatever the call or the endpoint rules out.
+    fn resolve_for<R: EndpointSpec>(&self, call: &CallAuth, assembled: &mut Assembled) -> Result<Resolved, InvalidArgument> {
+        let resolved = match self.auth_for::<R>() {
+            None => self.auth.resolve(call, self.credential.as_ref())?,
+            Some(EndpointAuth::Replaced(auth)) => auth.resolve_required(call, self.credential.as_ref(), R::ENDPOINT_ID)?,
+            Some(EndpointAuth::Public) => {
+                for placement in &self.public_placements {
+                    remove_placement(assembled, placement);
+                }
+                return Ok(Resolved::anonymous());
+            }
+        };
+        if matches!(call, CallAuth::Anonymous) {
+            match self.auth_for::<R>() {
+                Some(EndpointAuth::Replaced(auth)) => strip_credentials(auth, assembled),
+                _ => strip_credentials(&self.auth, assembled),
+            }
+        }
+        Ok(resolved)
+    }
+
     /// The execution core shared by every send: prepares the first hop
     /// ([`prepare`](Self::prepare)), checks the deadline, and follows
     /// redirects under one expiration until a reply that ends the send.
@@ -802,11 +1012,11 @@ impl Inner {
                 inner.request_id_header.as_deref(),
                 start.elapsed(),
             );
-            let body = live_body(reply, &expiration);
+            let body = live_body(reply, &expiration, inner.max_frame_bytes);
             if !is_followable_redirect(status) {
                 return Ok(Exchange::Final {
                     meta: response_meta,
-                    body,
+                    body: Box::new(body),
                     url: current.url.clone(),
                 });
             }
@@ -823,7 +1033,7 @@ impl Inner {
                     });
                 }
             };
-            let (next, credentials) = match self.next_hop(&current, status, &headers, followed) {
+            let (next, credentials) = match self.next_hop::<R>(&current, status, &headers, followed) {
                 Ok(next) => next,
                 Err(reason) => {
                     return Ok(Exchange::Stopped {
@@ -870,26 +1080,22 @@ impl Inner {
             .map_err(|argument| pre_send(TransportErrorKind::InvalidArgument(argument), self.base_meta::<R>()))?;
         let method = parts.method.clone();
         let mut assembled = self
-            .assemble(parts)
+            .assemble(parts, R::ADDRESS)
             .map_err(|kind| pre_send(kind, self.meta_for::<R>(&method, &inner.base_url, &HeaderMap::new(), AuthMethod::Anonymous)))?;
 
-        let Decision::Follow { credentials } = inner.origins.link(&assembled.url) else {
+        let Decision::Follow { credentials } = inner.origins_for::<R>().link(&assembled.url) else {
             let meta = self.meta_for::<R>(&assembled.method, &assembled.url, &assembled.headers, AuthMethod::Anonymous);
             let target = inner.secrets.redact_url(&assembled.url);
             return Err(pre_send(TransportErrorKind::CrossOriginRejected { target }, meta));
         };
 
-        let resolved = inner.auth.resolve(&options.auth, inner.credential.as_ref());
-        let resolved = match resolved {
+        let resolved = match inner.resolve_for::<R>(&options.auth, &mut assembled) {
             Ok(resolved) => resolved,
             Err(argument) => {
                 let meta = self.meta_for::<R>(&assembled.method, &assembled.url, &assembled.headers, AuthMethod::Anonymous);
                 return Err(pre_send(TransportErrorKind::InvalidArgument(argument), meta));
             }
         };
-        if matches!(options.auth, CallAuth::Anonymous) {
-            strip_credentials(&inner.auth, &mut assembled);
-        }
         let (sent, auth) = match self.authenticate(&assembled, credentials, &resolved, false) {
             Ok(sent) => sent,
             Err(argument) => {
@@ -938,14 +1144,14 @@ impl Inner {
             if replace {
                 remove_placement(&mut sent, placement);
             }
-            place_credential(&mut sent, placement, value)?;
+            place_credential(&mut sent.url, &mut sent.headers, placement, value)?;
         }
         Ok((sent, resolved.auth.clone()))
     }
 
     /// The next hop for a redirect received in reply to `current`, and
     /// whether the credential goes with it.
-    fn next_hop(
+    fn next_hop<R: EndpointSpec>(
         &self,
         current: &Assembled,
         status: StatusCode,
@@ -964,7 +1170,7 @@ impl Inner {
             return Err(RedirectRefusal::HopLimit);
         }
         target.set_fragment(None);
-        let Decision::Follow { credentials } = self.origins.redirect(&target) else {
+        let Decision::Follow { credentials } = self.origins_for::<R>().redirect(&target) else {
             return Err(RedirectRefusal::CrossOrigin);
         };
 
@@ -987,8 +1193,9 @@ impl Inner {
     }
 
     /// Joins the endpoint's path (or takes it whole when it is an absolute
-    /// URL) and query onto the base URL, and assembles its headers and body.
-    fn assemble(&self, parts: RequestParts) -> Result<Assembled, TransportErrorKind> {
+    /// URL) and query onto the base URL, or for [`Address::GraphQl`] the
+    /// query onto the GraphQL address, and assembles its headers and body.
+    fn assemble(&self, parts: RequestParts, address: Address) -> Result<Assembled, TransportErrorKind> {
         let inner = self;
         let RequestParts {
             method,
@@ -997,17 +1204,21 @@ impl Inner {
             headers: part_headers,
             body,
         } = parts;
-        let mut url = if is_absolute_url(&path) {
+        let mut url = if address == Address::GraphQl {
+            // Checked against the cross-origin policy, as an absolute URL
+            // is, before it is sent.
+            inner.graphql_url.clone().ok_or(TransportErrorKind::InvalidUrl)
+        } else if is_absolute_url(&path) {
             // An absolute URL, such as a followed next-page link, is checked
             // against the cross-origin policy before it is sent.
-            Url::parse(&path)
+            Url::parse(&path).map_err(|_| TransportErrorKind::InvalidUrl)
         } else {
             let separator = if path.starts_with('/') || path.is_empty() { "" } else { "/" };
             Url::parse(&format!("{}{separator}{path}", inner.base_url.as_str().trim_end_matches('/')))
-        }
-        .map_err(|_| TransportErrorKind::InvalidUrl)?;
+                .map_err(|_| TransportErrorKind::InvalidUrl)
+        }?;
         url.set_fragment(None);
-        append_query(&mut url, query.iter().map(|(name, value)| (name.as_str(), value.as_str())));
+        append_query(&mut url, query.iter().map(|(name, value)| (name.as_str(), value)));
 
         let mut headers = inner.default_headers.clone();
         let mut replaced = Vec::new();
@@ -1067,7 +1278,7 @@ fn category_kind(category: FailureCategory, deadline: Option<&Deadline>) -> Tran
     }
 }
 
-/// Removes every value any of the API's placements could carry, for a call
+/// Removes every value any of `auth`'s placements could carry, for a call
 /// that asked for no credential.
 fn strip_credentials(auth: &AuthConfig, assembled: &mut Assembled) {
     for placement in auth.placements() {
@@ -1098,23 +1309,32 @@ fn strip_secrets(secrets: &SecretNames, assembled: &mut Assembled) {
     remove_query(&mut assembled.url, |name| secrets.is_secret_query(name));
 }
 
-fn remove_query(url: &mut Url, remove: impl Fn(&str) -> bool) {
-    let kept: Vec<(String, String)> = url
-        .query_pairs()
-        .filter(|(pair_name, _)| !remove(pair_name))
-        .map(|(pair_name, value)| (pair_name.into_owned(), value.into_owned()))
+/// Drops every query pair whose decoded name `remove` matches. The pairs
+/// kept are kept byte for byte: decoding and re-encoding them would turn a
+/// delimited value's literal `,` into `%2C`.
+pub(crate) fn remove_query(url: &mut Url, remove: impl Fn(&str) -> bool) {
+    let Some(query) = url.query() else {
+        return;
+    };
+    let segments: Vec<&str> = query.split('&').collect();
+    let kept: Vec<&str> = segments
+        .iter()
+        .copied()
+        .filter(|segment| {
+            // Names are decoded exactly as `Url::query_pairs` decodes them.
+            !url::form_urlencoded::parse(segment.as_bytes()).next().is_some_and(|(name, _)| remove(&name))
+        })
         .collect();
-    if kept.len() == url.query_pairs().count() {
+    if kept.len() == segments.len() {
         return;
     }
-    url.set_query(None);
-    append_query(url, kept.iter().map(|(name, value)| (name.as_str(), value.as_str())));
+    let kept = kept.join("&");
+    url.set_query((!kept.is_empty()).then_some(kept.as_str()));
 }
 
-/// Appends `pairs` to `url`'s query. Names and values are percent-encoded
-/// except for RFC 3986 unreserved characters, so a space is sent as `%20`,
-/// never `+`; the generated clients have always put this form on the wire.
-fn append_query<'a>(url: &mut Url, pairs: impl IntoIterator<Item = (&'a str, &'a str)>) {
+/// Appends `pairs` to `url`'s query, each name and value encoded once (see
+/// [`QueryValue`]).
+pub(crate) fn append_query<'a>(url: &mut Url, pairs: impl IntoIterator<Item = (&'a str, &'a QueryValue)>) {
     let mut query = url.query().unwrap_or_default().to_string();
     for (name, value) in pairs {
         if !query.is_empty() {
@@ -1122,20 +1342,10 @@ fn append_query<'a>(url: &mut Url, pairs: impl IntoIterator<Item = (&'a str, &'a
         }
         encode_query_component(name, &mut query);
         query.push('=');
-        encode_query_component(value, &mut query);
+        query.push_str(&value.encoded());
     }
     if !query.is_empty() {
         url.set_query(Some(&query));
-    }
-}
-
-fn encode_query_component(text: &str, out: &mut String) {
-    for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            out.push(char::from(byte));
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
-        }
     }
 }
 
@@ -1165,32 +1375,40 @@ fn cookie_pairs(headers: &HeaderMap) -> impl Iterator<Item = (String, String)> +
 
 /// Adds the resolved credential, refusing a request that already carries a
 /// value where the credential goes.
-fn place_credential(assembled: &mut Assembled, placement: &CredentialPlacement, value: &str) -> Result<(), InvalidArgument> {
+/// Writes `value` where `placement` sends it, refusing to replace a value the
+/// request already sets there. Shared with
+/// [`HandshakeCredential::apply`](crate::HandshakeCredential::apply).
+pub(crate) fn place_credential(
+    url: &mut Url,
+    headers: &mut HeaderMap,
+    placement: &CredentialPlacement,
+    value: &str,
+) -> Result<(), InvalidArgument> {
     match placement {
         CredentialPlacement::ApiKeyQuery { name } => {
-            if assembled.url.query_pairs().any(|(pair_name, _)| pair_name == name.as_str()) {
+            if url.query_pairs().any(|(pair_name, _)| pair_name == name.as_str()) {
                 return Err(InvalidArgument::new(format!(
                     "the request already sets the query parameter `{name}` that carries the credential"
                 )));
             }
-            append_query(&mut assembled.url, [(name.as_str(), value)]);
+            append_query(url, [(name.as_str(), &QueryValue::from(value))]);
         }
         CredentialPlacement::ApiKeyCookie { name } => {
-            if cookie_pairs(&assembled.headers).any(|(cookie, _)| &cookie == name) {
+            if cookie_pairs(headers).any(|(cookie, _)| &cookie == name) {
                 return Err(InvalidArgument::new(format!(
                     "the request already sets the cookie `{name}` that carries the credential"
                 )));
             }
-            let mut cookies: Vec<String> = cookie_pairs(&assembled.headers).map(|(cookie, value)| format!("{cookie}={value}")).collect();
+            let mut cookies: Vec<String> = cookie_pairs(headers).map(|(cookie, value)| format!("{cookie}={value}")).collect();
             cookies.push(format!("{name}={}", encode_cookie_value(value)));
             let header = HeaderValue::from_str(&cookies.join("; ")).map_err(|_| InvalidArgument::new("the cookie header is not valid"))?;
-            assembled.headers.insert(COOKIE, header);
+            headers.insert(COOKIE, header);
         }
         other => {
             let name = other.header_name().unwrap_or("Authorization");
             let header_name = HeaderName::from_bytes(name.as_bytes())
                 .map_err(|_| InvalidArgument::new(format!("the credential header `{name}` is not valid")))?;
-            if assembled.headers.contains_key(&header_name) {
+            if headers.contains_key(&header_name) {
                 return Err(InvalidArgument::new(format!(
                     "the request already sets the header `{name}` that carries the credential"
                 )));
@@ -1198,7 +1416,7 @@ fn place_credential(assembled: &mut Assembled, placement: &CredentialPlacement, 
             let mut header = HeaderValue::from_str(value)
                 .map_err(|_| InvalidArgument::new(format!("the credential for `{name}` is not a valid header value")))?;
             header.set_sensitive(true);
-            assembled.headers.insert(header_name, header);
+            headers.insert(header_name, header);
         }
     }
     Ok(())
@@ -1245,7 +1463,7 @@ fn completed<T, E>(deadline: Option<&Deadline>, meta: ResponseMeta, outcome: Out
 
 /// Wraps a received reply's body for a codec, bounded by the send's
 /// expiration.
-fn live_body(reply: reqwest::Response, expiration: &Expiration) -> LiveBody {
+fn live_body(reply: reqwest::Response, expiration: &Expiration, max_frame_bytes: usize) -> LiveBody {
     let status = reply.status();
     let headers = reply.headers().clone();
     let stream = futures_util::stream::unfold(Some(reply), |state| async move {
@@ -1261,20 +1479,26 @@ fn live_body(reply: reqwest::Response, expiration: &Expiration) -> LiveBody {
     LiveBody::new(status, headers, stream, Some(expiration.at)).with_stream_bounds(StreamBounds {
         idle: Some(expiration.timeout),
         deadline: expiration.deadline_at,
+        max_frame_bytes,
     })
 }
 
 /// Classifies a received reply: a 2xx through the endpoint's codec and the
-/// client's `hooks`, any other status by its declared error body.
+/// client's `hooks`, any other status by the endpoint's error table.
 async fn classify_reply<R: EndpointSpec>(body: LiveBody, hooks: HookStage<'_>) -> Outcome<R::Success, R::Failure> {
     let status = body.status();
     if status.is_success() {
         return match R::Decoder::decode_hooked(body, hooks).await {
             Ok(value) => Outcome::Success(value),
-            Err(failure) => {
+            Err(mut failure) => {
                 let kind = match failure.kind {
                     DecodeFailureKind::Interrupted => ErrorKind::BodyInterrupted,
                     DecodeFailureKind::Hook => ErrorKind::Hook,
+                    DecodeFailureKind::UnexpectedContentType => ErrorKind::UnexpectedContentType,
+                    DecodeFailureKind::Declared => match failure.take_declared().and_then(R::Failure::from_declared) {
+                        Some(declared) => ErrorKind::Declared(declared),
+                        None => ErrorKind::MalformedSuccess,
+                    },
                     _ => ErrorKind::MalformedSuccess,
                 };
                 Outcome::Failure(ApiError {
@@ -1293,13 +1517,13 @@ async fn classify_reply<R: EndpointSpec>(body: LiveBody, hooks: HookStage<'_>) -
             });
         }
     };
-    let kind = if R::Failure::DECLARED && R::DECLARED_ERROR_STATUSES.contains(&status.as_u16()) {
-        match R::Failure::decode_body(&bytes) {
+    let route = R::Failure::DECLARED.then(|| ErrorRoute::lookup(R::ERRORS, status.as_u16())).flatten();
+    let kind = match route {
+        Some(route) => match R::Failure::decode_body(route.alternative, &bytes) {
             Some(declared) => ErrorKind::Declared(declared),
             None => ErrorKind::MalformedError,
-        }
-    } else {
-        ErrorKind::Undeclared
+        },
+        None => ErrorKind::Undeclared,
     };
     Outcome::Failure(ApiError { kind, body: bytes })
 }

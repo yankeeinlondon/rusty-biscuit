@@ -22,7 +22,9 @@ use schematic_define::RestApi;
 use crate::cargo_gen::MANIFEST_OWNERSHIP_MARKER;
 use crate::errors::GeneratorError;
 use crate::output::format::GENERATED_FILE_HEADER;
-use crate::output::ws_modules::ws_definition_modules;
+use schematic_definitions::registry::ApiRegistration;
+
+use crate::output::ws_modules::ws_registrations;
 
 /// How a file proves the generator wrote it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,6 +173,7 @@ pub(crate) fn read_rust_inventory(
     root: &Path,
     groups: &IndexMap<String, Vec<&RestApi>>,
     selected: &BTreeSet<String>,
+    registrations: &[ApiRegistration],
 ) -> Result<RustInventory, GeneratorError> {
     let refuse = |problems: Vec<String>| GeneratorError::UnsafeOutput {
         root: root.display().to_string(),
@@ -191,12 +194,11 @@ pub(crate) fn read_rust_inventory(
         return Err(refuse(problems));
     };
     let declared = declared_modules(&lib);
-    let exports = prelude_exports(&prelude);
+    let exports = prelude_exports(&prelude, registrations);
     let abi = abi_marker(&lib);
 
-    let ws_modules: BTreeSet<&str> = ws_definition_modules()
-        .iter()
-        .map(|ws| ws.module)
+    let ws_modules: BTreeSet<&str> = ws_registrations(registrations)
+        .map(|(entry, _)| entry.module)
         .chain(["ws_shared"])
         .collect();
 
@@ -390,7 +392,7 @@ fn abi_marker(lib: &syn::File) -> AbiMarker {
 /// Names each `pub use crate::<module>::…` of a `prelude.rs` imports, sorted,
 /// keyed by module. `shared` and the WebSocket helper re-exports are included
 /// under their own modules.
-fn prelude_exports(prelude: &syn::File) -> BTreeMap<String, Vec<String>> {
+fn prelude_exports(prelude: &syn::File, registrations: &[ApiRegistration]) -> BTreeMap<String, Vec<String>> {
     let mut exports: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for item in &prelude.items {
         let syn::Item::Use(item_use) = item else {
@@ -410,8 +412,8 @@ fn prelude_exports(prelude: &syn::File) -> BTreeMap<String, Vec<String>> {
         names.sort();
     }
     exports.remove("shared");
-    for ws in ws_definition_modules() {
-        exports.remove(ws.module);
+    for (entry, _) in ws_registrations(registrations) {
+        exports.remove(entry.module);
     }
     exports
 }

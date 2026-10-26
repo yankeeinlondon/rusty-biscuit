@@ -2,7 +2,7 @@
 
 ## MermaidDiagram API
 
-The main entry point for rendering Mermaid diagrams to SVG or PNG.
+The main entry point for rendering Mermaid diagrams to SVG or PNG. Rendering is done by Merman (pinned fork, see [SKILL.md](./SKILL.md#dependencies)) with this crate's text measurer and font chain. User-facing doc: `biscuit-visualized/docs/merman.md`.
 
 ### Construction
 
@@ -20,14 +20,30 @@ let diagram = MermaidDiagram::new("flowchart LR\n    A --> B")
 ```rust
 use biscuit_visualized::artifact::{RenderRequest, OutputFormat};
 
-let req = RenderRequest::new(OutputFormat::Svg);
-let artifact = diagram.render(req)?;
+let req = RenderRequest { format: OutputFormat::Svg, ..RenderRequest::default() };
+let artifact = diagram.render(&req)?;
 
 // artifact.path: PathBuf to the rendered file (may be in cache)
 // artifact.format: OutputFormat::Svg
 // artifact.cache_hit: bool
-// artifact.alt_text: Option<String>
+// artifact.alt_text: String
 ```
+
+`RenderRequest::background` decides what is painted behind the diagram (Merman leaves the root unpainted): `Theme` (default) paints a `viewBox`-sized rect of the palette's background (`Palette::background()`: `Dark` `#333333`, the others `#ffffff`), `Solid { r, g, b }` paints that color, and `Transparent` paints nothing. PNG-only fields (`target_width`, `row_height`) are covered in [Rasterization](./rasterization.md).
+
+`natural_size()` renders (or reads from the cache) the SVG artifact and returns its root `viewBox` size; the terminal component scales from it.
+
+### Pipeline (`mermaid/render.rs`)
+
+1. `default_chain()`; `source_theme` (Merman's `preprocess_diagram` + `registry().detect_type` → family id and the author's `%%{init}%%`/frontmatter config); the palette (`palette()`: `with_palette` else `Palette::fixed(theme)`) → `design::design_json(palette, family)` unless the author owns the theme; site config `{"theme": "base", "themeVariables": {"fontFamily": stack}}` merged over `MermaidConfig::to_json()`, plus palette `base` variables and `darkMode` (`wants_site_palette`), `family_site_variables` (gantt, cynefin, treeView, eventmodeling, venn, treemap, kanban, pie, xychart), and `family_site_config` (C4 `c4` text colors; packet `packet` block/label colors, author keys win). See [Themes and palettes](#themes-and-palettes).
+2. `prepare` (source rewrites): ZenUML header → `RenderFailed`; `rewrite_label_newlines`; if the header is `gitGraph` and the source contains `tag:`, one Merman `layout_json` request, then `gitgraph_layout::commit_spacing_for` and `with_commit_spacing` (appends `%%{init: {"gitGraph": {"commitSpacing": N}}}%%`).
+3. `cache_key_for` on the **rewritten** source (see [Artifacts & Caching](./artifacts-caching.md#mermaid-cache-key)); a hit returns before any SVG request.
+4. `render_svg`: Merman `RenderRequest::svg` with `SvgPipeline::resvg_safe()`, a uniform `TextMeasurementPolicy` around `LabelMeasurer` (profile `biscuit-visualized`), `SvgEnvironment::deterministic()`, diagram id `bv-<xxhash of the cache key>`.
+5. `design::compile` + `RenderRequest::with_theme` on the Merman request; then `postprocess` (`mermaid/postprocess.rs`), `accents::apply_accents`, `contrast::readable_text` (always, with or without a design; accents only with a design); for SVG with `MermaidTarget::HtmlStatic`, `html_static` (see [HTML static target](#html-static-target)); then `with_background`, then `rasterize_svg_for_request` for PNG, then `FileCache::store`.
+
+### Time budget
+
+`with_time_budget(Duration)` (default `MermaidDiagram::DEFAULT_TIME_BUDGET` = 2 s; `time_budget()` reads it) on `mermaid::MermaidDiagram`; the component's `with_time_budget` passes through. `control()` builds `OperationControl::new().with_deadline(budget)` **per Merman request**, so the gitGraph `layout_json` pass and the SVG render each get the full budget. It bounds Merman's parse/layout/SVG only (Merman's checkpoints), not post-processing or rasterization. `RenderError::Cancelled` → `tracing::warn!` (budget, elapsed) and `MermaidError::RenderFailed`; the component shows the code block. Tests read per-request elapsed times through the `cfg(test)` `take_merman_calls()`.
 
 ### Fallback
 
@@ -38,14 +54,36 @@ let code_block = diagram.fallback_code_block();
 // Returns: ```mermaid\n<source>\n```
 ```
 
-## MermaidTheme
+Render failures (all `MermaidError::RenderFailed`): parse error, unknown diagram type, ZenUML (detected by `header_keyword` == `zenuml`; Merman would draw it, Mermaid.js core does not support it), a math label (`$$…$$`: Merman refuses the diagram because `math` is not compiled in), and an exceeded time budget. `validate()` (public) is parse-only, so a math label passes it; the crate-private `validate_renderable()` adds Merman's capability plan (`RenderRequest::svg_plan` → `RenderCapabilityPlan::missing_capabilities`, no layout or fonts) and returns the image render's error ("render session lacks capability `math` …"). The text target draws a math label literally (partial coverage), so only source-shown fallible paths report it.
 
-| Variant | Description | Best For |
-|---------|-------------|----------|
-| `Dark` | Dark background, light elements | Dark terminal themes |
-| `Default` | Standard Mermaid light theme | Light terminals |
-| `Forest` | Green tones | Nature-themed output |
-| `Neutral` | Muted, low-contrast | Formal/documentation |
+## Text target (`mermaid/text.rs`)
+
+Merman's `ascii` feature draws a diagram as text for a terminal that cannot show images; the policy and presentation around it live in the terminal components.
+
+- **Eligibility** (`text_eligibility(diagram_type)`, `MermaidDiagram::text_eligibility()`): read from `merman::ascii::ascii_capabilities()`, never a family-name list. Eligible = row's `primary_projection` is `Diagrammatic`; coverage `Full`/`Partial` (no value → `Partial`; an unknown enum value → not eligible); `admits_auto_layout()` when the row lists `Auto`. The row key is `merman::diagram_type_metadata_id(detected)` (`flowchart`, `er`, `state`, `gitgraph`), not `diagram_type_family_id` (`gitGraph`); `SourceTheme::diagram_type` carries it. At rev `6e6b1e6`: class, er, flowchart, sequence, state, swimlane, xychart (all partial; flowchart, sequence, swimlane admit `Auto`). Eligible is not drawable: an xychart without an explicit `y-axis a --> b` range gets no drawing (source shows, so `bt bar-chart`/`line-chart` always show source), and a drawn one starts with Merman's raw `xDomain: band categories=[…]` line (pinned by `component_fallback_tests::an_xychart_without_a_y_range_shows_the_source`).
+- **Render** (`render_text(TextOptions) -> Result<TextRender, MermaidError>`, `terminal` feature only, because fit is measured with biscuit-terminal's `visible_width`): `Err` with zero requests when Merman cannot preprocess the source (malformed frontmatter or directive: `source_theme` is fallible, never "no family") or cannot detect its type (`detect_type` error kept in `SourceTheme::detect_error`, turned into `Err` only by `text_diagram_type` on the text paths; the image path ignores it and fails in Merman's render; ZenUML is detected, so it stays `Ok(None)`), zero requests when ineligible or `max_columns == 0`, otherwise exactly one `RenderRequest::ascii` through the same `Renderer`/site config and `\n` rewrite as SVG (no palette, design, font chain, or cache). Requests plain output, the standard (non-CJK) width profile, `Auto` or `Canonical` per eligibility, `max_width = max_columns` with `OverflowPolicy::Allow` (overflow is reported, not an error). Time budget as SVG.
+- **Judgment** (`text::judge`): output `normalize_terminal_text`-ed, width = widest row in cells. `Source(NotDiagrammatic)` unless the reported projection is `Diagrammatic`; `Source(Empty)` for blank text; `Source(TooWide)` when `overflowed` or wider than the columns; else `Drawing` (text, coverage, `TextReport` with requested/reported layout). Errors (parse, Merman, time budget, resource limit) stay `Err`.
+- **Merman facts**: `Auto` on a family without it is an `InvalidOption` error (never requested). A drawable family returns `StructuredText` only under `OverflowPolicy::Fallback`. Unroutable class/ER output is boxes plus a `relations:` list, still reported `Diagrammatic`. Label control characters are already escaped by Merman (`\u{1B}` printed literally).
+- **Tests** (`src/tests/text_tests.rs`): the eligibility table snapshot (R-F2; a rev bump shows here), one-edit cells on a copied `AsciiCapability`/`AsciiOutput` (both have public fields), exact drawings, cancellation via `with_time_budget(Duration::ZERO)` (no sleep), a limit via `render_text_with(…, AsciiResourcePolicy::default().with_limit(MaxOutputBytes, 16))`. `cfg(test)` thread-local counters: `take_text_requests()`, `fonts::chain::take_default_chain_requests()`, `cache::file_cache::take_stored_files()`.
+
+## Themes and palettes
+
+`mermaid::Palette` (`mermaid/palette.rs`, backend-neutral; `Rgb` in `mermaid/color.rs`): background, text, surface, surface_alt, border, line, 6 accents (ANSI order red, green, yellow, blue, magenta, cyan), tints (accent over background, ≤22%, weaker until text reaches 4.5:1), `chart_tints()` (≤60%, pie), `text_on(fill)`. Constructors all run the contrast passes (text 4.5:1 on background and every tint/surface; accents/border/line 3:1; no large-text exception):
+
+- `Palette::fixed(MermaidTheme)`: from Mermaid.js 12.2.0's same-named theme (bg/text/mainBkg/nodeBorder/lineColor; accents from its `git*` colors). `Dark` bg `#333333` text `#cccccc`; `Default` `#ffffff`/`#333333`; `Forest` `#ffffff`/`#000000`; `Neutral` grays. **No code maps a `MermaidTheme` to a Merman built-in theme**; `as_str()` is only the name.
+- `Palette::new(bg, fg, accents)`; `Palette::for_terminal(&TerminalColors, is_dark)`: ANSI 1–6 → accents, a missing slot → background-derived accent, no fg → black/white, **no bg → `fixed(for_color_mode(is_dark))`**.
+- `TerminalColors { background, foreground, ansi: [Option<Rgb>; 16] }`; `TerminalColors::detect()` (feature `terminal`) is all-`None` when stdout is not a terminal or `CI` is set, else `biscuit_terminal::discovery::osc_queries::{bg_color, text_color, ansi_palette}` (OSC 4 runs on native Windows too).
+- `MermaidDiagram::with_palette(p)` / `palette()`; `with_theme(t)` **resets** the palette to `fixed(t)`. Component: `MermaidDiagram::new` uses `terminal_palette()`; `with_theme` / `with_palette` override.
+
+Designs (`mermaid/design.rs`): one `ThemeDesignV1` per family from a role table, every facet filtered through `describe_theme_support(family, StandaloneSvg, …)` (`Unconditional`/`Conditional`). Rules: no static fill beside a target's ordinal palette (Merman lets the static fill win); node fill = surface only where the family has no node ordinal palette (class, block, architecture, …); ordinal palettes: tints (flowchart, state, kanban, journey, timeline), chart tints (pie), accents (gitGraph, sankey, chart series), mindmap = accents moved to 4.5:1 against Merman's fixed `#333` label; no widths, no fonts; `design.mermaid` only for gitGraph label colors (`commitLabel*`, `tagLabel*`, `git0..7`, `gitBranchLabel0..7`; evidence `Residual` via `compatibility-unverified`). `REJECTED_DESPITE_SUPPORT`: kanban `task-label`.
+
+Site config: Merman lets **explicit site `themeVariables` win over a compiled theme** (and over the source's own `%%{init}%%` variables, the reverse of Mermaid.js). So `wants_site_palette` adds palette `base` root variables only for families with no ordinal palette that are not sequence/class (treemap, quadrant, ER, gantt, C4, block, …); `family_site_variables` adds per-family surfaces behind labels (gantt alternate sections, cynefin domains, eventmodeling lanes/boxes, venn sets, treemap sections, kanban columns written ten points darker because Merman lightens `cScale`, treeView description text, pie text colors, `xyChart.*`), each measured not to erase the design; `family_site_config` sets C4 boundary/relationship text and packet block/label colors in their own config sections.
+
+Author wins: author `theme` named → no design, no palette variables; author `themeVariables` with a **color** (`sets_a_color`) → no design, palette root variables with the author's copied on top; non-color variables (widths, `darkMode`) keep the design.
+
+Post-design edits: `accents.rs` (flowchart tint→accent stroke pairs; class boxes in document order keyed on the surface fill; sequence actor `<rect name>` boxes left to right by `x`), all keyed on palette colors only, so author-styled shapes are never recolored. `contrast.rs`: each `<text>` vs the nearest inline-filled shape behind it (closed `<g>` siblings count, `<use href>` placements followed, else the palette background); when a text's color or that shape is painted by the stylesheet or an attribute (every surface under an author `%%{init}%%` color, the sequence `box`), usvg resolves the paint and the fill is the most frequent color under a 5×3 grid over the text box (fills and strokes, clips honored), found through a numbered stroke-only marker before each `<text>` because usvg drops ids inside `<use>`. A failing text is rewritten to `text_on(fill)` (on the `<text>` and its `<tspan>`s, fill first in the style) unless its color is one the author wrote as a text color (`author_text_colors`: CSS `color`, C4 `$fontColor`/`$textColor`, text/label/title/font theme keys); author text is kept on any fill. No CSS is injected; Merman's `<style>` is scoped `#<diagram id>` (a test guards it).
+
+`MermaidTheme::for_color_mode(is_dark)` → `Dark`/`Default`; `inverse()`; `MermaidTheme::default()` is `Dark`.
 
 ### Adaptive Theme Selection
 
@@ -69,11 +107,11 @@ flowchart LR
     A --> B
 ```
 
-The renderer detects existing init directives and avoids adding conflicting theme configuration.
+Merman reads them (and frontmatter); a color or a named theme there displaces the compiled theme (see [Themes and palettes](#themes-and-palettes)). Nothing in the source is rewritten for the theme; the only directive this crate adds is gitGraph `commitSpacing`.
 
 ## MermaidConfig (Quadrant Charts)
 
-For fine-grained quadrant chart customization:
+For fine-grained quadrant chart customization. `to_json()` becomes Merman site config: `quadrantChart.pointLabelFontSize` / `pointRadius` and `themeVariables.quadrant{1..4}Fill` (no SVG string patches). `point_label_font_size` sizes quadrant point labels only.
 
 ```rust
 use biscuit_visualized::mermaid::MermaidConfig;
@@ -106,44 +144,55 @@ let theme = QuadrantTheme::parse("magic-quadrangle");
 
 ## Supported Diagram Types
 
-All standard Mermaid diagram types are supported:
+Every family in Merman's registry (`all-diagrams`): architecture, block, C4, class, ER, flowchart (`flowchart`/`graph`), gantt, gitGraph, journey, kanban, mindmap, packet, pie, quadrant chart, radar, requirement, sankey, sequence, state, timeline, treemap, XY chart, and the Merman-only agentflow, cynefin, `eventmodeling`, info, ishikawa, railroad (`railroadAbnf`/`railroadEbnf`/`railroadPeg`), swimlane, `treeView`, `usecase`, venn, wardley. One fixture per family in `src/src/tests/fixtures/merman/families/`; a test fails when a Merman bump adds a family without one. Not rendered (code-block fallback): `error`, ZenUML, and math labels.
 
-- **Flowchart** (`flowchart LR/TB/RL/BT`)
-- **Sequence** (`sequenceDiagram`)
-- **Class** (`classDiagram`)
-- **State** (`stateDiagram-v2`)
-- **ER** (`erDiagram`)
-- **Pie** (`pie`)
-- **XY Chart** (`xychart-beta`)
-- **Quadrant** (`quadrant-beta`)
-- **Gantt** (`gantt`)
-- **Timeline** (`timeline`)
-- **Journey** (`journey`)
-- **Mindmap** (`mindmap`)
-- **Git Graph** (`gitGraph`)
+## gitGraph: `commitSpacing` and geometry
 
-## gitGraph Corrections
+Full contract: `biscuit-visualized/docs/mermaid-gitgraph.md`. Merman keeps both parents of a labeled `merge` and renders a merge of a branch with no commit of its own (second parent = the branch's head), as Mermaid.js does, so there is **no merge repair and no "empty branch" error** anymore. A merge *into* a lane with no commit is still a Merman/Mermaid.js error; the `GitGraph` component never emits one.
 
-`MermaidDiagram::compute_layout` (private; shared by `natural_size`, `render_svg`, and `gitgraph_geometry`) applies two corrections to every gitGraph, in `mermaid/gitgraph.rs`. Full contract: `biscuit-visualized/docs/mermaid-gitgraph.md`.
+- **Tag spacing** (`gitgraph_layout::commit_spacing_for`, run in `prepare`): only when the source contains `tag:`. One `layout_json` pass at the current spacing (Merman default 50 = `COMMIT_STEP` 40 + `LAYOUT_OFFSET` 10; `DEFAULT_COMMIT_SPACING`). Returns `None` when the effective config already sets `gitGraph.commitSpacing` (author wins, directive or frontmatter), when the direction is not LR (TB/BT tags are rotated and not spaced), or when no pair collides. Colliding pair = tags on different commits, different columns (`parallelCommits` same column is skipped), whose boxes share rows (strict). Gap = `TAG_GAP_EM` (1.0) × `themeVariables.fontSize` (16 default; read from the layout document's `meta.effective_config`). Each pair needs `step + shortfall / column distance`; the max wins, rounded up to 0.01 px (`SPACING_RESOLUTION`); `SPACING_EPSILON` 0.01. Single pass: boxes move linearly with spacing, no verify loop. Tag boxes: widths from our measurer at `tagLabelFontSize` read exactly as Merman reads it (`render.rs` `tag_font_size`: only a string `px`/`em`/`%`/`inherit`/`unset`/`0`; a JSON number or anything else = 10 px; base `fontSize` clamped to ≥ 1; pinned by `gitgraph_tests::tag_font_size_*`, which compare against the drawn polygons) and Merman's `drawCommitTags` formula (`TAG_PX` 4, `TAG_PY` 2, `TAG_LIFT` 19.2, `TAG_STACK_STEP` 20; rotated 45° for TB/BT).
+- **Directive:** `with_commit_spacing` appends `%%{init: {"gitGraph": {"commitSpacing": N}}}%%` as the last line; Merman deep-merges directives in order, so nothing else changes. `commitSpacing` exists only on the fork (`yankeeinlondon/merman` branch `gitgraph-commit-spacing`).
+- **Geometry** (`#[doc(hidden)] MermaidDiagram::gitgraph_geometry()`): `gitgraph_layout::geometry_from_layout_json` reads the layout document of the rewritten source **strictly** (missing/mistyped fields, duplicate keys anywhere, trailing content → `LayoutDataError` → `RenderFailed`, each naming the JSON path) and builds `GitGraphGeometry` (commits with id, lane, parents, `index`, `x`, tags with bounds; `commit_step` from the commits' `pos`, `tag_gap`, size) with `tag_boxes()` / `tag_overlaps()`. `Ok(None)` for non-gitGraphs. `#[doc(hidden)] default_gitgraph_commit_step()` is 50; compare against it, never a literal. Prove tag placement with it, never with Mermaid text. Tests: `src/src/tests/gitgraph_tests.rs`, `src/src/tests/gitgraph_layout_tests.rs`.
 
-- **Merge repair** (`repair_gitgraph_merges`, right after `parse_mermaid`): 0.3.1 reads everything after `merge` as the source lane's name, so `merge feat id: "M" tag: "v1"` loses its second parent. The source is recovered from the IR message `merged branch {suffix} into {lane}` and matched against declared lanes (the name, or the name + whitespace + `id:`/`tag:`/`type:`; exactly one). The second parent is the source lane's last earlier commit. Two-parent merges, and a single parent that already is the source tip, are left alone. No match, several, or an empty source lane is `MermaidError::RenderFailed`, never skipped. The parser *drops* a labeled merge into a lane with no commit yet; the repair cannot see it, so emit merges only into lanes with a head. A test pins the message format.
-- **Tag spacing** (`layout` → `spaced` → `required_step`): an `LR`/`RL` gitGraph with no rotated tag is laid out at the default step, then widened only for **colliding pairs**: tags on different commits whose boxes overlap vertically (strict) and are closer than `TAG_GAP_EM × theme.font_size` (`TAG_GAP_EM = 1.0`, a policy). Each pair needs `step + shortfall / index distance` (index = position in `GitGraphLayout::commits`; earlier = smaller commit x); the max wins, so the tightest pair lands exactly one em apart. The result is re-verified (tag edges are linear in the step, so one widening clears); if two widenings still collide, the third layout after the first (`MAX_SPACING_PASSES` = 3) uses `widest tag + gap` unverified. `SPACING_EPSILON` (0.01) treats a pair within noise of the gap as clear. Same-commit stacks (`main`/`origin/main` on one tip) and an isolated long label keep the default step. Tag widths are measured at the renderer's `tag_label_font_size`, so a theme font override changes only the gap. Untagged, vertical (`TB`/`BT`; 0.3.1 ignores `gitGraph TB:`, only a separate direction line counts), and rotated-tag graphs keep the single pass, so rotated tags can still overlap. 0.3.1 parses `direction RL` as LR. The step is still global: one collision widens every column.
-- **Cache:** neither adds a key input; `MERMAID_BACKEND` is `mermaid-rs-renderer@0.3.x+bv3` (bumped for collision-driven spacing). Bump `+bv<n>` whenever this layer changes output.
-- **Proof:** `#[doc(hidden)] MermaidDiagram::gitgraph_geometry()` returns `GitGraphGeometry` (commits with lane, repaired parents, placement `index` and `x`, tag bounds; `commit_step`, size) with `tag_boxes()` / `tag_overlaps()`. `#[doc(hidden)] default_gitgraph_commit_step()` is the renderer default for callers without a `mermaid-rs-renderer` dependency; compare against it, never a literal `34`. Use it, never Mermaid text snapshots, to prove tags do not overlap. Tests: `src/src/tests/gitgraph_tests.rs`.
+## SVG Post-Processing (`mermaid/postprocess.rs`)
 
-## SVG Post-Processing
+String-level edits keyed on Merman's output at the pinned rev (guard tests in `src/src/tests/postprocess_tests.rs` fail when either becomes dead; re-check on every Merman bump). Idempotent; an SVG with neither defect is returned borrowed, unchanged.
 
-The renderer applies fixes to the raw Mermaid SVG output:
+1. **Gradient strokes → solid:** every non-default theme's neo look strokes shapes with `stroke:url(#…)` to an `objectBoundingBox` `<linearGradient>`, which paints nothing on zero-height dividers (class/ER). Every such reference becomes the stylesheet's node stroke color (else the gradient's first stop).
+2. **`sans-serif` default:** a root `<svg>` with no font (no `#<id>{font-family:…}` rule, e.g. wardley) gets `font-family="sans-serif"`, so usvg never falls back to serif.
 
-1. **Legend text alignment**: Adds `dominant-baseline="central"` to fix vertical centering
-2. **Pie chart contrast**: Adjusts text color per slice based on WCAG luminance calculation — dark text on light slices, light text on dark slices
-3. **Init directive handling**: Detects existing `%%{init:...}%%` blocks and avoids adding conflicting theme/config directives
+There are no other SVG string patches: quadrant fills and point radius go through site config, and the accent and contrast edits live in `mermaid/accents.rs` and `mermaid/contrast.rs` (see [Themes and palettes](#themes-and-palettes)).
+
+## HTML static target
+
+`MermaidDiagram::with_target(MermaidTarget::HtmlStatic)` (`target()` reads it; `#[non_exhaustive]` enum, default `RasterSafe`) selects SVG for a browser. The component `components::mermaid::MermaidDiagram::with_target` (and the crate-private `MermaidRenderer::with_target`) pass it through, so `render_to_svg` (Darkmatter's `render_browser_mermaid` path) honors it. Darkmatter only selects it and sanitizes.
+
+`postprocess::html_static(svg, &LabelMeasurer)` runs after `postprocess`, SVG only:
+
+- **Font:** every `font-family` value (`<style>` rules, inline `style` declarations, `font-family` attributes) becomes `'<Family>',<original stack>`. `<Family>` = `LabelMeasurer::measured_family(style)`: the measurer's own cached `face_for` resolution (`FontChain::resolve` of `LabelMeasurer::query`), then the face's first fontdb family name. `render_svg` builds one `Arc<LabelMeasurer>` for Merman and reuses it here. Weight/style come from the same declaration block or the element's attributes (family choice is weight-independent in the chain anyway). Attribute values and stylesheet text are entity-decoded before splitting on `;` (Merman writes `&quot;`), and re-encoded only when edited. The name is single-quoted with CSS hex escapes for quotes, `\`, `<`, `>`, `&`, and controls. Prepended even when the stack already starts with that family in another spelling (`"trebuchet ms"` on macOS); only the exact `'<Family>',` this pass writes counts as done (idempotence).
+- **Overflow:** each non-root `<svg>` whose content holds a `<text>` gets `overflow` → `visible` in its `style`/`overflow` attribute, or ` overflow="visible"` added when it has neither. Merman clips class/ER/mindmap/state labels with `overflow:hidden` there. Root `<svg>` and viewports without text untouched; text content never edited.
+- **PNG ignores the target** (`output_target(format)`): rasterized from the raster-safe SVG, identical key. Raster output never gets an overflow patch (`postprocess_is_idempotent_and_adds_no_overflow_patch`).
+- **Cache key:** `"target": "html-static"` is added to the options JSON only for SVG + `HtmlStatic`; raster-safe keys are unchanged, so no `+bv<n>` bump.
+- Tests: `src/src/tests/html_static_tests.rs` (injected Inter chain for the post-process; host chain end to end; `take_rasterized_svgs()` is the `cfg(test)` record of SVGs handed to the rasterizer), plus `the_html_static_target_has_its_own_svg_key_only` in `mermaid_cache_key_tests.rs`.
+
+## Embedded font (HTML static opt-in)
+
+Full doc: `biscuit-visualized/docs/mermaid-embedded-font.md`. Code: `mermaid/embed/`.
+
+- **Opt-in:** `MermaidDiagram::with_embedded_font(true)` (default off) acts only for SVG + `HtmlStatic` (`embeds_font(format)`); otherwise byte-identical output and key. `render_with_font` → `(RenderedArtifact, Option<DiagramFont>)`; component: `with_embedded_font` + `render_to_svg_with_font`. `page_font(&[DiagramFont])` → `PageFont` (`comments()`, `css()`, `markup()`, `is_empty()`) or `FontEmbeddingError` (one warning already logged; caller emits no font).
+- **Face rule (`embed/faces.rs`, `embed/permission.rs`):** per requested `font-family` list **and per diagram, over the weights it draws**. `FaceChooser` (`LabelMeasurer::embedding_forcing`) keeps the chain's resolved faces, a refused one recorded as `EmbeddedFace::permission = Err(Refusal)` (Restricted, `0x0200` bitmap-only, no/short `OS/2`, not `glyf`: CFF/CFF2/`fvar`). After the first layout, `forced_inter(faces, glyphs)` names the requested families that draw a refused weight (regular < 600 ≤ bold, as the collector splits) and warns; `render_with_font_in` then re-runs `prepare` + render with those forced to bundled Inter (`ChoiceReason::Refused`), stored under the **first** pass's cache key; never a third pass. Also bundled Inter: no installed face, `MERMAID_FONT=Inter`, and a resolved face *named* `Inter` that is not the bundled one (`Resolved`), so two files never share `Inter` + weight on a page. Embeddable: Installable/Editable/Preview & print (least restrictive bit wins; `0x0100` → embed whole). `build` never embeds a refused face (`debug_assert` + skip). `page_font` dedupes whole `FamilyChoice`s, so one page can carry Arial (regular-only diagram) and Inter (diagram drawing the refused bold) for one stack; one comment per embedded family, most explanatory reason wins (`reason_rank`).
+- **Measurement:** per face and weight, as the emitted file draws: a subset → plain advances (`ShapeParams::layout_tables = false`, face rebuilt from the subset's tables) because the `allsorts` subset has no `GPOS`/`GSUB`/`kern`; a whole face (`EmbeddedFace::unsubset`, `0x0100`) → normal shaping (`layout_tables = true`). `LabelMeasurer::face_for` caches `(ID, layout_tables)` per style key, from `FamilyChoice::face_for_weight` (bold from 600). Guarded by `embed_render_tests::the_opt_in_measures_each_weight_as_its_emitted_file_draws`.
+- **Subset (`embed/glyphs.rs`, `embed/subset.rs`, `embed/embedding.rs`):** characters read from the final SVG via `roxmltree` + `simplecss` (usvg's cascade), split at weight 600, U+0020 added; one rule per family × weight drawn (deduped on family, weight, and face ID, so a single face serving both weights gets a 400 and a 700 rule with different subsets), union over the page. Budget `BUDGET_BYTES` = 60,000 (pre-base64): over → still embedded, `info` log. Any face failing → whole page `Err`.
+- **Page markup (`embed/comment.rs`):** one `<!-- mermaid font: … -->` per family (names via `comment_safe`), then `<style>`; Inter's OFL CSS comment (`INTER_COPYRIGHT`, tested against `OFL.txt`) right before its first rule, only when Inter is embedded.
+- **Cache:** options JSON `target: "html-static+embedded-font"`; `{key}.font.json` record (`FontRecord`: `requested`, required `forced_inter`, glyphs) beside the SVG, written first; a hit re-chooses with `forced_inter`; missing/unreadable/old-shape record → re-render. Subset never cached.
+- Tests: `src/src/tests/embed_*_tests.rs` (`embed_render_tests.rs` is the render path end to end).
 
 ## MermaidError
 
 ```rust
 pub enum MermaidError {
-    /// Mermaid rendering failed (invalid syntax, unsupported features)
+    /// Mermaid rendering failed (parse error, unknown type, ZenUML, math label,
+    /// time budget exceeded, unreadable gitGraph layout data)
     RenderFailed(String),
     /// SVG-to-PNG rasterization failed
     RasterizationFailed(RasterError),
@@ -154,10 +203,19 @@ pub enum MermaidError {
 
 ## Source Files
 
-| File | Contents |
+| File (under `biscuit-visualized/src/src/`) | Contents |
 |------|----------|
-| `biscuit-visualized/src/mermaid/mod.rs` | Module re-exports |
-| `biscuit-visualized/src/mermaid/render.rs` | `MermaidDiagram`, SVG post-processing |
-| `biscuit-visualized/src/mermaid/gitgraph.rs` | gitGraph merge repair, tag spacing, `GitGraphGeometry` |
-| `biscuit-visualized/src/mermaid/config.rs` | `MermaidTheme`, `MermaidConfig`, `QuadrantTheme` |
-| `biscuit-visualized/src/mermaid/error.rs` | `MermaidError` |
+| `mermaid/mod.rs` | Module re-exports |
+| `mermaid/render.rs` | `MermaidDiagram`: pipeline, Merman requests, time budget, cache key, background, `natural_size`, ZenUML detection |
+| `mermaid/newline.rs` | `\n` → `<br/>` label rewrite (class, ER, mindmap, requirement) |
+| `mermaid/gitgraph_layout.rs` | Strict layout-data reader, `GitGraphGeometry` builder, `commitSpacing` computation and directive |
+| `mermaid/gitgraph.rs` | `GitGraphGeometry` types, `TAG_GAP_EM`, `default_gitgraph_commit_step()` |
+| `mermaid/postprocess.rs` | Gradient-stroke fix, `sans-serif` default, HTML static edits (`html_static`) |
+| `mermaid/config.rs` | `MermaidTheme`, `MermaidConfig`, `QuadrantTheme` |
+| `mermaid/color.rs` | `Rgb`, WCAG contrast, tint/contrast helpers |
+| `mermaid/palette.rs` | `Palette`, `TerminalColors` (`detect()` under `terminal`) |
+| `mermaid/design.rs` | Per-family `ThemeDesignV1`, support filter, site-palette rule, gitGraph label variables |
+| `mermaid/accents.rs` | Flowchart / class / sequence accent edits |
+| `mermaid/contrast.rs` | Text contrast pass, CSS color parser |
+| `mermaid/text.rs` | Text target: eligibility from `ascii_capabilities()`, `TextOptions`/`TextRender`/`TextSource`, the Merman request options, the fit judgment |
+| `mermaid/error.rs` | `MermaidError` |

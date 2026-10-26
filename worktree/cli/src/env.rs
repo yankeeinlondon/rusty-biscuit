@@ -146,6 +146,7 @@ mod tests {
         }
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     fn wrapper_is_active_only_for_exact_one() {
         let cases: &[(Option<&str>, bool)] = &[

@@ -56,3 +56,84 @@ fn rasterize_at_width_and_at_scale_agree_when_target_matches_scale() {
     let (s_w, s_h) = png_dims(&by_scale);
     assert_eq!((w_w, w_h), (s_w, s_h));
 }
+
+mod requests {
+    use crate::artifact::{Background, RenderRequest};
+    use crate::raster::png::rasterize_svg_for_request;
+
+    use super::{SQUARE_SVG, png_dims};
+
+    /// A 100x50 SVG whose bottom row of pixels is drawn, so the end of the
+    /// drawing is visible in the raster.
+    const BANDED_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50" viewBox="0 0 100 50">
+        <rect width="100" height="50" fill="#0000ff"/>
+    </svg>"##;
+
+    fn rgba(png: &[u8]) -> image::RgbaImage {
+        image::load_from_memory(png).unwrap().to_rgba8()
+    }
+
+    #[test]
+    fn the_height_is_padded_up_to_whole_rows() {
+        let request = RenderRequest::default().with_target_width(30).with_row_height(16);
+        // 30 px wide is 15 px tall: one 16 px row.
+        assert_eq!(png_dims(&rasterize_svg_for_request(SQUARE_SVG, &request).unwrap()), (30, 16));
+        // 64 px wide is 32 px tall: already two whole rows, no padding.
+        let exact = request.clone().with_target_width(64);
+        assert_eq!(png_dims(&rasterize_svg_for_request(SQUARE_SVG, &exact).unwrap()), (64, 32));
+        // Without a row height the drawing's own height stands.
+        let unpadded = RenderRequest::default().with_target_width(30);
+        assert_eq!(png_dims(&rasterize_svg_for_request(SQUARE_SVG, &unpadded).unwrap()), (30, 15));
+    }
+
+    /// Padding is added below the drawing, which keeps its aspect ratio:
+    /// the drawn rows equal the unpadded raster's, nothing is stretched.
+    #[test]
+    fn padding_sits_below_an_unstretched_drawing() {
+        let unpadded = rgba(
+            &rasterize_svg_for_request(BANDED_SVG, &RenderRequest::default().with_target_width(30))
+                .unwrap(),
+        );
+        for (background, padding) in [
+            (Background::Transparent, image::Rgba([0, 0, 0, 0])),
+            (Background::Theme, image::Rgba([0, 0, 0, 0])),
+            (Background::Solid { r: 10, g: 20, b: 30 }, image::Rgba([10, 20, 30, 255])),
+        ] {
+            let request = RenderRequest::default()
+                .with_target_width(30)
+                .with_row_height(16)
+                .with_background(background);
+            let padded = rgba(&rasterize_svg_for_request(BANDED_SVG, &request).unwrap());
+
+            assert_eq!(padded.dimensions(), (30, 16), "{background:?}");
+            for x in 0..30 {
+                for y in 0..15 {
+                    assert_eq!(padded.get_pixel(x, y), unpadded.get_pixel(x, y), "{background:?}");
+                }
+                assert_eq!(*padded.get_pixel(x, 15), padding, "{background:?}");
+            }
+        }
+    }
+
+    /// The rasterizer's encoding keeps every pixel of tiny-skia's own encoder
+    /// and stays smaller than the raw pixels.
+    #[test]
+    fn the_encoding_is_lossless_and_smaller_than_the_raw_pixels() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120" viewBox="0 0 200 120">
+            <defs><linearGradient id="g"><stop offset="0" stop-color="#123"/><stop offset="1" stop-color="#fa0" stop-opacity="0.4"/></linearGradient></defs>
+            <rect width="200" height="120" fill="url(#g)"/>
+            <circle cx="60" cy="60" r="40" fill="#0a8" fill-opacity="0.7"/>
+            <path d="M10 110 L190 10" stroke="#fff" stroke-width="3"/>
+        </svg>"##;
+        let ours = rasterize_svg_for_request(svg, &RenderRequest::default().with_target_width(400)).unwrap();
+
+        let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default()).unwrap();
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(400, 240).unwrap();
+        resvg::render(&tree, resvg::usvg::Transform::from_scale(2.0, 2.0), &mut pixmap.as_mut());
+        let theirs = pixmap.encode_png().unwrap();
+
+        assert_eq!(rgba(&ours), rgba(&theirs));
+        let raw = pixmap.data().len();
+        assert!(ours.len() < raw, "{} >= {raw}", ours.len());
+    }
+}

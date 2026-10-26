@@ -109,7 +109,7 @@ fn resolved_document_path(graph: &WorkspaceGraph, link: NodeId) -> Option<std::p
         return resolved_file(graph, link);
     };
     let document = graph.node(target)?.document;
-    graph.document(document).map(|record| record.path.clone())
+    graph.document(document).map(|record| record.path.to_path_buf())
 }
 
 /// Builds a `file://` URI for `path`, attaching `fragment` when present.

@@ -2,85 +2,150 @@
 
 //! Convenient re-exports for working with generated API clients.
 //!
-//! This prelude exports each API's client struct, and
-//! the runtime types every call uses. Request, call, and response
+//! This prelude exports the client struct of each API whose module
+//! feature is enabled, and the runtime types every call uses. Request, call, and response
 //! types are **not** re-exported here to avoid naming conflicts. An
 //! endpoint method needs none of them imported; when one must be
-//! named, import it from its API module:
-//!
-//! ```text
-//! use schematic_schema::openai::{ListModelsCall, ListModelsRequest, ListModelsResponse};
-//! ```
+//! named, import it from its API module.
 //!
 //! ## Re-exports
 //!
 //! **API clients:**
 //!
-//! - [`Anthropic`]
-//! - [`ArtificialAnalysisData`]
-//! - [`ArtificialAnalysisCritPt`]
-//! - [`Bitbucket`]
-//! - [`OpenAI`]
-//! - [`ElevenLabs`]
-//! - [`Gitea`]
-//! - [`GitHub`]
-//! - [`GitLab`]
-//! - [`HuggingFaceHub`]
-//! - [`LmStudio`]
-//! - [`OllamaNative`]
-//! - [`OllamaOpenAI`]
-//! - [`EmqxBasic`]
-//! - [`EmqxBearer`]
-//! - [`Eversolo`]
-//! - [`SamsungSmartTv`]
-//! - [`UnfoldedCircleCoreRest`]
+#![cfg_attr(feature = "anthropic", doc = " - [`Anthropic`]")]
+#![cfg_attr(feature = "artificial_analysis", doc = " - [`ArtificialAnalysisData`]")]
+#![cfg_attr(feature = "artificial_analysis", doc = " - [`ArtificialAnalysisCritPt`]")]
+#![cfg_attr(feature = "bitbucket", doc = " - [`Bitbucket`]")]
+#![cfg_attr(feature = "openai", doc = " - [`OpenAI`]")]
+#![cfg_attr(feature = "elevenlabs", doc = " - [`ElevenLabs`]")]
+#![cfg_attr(feature = "gitea", doc = " - [`Gitea`]")]
+#![cfg_attr(feature = "github", doc = " - [`GitHub`]")]
+#![cfg_attr(feature = "gitlab", doc = " - [`GitLab`]")]
+#![cfg_attr(feature = "huggingface", doc = " - [`HuggingFaceHub`]")]
+#![cfg_attr(feature = "lmstudio", doc = " - [`LmStudio`]")]
+#![cfg_attr(feature = "ollama", doc = " - [`OllamaNative`]")]
+#![cfg_attr(feature = "ollama", doc = " - [`OllamaOpenAI`]")]
+#![cfg_attr(feature = "emqx", doc = " - [`EmqxBasic`]")]
+#![cfg_attr(feature = "emqx", doc = " - [`EmqxBearer`]")]
+#![cfg_attr(feature = "eversolo", doc = " - [`Eversolo`]")]
+#![cfg_attr(feature = "samsung_smart_tv", doc = " - [`SamsungSmartTv`]")]
+#![cfg_attr(
+    feature = "unfolded_circle_core_rest",
+    doc = " - [`UnfoldedCircleCoreRest`]"
+)]
 //!
 //! **WebSocket definition helpers:**
 //!
-//! - [`define_elevenlabs_ws_api_definition`] (ElevenLabsTTS)
-//! - [`define_unfolded_circle_core_ws_api_definition`] (UnfoldedCircleCoreWs)
-//! - [`define_unfolded_circle_dock_ws_api_definition`] (UnfoldedCircleDockWs)
-//! - [`define_unfolded_circle_integration_ws_api_definition`] (UnfoldedCircleIntegrationWs)
-//! - [`define_samsung_smart_tv_remote_ws_api_definition`] (SamsungSmartTvRemote)
+#![cfg_attr(
+    feature = "elevenlabs_ws",
+    doc = " - [`define_elevenlabs_ws_api_definition`] (ElevenLabsTTS)"
+)]
+#![cfg_attr(
+    feature = "unfolded_circle_core_ws",
+    doc = " - [`define_unfolded_circle_core_ws_api_definition`] (UnfoldedCircleCoreWs)"
+)]
+#![cfg_attr(
+    feature = "unfolded_circle_dock_ws",
+    doc = " - [`define_unfolded_circle_dock_ws_api_definition`] (UnfoldedCircleDockWs)"
+)]
+#![cfg_attr(
+    feature = "unfolded_circle_integration_ws",
+    doc = " - [`define_unfolded_circle_integration_ws_api_definition`] (UnfoldedCircleIntegrationWs)"
+)]
+#![cfg_attr(
+    feature = "samsung_smart_tv_remote_ws",
+    doc = " - [`define_samsung_smart_tv_remote_ws_api_definition`] (SamsungSmartTvRemote)"
+)]
 //!
 //! **Runtime types:** [`Call`], [`CallError`], [`CallOptions`],
 //! [`Credential`], [`Deadline`], [`FullCall`], [`OriginPolicy`],
 //! [`Response`], [`RawResponse`], and [`TransportError`] from
 //! [`schematic_runtime`].
-//!
-//! ## Examples
-//!
-//! ```text
-//! use schematic_schema::prelude::*;
-//!
-//! let client = OpenAI::new();
-//! let model = client.retrieve_model("gpt-4").await?;
-//! println!("{}", model.id);
-//! ```
+#![cfg_attr(feature = "anthropic", doc = "")]
+#![cfg_attr(feature = "anthropic", doc = " ## Examples")]
+#![cfg_attr(feature = "anthropic", doc = "")]
+#![cfg_attr(feature = "anthropic", doc = " ```no_run")]
+#![cfg_attr(feature = "anthropic", doc = " use schematic_schema::prelude::*;")]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " use schematic_schema::anthropic::ListModelsRequest;"
+)]
+#![cfg_attr(feature = "anthropic", doc = "")]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " # async fn example() -> Result<(), Box<dyn std::error::Error>> {"
+)]
+#![cfg_attr(feature = "anthropic", doc = " let client = Anthropic::new();")]
+#![cfg_attr(feature = "anthropic", doc = " let data = client.list_models().await?;")]
+#![cfg_attr(feature = "anthropic", doc = "")]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " // the same request, built as a typed request and sent"
+)]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " let data = client.send(ListModelsRequest::default()).await?;"
+)]
+#![cfg_attr(feature = "anthropic", doc = "")]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " // the whole response: status, headers, and request id as well"
+)]
+#![cfg_attr(
+    feature = "anthropic",
+    doc = " let response = client.list_models().full().await?;"
+)]
+#![cfg_attr(feature = "anthropic", doc = " println!(\"{}\", response.meta);")]
+#![cfg_attr(feature = "anthropic", doc = " # Ok(())")]
+#![cfg_attr(feature = "anthropic", doc = " # }")]
+#![cfg_attr(feature = "anthropic", doc = " ```")]
 pub use schematic_runtime::{
     Call, CallError, CallOptions, Credential, Deadline, FullCall, OriginPolicy,
     RawResponse, Response, TransportError,
 };
+#[cfg(feature = "anthropic")]
 pub use crate::anthropic::Anthropic;
+#[cfg(feature = "artificial_analysis")]
 pub use crate::artificial_analysis::ArtificialAnalysisData;
+#[cfg(feature = "artificial_analysis")]
 pub use crate::artificial_analysis::ArtificialAnalysisCritPt;
+#[cfg(feature = "bitbucket")]
 pub use crate::bitbucket::Bitbucket;
+#[cfg(feature = "openai")]
 pub use crate::openai::OpenAI;
+#[cfg(feature = "elevenlabs")]
 pub use crate::elevenlabs::ElevenLabs;
+#[cfg(feature = "gitea")]
 pub use crate::gitea::Gitea;
+#[cfg(feature = "github")]
 pub use crate::github::GitHub;
+#[cfg(feature = "gitlab")]
 pub use crate::gitlab::GitLab;
+#[cfg(feature = "huggingface")]
 pub use crate::huggingface::HuggingFaceHub;
+#[cfg(feature = "lmstudio")]
 pub use crate::lmstudio::LmStudio;
+#[cfg(feature = "ollama")]
 pub use crate::ollama::OllamaNative;
+#[cfg(feature = "ollama")]
 pub use crate::ollama::OllamaOpenAI;
+#[cfg(feature = "emqx")]
 pub use crate::emqx::EmqxBasic;
+#[cfg(feature = "emqx")]
 pub use crate::emqx::EmqxBearer;
+#[cfg(feature = "eversolo")]
 pub use crate::eversolo::Eversolo;
+#[cfg(feature = "samsung_smart_tv")]
 pub use crate::samsung_smart_tv::SamsungSmartTv;
+#[cfg(feature = "unfolded_circle_core_rest")]
 pub use crate::unfolded_circle_core_rest::UnfoldedCircleCoreRest;
+#[cfg(feature = "elevenlabs_ws")]
 pub use crate::elevenlabs_ws::define_api as define_elevenlabs_ws_api_definition;
+#[cfg(feature = "unfolded_circle_core_ws")]
 pub use crate::unfolded_circle_core_ws::define_api as define_unfolded_circle_core_ws_api_definition;
+#[cfg(feature = "unfolded_circle_dock_ws")]
 pub use crate::unfolded_circle_dock_ws::define_api as define_unfolded_circle_dock_ws_api_definition;
+#[cfg(feature = "unfolded_circle_integration_ws")]
 pub use crate::unfolded_circle_integration_ws::define_api as define_unfolded_circle_integration_ws_api_definition;
+#[cfg(feature = "samsung_smart_tv_remote_ws")]
 pub use crate::samsung_smart_tv_remote_ws::define_api as define_samsung_smart_tv_remote_ws_api_definition;

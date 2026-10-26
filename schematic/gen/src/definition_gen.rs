@@ -2,14 +2,14 @@
 //!
 //! The standalone importer output in [`crate::import_pipeline`] writes a
 //! self-contained client. This module writes the other half of the house
-//! layout instead: a `define_{api}_api()` function that reconstructs the
+//! layout instead: a `define_{api}_api()` factory backed by fallible typed builders for the
 //! imported [`RestApi`] as a value, so an imported API sits in the definitions
 //! catalog alongside the hand-authored ones and flows through the normal
 //! `generate` pipeline.
 //!
 //! An imported document carries no pagination, so authored pagination for an
 //! imported API lives in a hand-written overlay function the importer never
-//! writes. When one is configured, the emitted factory passes the imported
+//! writes. When one is configured, the emitted fallible assembly passes the built
 //! value through it, so `define_{api}_api()` returns the augmented definition
 //! to every caller.
 
@@ -17,12 +17,17 @@ use std::path::Path;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
+use schematic_define::constraints::Constraints;
+use schematic_define::models::ModelCatalog;
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, FormField,
-    FormFieldKind, ParamDef, ParamStyle, QueryParamType, RestApi, RestMethod, Schema,
+    ApiKeyLocation, ApiRequest, AuthStrategy, CrossOrigin, Endpoint, ErrorEntry,
+    FormField, FormFieldKind, JsonTag, OAuth2Config, ParamDef, ParamStyle, PrimitiveType,
+    QueryParamType, ResponseShape, RestApi, RestMethod, StatusMatch, StreamEnd, StreamFraming,
+    SuccessShape, TypeRef,
 };
 
 use crate::errors::GeneratorError;
+use crate::model_gen::{RuleSource, json_tokens};
 use crate::output::{format_code, validate_code, write_atomic};
 
 /// Writes `mod.rs` for a definitions-crate module describing `api`.
@@ -30,14 +35,23 @@ use crate::output::{format_code, validate_code, write_atomic};
 /// `overlay`, when given, is the Rust path of a `fn(RestApi) -> RestApi` the
 /// emitted factory applies to the imported value (see the module docs).
 ///
+/// Value rules on parameters, form fields, and request bodies are emitted
+/// as builder calls. A JSON body typed by a plain alias in `models` (one
+/// emitted as `pub type`) is inline once assembled, so the alias' rules from
+/// its component in `api.schemas` become the endpoint's request rules unless
+/// the import already gave it some.
+///
 /// ## Errors
 ///
 /// Returns `GeneratorError::ConfigError` if `overlay` is not a plain Rust path
-/// (see [`parse_overlay_path`]), and another `GeneratorError` if the emitted
-/// tokens do not parse as Rust or the file cannot be written. Nothing is
-/// written on error.
+/// (see [`parse_overlay_path`]), `GeneratorError::CodeGenError` if such an
+/// alias holds a rule the endpoint's request constraints cannot carry (one
+/// beneath `properties`, `additionalProperties`, or a reference), and
+/// another `GeneratorError` if the emitted tokens do not parse as Rust or the
+/// file cannot be written. Nothing is written on error.
 pub fn generate_definition_module(
     api: &RestApi,
+    models: &ModelCatalog,
     module_name: &str,
     model_names: &[String],
     overlay: Option<&str>,
@@ -45,7 +59,9 @@ pub fn generate_definition_module(
     dry_run: bool,
 ) -> Result<String, GeneratorError> {
     let overlay = overlay.map(parse_overlay_path).transpose()?;
-    let tokens = assemble_definition_module(api, module_name, model_names, overlay.as_ref());
+    let rules = RuleSource::new(models, &api.schemas);
+    let tokens = assemble_definition_module(api, &rules, module_name, model_names, overlay.as_ref());
+    rules.finish()?;
     let file = validate_code(&tokens)?;
     let formatted = format_code(&file);
 
@@ -56,6 +72,25 @@ pub fn generate_definition_module(
     }
 
     Ok(formatted)
+}
+
+/// Fails, as [`generate_definition_module`] would, when a JSON body typed
+/// by a plain alias holds a rule its endpoint cannot carry; the importer
+/// calls it before writing any file.
+///
+/// ## Errors
+///
+/// `GeneratorError::CodeGenError` naming each such endpoint, alias, and rule.
+pub(crate) fn check_alias_bodies(api: &RestApi, models: &ModelCatalog) -> Result<(), GeneratorError> {
+    let rules = RuleSource::new(models, &api.schemas);
+    for endpoint in &api.endpoints {
+        if let Some(ApiRequest::Json(reference)) = &endpoint.request
+            && endpoint.request_constraints.is_none()
+        {
+            rules.body_constraints(&endpoint.id, reference);
+        }
+    }
+    rules.finish()
 }
 
 /// Parses an `--overlay` value as a plain Rust path to a function, such as
@@ -96,180 +131,310 @@ fn path_text(path: &syn::Path) -> String {
 /// Assembles the full module token stream.
 fn assemble_definition_module(
     api: &RestApi,
+    rules: &RuleSource,
     module_name: &str,
     model_names: &[String],
     overlay: Option<&syn::Path>,
 ) -> TokenStream {
     let fn_name = format_ident!("define_{}_api", module_name);
-    let api_expr = rest_api_tokens(api, overlay);
-    let registry = registry_tokens(model_names);
-
-    let module_doc = format!(
-        " {} REST API definition, imported from an OpenAPI specification.",
-        api.name
-    );
-    let overlay_arg = overlay
-        .map(|path| format!(" --overlay {}", path_text(path)))
-        .unwrap_or_default();
-    let regenerate_doc = format!(
-        " Regenerate with `schematic-gen import --input <spec> --api-name {} --definitions-out <dir>{overlay_arg}`.",
-        api.name
-    );
+    let api_expr = rest_api_tokens(api, rules, overlay);
+    // Bound debug-build stack use even for documents with thousands of models.
+    let registrations = model_names.chunks(32).enumerate().map(|(index, names)| {
+        let function = format_ident!("register_types_{}", index);
+        let registrations = names.iter().map(|name| {
+            let ty: syn::Type = syn::parse_str(name).expect("validated model type");
+            quote! { ctx.register::<#ty>()?; }
+        });
+        quote! {
+            fn #function(ctx: &mut DefinitionContext) -> Result<(), DefinitionError> {
+                #(#registrations)*
+                Ok(())
+            }
+            #function(ctx)?;
+        }
+    });
+    let module_path = format!("::schematic_definitions::{module_name}");
+    let module_doc = format!(" {} REST API definition, imported from an OpenAPI specification.", api.name);
+    let overlay_arg = overlay.map(|p| format!(" --overlay {}", path_text(p))).unwrap_or_default();
+    let regenerate_doc = format!(" Regenerate with `schematic-gen import --input <spec> --api-name {} --definitions-out <dir>{overlay_arg}`.", api.name);
     let endpoint_doc = format!(" Endpoints: {}.", api.endpoints.len());
     let fn_doc = format!(" Builds the {} REST API definition.", api.name);
-
     quote! {
         #![doc = #module_doc]
         #![doc = ""]
         #![doc = #endpoint_doc]
         #![doc = ""]
         #![doc = #regenerate_doc]
-
         mod types;
-
         pub use types::*;
-
-        use crate::registry::SchemaRegistry;
+        use crate::registry::assemble_module_group;
         use schematic_define::*;
 
         #[doc = #fn_doc]
         #[must_use]
         pub fn #fn_name() -> RestApi {
+            module_group().expect("valid imported API").remove(0)
+        }
+
+        /// Assemble the API and its ordered schemas from one registration context.
+        pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
+            assemble_module_group(#module_path, |ctx| {
+                #(#registrations)*
+                let api = imported_api(ctx)?;
+                Ok(vec![api])
+            })
+        }
+
+        fn imported_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
             #api_expr
         }
-
-        #registry
     }
 }
 
-/// Emits `openapi_registry()`, registering every generated model type.
-///
-/// The registry is what supplies `components.schemas` on OpenAPI export, so it
-/// has to name every type the endpoints can reference; `validate_completeness`
-/// checks exactly that.
-fn registry_tokens(model_names: &[String]) -> TokenStream {
-    let count = model_names.len();
-    let registrations = model_names.iter().map(|name| {
-        let ident = format_ident!("{}", name);
-        quote! { .register::<#ident>(#name) }
-    });
-
-    let doc = format!(" Builds a schema registry holding all {count} generated model types.");
-
-    quote! {
-        #[doc = #doc]
-        #[must_use]
-        pub fn openapi_registry() -> SchemaRegistry {
-            SchemaRegistry::new()
-                #(#registrations)*
-        }
-    }
-}
-
-fn rest_api_tokens(api: &RestApi, overlay: Option<&syn::Path>) -> TokenStream {
+fn rest_api_tokens(api: &RestApi, rules: &RuleSource, overlay: Option<&syn::Path>) -> TokenStream {
     let name = &api.name;
     let description = &api.description;
     let base_url = &api.base_url;
-    let docs_url = option_string_tokens(api.docs_url.as_deref());
     let auth = auth_strategy_tokens(&api.auth);
     let env_auth = string_vec_tokens(&api.env_auth);
-    let env_username = option_string_tokens(api.env_username.as_deref());
-    let headers = header_pairs_tokens(&api.headers);
-    let module_path = option_string_tokens(api.module_path.as_deref());
-    let request_suffix = option_string_tokens(api.request_suffix.as_deref());
-    let version = option_string_tokens(api.version.as_deref());
-    let cross_origin = cross_origin_tokens(&api.cross_origin);
-    let request_id_header = option_string_tokens(api.request_id_header.as_deref());
-    let secret_names = string_vec_tokens(&api.secret_names);
-
-    let endpoints = api.endpoints.iter().map(endpoint_tokens);
-
-    // `Vec::from([..])` rather than `vec![..]`: prettyplease does not format
-    // inside a macro invocation, so a `vec!` here would emit the whole endpoint
-    // list as one unformatted token soup.
-    let literal = quote! {
-        RestApi {
-            name: #name.to_string(),
-            description: #description.to_string(),
-            base_url: #base_url.to_string(),
-            docs_url: #docs_url,
-            auth: #auth,
-            auth_policy: None,
-            env_auth: #env_auth,
-            env_username: #env_username,
-            headers: #headers,
-            endpoints,
-            module_path: #module_path,
-            request_suffix: #request_suffix,
-            version: #version,
-            env_mapping: None,
-            cross_origin: #cross_origin,
-            request_id_header: #request_id_header,
-            secret_names: #secret_names,
-            // An imported document yields no pagination. Authored pagination
-            // belongs to the configured overlay, which owns these two fields;
-            // the importer never writes the overlay, so a re-import keeps it.
-            default_pagination: None,
-            pagination_exceptions: vec![],
+    let mut builder = quote! { RestApi::builder(ctx, #name, #base_url).describes(#description).authentication(#auth, #env_auth) };
+    for (value, setter) in [
+        (&api.docs_url, "docs_url"),
+        (&api.module_path, "module_path"), (&api.request_suffix, "request_suffix"),
+        (&api.version, "version"), (&api.request_id_header, "request_id_header"),
+    ] {
+        if let Some(value) = value {
+            let setter = format_ident!("{}", setter);
+            builder = quote! { #builder.#setter(#value) };
         }
-    };
-
-    let tail = match overlay {
-        Some(overlay) => quote! {
-            let api = #literal;
-            #overlay(api)
-        },
-        None => literal,
-    };
-
+    }
+    let policy = cross_origin_tokens(&api.cross_origin);
+    builder = quote! { #builder.cross_origin(#policy) };
+    for name in &api.secret_names { builder = quote! { #builder.secret_header(#name) }; }
+    if api.unchecked_compositions { builder = quote! { #builder.accept_unchecked_compositions() }; }
+    for (key, value) in &api.headers { builder = quote! { #builder.header(#key, #value) }; }
+    if !api.errors.is_empty() {
+        let errors = error_set_tokens(&api.errors);
+        builder = quote! { #builder.default_errors(#errors) };
+    }
+    let endpoints = api.endpoints.iter().enumerate().map(|(index, endpoint)| {
+        let function = format_ident!("endpoint_{}", index);
+        let expression = endpoint_tokens(endpoint, rules);
+        let typed_request = match &endpoint.request {
+            Some(ApiRequest::Json(_)) => true,
+            Some(ApiRequest::FormData { fields } | ApiRequest::UrlEncoded { fields }) => fields.iter().any(|field| matches!(field.kind, FormFieldKind::Json(_))),
+            _ => false,
+        };
+        let argument = if registers_response_types(endpoint) || typed_request { format_ident!("ctx") } else { format_ident!("_ctx") };
+        quote! {
+            fn #function(#argument: &mut DefinitionContext) -> Result<Endpoint, DefinitionError> {
+                #expression
+            }
+            endpoints.push(#function(ctx)?);
+        }
+    });
+    let count = api.endpoints.len();
+    let tail = overlay.map(|overlay| quote! { #overlay(api) }).unwrap_or_else(|| quote! { api });
     quote! {
-        let endpoints = Vec::from([#(#endpoints),*]);
-        #tail
+        let mut endpoints = Vec::with_capacity(#count);
+        #(#endpoints)*
+        let api = #builder.endpoints(endpoints).build()?;
+        Ok(#tail)
     }
 }
 
-fn endpoint_tokens(endpoint: &Endpoint) -> TokenStream {
+/// The builder expression for `endpoint`; `rules` supplies an alias-typed
+/// JSON body's rules (see [`generate_definition_module`]).
+fn endpoint_tokens(endpoint: &Endpoint, rules: &RuleSource) -> TokenStream {
     let id = &endpoint.id;
     let method = method_tokens(endpoint.method);
     let path = &endpoint.path;
     let description = &endpoint.description;
-    let request = match &endpoint.request {
-        Some(request) => {
-            let request = api_request_tokens(request);
-            quote! { Some(#request) }
+    let mut builder = quote! { Endpoint::new(#id, #method, #path).describes(#description) };
+    let shapes = endpoint.success_shapes();
+    builder = match shapes {
+        [only] if only.plain().is_some() => match &only.shape {
+            ResponseShape::Json(reference) => {
+                let ty = imported_type(reference);
+                quote! { #builder.returns_json::<#ty>(ctx) }
+            }
+            ResponseShape::Text => quote! { #builder.returns_text() },
+            ResponseShape::Binary => quote! { #builder.returns_binary() },
+            _ => quote! { #builder.returns_empty() },
+        },
+        _ => {
+            for shape in shapes {
+                let success = success_tokens(shape);
+                builder = quote! { #builder.returns(#success) };
+            }
+            builder
         }
-        None => quote! { None },
     };
-    let response = api_response_tokens(&endpoint.response);
-    let headers = header_pairs_tokens(&endpoint.headers);
-    let params = match &endpoint.params {
-        Some(params) => {
-            let params = endpoint_params_tokens(params);
-            quote! { Some(#params) }
-        }
-        None => quote! { None },
-    };
-    let oauth_scopes = match &endpoint.oauth_scopes {
-        Some(scopes) => {
-            let scopes = string_vec_tokens(scopes);
-            quote! { Some(#scopes) }
-        }
-        None => quote! { None },
-    };
-
-    quote! {
-        Endpoint {
-            id: #id.to_string(),
-            method: #method,
-            path: #path.to_string(),
-            description: #description.to_string(),
-            request: #request,
-            response: #response,
-            headers: #headers,
-            params: #params,
-            oauth_scopes: #oauth_scopes,
+    if endpoint.no_declared_errors {
+        builder = quote! { #builder.errors(ErrorSet::none()) };
+    } else if !endpoint.errors.is_empty() {
+        let errors = error_set_tokens(&endpoint.errors);
+        builder = quote! { #builder.errors(#errors) };
+    }
+    if let Some(request) = &endpoint.request {
+        builder = match request {
+            ApiRequest::Json(reference) => {
+                let ty = imported_type(reference);
+                quote! { #builder.request_json::<#ty>(ctx) }
+            }
+            ApiRequest::FormData { fields } | ApiRequest::UrlEncoded { fields } => {
+                let setter = if matches!(request, ApiRequest::FormData { .. }) { format_ident!("request_form") } else { format_ident!("request_urlencoded") };
+                let fields = fields.iter().map(form_field_tokens);
+                quote! { #builder.#setter(Vec::from([#(#fields),*])) }
+            }
+            ApiRequest::Text { content_type } => quote! { #builder.request_text_with_content_type(#content_type) },
+            ApiRequest::Binary { content_type } => quote! { #builder.request_binary_with_content_type(#content_type) },
+            _ => builder,
+        };
+        let alias_rules = match request {
+            ApiRequest::Json(reference) if endpoint.request_constraints.is_none() => rules.body_constraints(id, reference),
+            _ => None,
+        };
+        if let Some(body_rules) = endpoint.request_constraints.as_deref().or(alias_rules.as_ref()) {
+            let body_rules = constraints_tokens(body_rules);
+            builder = quote! { #builder.request_constraints(#body_rules) };
         }
     }
+    if let Some(policy) = &endpoint.cross_origin {
+        let policy = cross_origin_tokens(policy);
+        builder = quote! { #builder.cross_origin(#policy) };
+    }
+    if let Some(params) = &endpoint.params {
+        // Typed path parameters are emitted only when one carries value
+        // rules, so the rules survive assembly. Emitting every typed one (a
+        // described or deprecated string, which the import also declares)
+        // would change the generated clients of imported APIs, so that stays
+        // a separate change. They go first: once one is declared, build
+        // requires one per placeholder.
+        let path: &[ParamDef] = if params.path.iter().any(|param| param.constraints.is_some()) { &params.path } else { &[] };
+        for (params, setter) in [(path, "path_param"), (params.query.as_slice(), "query"), (params.header.as_slice(), "header_param"), (params.cookie.as_slice(), "cookie")] {
+            let setter = format_ident!("{}", setter);
+            for param in params { let param = param_def_tokens(param); builder = quote! { #builder.#setter(#param) }; }
+        }
+    }
+    for (key, value) in &endpoint.headers { builder = quote! { #builder.header(#key, #value) }; }
+    quote! { #builder.build() }
+}
+
+/// Whether the endpoint's success shapes or own error entries register a
+/// JSON type, so its emitted function needs the context.
+fn registers_response_types(endpoint: &Endpoint) -> bool {
+    let success = endpoint.success_shapes().iter().any(|shape| matches!(&shape.shape,
+        ResponseShape::Json(_) | ResponseShape::Stream { framing: StreamFraming::Sse(_) | StreamFraming::Ndjson(_), .. }));
+    success || endpoint.errors.iter().any(|entry| matches!(entry.shape, ResponseShape::Json(_)))
+}
+
+/// A `Success` expression reproducing `shape` and every fact it declares.
+fn success_tokens(shape: &SuccessShape) -> TokenStream {
+    let register = |reference: &TypeRef| { let ty = imported_type(reference); quote! { ctx.register::<#ty>()? } };
+    let mut tokens = match &shape.shape {
+        ResponseShape::Json(reference) => { let desc = register(reference); quote! { Success::json(#desc) } }
+        ResponseShape::Text => quote! { Success::text() },
+        ResponseShape::Binary => quote! { Success::binary() },
+        ResponseShape::Stream { framing, end, keep } => {
+            let mut stream = match framing {
+                StreamFraming::Sse(item) => { let desc = register(item); quote! { Success::sse(#desc) } }
+                StreamFraming::Ndjson(item) => { let desc = register(item); quote! { Success::ndjson(#desc) } }
+                _ => quote! { Success::bytes() },
+            };
+            stream = match end {
+                StreamEnd::DataLineEquals(data) => quote! { #stream.ends_at_data_line(#data) },
+                StreamEnd::EventNamed(name) => quote! { #stream.ends_at_event(#name) },
+                StreamEnd::FieldEquals { field, value } => { let value = scalar_tokens(value); quote! { #stream.ends_when_field(#field, #value) } }
+                _ => stream,
+            };
+            if *keep { stream = quote! { #stream.keep_end() }; }
+            stream
+        }
+        _ => quote! { Success::empty() },
+    };
+    if let Some(content_type) = &shape.content_type { tokens = quote! { #tokens.content_type(#content_type) }; }
+    for status in &shape.statuses { tokens = quote! { #tokens.status(#status) }; }
+    tokens = match &shape.json_tag {
+        Some(JsonTag::Field { name, value }) => { let value = scalar_tokens(value); quote! { #tokens.tagged(#name, #value) } }
+        Some(JsonTag::Array) => quote! { #tokens.json_array() },
+        Some(JsonTag::Object) => quote! { #tokens.json_object() },
+        _ => tokens,
+    };
+    if shape.fallback { tokens = quote! { #tokens.fallback() }; }
+    if let Some(note) = &shape.note { tokens = quote! { #tokens.note(#note) }; }
+    if let Some(variant) = &shape.variant { tokens = quote! { #tokens.variant(#variant) }; }
+    tokens
+}
+
+/// An `ErrorSet` expression declaring `entries` in order.
+fn error_set_tokens(entries: &[ErrorEntry]) -> TokenStream {
+    let mut tokens = quote! { ErrorSet::new() };
+    for entry in entries {
+        let status = match entry.status {
+            StatusMatch::Exact(status) => quote! { StatusMatch::exact(#status) },
+            StatusMatch::Range { lo, hi } if lo % 100 == 0 && hi == lo + 99 => { let class = lo / 100; quote! { StatusMatch::class(#class) } }
+            StatusMatch::Range { lo, hi } => quote! { StatusMatch::range(#lo, #hi) },
+            _ => panic!("error status match {} has no builder form", entry.status),
+        };
+        let mut shape = match &entry.shape {
+            ResponseShape::Json(reference) => { let ty = imported_type(reference); quote! { ErrorShape::json(ctx.register::<#ty>()?) } }
+            ResponseShape::Text => quote! { ErrorShape::text() },
+            ResponseShape::Binary => quote! { ErrorShape::binary() },
+            _ => quote! { ErrorShape::empty() },
+        };
+        if let Some(content_type) = &entry.content_type { shape = quote! { #shape.content_type(#content_type) }; }
+        tokens = quote! { #tokens.on(#status, #shape) };
+    }
+    tokens
+}
+
+/// A literal for a tag or terminator value, which validation keeps to a
+/// string, number, or boolean.
+///
+/// ## Panics
+///
+/// Panics on any other JSON value.
+fn scalar_tokens(value: &serde_json::Value) -> TokenStream {
+    use proc_macro2::Literal;
+    match value {
+        serde_json::Value::String(text) => quote! { #text },
+        serde_json::Value::Bool(flag) => quote! { #flag },
+        serde_json::Value::Number(number) => {
+            let literal = if let Some(unsigned) = number.as_u64() { Literal::u64_suffixed(unsigned) }
+                else if let Some(signed) = number.as_i64() { Literal::i64_suffixed(signed) }
+                else { Literal::f64_suffixed(number.as_f64().expect("a JSON number that is no integer is a float")) };
+            quote! { #literal }
+        }
+        other => panic!("tag or terminator value {other} is not a string, number, or boolean"),
+    }
+}
+
+/// The Rust type an emitted builder registers for an imported reference.
+///
+/// Names are the generated models of the same module (`pub use types::*`),
+/// and free-form JSON is spelled `serde_json::Value`, as the importer has
+/// always written it. Wrappers spell their standard-library type.
+///
+/// ## Panics
+///
+/// Panics on a composition or `Unknown`, which the importer never produces
+/// for a body or response.
+fn imported_type(reference: &TypeRef) -> syn::Type {
+    fn spelling(reference: &TypeRef) -> String {
+        match reference {
+            TypeRef::Named(name) => name.clone(),
+            TypeRef::Primitive(PrimitiveType::Json) => "serde_json::Value".to_string(),
+            TypeRef::Primitive(primitive) => primitive.rust_path().to_string(),
+            TypeRef::Array(item) => format!("Vec<{}>", spelling(item)),
+            TypeRef::Optional(inner) => format!("Option<{}>", spelling(inner)),
+            TypeRef::Map(value) => format!("std::collections::HashMap<String, {}>", spelling(value)),
+            TypeRef::KeyedMap { key, value } => format!("std::collections::HashMap<{key}, {}>", spelling(value)),
+            other => panic!("imported schema reference {other:?} has no Rust type"),
+        }
+    }
+    let spelling = spelling(reference);
+    syn::parse_str(&spelling).unwrap_or_else(|error| panic!("imported type `{spelling}` is not a Rust type: {error}"))
 }
 
 fn method_tokens(method: RestMethod) -> TokenStream {
@@ -289,53 +454,6 @@ fn method_tokens(method: RestMethod) -> TokenStream {
     quote! { RestMethod::#variant }
 }
 
-fn api_request_tokens(request: &ApiRequest) -> TokenStream {
-    match request {
-        ApiRequest::Json(schema) => {
-            let schema = schema_tokens(schema);
-            quote! { ApiRequest::Json(#schema) }
-        }
-        ApiRequest::FormData { fields } => {
-            let fields = fields.iter().map(form_field_tokens);
-            quote! { ApiRequest::FormData { fields: vec![#(#fields),*] } }
-        }
-        ApiRequest::UrlEncoded { fields } => {
-            let fields = fields.iter().map(form_field_tokens);
-            quote! { ApiRequest::UrlEncoded { fields: vec![#(#fields),*] } }
-        }
-        ApiRequest::Text { content_type } => {
-            quote! { ApiRequest::Text { content_type: #content_type.to_string() } }
-        }
-        ApiRequest::Binary { content_type } => {
-            quote! { ApiRequest::Binary { content_type: #content_type.to_string() } }
-        }
-        // `ApiRequest` is `#[non_exhaustive]`; an unmodelled variant degrades to
-        // "no body" rather than emitting source that would not compile.
-        _ => quote! { ApiRequest::Text { content_type: "application/octet-stream".to_string() } },
-    }
-}
-
-fn api_response_tokens(response: &ApiResponse) -> TokenStream {
-    match response {
-        ApiResponse::Json(schema) => {
-            let schema = schema_tokens(schema);
-            quote! { ApiResponse::Json(#schema) }
-        }
-        ApiResponse::Text => quote! { ApiResponse::Text },
-        ApiResponse::Binary => quote! { ApiResponse::Binary },
-        ApiResponse::Empty => quote! { ApiResponse::Empty },
-        _ => quote! { ApiResponse::Empty },
-    }
-}
-
-fn schema_tokens(schema: &Schema) -> TokenStream {
-    let type_name = &schema.type_name;
-    match &schema.module_path {
-        Some(path) => quote! { Schema::with_path(#type_name, #path) },
-        None => quote! { Schema::new(#type_name) },
-    }
-}
-
 fn form_field_tokens(field: &FormField) -> TokenStream {
     let name = &field.name;
 
@@ -347,16 +465,9 @@ fn form_field_tokens(field: &FormField) -> TokenStream {
             quote! { FormField::file_accept(#name, #accept) }
         }
         FormFieldKind::Files { .. } => quote! { FormField::files(#name) },
-        FormFieldKind::Json(schema) => {
-            let schema = schema_tokens(schema);
-            quote! {
-                FormField {
-                    name: #name.to_string(),
-                    kind: FormFieldKind::Json(#schema),
-                    required: true,
-                    description: None,
-                }
-            }
+        FormFieldKind::Json(reference) => {
+            let ty = imported_type(reference);
+            quote! { FormField::json_desc(#name, ctx.register::<#ty>()?) }
         }
         _ => quote! { FormField::text(#name) },
     };
@@ -367,48 +478,122 @@ fn form_field_tokens(field: &FormField) -> TokenStream {
         quote! { #base.optional() }
     };
 
-    match &field.description {
+    let base = match &field.description {
         Some(description) => quote! { #base.with_description(#description) },
         None => base,
-    }
-}
+    };
 
-fn endpoint_params_tokens(params: &EndpointParams) -> TokenStream {
-    let query = params.query.iter().map(param_def_tokens);
-    let header = params.header.iter().map(param_def_tokens);
-    let cookie = params.cookie.iter().map(param_def_tokens);
-
-    // `pagination` and `response_pagination` are not recovered from an imported
-    // spec; OpenAPI has no vocabulary for either.
-    quote! {
-        EndpointParams {
-            query: vec![#(#query),*],
-            header: vec![#(#header),*],
-            cookie: vec![#(#cookie),*],
-            pagination: None,
-            response_pagination: None,
+    match field.constraints.as_deref() {
+        Some(rules) => {
+            let rules = constraints_tokens(rules);
+            quote! { #base.constraints(#rules) }
         }
+        None => base,
     }
 }
 
 fn param_def_tokens(param: &ParamDef) -> TokenStream {
     let name = &param.name;
     let required = param.required;
+    let secret = param.secret;
+    let pager_managed = param.pager_managed;
+    // The importer does not map OpenAPI `deprecated` yet, so this is false.
+    let deprecated = param.deprecated;
+    let rust_name = option_string_tokens(param.rust_name.as_deref());
     let description = option_string_tokens(param.description.as_deref());
     let param_type = query_param_type_tokens(&param.param_type);
     let explode = param.explode;
     let style = param_style_tokens(param.style);
+    let constraints = match param.constraints.as_deref() {
+        Some(rules) => {
+            let rules = constraints_tokens(rules);
+            quote! { Some(Box::new(#rules)) }
+        }
+        None => quote! { None },
+    };
 
     quote! {
         ParamDef {
             name: #name.to_string(),
             required: #required,
+            secret: #secret,
+            rust_name: #rust_name,
+            pager_managed: #pager_managed,
+            deprecated: #deprecated,
             description: #description,
             param_type: #param_type,
             explode: #explode,
             style: #style,
+            constraints: #constraints,
         }
     }
+}
+
+/// A `Constraints` builder expression reproducing `rules`.
+///
+/// Numbers are passed as their exact text (`.maximum("18446744073709551616")`),
+/// the builders' lossless form; `enum` and `const` values are
+/// `serde_json::json!` literals, or plain string literals when every allowed
+/// value is a string.
+fn constraints_tokens(rules: &Constraints) -> TokenStream {
+    let mut tokens = quote! { schematic_define::constraints::Constraints::new() };
+    for (count, setter) in [(rules.min_length, "min_length"), (rules.max_length, "max_length")] {
+        if let Some(count) = count {
+            let setter = format_ident!("{}", setter);
+            tokens = quote! { #tokens.#setter(#count) };
+        }
+    }
+    if let Some(pattern) = &rules.pattern {
+        let setter = if rules.pattern_unenforced { format_ident!("unenforced_pattern") } else { format_ident!("pattern") };
+        tokens = quote! { #tokens.#setter(#pattern) };
+    }
+    if let Some(format) = &rules.format {
+        tokens = quote! { #tokens.format(#format) };
+    }
+    for (number, setter) in [
+        (&rules.minimum, "minimum"),
+        (&rules.maximum, "maximum"),
+        (&rules.exclusive_minimum, "exclusive_minimum"),
+        (&rules.exclusive_maximum, "exclusive_maximum"),
+        (&rules.multiple_of, "multiple_of"),
+    ] {
+        if let Some(number) = number {
+            let setter = format_ident!("{}", setter);
+            let text = number.as_str();
+            tokens = quote! { #tokens.#setter(#text) };
+        }
+    }
+    for (count, setter) in [(rules.min_items, "min_items"), (rules.max_items, "max_items")] {
+        if let Some(count) = count {
+            let setter = format_ident!("{}", setter);
+            tokens = quote! { #tokens.#setter(#count) };
+        }
+    }
+    if rules.unique_items {
+        tokens = quote! { #tokens.unique_items() };
+    }
+    if let Some(values) = &rules.allowed_values {
+        let strings: Option<Vec<&str>> = values.iter().map(serde_json::Value::as_str).collect();
+        tokens = match strings {
+            Some(strings) if !strings.is_empty() => quote! { #tokens.allowed_values([#(#strings),*]) },
+            _ => {
+                let values = values.iter().map(|value| {
+                    let value = json_tokens(value);
+                    quote! { serde_json::json!(#value) }
+                });
+                quote! { #tokens.allowed_values(Vec::<serde_json::Value>::from([#(#values),*])) }
+            }
+        };
+    }
+    if let Some(constant) = &rules.constant {
+        let constant = json_tokens(constant);
+        tokens = quote! { #tokens.constant(serde_json::json!(#constant)) };
+    }
+    if let Some(items) = &rules.items {
+        let items = constraints_tokens(items);
+        tokens = quote! { #tokens.items(#items) };
+    }
+    tokens
 }
 
 fn query_param_type_tokens(param_type: &QueryParamType) -> TokenStream {
@@ -448,7 +633,11 @@ fn param_style_tokens(style: ParamStyle) -> TokenStream {
 fn auth_strategy_tokens(auth: &AuthStrategy) -> TokenStream {
     match auth {
         AuthStrategy::None => quote! { AuthStrategy::None },
-        AuthStrategy::Basic => quote! { AuthStrategy::Basic },
+        AuthStrategy::Basic { username_env, password_env } => {
+            let username_env = string_vec_tokens(username_env.names());
+            let password_env = string_vec_tokens(password_env.names());
+            quote! { AuthStrategy::Basic { username_env: EnvList::new(#username_env), password_env: EnvList::new(#password_env) } }
+        }
         AuthStrategy::BearerToken { header } => {
             let header = option_string_tokens(header.as_deref());
             quote! { AuthStrategy::BearerToken { header: #header } }
@@ -465,6 +654,46 @@ fn auth_strategy_tokens(auth: &AuthStrategy) -> TokenStream {
                 }
             }
         }
+        AuthStrategy::ApiKeyParam { name, location } => {
+            let location = match location {
+                ApiKeyLocation::Query => quote! { ApiKeyLocation::Query },
+                ApiKeyLocation::Cookie => quote! { ApiKeyLocation::Cookie },
+                _ => unreachable!("unsupported imported API-key location"),
+            };
+            quote! { AuthStrategy::ApiKeyParam { name: #name.to_string(), location: #location } }
+        }
+        AuthStrategy::OAuth2(config) => {
+            let client_auth = format_ident!("{}", format!("{:?}", config.client_auth()));
+            let token_url = config.token_url();
+            let revocation_url = option_string_tokens(config.revocation_url());
+            let scopes = string_vec_tokens(config.default_scopes());
+            let shared = quote! {
+                token_url: #token_url.to_string(), revocation_url: #revocation_url,
+                default_scopes: #scopes, client_auth: OAuth2ClientAuthMethod::#client_auth,
+            };
+            match config {
+                OAuth2Config::AuthorizationCodePkce(grant) => {
+                    let authorization_url = &grant.authorization_url;
+                    let pkce = format_ident!("{}", format!("{:?}", grant.pkce));
+                    quote! { AuthStrategy::OAuth2(OAuth2Config::AuthorizationCodePkce(AuthorizationCodeGrant {
+                        authorization_url: #authorization_url.to_string(), #shared
+                        pkce: PkceRequirement::#pkce,
+                    })) }
+                }
+                OAuth2Config::ClientCredentials(_) => {
+                    quote! { AuthStrategy::OAuth2(OAuth2Config::ClientCredentials(ClientCredentialsGrant {
+                        #shared
+                    })) }
+                }
+                OAuth2Config::DeviceCode(grant) => {
+                    let device_authorization_url = &grant.device_authorization_url;
+                    quote! { AuthStrategy::OAuth2(OAuth2Config::DeviceCode(DeviceCodeGrant {
+                        device_authorization_url: #device_authorization_url.to_string(), #shared
+                    })) }
+                }
+                _ => unreachable!("unsupported imported OAuth2 grant"),
+            }
+        }
         _ => quote! { AuthStrategy::None },
     }
 }
@@ -479,6 +708,7 @@ fn option_string_tokens(value: Option<&str>) -> TokenStream {
 fn cross_origin_tokens(policy: &CrossOrigin) -> TokenStream {
     match policy {
         CrossOrigin::SameOrigin => quote! { CrossOrigin::same_origin() },
+        CrossOrigin::AllowOrigins(origins) if origins.is_empty() => quote! { CrossOrigin::allow_origins(Vec::<String>::new()) },
         CrossOrigin::AllowOrigins(origins) => {
             let origins = origins.iter();
             quote! { CrossOrigin::allow_origins([#(#origins),*]) }
@@ -491,185 +721,193 @@ fn cross_origin_tokens(policy: &CrossOrigin) -> TokenStream {
 
 fn string_vec_tokens(values: &[String]) -> TokenStream {
     let values = values.iter();
-    quote! { vec![#(#values.to_string()),*] }
-}
-
-fn header_pairs_tokens(headers: &[(String, String)]) -> TokenStream {
-    let pairs = headers
-        .iter()
-        .map(|(key, value)| quote! { (#key.to_string(), #value.to_string()) });
-    quote! { vec![#(#pairs),*] }
+    quote! { Vec::<String>::from([#(#values.to_string()),*]) }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use schematic_define::EndpointParams;
+
+    const EMPTY_CATALOG: ModelCatalog = ModelCatalog { module_path: None, types: Vec::new() };
+
+    /// A rule source with no models or components.
+    fn no_rules() -> RuleSource<'static> {
+        static CATALOG: ModelCatalog = EMPTY_CATALOG;
+        RuleSource::new(&CATALOG, &[])
+    }
 
     fn sample_api() -> RestApi {
-        RestApi {
-            name: "Sample".to_string(),
-            description: "Sample API".to_string(),
-            base_url: "https://api.example.com/v1".to_string(),
-            docs_url: Some("https://docs.example.com".to_string()),
-            auth: AuthStrategy::BearerToken { header: None },
-            auth_policy: None,
-            env_auth: vec!["SAMPLE_TOKEN".to_string()],
-            env_username: None,
-            headers: vec![],
-            endpoints: vec![Endpoint {
-                id: "ListItems".to_string(),
-                method: RestMethod::Get,
-                path: "/items".to_string(),
-                description: "List items".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ListItemsResponse"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            }],
-            module_path: None,
-            request_suffix: None,
-            version: None,
-            env_mapping: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
+        {
+            let mut api = schematic_define::RestApi::builder(&schematic_define::DefinitionContext::types_in("fixture"), "Sample".to_string(), "https://api.example.com/v1".to_string())
+                .describes("Sample API".to_string())
+                .authentication(AuthStrategy::BearerToken { header: None }, vec!["SAMPLE_TOKEN".to_string()])
+                .build().expect("valid API fixture");
+            api.docs_url = Some("https://docs.example.com".to_string());
+            api.endpoints = vec![{
+                let mut endpoint = Endpoint::new("ListItems".to_string(), RestMethod::Get, "/items".to_string())
+                    .describes("List items".to_string())
+                    .returns_empty()
+                    .build().expect("valid endpoint fixture");
+                endpoint.response = vec![SuccessShape::json_type("ListItemsResponse")];
+                endpoint
+            }];
+            api
         }
     }
 
     #[test]
     fn emits_parseable_rust() {
-        let tokens = assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()], None);
+        let tokens = assemble_definition_module(&sample_api(), &no_rules(), "sample", &["ListItemsResponse".to_string()], None);
         assert!(validate_code(&tokens).is_ok());
     }
 
     #[test]
     fn emits_the_conventional_function_name() {
-        let tokens = assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()], None);
+        let tokens = assemble_definition_module(&sample_api(), &no_rules(), "sample", &["ListItemsResponse".to_string()], None);
         let code = format_code(&validate_code(&tokens).unwrap());
 
         assert!(code.contains("pub fn define_sample_api() -> RestApi"));
     }
 
     #[test]
-    fn emits_each_endpoint() {
-        let tokens = assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()], None);
-        let code = format_code(&validate_code(&tokens).unwrap());
+    fn emits_builder_calls_reproducing_response_model_v2_facts() {
+        let mut api = sample_api();
+        let shape = |kind: ResponseShape, edit: &dyn Fn(&mut SuccessShape)| { let mut shape = SuccessShape::new(kind); edit(&mut shape); shape };
+        let named = |name: &str| TypeRef::Named(name.into());
+        api.errors = vec![ErrorEntry::new(StatusMatch::class(5), ResponseShape::Text)];
+        let endpoint = &mut api.endpoints[0];
+        endpoint.response = vec![
+            shape(ResponseShape::Json(named("Directory")), &|s| {
+                s.json_tag = Some(JsonTag::Field { name: "type".into(), value: serde_json::json!("dir") });
+                s.variant = Some("Directory".into());
+                s.statuses = vec![200, 203];
+            }),
+            shape(ResponseShape::Json(TypeRef::Array(Box::new(named("Entry")))), &|s| s.json_tag = Some(JsonTag::Array)),
+            shape(ResponseShape::Stream { framing: StreamFraming::Sse(named("Event")), end: StreamEnd::EventNamed("message_stop".into()), keep: false },
+                &|s| s.note = Some("returned when `stream` is true".into())),
+            shape(ResponseShape::Stream { framing: StreamFraming::Ndjson(named("Chunk")), end: StreamEnd::FieldEquals { field: "done".into(), value: serde_json::json!(true) }, keep: true }, &|_| {}),
+            shape(ResponseShape::Stream { framing: StreamFraming::Bytes, end: StreamEnd::ConnectionClose, keep: false }, &|s| s.content_type = Some("audio/mpeg".into())),
+            shape(ResponseShape::Binary, &|s| s.fallback = true),
+        ];
+        endpoint.errors = vec![
+            ErrorEntry::new(StatusMatch::exact(404), ResponseShape::Json(named("Problem"))),
+            { let mut html = ErrorEntry::new(StatusMatch::range(429, 431), ResponseShape::Text); html.content_type = Some("text/html".into()); html },
+        ];
+        let mut opted_out = api.endpoints[0].clone();
+        opted_out.id = "OptedOut".into();
+        opted_out.response = vec![SuccessShape::json_type("ListItemsResponse")];
+        opted_out.errors = vec![];
+        opted_out.no_declared_errors = true;
+        api.endpoints.push(opted_out);
 
-        assert!(code.contains(r#"id: "ListItems".to_string()"#));
-        assert!(code.contains("RestMethod::Get"));
-        assert!(code.contains(r#"path: "/items".to_string()"#));
+        let code = format_code(&validate_code(&assemble_definition_module(&api, &no_rules(), "sample", &[], None)).unwrap());
+        // Compare without whitespace or the formatter's trailing commas.
+        let code: String = code.split_whitespace().collect::<String>().replace(",)", ")");
+
+        for expected in [
+            ".default_errors(ErrorSet::new().on(StatusMatch::class(5u16),ErrorShape::text()))",
+            ".returns(Success::json(ctx.register::<Directory>()?).status(200u16).status(203u16).tagged(\"type\",\"dir\").variant(\"Directory\"))",
+            ".returns(Success::json(ctx.register::<Vec<Entry>>()?).json_array())",
+            ".returns(Success::sse(ctx.register::<Event>()?).ends_at_event(\"message_stop\").note(\"returnedwhen`stream`istrue\"))",
+            ".returns(Success::ndjson(ctx.register::<Chunk>()?).ends_when_field(\"done\",true).keep_end())",
+            ".returns(Success::bytes().content_type(\"audio/mpeg\"))",
+            ".returns(Success::binary().fallback())",
+            ".errors(ErrorSet::new().on(StatusMatch::exact(404u16),ErrorShape::json(ctx.register::<Problem>()?)).on(StatusMatch::range(429u16,431u16),ErrorShape::text().content_type(\"text/html\")))",
+            ".returns_json::<ListItemsResponse>(ctx).errors(ErrorSet::none())",
+        ] {
+            assert!(code.contains(expected), "missing {expected}\n{code}");
+        }
     }
 
     #[test]
-    fn emits_api_level_policy_fields() {
+    fn emits_typed_builders_and_one_ordered_context() {
+        let code = emit(None);
+        assert!(code.contains(r#"Endpoint::new("ListItems", RestMethod::Get, "/items")"#));
+        assert!(code.contains(".returns_json::<ListItemsResponse>(ctx)"));
+        assert!(code.contains("ctx.register::<ListItemsResponse>()?"));
+        assert!(code.contains("RestApi::builder(ctx,"));
+        assert!(!code.contains("let api = RestApi {"));
+        assert!(!code.contains("Endpoint {"));
+        assert!(!code.contains("Schema::new"));
+        assert!(code.contains("assemble_module_group"));
+    }
+
+    #[test]
+    fn emitted_builders_preserve_runtime_and_parameter_forms() {
         let mut api = sample_api();
         api.cross_origin = CrossOrigin::allow_origins(["https://uploads.example.com"]);
-        api.request_id_header = Some("x-request-id".to_string());
-        api.secret_names = vec!["X-Pin".to_string()];
-
-        let tokens = assemble_definition_module(&api, "sample", &["ListItemsResponse".to_string()], None);
-        let code = format_code(&validate_code(&tokens).unwrap());
-
-        assert!(code.contains(r#"CrossOrigin::allow_origins(["https://uploads.example.com"])"#));
-        assert!(code.contains(r#"request_id_header: Some("x-request-id".to_string())"#));
-        assert!(code.contains(r#"secret_names: vec!["X-Pin".to_string()]"#));
+        api.request_id_header = Some("x-request-id".into());
+        api.secret_names = vec!["X-Pin".into()];
+        api.endpoints[0].cross_origin = Some(CrossOrigin::deny());
+        api.endpoints[0].params = Some(EndpointParams {
+            query: vec![ParamDef::new("ref", QueryParamType::String).rust_name("git_ref").secret()],
+            ..Default::default()
+        });
+        let code = format_code(&validate_code(&assemble_definition_module(&api, &no_rules(), "sample", &["ListItemsResponse".into()], None)).unwrap());
+        assert!(code.contains(".cross_origin(CrossOrigin::deny())"));
+        assert!(code.contains(r#".request_id_header("x-request-id")"#));
+        assert!(code.contains(r#".secret_header("X-Pin")"#));
+        assert!(!code.contains("accept_unchecked_compositions"), "absent by default");
+        assert!(code.contains(r#"rust_name: Some("git_ref".to_string())"#));
+        assert!(code.contains("secret: true"));
     }
 
     #[test]
-    fn emits_same_origin_for_the_default_policy() {
-        let tokens =
-            assemble_definition_module(&sample_api(), "sample", &["ListItemsResponse".to_string()], None);
-        let code = format_code(&validate_code(&tokens).unwrap());
-
-        assert!(code.contains("cross_origin: CrossOrigin::same_origin()"));
-        assert!(code.contains("request_id_header: None"));
+    fn an_api_accepting_unchecked_compositions_emits_the_builder_call() {
+        let mut api = sample_api();
+        api.unchecked_compositions = true;
+        let code = format_code(&validate_code(&assemble_definition_module(&api, &no_rules(), "sample", &["ListItemsResponse".into()], None)).unwrap());
+        assert_eq!(code.matches(".accept_unchecked_compositions()").count(), 1, "{code}");
+        let builder = &code[code.find("RestApi::builder(ctx,").unwrap()..];
+        assert!(builder.find(".accept_unchecked_compositions()").unwrap() < builder.find(".build()").unwrap(), "{builder}");
     }
 
     fn emit(overlay: Option<&str>) -> String {
         let overlay = overlay.map(|value| parse_overlay_path(value).unwrap());
-        let tokens = assemble_definition_module(
-            &sample_api(),
-            "sample",
-            &["ListItemsResponse".to_string()],
-            overlay.as_ref(),
-        );
-        format_code(&validate_code(&tokens).unwrap())
-    }
-
-    /// The statements of the emitted `define_sample_api()`.
-    fn factory_statements(code: &str) -> Vec<syn::Stmt> {
-        let file = syn::parse_file(code).unwrap();
-        file.items
-            .into_iter()
-            .find_map(|item| match item {
-                syn::Item::Fn(function) if function.sig.ident == "define_sample_api" => {
-                    Some(function.block.stmts)
-                }
-                _ => None,
-            })
-            .expect("define_sample_api is emitted")
+        format_code(&validate_code(&assemble_definition_module(&sample_api(), &no_rules(), "sample", &["ListItemsResponse".into()], overlay.as_ref())).unwrap())
     }
 
     #[test]
-    fn an_overlay_is_applied_to_the_constructed_api_as_the_tail_expression() {
+    fn configured_overlay_is_generic_and_runs_after_builder_validation() {
         let code = emit(Some("crate::sample_pagination::apply"));
-        let statements = factory_statements(&code);
-
-        let [.., syn::Stmt::Local(binding), syn::Stmt::Expr(syn::Expr::Call(call), None)] =
-            statements.as_slice()
-        else {
-            panic!("factory does not end with `let api = ..; overlay(api)`:\n{code}");
-        };
-        let syn::Pat::Ident(name) = &binding.pat else { panic!("binding is not an ident") };
-        assert_eq!(name.ident, "api");
-        let initializer = &binding.init.as_ref().expect("binding is initialized").expr;
-        assert!(
-            matches!(&**initializer, syn::Expr::Struct(literal) if literal.path.is_ident("RestApi")),
-            "`api` is not bound to the `RestApi` literal"
-        );
-        let syn::Expr::Path(callee) = &*call.func else { panic!("callee is not a path") };
-        assert_eq!(path_text(&callee.path), "crate::sample_pagination::apply");
-        let arguments: Vec<_> = call.args.iter().collect();
-        assert!(
-            matches!(arguments.as_slice(), [syn::Expr::Path(argument)] if argument.path.is_ident("api")),
-            "overlay is not called with `api` alone"
-        );
-        assert_eq!(code.matches("crate::sample_pagination::apply(").count(), 1);
+        assert_eq!(code.matches("crate::sample_pagination::apply(api)").count(), 1);
+        assert!(code.contains("Ok(crate::sample_pagination::apply(api))"));
+        assert!(code.contains("--overlay crate::sample_pagination::apply`"));
+        assert!(!emit(None).contains("--overlay"));
     }
 
     #[test]
-    fn without_an_overlay_the_factory_ends_with_the_literal() {
-        let code = emit(None);
-        let statements = factory_statements(&code);
+    fn imported_query_cookie_and_oauth_authentication_are_not_lost() {
+        for location in [ApiKeyLocation::Query, ApiKeyLocation::Cookie] {
+            let code = render_expr(auth_strategy_tokens(&AuthStrategy::ApiKeyParam { name: "key".into(), location }));
+            assert!(code.contains("AuthStrategy::ApiKeyParam"));
+            assert!(code.contains("name: \"key\".to_string()"));
+        }
+        let config = OAuth2Config::ClientCredentials(schematic_define::ClientCredentialsGrant {
+            token_url: "https://example.com/token".into(), revocation_url: None,
+            default_scopes: vec!["read".into()],
+            client_auth: schematic_define::OAuth2ClientAuthMethod::ClientSecretPost,
+        });
+        let code = render_expr(auth_strategy_tokens(&AuthStrategy::OAuth2(config)));
+        assert!(code.contains("OAuth2Config::ClientCredentials(ClientCredentialsGrant"));
+        assert!(code.contains("https://example.com/token"));
+        assert!(code.contains("ClientSecretPost"));
+        assert!(!code.contains("authorization_url") && !code.contains("pkce"));
 
-        let [.., syn::Stmt::Expr(syn::Expr::Struct(literal), None)] = statements.as_slice() else {
-            panic!("factory does not end with the `RestApi` literal:\n{code}");
-        };
-        assert!(literal.path.is_ident("RestApi"));
-        assert!(!code.contains("let api"));
-        assert!(!code.contains("--overlay"));
-    }
-
-    #[test]
-    fn an_overlay_changes_only_the_tail_and_the_regeneration_hint() {
-        let plain = emit(None);
-        let overlaid = emit(Some("crate::sample_pagination::apply"));
-
-        let stripped = overlaid
-            .replacen(" --overlay crate::sample_pagination::apply`", "`", 1)
-            .replacen("    let api = RestApi {\n", "    RestApi {\n", 1)
-            .replacen("    };\n    crate::sample_pagination::apply(api)\n", "    }\n", 1);
-        assert_eq!(stripped, plain);
-    }
-
-    #[test]
-    fn the_regeneration_hint_names_the_overlay() {
-        let code = emit(Some("crate::sample_pagination::apply"));
-
-        assert!(code.contains("--definitions-out <dir> --overlay crate::sample_pagination::apply`"));
+        let config = OAuth2Config::AuthorizationCodePkce(schematic_define::AuthorizationCodeGrant {
+            authorization_url: "https://example.com/authorize".into(),
+            token_url: "https://example.com/token".into(),
+            revocation_url: Some("https://example.com/revoke".into()),
+            default_scopes: vec![],
+            pkce: schematic_define::PkceRequirement::Supported,
+            client_auth: schematic_define::OAuth2ClientAuthMethod::None,
+        });
+        let code = render_expr(auth_strategy_tokens(&AuthStrategy::OAuth2(config)));
+        assert!(code.contains("OAuth2Config::AuthorizationCodePkce(AuthorizationCodeGrant"));
+        assert!(code.contains("authorization_url: \"https://example.com/authorize\".to_string()"));
+        assert!(code.contains("Some(\"https://example.com/revoke\".to_string())"));
+        assert!(code.contains("PkceRequirement::Supported"));
     }
 
     #[test]
@@ -710,6 +948,7 @@ mod tests {
 
         let result = generate_definition_module(
             &sample_api(),
+            &EMPTY_CATALOG,
             "sample",
             &[],
             Some("crate::x::<T>"),
@@ -745,5 +984,147 @@ mod tests {
 
         assert!(code.contains(r#"FormField::text("model")"#));
         assert!(!code.contains(".optional()"));
+    }
+
+    #[test]
+    fn emits_basic_with_its_ordered_environment_lists() {
+        let mut api = sample_api();
+        api.auth = AuthStrategy::Basic {
+            username_env: schematic_define::EnvList::from_strs(&["USER", "LOGIN"]),
+            password_env: schematic_define::EnvList::from_strs(&["PASS", "SECRET"]),
+        };
+        api.env_auth = vec![];
+        let code = rest_api_tokens(&api, &no_rules(), None).to_string().replace(' ', "");
+        assert!(code.contains(r#"AuthStrategy::Basic{username_env:EnvList::new(Vec::<String>::from(["USER".to_string(),"LOGIN".to_string()])),password_env:EnvList::new(Vec::<String>::from(["PASS".to_string(),"SECRET".to_string()]))}"#), "{code}");
+        assert!(!code.contains("env_username"));
+    }
+
+    /// `expression`'s source text and value, so a test can compare emitted
+    /// text against code that is known to compile.
+    macro_rules! source_and_value {
+        ($expression:expr) => {
+            (stringify!($expression), $expression)
+        };
+    }
+
+    fn compact(text: &str) -> String {
+        text.split_whitespace().collect()
+    }
+
+    #[test]
+    fn definition_gen_constraints_emit_compiling_builder_calls_for_every_keyword() {
+        use schematic_define::constraints::Constraints;
+        let (source, rebuilt) = source_and_value!(schematic_define::constraints::Constraints::new()
+            .min_length(1u64)
+            .max_length(64u64)
+            .pattern("^[a-z]+$")
+            .format("slug")
+            .minimum("1")
+            .maximum("18446744073709551616")
+            .exclusive_minimum("-1.5")
+            .exclusive_maximum("0.10000000000000000001")
+            .multiple_of("0.1")
+            .min_items(1u64)
+            .max_items(10u64)
+            .unique_items()
+            .allowed_values(Vec::<serde_json::Value>::from([serde_json::json!(1u64), serde_json::json!("a"), serde_json::json!(null)]))
+            .constant(serde_json::json!({ "k": [true, -2i64, 0.5f64] }))
+            .items(schematic_define::constraints::Constraints::new().unenforced_pattern("\\p{Lu}").allowed_values(["x", "y"])));
+        let rules = Constraints::new()
+            .min_length(1).max_length(64).pattern("^[a-z]+$").format("slug")
+            .minimum(1).maximum("18446744073709551616").exclusive_minimum(-1.5).exclusive_maximum("0.10000000000000000001").multiple_of("0.1")
+            .min_items(1).max_items(10).unique_items()
+            .allowed_values([serde_json::json!(1), serde_json::json!("a"), serde_json::Value::Null])
+            .constant(serde_json::json!({"k": [true, -2, 0.5]}))
+            .items(Constraints::new().unenforced_pattern(r"\p{Lu}").allowed_values(["x", "y"]));
+
+        assert_eq!(rebuilt, rules, "the expected source does not rebuild the rules");
+        assert_eq!(compact(&constraints_tokens(&rules).to_string()), compact(source));
+    }
+
+    #[test]
+    fn definition_gen_emits_parameter_form_and_body_rules() {
+        use schematic_define::constraints::Constraints;
+        use schematic_define::models::{ModelDef, TypeAlias};
+        let mut api = sample_api();
+        let mut endpoint = api.endpoints[0].clone();
+        endpoint.params = Some(EndpointParams {
+            query: vec![
+                ParamDef::new("limit", QueryParamType::Integer).constraints(Constraints::new().minimum(1).maximum(100)),
+                ParamDef::new("cursor", QueryParamType::String),
+            ],
+            ..Default::default()
+        });
+        api.endpoints = vec![endpoint.clone()];
+        for (id, request, body_rules) in [
+            ("Upload", ApiRequest::FormData { fields: vec![FormField::text("title").constraints(Constraints::new().max_length(200))] }, None),
+            ("Echo", ApiRequest::Text { content_type: "text/plain".into() }, Some(Constraints::new().min_length(1))),
+            ("Rename", ApiRequest::Json(TypeRef::Named("Slug".into())), None),
+            ("Create", ApiRequest::Json(TypeRef::Named("ListItemsResponse".into())), None),
+        ] {
+            let mut endpoint = endpoint.clone();
+            endpoint.id = id.into();
+            endpoint.params = None;
+            endpoint.request = Some(request);
+            endpoint.request_constraints = body_rules.map(Box::new);
+            api.endpoints.push(endpoint);
+        }
+        api.schemas = vec![schematic_define::SchemaComponent {
+            name: "Slug".into(),
+            rust_path: Some("Slug".into()),
+            schema: serde_json::json!({"type": "string", "maxLength": 8}),
+        }];
+        let catalog = ModelCatalog {
+            module_path: None,
+            types: vec![ModelDef::Alias(TypeAlias { name: "Slug".into(), description: None, target: TypeRef::Primitive(PrimitiveType::String), discriminator: None })],
+        };
+
+        let tokens = assemble_definition_module(&api, &RuleSource::new(&catalog, &api.schemas), "sample", &["ListItemsResponse".into()], None);
+        // Compare without whitespace or the formatter's trailing commas.
+        let code = compact(&format_code(&validate_code(&tokens).expect("emitted module parses"))).replace(",)", ")");
+
+        for expected in [
+            r#"name:"limit".to_string(),"#,
+            r#"constraints:Some(Box::new(schematic_define::constraints::Constraints::new().minimum("1").maximum("100"))),"#,
+            r#"name:"cursor".to_string(),"#,
+            "constraints:None,",
+            r#"FormField::text("title").constraints(schematic_define::constraints::Constraints::new().max_length(200u64))"#,
+            r#".request_text_with_content_type("text/plain").request_constraints(schematic_define::constraints::Constraints::new().min_length(1u64))"#,
+            r#".request_json::<Slug>(ctx).request_constraints(schematic_define::constraints::Constraints::new().max_length(8u64))"#,
+        ] {
+            assert!(code.contains(expected), "missing {expected}\n{code}");
+        }
+        assert!(!code.contains(".request_json::<ListItemsResponse>(ctx).request_constraints"), "a component body's rules stay on its model");
+        assert_eq!(code.matches(".request_constraints(").count(), 2);
+    }
+
+    #[test]
+    fn definition_gen_emits_typed_path_parameters_only_when_one_carries_rules() {
+        use schematic_define::constraints::Constraints;
+        let mut api = sample_api();
+        let template = api.endpoints[0].clone();
+        api.endpoints.clear();
+        for (id, rules) in [("GetConstrained", Some(Constraints::new().max_length(64))), ("GetDescribed", None)] {
+            let mut endpoint = template.clone();
+            endpoint.id = id.into();
+            endpoint.path = "/items/{id}/{rev}".into();
+            let mut id_param = ParamDef::path("id", QueryParamType::String);
+            id_param.description = Some("The item".into());
+            id_param.constraints = rules.map(Box::new);
+            endpoint.params = Some(EndpointParams { path: vec![id_param, ParamDef::path("rev", QueryParamType::String)], ..Default::default() });
+            api.endpoints.push(endpoint);
+        }
+        let catalog = ModelCatalog { module_path: None, types: vec![] };
+
+        let tokens = assemble_definition_module(&api, &RuleSource::new(&catalog, &api.schemas), "sample", &["ListItemsResponse".into()], None);
+        let code = compact(&format_code(&validate_code(&tokens).expect("emitted module parses")));
+
+        // Both placeholders of the constrained endpoint are declared, so its
+        // build still finds one parameter per placeholder; the endpoint whose
+        // typed parameters carry only a description emits none, as before.
+        assert_eq!(code.matches(".path_param(").count(), 2, "{code}");
+        assert!(code.contains(r#"max_length(64u64)"#), "{code}");
+        let described = &code[code.find(r#""GetDescribed""#).expect("second endpoint")..];
+        assert!(!described.contains(".path_param("), "{described}");
     }
 }

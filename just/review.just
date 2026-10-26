@@ -15,9 +15,12 @@ magenta := '\033[35m'
 cyan := '\033[36m'
 
 # Stand-in for the coming sequence support: alternate implement → review on an
-# implemented spec until a review marks it production ready (at most 5 cycles),
-# then run one follow-up pass for that review's open medium/low findings and
-# observations. Rerunning on a ready spec runs only a still-open follow-up pass.
+# implemented spec until a review marks it production ready (at most 5 cycles).
+# A review is ready only when it has no findings, so nothing follows it.
+# A review that sets `human_in_the_loop` pauses the cycle for an interactive
+# rulings session, then the cycle continues; a review that marks every finding
+# blocked without asking for a ruling ends it, because another cycle would
+# change nothing.
 # Pass `--use-defaults` to skip the agent/model prompts and use the defaults.
 [positional-arguments]
 fix +args:
@@ -83,31 +86,15 @@ fix +args:
         return 0
     }
 
-    # A ready review's medium/low findings and observations, until its one
-    # follow-up pass marks it `implemented`.
-    open_followups() {
-        local review="$1" implemented findings observations
-        implemented="$(md get --raw "${review}" implemented)" || return 1
-        if [[ "${implemented}" == "true" ]]; then echo 0; return 0; fi
-        findings="$(md get --raw "${review}" findings)" || return 1
-        observations="$(md get --raw "${review}" observations)" || return 1
-        printf '%s\n%s\n' "${findings}" "${observations}" | grep -c . || true
-    }
-
     review="$(latest_review)"
     review_ready=""
     if [[ -n "${review}" && -f "${review}" ]]; then
         review_ready="$(md get --raw "${review}" ready)"
     fi
     completed="$(md get --raw "${spec}" completed)"
-    followups_only=false
     if [[ "${review_ready}" == "true" || "${completed}" == "true" ]]; then
-        if [[ -n "${review}" && -f "${review}" ]] && (( $(open_followups "${review}") > 0 )); then
-            followups_only=true
-        else
-            echo -e "$(just _link "${spec}") is already {{ green }}production ready{{ reset }}; nothing to do."
-            exit 0
-        fi
+        echo -e "$(just _link "${spec}") is already {{ green }}production ready{{ reset }}; nothing to do."
+        exit 0
     fi
 
     choose_agent() {
@@ -123,6 +110,28 @@ fix +args:
         echo "${answer:-${default}}"
     }
 
+    # A review waits on a human while it has `human_in_the_loop` items and the
+    # author has not set `human_resolved: true`.
+    waiting_on_human() {
+        local items
+        items="$(md get --raw "$1" human_in_the_loop)"
+        [[ -n "${items}" && "${items}" != "null" && "${items}" != "[]" ]] \
+            && [[ "$(md get --raw "$1" human_resolved)" != "true" ]]
+    }
+    collect_rulings() {
+        local review="$1"
+        if [[ ! -t 0 || ! -t 1 ]]; then
+            echo -e "{{ yellow }}$(just _link "${review}"){{ reset }} needs your rulings; run {{ bold }}just fix ${spec}{{ reset }} in a terminal to record them." >&2
+            exit 1
+        fi
+        echo -e "🧑‍⚖️  $(just _link "${review}") needs your rulings before the cycle can continue"
+        claudine compose "@prompts/_reviews/human-rulings.md" -y -i --${implement_agent} --model "${implement_model}" review="${review}" spec="${spec}"
+        if waiting_on_human "${review}"; then
+            echo -e "{{ yellow }}$(just _link "${review}"){{ reset }} still has items without a ruling; run {{ bold }}just fix ${spec}{{ reset }} again to finish them." >&2
+            exit 1
+        fi
+    }
+
     review_agent="$(choose_agent "Review" codex)"
     review_model="$(choose_model "Review" gpt-6.1-sol)"
     implement_agent="$(choose_agent "Implementation" claude)"
@@ -134,25 +143,13 @@ fix +args:
     echo -e "    - implementation: {{ yellow }}${implement_agent}{{ reset }}/{{ green }}${implement_model}{{ reset }}"
     echo
 
-    # One pass, and no review after it: fixes the small medium/low findings
-    # and files the rest in the area's `fixes/_unscheduled/` backlog.
-    run_followups() {
-        local review="$1" open
-        open="$(open_followups "${review}")"
-        (( open > 0 )) || return 0
-        echo -e "🧹 follow-up pass for ${open} open item(s) in $(just _link "${review}")"
-        claudine compose "@prompts/_implement/implement-suggestions.md" -y --${implement_agent} --model "${implement_model}" spec="${spec}"
-    }
-
-    if [[ "${followups_only}" == "true" ]]; then
-        run_followups "${review}"
-        exit 0
-    fi
-
     cycle=0
     while (( cycle < max_cycles )); do
         (( ++cycle ))
         review="$(latest_review)"
+        if [[ -n "${review}" && -f "${review}" ]] && waiting_on_human "${review}"; then
+            collect_rulings "${review}"
+        fi
 
         # Without an unimplemented review there are no findings to implement,
         # so the cycle starts with its review.
@@ -172,11 +169,18 @@ fix +args:
         ready="$(md get --raw "${review}" ready)"
         if [[ "${ready}" == "true" ]]; then
             echo -e "👍 $(just _link "${review}") marked the spec {{ green }}production ready{{ reset }} after ${cycle} cycle(s)"
-            run_followups "${review}"
             exit 0
         fi
         if [[ "${ready}" != "false" ]]; then
             echo -e "{{ red }}ERROR:{{ reset }} ${review} did not set a boolean 'ready' frontmatter property" >&2
+            exit 1
+        fi
+        if waiting_on_human "${review}"; then
+            collect_rulings "${review}"
+            continue
+        fi
+        if [[ "$(md get --raw "${review}" blocked)" == "true" ]]; then
+            echo -e "{{ red }}ERROR:{{ reset }} $(just _link "${review}") marks every finding blocked but asks for no ruling ({{ italic }}human_in_the_loop{{ reset }} is empty), so another cycle would change nothing." >&2
             exit 1
         fi
     done

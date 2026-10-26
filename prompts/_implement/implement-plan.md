@@ -14,7 +14,7 @@ $schema:
 yolo: true
 commit_message: ""
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
-phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
+phase: "{{ file_exists(plan) ? frontmatter(plan, 'phase') || frontmatter(plan, 'start_phase') || 1 : null }}"
 area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
 pass_icon: "{{ loop.is_last ? '✅' : '🧑‍💻' }}"
 total_phases: |-
@@ -33,13 +33,46 @@ spec: |-
     }}
 # The implementation's log file
 log: "{{ dirname(spec || plan) + '/implementation-log.md' }}"
+# `depends_on` entries are `{date}-{name}` directories beside the spec or under
+# its `_completed/` folder. The expression language has no list iteration, so
+# the first three are checked explicitly; a longer list only warns.
+dependency_dir: "{{ spec ? dirname(dirname(spec)) : null }}"
+dependencies: "{{ spec ? frontmatter(spec, 'depends_on') || [] : [] }}"
+dependency_0: "{{ length(dependencies) > 0 ? (file_exists(dependency_dir + '/' + dependencies[0] + '/spec.md') ? dependency_dir + '/' + dependencies[0] + '/spec.md' : file_exists(dependency_dir + '/_completed/' + dependencies[0] + '/spec.md') ? dependency_dir + '/_completed/' + dependencies[0] + '/spec.md' : null) : null }}"
+dependency_1: "{{ length(dependencies) > 1 ? (file_exists(dependency_dir + '/' + dependencies[1] + '/spec.md') ? dependency_dir + '/' + dependencies[1] + '/spec.md' : file_exists(dependency_dir + '/_completed/' + dependencies[1] + '/spec.md') ? dependency_dir + '/_completed/' + dependencies[1] + '/spec.md' : null) : null }}"
+dependency_2: "{{ length(dependencies) > 2 ? (file_exists(dependency_dir + '/' + dependencies[2] + '/spec.md') ? dependency_dir + '/' + dependencies[2] + '/spec.md' : file_exists(dependency_dir + '/_completed/' + dependencies[2] + '/spec.md') ? dependency_dir + '/_completed/' + dependencies[2] + '/spec.md' : null) : null }}"
+unimplemented_dependencies: "{{ (dependency_0 && frontmatter(dependency_0, 'implemented') != true ? '- `' + dependencies[0] + '`\n' : '') + (dependency_1 && frontmatter(dependency_1, 'implemented') != true ? '- `' + dependencies[1] + '`\n' : '') + (dependency_2 && frontmatter(dependency_2, 'implemented') != true ? '- `' + dependencies[2] + '`\n' : '') }}"
 initialize:
+    # A spec built on unimplemented work would stop at its own prerequisite
+    # gate only after a full Phase 1; refuse before launching an agent.
+    - when: "unimplemented_dependencies"
+      then:
+          - message: |-
+                ⏸️  `{{parent_dir(spec)}}` depends on work that is not implemented yet:
+
+                {{unimplemented_dependencies}}
+          - error: "the spec {{spec}} lists `depends_on` entries that are not `implemented: true`; implement them first"
+    - when: "length(dependencies) > 3"
+      then:
+          - warn: "`{{parent_dir(spec)}}` lists {{length(dependencies)}} dependencies; only the first three were checked for `implemented: true`"
+    # Fail before Phase 1 rather than discover the open rulings an hour into it.
+    - when: "spec && frontmatter(spec, 'needs_rulings') == true"
+      then:
+          - message: |-
+                ⏸️  `{{parent_dir(spec)}}` still needs rulings before it can be implemented:
+
+                {{ as_ordered_list(frontmatter(spec, 'required_rulings') || []) }}
+          - error: "the spec {{spec}} sets `needs_rulings: true`; record the rulings (or set `needs_rulings: false`) before running the implementation"
     - ensure_file: "{{log}}"
     - when: "!total_phases || total_phases <= 0"
       then:
           - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
           - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
           - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
+    - when: "total_phases && phase > total_phases"
+      then:
+          - message: "every phase of `{{parent_dir(plan)}}` is already implemented (`phase` is {{phase}} of {{total_phases}})"
+          - error: "nothing to implement: the plan ({{plan}}) records `phase: {{phase}}`, past its last phase ({{total_phases}})"
 
 start:
     - message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
@@ -62,6 +95,10 @@ success:
       then:
         - warn: "the final phase of `{{parent_dir(plan)}}` finished without setting `implemented: true` on the plan and spec; check the log before treating it as complete"
         - message: "⚠️  final phase of `{{parent_dir(plan)}}` finished without `implemented: true` on the plan and spec; check the log before treating it as complete"
+    # Persisted before the commit so a rerun resumes after this phase; the
+    # loop's counter lives only in memory. Not a `shell` action: those resolve
+    # at pre-flight from the plan on disk, not this iteration's `phase`.
+    - set_frontmatter: ["{{plan}}", "phase", "{{phase + 1}}"]
     - when: "ctx.dirty_files && !commit_message"
       then:
         - message: |-
@@ -89,7 +126,7 @@ failure:
     message: "❌️  phase **{{phase}}** (_of {{total_phases}}_) failed in the plan `{{parent_dir(plan)}}` ({{area}}, {{ctx.agent}}/{{ctx.model}}: {{err.msg}})"
     effect: sad-trombone
 loop:
-    until: "phase >= total_phases || frontmatter(log, 'human_review') == true"
+    until: "phase >= total_phases"
     action: "increment(phase)"
 ---
 ::block when="total_phases"
@@ -240,22 +277,34 @@ earlier phase is committed when it succeeds.
         ::end-block
     ::end-block
 
+### Decisions Are Yours; the Human Reviews After Implementation
+
+There is **no human in the loop between phases**. Every phase runs straight
+into the next, and a human first looks at this work in the review that follows
+the final phase. Never stop, pause, or wait for a sign-off, approval, or
+ruling, even if the plan calls a step a "human gate" or a "sign-off": produce
+the artifact, keep going, and let the review pick it up.
+
+- when you meet a choice the plan does not settle, or find the plan or spec is
+  wrong, choose the best option yourself, implement it, and keep going
+- record each such choice by appending an item to the `decisions_for_review`
+  list on the implementation log ({{log}}); keep the items earlier phases
+  added. The first review reads this list. Each item is a YAML `|-` block,
+  written without repo jargon, that states:
+    - what you decided and what the plan or spec said
+    - the alternatives and their trade-offs
+    - what would need redoing if the reviewer picks another option
+- if later work depends on a decision a human might reverse, build it on your
+  decision anyway; redoing it after review costs less than a stalled run
+- the only reason to stop is that the phase **cannot be completed at all**
+  (for example, a required credential or host is unavailable). Then fail the
+  phase: say exactly what is blocked in your final output and in the log, and
+  exit with an error, so the pipeline does not treat the run as finished
+
 ### Handoff to the Next Phase
 
-Set these properties on the implementation log ({{log}}), never on the spec or plan:
+Set this property on the implementation log ({{log}}), never on the spec or plan:
 
-- If something happened during the implementation of this phase (# {{phase}}) that you feel requires human involvement _before_ proceeding onto the next phase for implementation then set `human_review` to `true` (otherwise set to `false`)
-    - this should be kept to a minimum as it will impact flow but when it's necessary it needs to be raised
-    - when `human_review` is set to `true` you must also set `human_review_items`:
-        - a list of things which the human is expected to weigh in on
-        - each item should use the YAML `|-` operator so that the text description is more easily read by a human
-        - don't use jargon and don't assume the human knows this repo or the details of this plan
-        - each list item should describe:
-            - why this decision is critical to be made _before_ the next phase is implemented
-            - bullet point out various options/solutions to choose from
-            - each option/solution should have a clear description and relative pros and cons
-            - you must recommend one of these options and explain why you're recommending it
-        - you can use Markdown formatting to help produce a nice looking and clear message
 - if something happened during the implementation that you think is important to know for the agent who will implement the next phase then set the `message_to_agent` property with that message and it will be passed to the agent; be sure you've provided enough context that what you're communicating is clear.
     - `message_to_agent` holds only your message: replace any message left by an earlier phase, and remove the property if you have nothing to pass on
 

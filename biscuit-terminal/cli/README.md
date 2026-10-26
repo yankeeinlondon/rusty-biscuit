@@ -95,10 +95,11 @@ bt image "photo.jpg|80"      # Fixed 80 columns
 bt image "photo.jpg|fill"    # Fill available width
 ```
 
-Protocol selection:
+Protocol selection follows the [graphics route](../docs/discovery/graphics-routes.md), including through tmux, Zellij, and SSH:
 - **Kitty protocol**: Kitty, WezTerm, Ghostty, Konsole, Warp
-- **iTerm2 protocol**: iTerm2 (even if Kitty advertised)
-- **Fallback**: Alt text for unsupported terminals
+- **iTerm2 protocol**: iTerm2 (even if Kitty advertised), mintty, and a Windows SSH server
+- **Sixel**: Windows Terminal 1.22+, a tmux 3.4+ that draws Sixel itself, or a terminal whose DA1 reply reports Sixel
+- **Fallback**: half-blocks on a truecolor, Unicode terminal, else alt text (always alt text when piped)
 
 ### Prose Rendering
 
@@ -319,21 +320,27 @@ bt flowchart --json "A --> B"                      # Output as JSON
 ```
 
 **Features:**
-- **Color mode detection**: Automatically uses light or dark theme based on terminal background
+- **Terminal colors**: Drawn in the terminal's own background, text, and ANSI colors where it reports them, otherwise a fixed light or dark palette for its color mode ([Terminal palettes](../../biscuit-visualized/docs/merman.md#terminal-palettes))
 - **Transparent background**: Blends seamlessly with terminal (default)
-- **Inverse mode**: Solid background with contrasting colors (`--inverse`)
-- **High resolution**: 2x scale for sharp rendering on modern displays
+- **Inverse mode**: Solid background in the opposite fixed palette, light on a dark terminal and dark on a light one (`--inverse`)
+- **Sharp at any size**: The PNG is rendered at exactly the pixel width of the columns it fills, so it is never scaled up or down
 - **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill`. Without it, diagrams are sized so their body text is one terminal line tall, capped at the terminal width
-- **Aspect ratio preservation**: Images always maintain correct proportions via viuer
+- **Aspect ratio preservation**: Images always keep their proportions
 
 **Rendering backend:**
-- Pure Rust rendering via `biscuit-visualized` and `mermaid-rs-renderer`
-- No Node.js, npm, Chromium, or `mmdc` dependency is required
+- Pure Rust rendering via `biscuit-visualized` and [Merman](../../biscuit-visualized/docs/merman.md), a Rust reimplementation of Mermaid.js
+- No Node.js, npm, Chromium, or Mermaid CLI (`mmdc`) is required
 - Use `--json` to inspect generated Mermaid instructions when image rendering is not available
 
+**Without images:**
+- A terminal that cannot show images gets the diagram drawn as text when Merman can draw it and it fits, otherwise the diagram's source, both as highlighted code blocks on stdout (plain fences without color), and the exit code is 0. `--feature` changes that choice; see [the `bt` CLI reference](../docs/cli.md#mermaid-text-fallback)
+
 **Error handling:**
-- Syntax errors show the location and expected tokens
-- Returns non-zero exit code on errors
+- A diagram that cannot be drawn (it does not parse, has a math label, or takes longer than its [time budget](../../biscuit-visualized/docs/merman.md#time-budget)) prints the error and the diagram's source to stderr and exits non-zero, with or without images, and whatever `--feature` says
+
+```bash
+bt flowchart "A[unclosed --> B"    # the error and the source go to stderr, exit code 1
+```
 
 ### Quadrant Chart Rendering
 
@@ -397,7 +404,7 @@ Available inline properties: `color`, `radius`, `stroke-color`, `stroke-width`
 > **Note:** Multiple properties must be comma-separated. Space-only separation causes parsing errors.
 
 **Rendering backend:**
-- Pure Rust rendering via `biscuit-visualized` and `mermaid-rs-renderer`
+- Pure Rust rendering via `biscuit-visualized` and Merman
 - No external Mermaid CLI is required
 
 ### Git Graph Rendering
@@ -422,16 +429,22 @@ bt git-graph --json "commit" "branch feature"   # Output as JSON
 - `merge <name>` - Merge a branch into the current branch
 - `cherry-pick id: "abc123"` - Cherry-pick a commit
 
+Tags never overlap: when two tags on neighboring commits would collide, the commits are spaced just far enough apart to leave a gap of one em (the diagram's font size, 16 px by default) between them ([Mermaid gitGraph tag spacing](../../biscuit-visualized/docs/mermaid-gitgraph.md)).
+
+```bash
+bt git-graph 'commit id: "d1"' 'commit id: "d2" tag: "main"' 'commit id: "d3" tag: "origin/main"'
+```
+
 **Features:**
-- **Color mode detection**: Automatically uses light or dark theme based on terminal background
+- **Terminal colors**: Drawn in the terminal's own background, text, and ANSI colors where it reports them, otherwise a fixed light or dark palette for its color mode ([Terminal palettes](../../biscuit-visualized/docs/merman.md#terminal-palettes))
 - **Transparent background**: Blends seamlessly with terminal (default)
-- **Inverse mode**: Solid background with contrasting colors (`--inverse`)
+- **Inverse mode**: Solid background in the opposite fixed palette, light on a dark terminal and dark on a light one (`--inverse`)
 - **Title support**: Add a title above the diagram (`-t`/`--title`)
 - **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill`. Without it, diagrams are sized so their body text is one terminal line tall, capped at the terminal width
-- **Aspect ratio preservation**: Images always maintain correct proportions via viuer
+- **Aspect ratio preservation**: Images always keep their proportions
 
 **Rendering backend:**
-- Pure Rust rendering via `biscuit-visualized` and `mermaid-rs-renderer`
+- Pure Rust rendering via `biscuit-visualized` and Merman
 - No external Mermaid CLI is required
 
 ### Pie Chart Rendering
@@ -551,6 +564,10 @@ All diagram commands support:
 - `--title` / `-t`: Add title above diagram
 - `--json`: Output as JSON for scripting
 - `--meta`: Output rendering metadata to stderr (filename, cache hit, file size, render time)
+
+The Mermaid commands (all of the above except `graph-expression`) also take
+`--feature <NAME>` to control the text fallback; see
+[the `bt` CLI reference](../docs/cli.md#--feature).
 
 ### Shell Completions
 

@@ -6,28 +6,69 @@
 //! generated WebSocket client and host modules.
 #![allow(clippy::result_large_err)]
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicU64;
-use tokio::sync::{mpsc, oneshot, watch, Mutex};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 /// Errors that can occur during WebSocket operations.
 #[derive(Debug, thiserror::Error)]
 pub enum WsError {
-    /// Transport-level error from tungstenite.
+    /// Transport-level error from tungstenite on an established
+    /// connection. Handshake failures are
+    /// [`WsError::HandshakeRejected`] or [`WsError::Handshake`].
     #[error("WebSocket transport error: {0}")]
     Transport(#[from] tokio_tungstenite::tungstenite::Error),
+    /// The server answered the upgrade with another HTTP status:
+    /// 401 or 403 rejects the credential, a 3xx is a redirect, which
+    /// is never followed. Not retried, with this credential or any
+    /// other. `headers` are the response headers with secret values,
+    /// including any in a `Location` URL, redacted.
+    #[error("{}", handshake_rejection_text(*.status, .headers))]
+    HandshakeRejected {
+        /// The HTTP status of the response.
+        status: u16,
+        /// Response headers, names lowercased, secrets redacted.
+        headers: Vec<(String, String)>,
+    },
+    /// The upgrade failed without an HTTP response: the connection
+    /// was refused, TLS failed, or the reply was not a WebSocket
+    /// upgrade. The reason never contains the request URL.
+    #[error("WebSocket handshake failed: {0}")]
+    Handshake(String),
+    /// The selected credential cannot be sent: the API does not
+    /// accept its kind, or the request already carries the header,
+    /// query parameter, or cookie it would use. Never contains the
+    /// credential's value.
+    #[error("Invalid credential: {0}")]
+    InvalidCredential(String),
+    /// The handshake URL is not a valid absolute URL.
+    #[error("Invalid WebSocket URL: {0}")]
+    InvalidUrl(String),
     /// JSON serialization/deserialization error.
     #[error("Serialization error: {0}")]
     Serde(#[from] serde_json::Error),
-    /// Authentication failed.
-    #[error("Authentication failed: {0}")]
-    AuthRejected(String),
-    /// Authentication timed out.
-    #[error("Authentication timed out")]
-    AuthTimeout,
-    /// WebSocket handshake timed out.
-    #[error("Handshake timed out after {0}s")]
-    HandshakeTimeout(u64),
+    /// The setup callback rejected the session, for example a
+    /// refused authentication message. Terminal: the client closes
+    /// and nothing is retried.
+    #[error("Setup rejected: {0}")]
+    SetupRejected(String),
+    /// The setup callback failed in a way a new connection may not
+    /// repeat. It counts as one failed attempt.
+    #[error("Setup failed: {0}")]
+    Setup(String),
+    /// The opening message could not be written. It counts as one
+    /// failed attempt.
+    #[error("Could not write the opening message: {0}")]
+    OpeningWrite(String),
+    /// One connection attempt (upgrade, opening message, and setup)
+    /// did not finish within `WsClientOptions::handshake_timeout`.
+    #[error("Connection attempt timed out after {0:?}")]
+    HandshakeTimeout(std::time::Duration),
+    /// No inbound frame of any kind arrived for
+    /// `WsClientOptions::receive_timeout`; the connection is treated
+    /// as lost.
+    #[error("No inbound frame for {0:?}")]
+    ReceiveTimeout(std::time::Duration),
     /// Request timed out waiting for a correlated response.
     #[error("Request timed out after {0}s")]
     RequestTimeout(u64),
@@ -46,7 +87,19 @@ pub enum WsError {
     /// Correlation error (unmatched response).
     #[error("Correlation error: {0}")]
     Correlation(String),
-    /// A connection header could not be represented as an HTTP header.
+    /// An inbound frame is not JSON, matches no declared message, or
+    /// does not decode as the message its selectors name. The
+    /// connection stays open.
+    #[error("Could not decode an inbound {} frame: {reason}", frame.kind())]
+    Decode {
+        /// The frame exactly as received.
+        frame: WsRawFrame,
+        /// Why it was not decoded.
+        reason: String,
+    },
+    /// A connection header could not be represented as an HTTP
+    /// header, is managed by the WebSocket upgrade, or would carry
+    /// the API's credential a second time.
     ///
     /// Returned instead of silently dropping the header, so a malformed
     /// auth header surfaces here rather than as an opaque auth rejection.
@@ -58,12 +111,62 @@ pub enum WsError {
         reason: String,
     },
 }
+impl WsError {
+    /// Whether this is a handshake answer a redial would receive
+    /// again: 401, 403, or a redirect.
+    #[must_use]
+    pub fn is_terminal_handshake_rejection(&self) -> bool {
+        matches!(
+            self, Self::HandshakeRejected { status, .. } if matches!(status, 401 | 403 |
+            300..= 399)
+        )
+    }
+    /// Whether a failed attempt ends the client instead of using the
+    /// reconnect budget: a terminal handshake rejection or a setup
+    /// rejection.
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        self.is_terminal_handshake_rejection() || matches!(self, Self::SetupRejected(_))
+    }
+    /// The redacted `Location` of a rejected handshake, if it sent one.
+    #[must_use]
+    pub fn location(&self) -> Option<&str> {
+        match self {
+            Self::HandshakeRejected { headers, .. } => {
+                headers
+                    .iter()
+                    .find(|(name, _)| name == "location")
+                    .map(|(_, value)| value.as_str())
+            }
+            _ => None,
+        }
+    }
+}
+fn handshake_rejection_text(status: u16, headers: &[(String, String)]) -> String {
+    let location = headers
+        .iter()
+        .find(|(name, _)| name == "location")
+        .map(|(_, value)| value);
+    match location {
+        Some(location) if (300..400).contains(&status) => {
+            format!(
+                "WebSocket handshake redirected with HTTP {status} to {location}; redirects are not followed"
+            )
+        }
+        _ => format!("WebSocket handshake rejected with HTTP {status}"),
+    }
+}
 /// Options for configuring a WebSocket client connection.
 #[derive(Debug, Clone)]
 pub struct WsClientOptions {
-    /// Timeout for the WebSocket handshake.
+    /// Bound on one connection attempt: the upgrade, the opening
+    /// message, and the setup callback together. The explicit connect
+    /// makes one attempt; each reconnect gets the full bound again.
     pub handshake_timeout: std::time::Duration,
-    /// Timeout for receiving any message.
+    /// Inbound idle limit once a connection is ready: this long
+    /// without a frame of any kind, pings and pongs included, loses
+    /// the connection with [`WsError::ReceiveTimeout`]. Outbound
+    /// traffic does not reset it. `None` never times out.
     pub receive_timeout: Option<std::time::Duration>,
     /// Default timeout for correlated request-response calls.
     pub request_timeout: std::time::Duration,
@@ -81,6 +184,9 @@ pub struct WsClientOptions {
     pub websocket_config: Option<
         tokio_tungstenite::tungstenite::protocol::WebSocketConfig,
     >,
+    /// The credential for this connect, ahead of the client's and
+    /// the environment's. `Debug` never shows its value.
+    pub credential: Option<schematic_runtime::Credential>,
 }
 impl Default for WsClientOptions {
     fn default() -> Self {
@@ -94,6 +200,7 @@ impl Default for WsClientOptions {
             reconnect: None,
             disable_nagle: false,
             websocket_config: None,
+            credential: None,
         }
     }
 }
@@ -169,6 +276,12 @@ impl WsClientOptionsBuilder {
         self.options.websocket_config = config;
         self
     }
+    /// Set the credential for this connect.
+    #[must_use]
+    pub fn credential(mut self, credential: schematic_runtime::Credential) -> Self {
+        self.options.credential = Some(credential);
+        self
+    }
     /// Build options.
     #[must_use]
     pub fn build(self) -> WsClientOptions {
@@ -186,7 +299,9 @@ pub struct ReconnectPolicy {
     pub multiplier: f64,
     /// Random jitter ratio (0.0 to 1.0).
     pub jitter: f64,
-    /// Maximum number of reconnect attempts (None = unlimited).
+    /// Consecutive failed reconnect attempts allowed before the
+    /// client closes; a connection that completes setup resets the
+    /// count. `Some(0)` never reconnects, `None` is unlimited.
     pub max_attempts: Option<u32>,
 }
 impl Default for ReconnectPolicy {
@@ -207,7 +322,7 @@ pub enum WsConnectionState {
     Disconnected,
     /// Establishing connection.
     Connecting,
-    /// Performing authentication.
+    /// Upgraded; sending the opening message or running setup.
     Authenticating,
     /// Connected and ready for messages.
     Ready,
@@ -228,7 +343,7 @@ impl std::fmt::Display for WsConnectionState {
         }
     }
 }
-/// Internal command sent to the writer task.
+/// A frame queued for the supervisor to write.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub(crate) enum WriterCommand {
@@ -236,24 +351,40 @@ pub(crate) enum WriterCommand {
     SendText(String),
     /// Send a binary message.
     SendBinary(Vec<u8>),
-    /// Initiate graceful close.
-    Close,
 }
-/// Handle to an active WebSocket connection's transport tasks.
+impl WriterCommand {
+    fn into_message(self) -> tokio_tungstenite::tungstenite::Message {
+        match self {
+            Self::SendText(text) => {
+                tokio_tungstenite::tungstenite::Message::Text(text.into())
+            }
+            Self::SendBinary(data) => {
+                tokio_tungstenite::tungstenite::Message::Binary(data.into())
+            }
+        }
+    }
+}
+/// Handle to an active WebSocket connection's supervisor task.
 ///
 /// Provides channels for sending messages and observing connection state.
-/// Dropping this handle signals the transport tasks to shut down.
+/// Dropping this handle stops the supervisor at once; nothing redials.
 pub struct WsTransportHandle {
-    /// Channel for sending commands to the writer task.
-    pub(crate) writer_tx: mpsc::Sender<WriterCommand>,
+    /// Frames for the supervisor to write, each tagged with the
+    /// connection it was sent on.
+    pub(crate) writer_tx: mpsc::Sender<(u64, WriterCommand)>,
+    /// The number of the current connection; a reconnect that
+    /// becomes ready increments it before publishing `Ready`.
+    pub(crate) connection: Arc<AtomicU64>,
     /// Connection state watcher.
     pub(crate) state_rx: watch::Receiver<WsConnectionState>,
+    /// Set to ask the supervisor for a graceful close.
+    pub(crate) shutdown: watch::Sender<bool>,
     /// Supervisor task join handle.
     pub(crate) supervisor_handle: JoinHandle<()>,
     /// Monotonic request ID generator.
     pub(crate) next_id: Arc<AtomicU64>,
     /// Pending correlated requests awaiting responses.
-    pub(crate) pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
+    pub(crate) pending: PendingRequests,
 }
 impl WsTransportHandle {
     /// Returns the current connection state.
@@ -263,6 +394,38 @@ impl WsTransportHandle {
     /// Returns a cloned watch receiver for connection state changes.
     pub fn state_watcher(&self) -> watch::Receiver<WsConnectionState> {
         self.state_rx.clone()
+    }
+    /// Queues `command` for the current connection, waiting while the
+    /// outbound queue is full.
+    ///
+    /// ## Errors
+    ///
+    /// [`WsError::Disconnected`] unless the connection is ready both
+    /// when called and once the queue has room: a message is never
+    /// held for a later connection. A command queued just before a
+    /// loss is dropped by the supervisor, never written to the
+    /// replacement.
+    pub(crate) async fn send(&self, command: WriterCommand) -> Result<(), WsError> {
+        use std::sync::atomic::Ordering;
+        let connection = self.connection.load(Ordering::SeqCst);
+        if self.state() != WsConnectionState::Ready {
+            return Err(WsError::Disconnected);
+        }
+        let permit = self.writer_tx.reserve().await.map_err(|_| WsError::Disconnected)?;
+        if self.connection.load(Ordering::SeqCst) != connection
+            || self.state() != WsConnectionState::Ready
+        {
+            return Err(WsError::Disconnected);
+        }
+        permit.send((connection, command));
+        Ok(())
+    }
+    /// Asks the supervisor to close and waits until it has: during a
+    /// reconnect backoff, dial, or setup the attempt is abandoned.
+    pub(crate) async fn close(&self) {
+        self.shutdown.send_replace(true);
+        let mut state = self.state_rx.clone();
+        let _ = state.wait_for(|state| *state == WsConnectionState::Closed).await;
     }
 }
 impl Drop for WsTransportHandle {
@@ -292,23 +455,1126 @@ pub(crate) fn reconnect_delay(
     let offset = (normalized * 2.0 - 1.0) * span;
     std::time::Duration::from_secs_f64((base_secs + offset).max(0.0))
 }
-/// Trait for types that can be encoded to a WebSocket frame.
-pub trait WsEncode {
-    /// Encode this value to a WebSocket text frame payload.
-    fn ws_encode(&self) -> Result<String, WsError>;
+/// Upgrade headers the WebSocket handshake sets itself; a caller
+/// header may not replace them.
+const MANAGED_UPGRADE_HEADERS: [&str; 7] = [
+    "host",
+    "connection",
+    "upgrade",
+    "sec-websocket-key",
+    "sec-websocket-version",
+    "sec-websocket-accept",
+    "sec-websocket-extensions",
+];
+/// One explicit connect's handshake: the URL and headers with the
+/// selected credential already placed, kept privately so redials
+/// send exactly the same credential. `Debug` shows the URL with
+/// secret query values redacted and header names only.
+pub struct WsHandshake {
+    url: String,
+    headers: tokio_tungstenite::tungstenite::http::HeaderMap,
+    credential: schematic_runtime::HandshakeCredential,
+    secrets: schematic_runtime::SecretNames,
 }
-/// Trait for types that can be decoded from a WebSocket frame.
-pub trait WsDecode: Sized {
-    /// Decode from a WebSocket text frame payload.
-    fn ws_decode(text: &str) -> Result<Self, WsError>;
-}
-impl<T: serde::Serialize> WsEncode for T {
-    fn ws_encode(&self) -> Result<String, WsError> {
-        serde_json::to_string(self).map_err(WsError::Serde)
+impl WsHandshake {
+    /// Places `credential` onto `url` and the caller's `headers`.
+    ///
+    /// ## Errors
+    ///
+    /// [`WsError::InvalidUrl`]; [`WsError::InvalidHeader`] for a
+    /// header that is malformed, managed by the upgrade, or named in
+    /// `credential_headers`; [`WsError::InvalidCredential`] when the
+    /// request already carries the credential's query value or
+    /// cookie.
+    pub(crate) fn new(
+        url: &str,
+        headers: &[(String, String)],
+        credential_headers: &[&str],
+        credential: &schematic_runtime::HandshakeCredential,
+        secrets: schematic_runtime::SecretNames,
+    ) -> Result<Self, WsError> {
+        use tokio_tungstenite::tungstenite::http::header::{HeaderName, HeaderValue};
+        let mut url = schematic_runtime::Url::parse(url)
+            .map_err(|error| WsError::InvalidUrl(error.to_string()))?;
+        let mut map = tokio_tungstenite::tungstenite::http::HeaderMap::new();
+        for (name, value) in headers {
+            let invalid = |reason: &str| WsError::InvalidHeader {
+                name: name.clone(),
+                reason: reason.to_string(),
+            };
+            let lower = name.to_ascii_lowercase();
+            if MANAGED_UPGRADE_HEADERS.contains(&lower.as_str()) {
+                return Err(invalid("the WebSocket upgrade sets this header"));
+            }
+            if credential_headers.iter().any(|header| header.eq_ignore_ascii_case(name))
+            {
+                return Err(
+                    invalid(
+                        "this header carries the API's credential; set it with `credentials`",
+                    ),
+                );
+            }
+            let header_name = name
+                .parse::<HeaderName>()
+                .map_err(|_| invalid("not a valid header name"))?;
+            let header_value = value
+                .parse::<HeaderValue>()
+                .map_err(|_| invalid("not a valid header value"))?;
+            map.insert(header_name, header_value);
+        }
+        credential
+            .apply(&mut url, &mut map)
+            .map_err(|error| WsError::InvalidCredential(error.to_string()))?;
+        Ok(Self {
+            url: url.as_str().to_string(),
+            headers: map,
+            credential: credential.clone(),
+            secrets,
+        })
+    }
+    /// Where the placed credential came from.
+    pub(crate) fn auth_method(&self) -> &schematic_runtime::AuthMethod {
+        self.credential.auth_method()
+    }
+    /// The selected credential, for an opening field or a setup
+    /// message that carries it too.
+    pub(crate) fn credential(&self) -> &schematic_runtime::HandshakeCredential {
+        &self.credential
+    }
+    /// The URL with secret query values redacted.
+    #[must_use]
+    pub fn redacted_url(&self) -> String {
+        self.secrets.redact_url_reference(&self.url).as_str().to_string()
+    }
+    /// Performs the upgrade; the caller bounds it with the attempt's
+    /// timeout.
+    ///
+    /// ## Errors
+    ///
+    /// [`WsError::HandshakeRejected`] for any non-101 answer (a
+    /// redirect is not followed), and [`WsError::Handshake`] for
+    /// every other failure.
+    pub(crate) async fn dial(
+        &self,
+        options: &WsClientOptions,
+    ) -> Result<WsStream, WsError> {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let mut request = self
+            .url
+            .as_str()
+            .into_client_request()
+            .map_err(|error| self.handshake_error(error))?;
+        for (name, value) in &self.headers {
+            request.headers_mut().append(name.clone(), value.clone());
+        }
+        let connect = tokio_tungstenite::connect_async_with_config(
+            request,
+            options.websocket_config,
+            options.disable_nagle,
+        );
+        match connect.await {
+            Err(error) => Err(self.handshake_error(error)),
+            Ok((stream, _)) => Ok(stream),
+        }
+    }
+    fn handshake_error(&self, error: tokio_tungstenite::tungstenite::Error) -> WsError {
+        match error {
+            tokio_tungstenite::tungstenite::Error::Http(response) => {
+                let headers = self
+                    .secrets
+                    .redact_headers(response.headers())
+                    .iter()
+                    .map(|(name, value)| {
+                        (
+                            name.as_str().to_string(),
+                            String::from_utf8_lossy(value.as_bytes()).into_owned(),
+                        )
+                    })
+                    .collect();
+                WsError::HandshakeRejected {
+                    status: response.status().as_u16(),
+                    headers,
+                }
+            }
+            other => {
+                WsError::Handshake(
+                    other.to_string().replace(&self.url, &self.redacted_url()),
+                )
+            }
+        }
     }
 }
-impl<T: serde::de::DeserializeOwned> WsDecode for T {
-    fn ws_decode(text: &str) -> Result<Self, WsError> {
-        serde_json::from_str(text).map_err(WsError::Serde)
+impl std::fmt::Debug for WsHandshake {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WsHandshake")
+            .field("url", &self.redacted_url())
+            .field(
+                "headers",
+                &self.headers.keys().map(|name| name.as_str()).collect::<Vec<_>>(),
+            )
+            .field("auth_method", self.auth_method())
+            .finish()
+    }
+}
+/// A correlated request waiting for its answer.
+pub(crate) struct PendingRequest {
+    /// The message that may answer it; `None` accepts any frame
+    /// carrying the id (`request_value`).
+    response: Option<&'static str>,
+    reply: oneshot::Sender<WsInboundFrame>,
+}
+/// Pending correlated requests by wire id.
+pub(crate) type PendingRequests = Arc<Mutex<HashMap<String, PendingRequest>>>;
+fn lock_pending(
+    pending: &PendingRequests,
+) -> std::sync::MutexGuard<'_, HashMap<String, PendingRequest>> {
+    pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+/// The map key and the wire value of request id `id`: a JSON string
+/// when `string_ids`, otherwise a JSON number.
+pub(crate) fn request_id(id: u64, string_ids: bool) -> (String, serde_json::Value) {
+    let key = id.to_string();
+    let wire = if string_ids {
+        serde_json::Value::String(key.clone())
+    } else {
+        serde_json::Value::from(id)
+    };
+    (key, wire)
+}
+/// Removes its pending request when dropped, so a request that
+/// fails to send, times out, or is cancelled frees its slot.
+pub(crate) struct PendingGuard {
+    pending: PendingRequests,
+    key: String,
+}
+impl PendingGuard {
+    /// Registers a request under `key`.
+    ///
+    /// ## Errors
+    ///
+    /// [`WsError::BackpressureFull`] when `limit` requests are
+    /// already pending.
+    pub(crate) fn insert(
+        pending: &PendingRequests,
+        key: String,
+        response: Option<&'static str>,
+        reply: oneshot::Sender<WsInboundFrame>,
+        limit: usize,
+    ) -> Result<Self, WsError> {
+        let mut table = lock_pending(pending);
+        if table.len() >= limit {
+            return Err(WsError::BackpressureFull(limit));
+        }
+        table.insert(key.clone(), PendingRequest { response, reply });
+        Ok(Self {
+            pending: pending.clone(),
+            key,
+        })
+    }
+}
+impl Drop for PendingGuard {
+    fn drop(&mut self) {
+        lock_pending(&self.pending).remove(&self.key);
+    }
+}
+/// Completes the pending request `frame` answers and returns `None`,
+/// or returns the frame for the event queue. A frame answers a
+/// request when its `id_field` holds the request's id with the
+/// declared JSON type and `selected_message` names the request's
+/// declared response.
+pub(crate) fn answer_pending(
+    pending: &PendingRequests,
+    frame: WsInboundFrame,
+    id_field: &str,
+    string_ids: bool,
+    selected_message: fn(&WsInboundFrame) -> Option<&'static str>,
+) -> Option<WsInboundFrame> {
+    let id = frame.value().get(id_field);
+    let key = if string_ids {
+        id.and_then(serde_json::Value::as_str).map(str::to_string)
+    } else {
+        id.and_then(serde_json::Value::as_u64).map(|id| id.to_string())
+    };
+    let Some(key) = key else {
+        return Some(frame);
+    };
+    let mut table = lock_pending(pending);
+    let answers = table
+        .get(&key)
+        .is_some_and(|request| {
+            request
+                .response
+                .is_none_or(|response| selected_message(&frame) == Some(response))
+        });
+    if !answers {
+        return Some(frame);
+    }
+    if let Some(request) = table.remove(&key) {
+        let _ = request.reply.send(frame);
+    }
+    None
+}
+/// Drops every pending request, waking each caller with
+/// [`WsError::Disconnected`].
+pub(crate) fn fail_pending(pending: &PendingRequests) {
+    lock_pending(pending).clear();
+}
+/// Drops the commands queued for a lost connection. Returns `true`
+/// when the client is gone.
+pub(crate) fn discard_queued(
+    writer_rx: &mut mpsc::Receiver<(u64, WriterCommand)>,
+) -> bool {
+    loop {
+        match writer_rx.try_recv() {
+            Err(mpsc::error::TryRecvError::Disconnected) => return true,
+            Ok(_) => {}
+            Err(mpsc::error::TryRecvError::Empty) => return false,
+        }
+    }
+}
+/// The transport of one connection.
+pub(crate) type WsStream = tokio_tungstenite::WebSocketStream<
+    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+>;
+/// One inbound event: a frame, or an error the caller is told about.
+type WsEvent = Result<WsInboundFrame, WsError>;
+/// How long a manual close waits for its Close frame to be written.
+const CLOSE_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+/// Why a setup callback, or one of its session operations, failed.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum WsSetupError {
+    /// The server refused the session, for example its
+    /// authentication. Terminal: the client closes without trying
+    /// another credential or connection.
+    #[error("setup rejected: {0}")]
+    Rejected(String),
+    /// A failure a new connection may not repeat; it uses the
+    /// reconnect budget.
+    #[error("setup failed: {0}")]
+    Transient(String),
+    /// The peer closed the connection during setup.
+    #[error("the connection closed during setup")]
+    Closed,
+    /// The transport failed during setup.
+    #[error("transport error during setup: {0}")]
+    Io(String),
+    /// A setup message did not encode or decode.
+    #[error("setup message codec error: {0}")]
+    Codec(String),
+    /// The attempt this session belongs to has ended (it finished,
+    /// timed out, or the client closed), so the session can no longer
+    /// reach the connection.
+    #[error("the setup session is no longer valid")]
+    SessionInvalid,
+}
+impl WsSetupError {
+    /// Whether the failure ends the client: only [`Self::Rejected`].
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Rejected(_))
+    }
+}
+/// Where an attempt's connection is while setup runs.
+enum SetupSlot {
+    Idle(Box<WsStream>),
+    Busy,
+    Revoked,
+}
+type SharedSetupSlot = Arc<Mutex<SetupSlot>>;
+fn lock_slot(slot: &SharedSetupSlot) -> std::sync::MutexGuard<'_, SetupSlot> {
+    slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+/// The untyped half of a setup session: exclusive access to one
+/// attempt's connection until the attempt ends.
+///
+/// Each operation checks the connection out of a slot shared with the
+/// attempt (no lock is held across an await) and races its I/O
+/// against revocation, so a session moved into another task cannot
+/// keep the connection once its attempt is over.
+pub struct WsSetupChannel {
+    slot: SharedSetupSlot,
+    revoked: watch::Receiver<bool>,
+    credential: schematic_runtime::HandshakeCredential,
+    binary: bool,
+}
+impl WsSetupChannel {
+    async fn send_message(
+        &mut self,
+        message: tokio_tungstenite::tungstenite::Message,
+    ) -> Result<(), WsSetupError> {
+        use futures_util::SinkExt;
+        let mut stream = self.checkout()?;
+        let sent = tokio::select! {
+            biased; () = revoked(& mut self.revoked) => None, sent = stream.send(message)
+            => Some(sent),
+        };
+        match sent {
+            None => Err(WsSetupError::SessionInvalid),
+            Some(Err(error)) => Err(WsSetupError::Io(error.to_string())),
+            Some(Ok(())) => self.checkin(stream),
+        }
+    }
+    async fn send_json<T: serde::Serialize + ?Sized>(
+        &mut self,
+        payload: &T,
+    ) -> Result<(), WsSetupError> {
+        let codec = |error: serde_json::Error| WsSetupError::Codec(error.to_string());
+        let message = if self.binary {
+            tokio_tungstenite::tungstenite::Message::Binary(
+                serde_json::to_vec(payload).map_err(codec)?.into(),
+            )
+        } else {
+            tokio_tungstenite::tungstenite::Message::Text(
+                serde_json::to_string(payload).map_err(codec)?.into(),
+            )
+        };
+        self.send_message(message).await
+    }
+    /// The next data frame; pings and pongs are skipped.
+    async fn next_frame(&mut self) -> Result<WsInboundFrame, WsSetupError> {
+        let mut stream = self.checkout()?;
+        let received = tokio::select! {
+            biased; () = revoked(& mut self.revoked) => None, received =
+            next_data_frame(& mut stream) => Some(received),
+        };
+        match received {
+            None => Err(WsSetupError::SessionInvalid),
+            Some(Err(error)) => Err(error),
+            Some(Ok(raw)) => {
+                self.checkin(stream)?;
+                WsInboundFrame::parse(raw)
+                    .map_err(|error| WsSetupError::Codec(error.to_string()))
+            }
+        }
+    }
+    fn checkout(&self) -> Result<Box<WsStream>, WsSetupError> {
+        let mut slot = lock_slot(&self.slot);
+        match std::mem::replace(&mut *slot, SetupSlot::Busy) {
+            SetupSlot::Idle(stream) => Ok(stream),
+            other => {
+                *slot = other;
+                Err(WsSetupError::SessionInvalid)
+            }
+        }
+    }
+    fn checkin(&self, stream: Box<WsStream>) -> Result<(), WsSetupError> {
+        let mut slot = lock_slot(&self.slot);
+        if matches!(* slot, SetupSlot::Busy) {
+            *slot = SetupSlot::Idle(stream);
+            Ok(())
+        } else {
+            Err(WsSetupError::SessionInvalid)
+        }
+    }
+}
+async fn revoked(revoked: &mut watch::Receiver<bool>) {
+    let _ = revoked.wait_for(|revoked| *revoked).await;
+}
+async fn next_data_frame(stream: &mut WsStream) -> Result<WsRawFrame, WsSetupError> {
+    use futures_util::StreamExt;
+    use tokio_tungstenite::tungstenite::Message;
+    loop {
+        match stream.next().await {
+            None | Some(Ok(Message::Close(_))) => return Err(WsSetupError::Closed),
+            Some(Err(error)) => return Err(WsSetupError::Io(error.to_string())),
+            Some(Ok(Message::Text(text))) => {
+                return Ok(WsRawFrame::Text(text.to_string()));
+            }
+            Some(Ok(Message::Binary(data))) => {
+                return Ok(WsRawFrame::Binary(data.to_vec()));
+            }
+            Some(Ok(_)) => {}
+        }
+    }
+}
+/// The supervisor's side of a setup session's slot. Dropping it (the
+/// attempt failed, timed out, or the client closed) revokes the
+/// session and drops a connection the session is not using.
+struct SetupGuard {
+    slot: SharedSetupSlot,
+    revoke: watch::Sender<bool>,
+}
+impl SetupGuard {
+    fn new(
+        stream: WsStream,
+        credential: schematic_runtime::HandshakeCredential,
+        binary: bool,
+    ) -> (WsSetupChannel, Self) {
+        let slot = Arc::new(Mutex::new(SetupSlot::Idle(Box::new(stream))));
+        let (revoke, revoked) = watch::channel(false);
+        let channel = WsSetupChannel {
+            slot: Arc::clone(&slot),
+            revoked,
+            credential,
+            binary,
+        };
+        (channel, Self { slot, revoke })
+    }
+    /// Takes the connection back once setup has succeeded.
+    fn reclaim(self) -> Result<WsStream, WsError> {
+        match std::mem::replace(&mut *lock_slot(&self.slot), SetupSlot::Revoked) {
+            SetupSlot::Idle(stream) => Ok(*stream),
+            _ => {
+                Err(
+                    WsError::Setup(
+                        "setup returned while one of its session operations still held the connection"
+                            .to_string(),
+                    ),
+                )
+            }
+        }
+    }
+}
+impl Drop for SetupGuard {
+    fn drop(&mut self) {
+        let taken = std::mem::replace(&mut *lock_slot(&self.slot), SetupSlot::Revoked);
+        drop(taken);
+        self.revoke.send_replace(true);
+    }
+}
+/// A setup callback's typed access to one connection attempt, after
+/// the upgrade and the opening message and before the client reports
+/// the connection ready. `C` is the endpoint's client message enum,
+/// `S` its server message enum.
+///
+/// The session is valid only while its callback's attempt lasts; an
+/// operation after that returns [`WsSetupError::SessionInvalid`].
+/// Frames the callback does not read are delivered as events once the
+/// connection is ready.
+pub struct WsSetupSession<C, S> {
+    channel: WsSetupChannel,
+    decode: fn(WsInboundFrame) -> Result<S, WsError>,
+    _client: std::marker::PhantomData<fn(C)>,
+}
+impl<C: serde::Serialize, S> WsSetupSession<C, S> {
+    pub(crate) fn new(
+        channel: WsSetupChannel,
+        decode: fn(WsInboundFrame) -> Result<S, WsError>,
+    ) -> Self {
+        Self {
+            channel,
+            decode,
+            _client: std::marker::PhantomData,
+        }
+    }
+    /// The credential selected for this connect, the one the
+    /// handshake carried. Its `Debug` never shows the value; read the
+    /// key or token with
+    /// [`schematic_runtime::HandshakeCredential::expose_secret`].
+    #[must_use]
+    pub fn credential(&self) -> &schematic_runtime::HandshakeCredential {
+        &self.channel.credential
+    }
+    /// Sends one message, written as its payload alone.
+    ///
+    /// ## Errors
+    ///
+    /// [`WsSetupError::Codec`], [`WsSetupError::Io`], or
+    /// [`WsSetupError::SessionInvalid`].
+    pub async fn send(&mut self, message: C) -> Result<(), WsSetupError> {
+        self.channel.send_json(&message).await
+    }
+    /// Sends an arbitrary JSON value, bypassing the declared messages.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::send`].
+    pub async fn send_value(
+        &mut self,
+        value: serde_json::Value,
+    ) -> Result<(), WsSetupError> {
+        self.channel.send_json(&value).await
+    }
+    /// Receives the next data frame, decoded as the message its
+    /// selectors name. Pings and pongs are skipped.
+    ///
+    /// ## Errors
+    ///
+    /// [`WsSetupError::Closed`] when the peer closes,
+    /// [`WsSetupError::Codec`] when the frame does not decode,
+    /// [`WsSetupError::Io`], or [`WsSetupError::SessionInvalid`].
+    pub async fn next_message(&mut self) -> Result<S, WsSetupError> {
+        let frame = self.channel.next_frame().await?;
+        (self.decode)(frame).map_err(|error| WsSetupError::Codec(error.to_string()))
+    }
+    /// Receives the next data frame as a JSON value.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::next_message`].
+    pub async fn next_value(&mut self) -> Result<serde_json::Value, WsSetupError> {
+        self.channel.next_frame().await.map(WsInboundFrame::into_value)
+    }
+}
+impl<C, S> std::fmt::Debug for WsSetupSession<C, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WsSetupSession")
+            .field("credential", &self.channel.credential)
+            .finish_non_exhaustive()
+    }
+}
+/// The boxed future a setup callback returns.
+pub(crate) type SetupFuture = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<(), WsSetupError>> + Send>,
+>;
+/// A setup callback, called once per attempt with a fresh session.
+pub(crate) type SetupFactory = Arc<dyn Fn(WsSetupChannel) -> SetupFuture + Send + Sync>;
+/// How a correlated endpoint's answers are recognized.
+#[derive(Clone, Copy)]
+pub(crate) struct CorrelationConfig {
+    pub(crate) id_field: &'static str,
+    pub(crate) string_ids: bool,
+    pub(crate) selected_message: fn(&WsInboundFrame) -> Option<&'static str>,
+}
+/// Everything one explicit connect retains for its redials.
+pub(crate) struct WsSession {
+    pub(crate) handshake: WsHandshake,
+    /// The opening message, serialized once when connecting and
+    /// written first on every connection.
+    pub(crate) opening: Option<tokio_tungstenite::tungstenite::Message>,
+    pub(crate) setup: Option<SetupFactory>,
+    pub(crate) correlation: Option<CorrelationConfig>,
+    /// Whether messages are written as binary frames.
+    pub(crate) binary: bool,
+}
+/// Serializes an endpoint's opening payload once, binding its
+/// declared credential field to the handshake credential: an absent,
+/// null, or empty field is filled from the selected key or token, an
+/// equal value is kept, and a different value is refused.
+///
+/// ## Errors
+///
+/// [`WsError::InvalidCredential`] for a conflicting value (never
+/// showing either value), [`WsError::Protocol`] when a payload that
+/// must carry the credential is not a JSON object, and
+/// [`WsError::Serde`].
+pub(crate) fn opening_message<T: serde::Serialize + ?Sized>(
+    payload: &T,
+    credential_field: Option<&str>,
+    credential: &schematic_runtime::HandshakeCredential,
+    binary: bool,
+) -> Result<tokio_tungstenite::tungstenite::Message, WsError> {
+    use tokio_tungstenite::tungstenite::Message;
+    let bound = credential_field.zip(credential.expose_secret());
+    let encoded = match bound {
+        None if binary => return Ok(Message::Binary(serde_json::to_vec(payload)?.into())),
+        None => return Ok(Message::Text(serde_json::to_string(payload)?.into())),
+        Some((field, secret)) => {
+            let mut value = serde_json::to_value(payload)?;
+            let Some(object) = value.as_object_mut() else {
+                return Err(
+                    WsError::Protocol(
+                        format!(
+                            "the opening payload must be a JSON object to carry the credential in `{field}`"
+                        ),
+                    ),
+                );
+            };
+            match object.get(field) {
+                None | Some(serde_json::Value::Null) => {}
+                Some(
+                    serde_json::Value::String(given),
+                ) if given.is_empty() || given == secret => {}
+                Some(_) => {
+                    return Err(
+                        WsError::InvalidCredential(
+                            format!(
+                                "the opening payload's `{field}` differs from the credential selected for the handshake; supply the credential once"
+                            ),
+                        ),
+                    );
+                }
+            }
+            object
+                .insert(
+                    field.to_string(),
+                    serde_json::Value::String(secret.to_string()),
+                );
+            value
+        }
+    };
+    if binary {
+        Ok(Message::Binary(serde_json::to_vec(&encoded)?.into()))
+    } else {
+        Ok(Message::Text(serde_json::to_string(&encoded)?.into()))
+    }
+}
+/// One attempt within the per-attempt timeout.
+async fn run_attempt(
+    session: &WsSession,
+    options: &WsClientOptions,
+    state: &watch::Sender<WsConnectionState>,
+) -> Result<WsStream, WsError> {
+    let limit = options.handshake_timeout;
+    match tokio::time::timeout(limit, attempt(session, options, state)).await {
+        Ok(result) => result,
+        Err(_) => Err(WsError::HandshakeTimeout(limit)),
+    }
+}
+/// Upgrade, write the opening message, run setup, and take the
+/// connection back. Dropping this future revokes the setup session.
+async fn attempt(
+    session: &WsSession,
+    options: &WsClientOptions,
+    state: &watch::Sender<WsConnectionState>,
+) -> Result<WsStream, WsError> {
+    use futures_util::SinkExt;
+    let mut stream = session.handshake.dial(options).await?;
+    if session.opening.is_some() || session.setup.is_some() {
+        state.send_replace(WsConnectionState::Authenticating);
+    }
+    if let Some(opening) = &session.opening {
+        stream
+            .send(opening.clone())
+            .await
+            .map_err(|error| WsError::OpeningWrite(error.to_string()))?;
+    }
+    if let Some(setup) = &session.setup {
+        let (channel, guard) = SetupGuard::new(
+            stream,
+            session.handshake.credential().clone(),
+            session.binary,
+        );
+        setup(channel)
+            .await
+            .map_err(|error| match error {
+                WsSetupError::Rejected(reason) => WsError::SetupRejected(reason),
+                other => WsError::Setup(other.to_string()),
+            })?;
+        stream = guard.reclaim()?;
+    }
+    Ok(stream)
+}
+/// Makes the explicit connect's one attempt inline (dropping the
+/// returned future leaves nothing running), then spawns the
+/// supervisor for the ready connection.
+///
+/// ## Errors
+///
+/// The attempt's error: a handshake failure,
+/// [`WsError::OpeningWrite`], [`WsError::SetupRejected`],
+/// [`WsError::Setup`], or [`WsError::HandshakeTimeout`].
+pub(crate) async fn connect_session(
+    session: WsSession,
+    options: WsClientOptions,
+) -> Result<(WsTransportHandle, mpsc::Receiver<WsEvent>), WsError> {
+    let (state_tx, state_rx) = watch::channel(WsConnectionState::Connecting);
+    let stream = run_attempt(&session, &options, &state_tx).await?;
+    state_tx.send_replace(WsConnectionState::Ready);
+    let (writer_tx, writer_rx) = mpsc::channel(options.outbound_capacity);
+    let connection = Arc::new(AtomicU64::new(1));
+    let (event_tx, event_rx) = mpsc::channel(options.inbound_capacity);
+    let (shutdown, shutdown_rx) = watch::channel(false);
+    let pending = PendingRequests::default();
+    let supervisor = Supervisor {
+        session,
+        options,
+        state: state_tx,
+        events: event_tx,
+        held: None,
+        writer_rx,
+        connection: Arc::clone(&connection),
+        shutdown: shutdown_rx,
+        pending: pending.clone(),
+    };
+    let supervisor_handle = tokio::spawn(supervisor.run(stream));
+    let transport = WsTransportHandle {
+        writer_tx,
+        connection,
+        state_rx,
+        shutdown,
+        supervisor_handle,
+        next_id: Arc::new(AtomicU64::new(1)),
+        pending,
+    };
+    Ok((transport, event_rx))
+}
+/// Why serving a connection ended.
+enum Served {
+    /// A manual close or a dropped client.
+    Shutdown,
+    /// The connection was lost; the error, if any, is reported.
+    Lost(Option<WsError>),
+}
+/// Owns the connection after the first `Ready`.
+///
+/// Events go to a bounded queue. When it is full, at most one event
+/// is held and reading pauses until the consumer makes room; every
+/// other duty (manual close, the idle timeout, writes, state, and
+/// pending requests) carries on meanwhile. A transient error that
+/// arrives while an event is already held is dropped; the state still
+/// shows it.
+struct Supervisor {
+    session: WsSession,
+    options: WsClientOptions,
+    state: watch::Sender<WsConnectionState>,
+    events: mpsc::Sender<WsEvent>,
+    held: Option<WsEvent>,
+    writer_rx: mpsc::Receiver<(u64, WriterCommand)>,
+    /// The number of the connection being served or awaited.
+    connection: Arc<AtomicU64>,
+    shutdown: watch::Receiver<bool>,
+    pending: PendingRequests,
+}
+impl Supervisor {
+    async fn run(mut self, mut stream: WsStream) {
+        loop {
+            let served = self.serve(stream).await;
+            fail_pending(&self.pending);
+            let Served::Lost(error) = served else {
+                self.finish(None).await;
+                return;
+            };
+            self.state.send_replace(WsConnectionState::Disconnected);
+            if discard_queued(&mut self.writer_rx) {
+                self.finish(None).await;
+                return;
+            }
+            if let Some(error) = error {
+                self.notify(Err(error));
+            }
+            match self.recover().await {
+                Some(next) => stream = next,
+                None => return,
+            }
+        }
+    }
+    /// Serves one ready connection until it is lost or closed.
+    async fn serve(&mut self, stream: WsStream) -> Served {
+        use futures_util::StreamExt;
+        use tokio_tungstenite::tungstenite::Message;
+        let current = self.connection.load(std::sync::atomic::Ordering::SeqCst);
+        let (mut write, mut read) = stream.split();
+        let idle = self.options.receive_timeout;
+        let mut idle_deadline = idle.map(|limit| tokio::time::Instant::now() + limit);
+        let mut outgoing: Option<Message> = None;
+        let mut flush = false;
+        loop {
+            tokio::select! {
+                biased; () = shutdown_requested(& mut self.shutdown) => { self.state
+                .send_replace(WsConnectionState::Closing); let _ =
+                tokio::time::timeout(CLOSE_GRACE, futures_util::SinkExt::close(& mut
+                write)). await; return Served::Shutdown; } () =
+                idle_expired(idle_deadline) => { let limit = idle.unwrap_or_default();
+                return Served::Lost(Some(WsError::ReceiveTimeout(limit))); } delivered =
+                deliver_held(& self.events, & mut self.held), if self.held.is_some() => {
+                if ! delivered { return Served::Shutdown; } } written = drive_write(& mut
+                write, & mut outgoing, & mut flush), if outgoing.is_some() || flush => {
+                if let Err(error) = written { return
+                Served::Lost(Some(WsError::Transport(error))); } } command = self
+                .writer_rx.recv(), if outgoing.is_none() => { match command {
+                Some((connection, command)) if connection == current => { outgoing =
+                Some(command.into_message()); } Some(_) => {} None => return
+                Served::Shutdown, } } message = read.next(), if self.held.is_none() => {
+                idle_deadline = idle.map(| limit | tokio::time::Instant::now() + limit);
+                match message { Some(Ok(Message::Text(text))) => self
+                .inbound(WsRawFrame::Text(text.to_string())),
+                Some(Ok(Message::Binary(data))) => self.inbound(WsRawFrame::Binary(data
+                .to_vec())), Some(Ok(Message::Ping(_))) => flush = true,
+                Some(Ok(Message::Pong(_) | Message::Frame(_))) => {}
+                Some(Ok(Message::Close(_))) | None => return Served::Lost(None),
+                Some(Err(error)) => return Served::Lost(Some(WsError::Transport(error))),
+                } }
+            }
+        }
+    }
+    fn inbound(&mut self, raw: WsRawFrame) {
+        let event = match WsInboundFrame::parse(raw) {
+            Ok(frame) => {
+                match self.session.correlation {
+                    Some(correlation) => {
+                        match answer_pending(
+                            &self.pending,
+                            frame,
+                            correlation.id_field,
+                            correlation.string_ids,
+                            correlation.selected_message,
+                        ) {
+                            Some(frame) => Ok(frame),
+                            None => return,
+                        }
+                    }
+                    None => Ok(frame),
+                }
+            }
+            Err(error) => Err(error),
+        };
+        self.notify(event);
+    }
+    /// Queues `event`, holding it when the queue is full.
+    fn notify(&mut self, event: WsEvent) {
+        if self.held.is_some() {
+            return;
+        }
+        if let Err(mpsc::error::TrySendError::Full(event)) = self.events.try_send(event)
+        {
+            self.held = Some(event);
+        }
+    }
+    /// Redials under the reconnect policy. `None` once the client has
+    /// closed: no policy, the budget is spent, a terminal rejection,
+    /// or a manual close.
+    async fn recover(&mut self) -> Option<WsStream> {
+        let Some(policy) = self.options.reconnect.clone() else {
+            self.finish(None).await;
+            return None;
+        };
+        let mut failures: u32 = 0;
+        loop {
+            if policy.max_attempts.is_some_and(|max| failures >= max) {
+                self.finish(None).await;
+                return None;
+            }
+            if !self.pause(reconnect_delay(&policy, failures)).await {
+                self.finish(None).await;
+                return None;
+            }
+            self.state.send_replace(WsConnectionState::Connecting);
+            let attempt = tokio::select! {
+                biased; () = shutdown_requested(& mut self.shutdown) => None, result =
+                run_attempt(& self.session, & self.options, & self.state) =>
+                Some(result),
+            };
+            match attempt {
+                None => {
+                    self.finish(None).await;
+                    return None;
+                }
+                Some(Ok(stream)) => {
+                    self.connection.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    self.state.send_replace(WsConnectionState::Ready);
+                    return Some(stream);
+                }
+                Some(Err(error)) if error.is_terminal() => {
+                    self.finish(Some(error)).await;
+                    return None;
+                }
+                Some(Err(error)) => {
+                    self.state.send_replace(WsConnectionState::Disconnected);
+                    self.notify(Err(error));
+                    failures = failures.saturating_add(1);
+                }
+            }
+        }
+    }
+    /// Waits out a backoff delay while still delivering a held
+    /// event. `false` when the client closed meanwhile.
+    async fn pause(&mut self, delay: std::time::Duration) -> bool {
+        let sleep = tokio::time::sleep(delay);
+        tokio::pin!(sleep);
+        loop {
+            tokio::select! {
+                biased; () = shutdown_requested(& mut self.shutdown) => return false,
+                delivered = deliver_held(& self.events, & mut self.held), if self.held
+                .is_some() => { if ! delivered { return false; } } () = & mut sleep =>
+                return true,
+            }
+        }
+    }
+    /// Publishes `Closed`, then delivers the held event and `error`
+    /// before the event stream ends, unless the client closes first.
+    async fn finish(&mut self, error: Option<WsError>) {
+        fail_pending(&self.pending);
+        self.state.send_replace(WsConnectionState::Closed);
+        let pending_events = self.held.take().into_iter().chain(error.map(Err));
+        for event in pending_events {
+            tokio::select! {
+                biased; () = shutdown_requested(& mut self.shutdown) => return, sent =
+                self.events.send(event) => { if sent.is_err() { return; } }
+            }
+        }
+    }
+}
+async fn shutdown_requested(shutdown: &mut watch::Receiver<bool>) {
+    let _ = shutdown.wait_for(|requested| *requested).await;
+}
+async fn idle_expired(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
+}
+/// Sends the held event once the queue has room. `false` when the
+/// consumer is gone.
+async fn deliver_held(
+    events: &mpsc::Sender<WsEvent>,
+    held: &mut Option<WsEvent>,
+) -> bool {
+    match events.reserve().await {
+        Ok(permit) => {
+            if let Some(event) = held.take() {
+                permit.send(event);
+            }
+            true
+        }
+        Err(_) => {
+            *held = None;
+            false
+        }
+    }
+}
+/// Writes `outgoing`, if any, and flushes. Cancel-safe: a frame is
+/// taken only once the sink accepts it, and `flush` stays set until
+/// the flush completes, which also sends any queued pong.
+async fn drive_write(
+    write: &mut futures_util::stream::SplitSink<
+        WsStream,
+        tokio_tungstenite::tungstenite::Message,
+    >,
+    outgoing: &mut Option<tokio_tungstenite::tungstenite::Message>,
+    flush: &mut bool,
+) -> Result<(), tokio_tungstenite::tungstenite::Error> {
+    use futures_util::Sink;
+    std::future::poll_fn(|cx| {
+            let mut sink = std::pin::Pin::new(&mut *write);
+            if outgoing.is_some() {
+                std::task::ready!(sink.as_mut().poll_ready(cx))?;
+                if let Some(message) = outgoing.take() {
+                    sink.as_mut().start_send(message)?;
+                }
+                *flush = true;
+            }
+            std::task::ready!(sink.as_mut().poll_flush(cx))?;
+            *flush = false;
+            std::task::Poll::Ready(Ok(()))
+        })
+        .await
+}
+/// One inbound data frame exactly as received.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WsRawFrame {
+    /// A text frame.
+    Text(String),
+    /// A binary frame.
+    Binary(Vec<u8>),
+}
+impl WsRawFrame {
+    /// `"text"` or `"binary"`.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Text(_) => "text",
+            Self::Binary(_) => "binary",
+        }
+    }
+}
+/// An inbound frame that parsed as JSON: the raw frame and its value.
+///
+/// Message selectors read the value; the payload is decoded from the
+/// raw frame, so payload types holding borrowed or raw JSON decode as
+/// they would from the wire.
+#[derive(Debug, Clone)]
+pub struct WsInboundFrame {
+    raw: WsRawFrame,
+    value: serde_json::Value,
+}
+impl WsInboundFrame {
+    /// Parses `raw` as JSON.
+    ///
+    /// ## Errors
+    ///
+    /// [`WsError::Decode`] carrying `raw` when it is not JSON.
+    pub fn parse(raw: WsRawFrame) -> Result<Self, WsError> {
+        let parsed = match &raw {
+            WsRawFrame::Text(text) => serde_json::from_str(text),
+            WsRawFrame::Binary(bytes) => serde_json::from_slice(bytes),
+        };
+        match parsed {
+            Ok(value) => Ok(Self { raw, value }),
+            Err(error) => {
+                Err(WsError::Decode {
+                    frame: raw,
+                    reason: format!("not JSON: {error}"),
+                })
+            }
+        }
+    }
+    /// The frame exactly as received.
+    #[must_use]
+    pub fn raw(&self) -> &WsRawFrame {
+        &self.raw
+    }
+    /// The parsed JSON value.
+    #[must_use]
+    pub fn value(&self) -> &serde_json::Value {
+        &self.value
+    }
+    /// Consumes the frame, returning its JSON value.
+    #[must_use]
+    pub fn into_value(self) -> serde_json::Value {
+        self.value
+    }
+    /// Whether every `(field, value)` selector holds: each top-level
+    /// field is the JSON string `value`.
+    #[must_use]
+    pub fn matches(&self, selectors: &[(&str, &str)]) -> bool {
+        selectors
+            .iter()
+            .all(|(field, expected)| {
+                self.value.get(*field).and_then(serde_json::Value::as_str)
+                    == Some(*expected)
+            })
+    }
+    /// Decodes the payload of the message named `message`.
+    ///
+    /// ## Errors
+    ///
+    /// [`WsError::Decode`] carrying the raw frame when the payload
+    /// does not decode as `T`.
+    pub fn decode_payload<T: serde::de::DeserializeOwned>(
+        self,
+        message: &str,
+    ) -> Result<T, WsError> {
+        let decoded = match &self.raw {
+            WsRawFrame::Text(text) => serde_json::from_str(text),
+            WsRawFrame::Binary(bytes) => serde_json::from_slice(bytes),
+        };
+        decoded
+            .map_err(|error| WsError::Decode {
+                frame: self.raw,
+                reason: format!("selected message `{message}` did not decode: {error}"),
+            })
+    }
+    /// The error for a frame that matches no declared message.
+    #[must_use]
+    pub fn unmatched(self) -> WsError {
+        WsError::Decode {
+            frame: self.raw,
+            reason: "it matches no declared message selector and the direction has no fallback"
+                .to_string(),
+        }
+    }
+}
+/// A stream of inbound events that keeps its connection open.
+///
+/// Returned by a client's `events` and `value_events`; it reads the
+/// same queue as `next_event`, so every inbound message is delivered
+/// once. Dropping the stream closes the connection.
+pub struct WsEventStream<T> {
+    event_rx: mpsc::Receiver<Result<WsInboundFrame, WsError>>,
+    decode: fn(WsInboundFrame) -> Result<T, WsError>,
+    _transport: WsTransportHandle,
+}
+impl<T> WsEventStream<T> {
+    pub(crate) fn new(
+        event_rx: mpsc::Receiver<Result<WsInboundFrame, WsError>>,
+        decode: fn(WsInboundFrame) -> Result<T, WsError>,
+        transport: WsTransportHandle,
+    ) -> Self {
+        Self {
+            event_rx,
+            decode,
+            _transport: transport,
+        }
+    }
+}
+impl<T> futures_util::Stream for WsEventStream<T> {
+    type Item = Result<T, WsError>;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        let decode = self.decode;
+        self.event_rx.poll_recv(cx).map(|item| item.map(|event| event.and_then(decode)))
     }
 }

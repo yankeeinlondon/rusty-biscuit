@@ -75,19 +75,19 @@ severity=<severity> api=<api> endpoint=<endpoint> feature=<feature> output=<outp
 output:
 
 ```text
-$ schematic-gen validate --api gitea
-[WARN] severity=warning api=Gitea endpoint=GetGitTreeRecursive feature=query-in-path output=rust: path template `/repos/{owner}/{repo}/git/trees/{sha}?recursive=true` embeds a query string; declare it as query parameters so it can be separated from the path
-[WARN] ... output=openapi: ...
-[WARN] ... output=postman: ...
-  [PASS] rust
-  [PASS] openapi
-  [PASS] postman
+$ schematic-gen validate --api example
+[ERROR] severity=error api=Example endpoint=ReadTree feature=query-in-path output=rust: path template `/repos/{owner}/{repo}/git/trees/{sha}?recursive=true` embeds a query string; declare it as query parameters so it can be separated from the path
+[ERROR] ... output=openapi: ...
+[ERROR] ... output=postman: ...
+  [FAIL] rust
+  [FAIL] openapi
+  [FAIL] postman
 ```
 
 For example:
 
 ```text
-severity=warning api=Gitea endpoint=GetGitTreeRecursive feature=query-in-path output=postman: path template `/repos/{owner}/{repo}/git/trees/{sha}?recursive=true` embeds a query string; declare it as query parameters so it can be separated from the path
+severity=error api=Example endpoint=ReadTree feature=query-in-path output=postman: path template `/repos/{owner}/{repo}/git/trees/{sha}?recursive=true` embeds a query string; declare it as query parameters so it can be separated from the path
 severity=error api=Feed,FeedCompat endpoint=<none> feature=generated-name-collision output=rust: `SubscribeRequest` is generated for the request struct of Feed::Subscribe and the request struct of FeedCompat::Subscribe
 ```
 
@@ -96,7 +96,11 @@ severity=error api=Feed,FeedCompat endpoint=<none> feature=generated-name-collis
 - `api` names every API involved; a module-group problem lists each member,
   separated by commas.
 - `endpoint` is `<none>` when the problem belongs to the API or the group.
-- `output` is `rust`, `openapi`, or `postman`.
+- `output` is `rust`, `openapi`, `postman`, or `asyncapi`. The `asyncapi`
+  output is written by `export-asyncapi`, not by `generate`; it reports
+  `websocket-definition` findings: an error for a definition that cannot
+  become a valid document, a warning for what the
+  [supported subset](../io/asyncapi.md#what-the-export-leaves-out) cannot carry.
 
 The same fields are available to code as
 `schematic_gen::diagnostics::ValidationDiagnostic`, which also implements
@@ -104,9 +108,9 @@ The same fields are available to code as
 
 ```json
 {
-  "severity": "warning",
-  "api": ["Gitea"],
-  "endpoint": "GetGitTreeRecursive",
+  "severity": "error",
+  "api": ["Example"],
+  "endpoint": "ReadTree",
   "feature": "query-in-path",
   "output": "postman",
   "message": "path template ... embeds a query string; ..."
@@ -119,25 +123,40 @@ The same fields are available to code as
 | --- | :-: | :-: | :-: | --- |
 | `duplicate-endpoint-id`: two endpoints of one API share an id | ✓ | ✓ | ✓ | error |
 | `duplicate-method-path`: two endpoints of one API share a method and path | ✓ | ✓ | ✓ | error (see below) |
-| `query-in-path`: a path template contains `?` | ✓ | ✓ | ✓ | warning (see below) |
+| `query-in-path`: a path template contains `?` | ✓ | ✓ | ✓ | error (see below) |
 | `invalid-output-filename`: the file name is not one safe path component, or a module would overwrite a shared generated file | ✓ | ✓ | ✓ | error |
-| `invalid-identifier`: an API name, endpoint id, or parameter name cannot become the Rust identifier generated from it | ✓ | | | error |
+| `invalid-identifier`: an API name, endpoint id, GraphQL operation id, or parameter name cannot become the Rust identifier generated from it | ✓ | | | error |
 | `invalid-request-suffix`: `request_suffix` is empty or not alphanumeric | ✓ | | | error |
-| `invalid-module-path`: the module path is not one Rust identifier | ✓ | | | error |
-| `invalid-type-syntax`: a body, response, or form JSON type is not a Rust type | ✓ | | | error |
-| `generated-name-collision`: two generated items, fields, or client methods share a name, including two endpoints whose methods get one name and a call type named like another item | ✓ | | | error |
+| `invalid-module-path`: the module path is not one Rust identifier, or is `default` (the generated crate's default Cargo feature) | ✓ | | | error |
+| `invalid-type-syntax`: a body, response, or form JSON type, spelled through the API's schema components, is not a Rust type | ✓ | | | error |
+| `generated-name-collision`: two generated items, fields, or client methods share a name, including two endpoints whose methods get one name, a call type named like another item, a path-parameter enum (`{RequestType}{FieldPascal}`) named like another item, a path field named like another field of its request, and two values of one path enum that sanitize to the same variant (`a-b` and `a_b`). GraphQL operation requests, the `{Id}Response` success enum, the `{Id}Error` failure enum, and stream end markers (`{Id}End`) join the module's names; a registered body, response, stream item, error, variables, or data type that one of them shadows is reported as, for example, "response type `GetError` of Api::Get is shadowed by the failure enum of Api::Get"; and two success shapes that would generate one variant of `{Id}Response` are reported with `name them with Success::variant` | ✓ | | | error |
+| `path-parameter`: a declared path parameter has no placeholder, a placeholder has no declaration (once any is declared), its type is `Array` or `Json`, its enum has no values, or its `rust_name` is not a valid field name | ✓ | | | error |
 | `endpoint-method-rename`: an endpoint method or call-type setter was renamed to avoid a method every API struct or call type has (see below) | ✓ | | | warning |
-| `incomplete-schema-registry`: a JSON type has no schema in the module's registry | | ✓ | | error |
+| `invalid-schema-reference`: a body, response, or form JSON reference names no registered component in the API's `schemas`, a component is malformed, or two members of one OpenAPI module document define a component name differently (see below) | ✓ | ✓ | | error |
 | `duplicate-method-path` across a module group: two member APIs declare different operations on one method and path | | ✓ | | error (found while building the document) |
 | `duplicate-operation-id`: a finished document declares one `operationId` twice | | ✓ | | error (found while building the document) |
 | `unresolved-link-operation`: a link in a finished document names an `operationId` no operation declares | | ✓ | | error (found while building the document) |
 | `text-request-body`, `binary-request-body`: the declared content type is empty or not a valid header value | ✓ | | | error |
 | `api-key-param`: a query API-key parameter name is empty, or a cookie API-key name is not a cookie name | ✓ | | | error |
 | `header-parameter`, `cookie-parameter`: the name is not an HTTP token | ✓ | | | error |
-| `query-parameter`, `header-parameter`, `cookie-parameter`: the type is an array of arrays | ✓ | | | error |
+| `header-parameter`, `cookie-parameter`: the type is an array of arrays | ✓ | | | error |
+| `query-parameter`: a query parameter's type, style, and `explode` have no Rust serialization (see below) | ✓ | | | warning when optional (the parameter is left out of the request type), error when required |
+| `query-parameter`: a query enum declares no values | ✓ | | | error |
+| `websocket-definition`: a shipped WebSocket definition cannot be lowered into its module (see [WebSocket definitions](#websocket-definitions)) | ✓ | | | error, or warning for a repeated base/path segment and other non-blocking findings |
+| `generated-name-collision`: two values of a query or path enum generate one variant, or a generated enum's name is already emitted in the module | ✓ | | | error |
+| `type-constraint`: a value constraint on a parameter, form field, or request body root contradicts itself or its value's type, or a rule in a stored schema component is malformed or contradictory, the same check API build applies (see [value constraints](../value-constraints.md#definition-errors)); the message names the input path, or the component and JSON pointer, and the keyword, for example ``query.limit `minimum` leaves no number between the lower and upper bounds`` or ``component `Tag` #/properties/label `maxLength` must be a nonnegative integer, not a string`` | ✓ | ✓ | ✓ | error |
+| `type-constraint`: a request rule the Rust client cannot check, because it sits beneath a `oneOf`, `anyOf` (other than an `Option`), `allOf` (other than a one-member one), or `not` in an API that does not [accept unchecked compositions](request-side.md#accepting-unchecked-compositions), beneath a keyword the checks do not enter (a positional `items` list, `prefixItems`, `contains`, `patternProperties`, `if`/`then`/`else`, and the others listed there), or beside a `$ref` that names no component; the message names the input, component, JSON pointer, keyword, and the composition or keyword (see [value rules](request-side.md#value-rules)) | ✓ | | | error |
+| `type-constraint`: a request rule the Rust client does not check and labels in rustdoc: a `format` (an annotation only), a valid pattern outside the [enforced subset](../value-constraints.md#patterns) in a component or marked unenforced on an endpoint (an invalid pattern, or an endpoint pattern outside the subset that is not marked unenforced, is the error above and is not reported again here), or, in an API that accepts unchecked compositions, a rule whose only blocker is such a composition; for example ``body (component `Tool` at `#/properties/type`) `enum` is not enforced: beneath the `anyOf` at `#` of component `Tools`, a composition whose members are not checked; the API accepts unchecked compositions`` | ✓ | | | warning |
 | `pagination-strategy`: a pagination strategy is malformed, alone or on its endpoint (see below) | ✓ | | | error |
-| `pagination-exception`: an exceptions row names no endpoint or one already named, or its list shape is unusable: item selector, item type, item location, alternates | ✓ | | | error |
+| `pagination-exception`: an endpoint collection has an unusable item selector, item type, item location, or alternates | ✓ | | | error |
 | `pagination-parameter`: a strategy input collides with a declared parameter it cannot adopt, adopts one without the knob that replaces it, or manages a required one without a value to send | ✓ | | | error |
+| `oauth2-grant`: the API, or an endpoint's replacement policy, uses an OAuth2 device-code grant, which OpenAPI 3.0 has no flow for; the scheme is left out | | ✓ | | warning |
+| `oauth2-grant`: the API, or an endpoint's exported replacement method, uses an OAuth2 device-code grant, which Postman has no grant for; the auth carries the token URL, scopes, and an access-token variable for a token obtained outside Postman | | | ✓ | warning |
+| `fixed-header`: an operation does not carry a header as a header parameter: a fixed or explicit header its effective security already sends, an `Accept` or `Content-Type` value its success responses or request body do not declare, an `Authorization` header no scheme sends, an explicit `Accept`/`Content-Type`/`Authorization` parameter, or a fixed header whose explicit parameter's schema rejects the value (see [Fixed headers](../io/export-openapi.md#fixed-headers)) | | ✓ | | warning |
+| `endpoint-auth`: an endpoint's replacement policy accepts more than one authentication alternative, but a Postman request holds one auth; only the first is exported | | | ✓ | warning |
+| `example-value`: no value validating against its registered schema could be built for a JSON request body, saved response (or stream item or terminator), or GraphQL `variables`; the body is left empty and the message names the role and the schema path (see [Postman example values](../io/export-postman.md#example-values)) | | | ✓ | warning |
+| `graphql-operation`: the API declares a GraphQL operation, which OpenAPI does not carry; the endpoint field names the operation, and the message reads `<API> operation <id>: GraphQL operation skipped in OpenAPI output` | | ✓ | | warning |
+| `graphql-operation`: no GraphQL address rule matches the API's base URL, so its operations are left out of the collection | | | ✓ | warning |
 
 The Rust client sends text and binary bodies, header and cookie parameters,
 and API keys in a query parameter or cookie, so its rules for those features
@@ -145,37 +164,87 @@ check only that the declared names and content types can go on the wire.
 How each one is sent is described in
 [request-side inputs](./request-side.md#text-and-binary-bodies).
 OpenAPI declares header and cookie parameters in their own locations, and a
-Postman collection carries each one as a request header, disabled when the
-parameter is optional (see
+Postman collection carries a header parameter as a request header and merges
+cookies into one `Cookie` header, disabled when optional (see
 [Postman parameter mapping](../io/export-postman.md#parameter-mapping)), so
-neither export has a rule for them.
+neither export checks their names; OpenAPI reports only the headers it leaves
+out (`fixed-header`).
 
-The Rust client sends each element of an array parameter as text: one
-repeated pair per element in the query, one `,`-joined value in a header or
-cookie. An element that is itself an array has no text form, so an array of
-arrays is an error at every location rather than a shape the client would
-drop or fail to compile. OpenAPI writes the nested shape as a parameter
-schema, and Postman carries no parameter type, so both exports are still
-written:
+The Rust client sends each element of a header or cookie array as text,
+joined with `,`. An element that is itself an array has no text form, so an
+array of arrays is an error there.
+
+A query parameter is sent in the form its type, style, and `explode`
+declare ([array forms](./request-side.md#array-forms)). A declaration with
+no such form (a JSON value, an array of arrays or of JSON values,
+`DeepObject` or `Simple` style, a delimited single value, or an exploded
+delimited array) is left out of the request type when it is optional, with
+a warning; when it is required no correct request exists, so it is an
+error. OpenAPI writes the declared shape as a parameter schema, and Postman
+carries no parameter type, so both exports are still written:
 
 ```rust
-// Fails the Rust client only (`query-parameter`).
+// Fails the Rust client only (`query-parameter`): required and unsendable.
 EndpointParams::default().with_query_param(
     "matrix",
     QueryParamType::Array(Box::new(QueryParamType::Array(Box::new(QueryParamType::Boolean)))),
-    false,
+    true,
     None,
 )
 ```
 
+```text
+[WARN] severity=warning api=OpenAI endpoint=ListPaginatedFineTuningJobs feature=query-parameter output=rust: query parameter `metadata` is a JSON value in `deepObject` style with explode true, which the Rust client cannot serialize; it is left out of the request type
+```
+
 Rust-only rules are never applied to the exports. An export carries type
-names and endpoint ids as data, so a name that is not valid Rust syntax still
-produces a valid OpenAPI document and Postman collection:
+names and endpoint ids as data, so a component whose Rust path is not valid
+Rust syntax still produces a valid OpenAPI document and Postman collection:
 
 ```rust
-// Fails the Rust client only; OpenAPI and Postman are still written.
-response: ApiResponse::json_type("Vec<Model"),
+// Fails the Rust client only (`invalid-type-syntax`); OpenAPI and Postman are still written.
+response: vec![SuccessShape::json_type("Model")],
+// ...where the API's `schemas` holds:
+SchemaComponent { name: "Model".into(), rust_path: Some("Vec<Model".into()), schema: json!({}) },
 ```
+
+### Schema references
+
+A JSON body, response, or form part stores a `TypeRef` that names schema
+components, for example `Array(Named("Model"))`. The Rust client spells it
+through the API's `schemas` (`Vec<::my_models::Model>`), and the OpenAPI export
+writes it as a `$ref` to `#/components/schemas/Model`. Both outputs therefore
+need every name to resolve, and both report `invalid-schema-reference` when one
+does not:
+
+```text
+severity=error api=Items endpoint=ListItems feature=invalid-schema-reference output=rust: schema reference `Model` does not name a registered component of API `Items`; register the type in the API's definition context
+```
+
+Each dangling name is reported once per endpoint, including every name inside
+a wrapped reference. A name that exists only nested inside another component
+(its entry has no Rust path) cannot be referenced directly. When every name
+resolves, `RestApi::validate_references` and `RestApi::validate_schema_closure`
+still run, so an empty or duplicate component name, a schema that is not a JSON
+Schema object or boolean, an empty map key, or a `$ref` inside a component that
+no component satisfies is reported under the same feature, with the parent
+component and the path to the reference:
+
+```text
+severity=error api=TestApi endpoint=<none> feature=invalid-schema-reference output=rust: TestApi schema Response at /properties/owner: unresolved schema reference "Gone"
+``` The Postman collection never
+reads a schema, so it is written regardless.
+
+A grouped OpenAPI document also reports the feature, for the module and both
+APIs, when two members carry one component name with different schemas:
+
+```text
+severity=error api=FooA,FooC endpoint=<none> feature=invalid-schema-reference output=openapi: module 'foo': schema component "Status" has different definitions in both APIs; an OpenAPI document holds one schema per component name
+```
+
+An API built with `RestApi::builder` has already passed the same check, so
+in practice the diagnostic catches a definition that was deserialized or
+edited after it was built.
 
 ### Pagination rules
 
@@ -183,7 +252,7 @@ Pagination changes only the Rust client, so only its validator checks it.
 Each message starts with the rule's id, then says what is wrong:
 
 ```text
-severity=error api=GitHub endpoint=ListReleaze feature=pagination-exception output=rust: unknown-exception-id: exception names `ListReleaze`, which is not an endpoint of this API; did you mean `ListReleases`?
+severity=error api=Catalog endpoint=ListItems feature=pagination-exception output=rust: missing-item-type: collection requires an item type
 ```
 
 The rules, by feature id:
@@ -199,20 +268,21 @@ The rules, by feature id:
   `session-handle-unreachable`, `session-handle-not-sent`,
   `session-step-needs-handle`, `keep-alive-without-input`,
   `invalid-partition-max`.
-- `pagination-exception`: `unknown-exception-id` (with the nearest endpoint id
-  when one is a likely typo), `duplicate-exception-id`,
-  `invalid-item-selector`, `not-an-array-location`, `missing-item-type`,
+- `pagination-exception`: `invalid-item-selector`, `not-an-array-location`, `missing-item-type`,
   `invalid-item-type`, `unknown-item-type`, `alternates-without-primary`,
   `alternates-on-unpaginated`, `duplicate-label`, `invalid-label`.
 - `pagination-parameter`: `collides-with-endpoint-param`,
-  `adoption-without-knob`, `pager-managed-required-without-default`.
+  `adoption-without-knob`, `pager-managed-required-without-default`,
+  `pager-managed-default-invalid`, `page-size-constraint-conflict` (the
+  adopted page-size parameter declares bounds other than the strategy's, or a
+  rule the pager cannot enforce; see [pagination](../pagination.md)).
 
 An API default's own shape is reported once, with `endpoint=<none>`; each
 endpoint that inherits it is checked only for what depends on the endpoint.
-An item type named by an exceptions row must be valid Rust type syntax, and a
-single identifier other than a primitive must be a schema of the API's
-registry (nested schemas count). An item location is checked against the
-response type's registered schema when there is one; when the registry cannot
+An item type named by an endpoint collection must be valid Rust type syntax, and a
+single identifier other than a primitive must be a component in the API's
+`schemas` (nested schemas count). An item location is checked against the
+response type's component schema when there is one; when the components cannot
 describe the type, the generated client checks the location at run time
 instead, and nothing is reported.
 
@@ -232,23 +302,14 @@ response does not make a second endpoint on the same route. Declare one
 endpoint instead, with the distinguishing input as an optional parameter:
 
 ```rust
-// Rejected: both are GET /repos/{owner}/{repo}/git/trees/{tree_sha}.
-//   GetGitTree           (no parameters)
-//   GetGitTreeRecursive  (recursive=true)
+use schematic_define::{Endpoint, ParamDef, QueryParamType};
 
-// Accepted: one endpoint; `recursive` is an optional query parameter.
-Endpoint {
-    id: "GetGitTree".to_string(),
-    method: RestMethod::Get,
-    path: "/repos/{owner}/{repo}/git/trees/{tree_sha}".to_string(),
-    params: Some(EndpointParams::default().with_query_param(
-        "recursive",
-        QueryParamType::Boolean,
-        false,
-        Some("Fetch the tree recursively instead of a single level"),
-    )),
-    // ...
-}
+let endpoint = Endpoint::get("GetGitTree", "/repos/{owner}/{repo}/git/trees/{sha}")
+    .describes("Fetch a tree")
+    .returns_empty()
+    .query(ParamDef::new("recursive", QueryParamType::Boolean)
+        .describes("Fetch all levels instead of one"))
+    .build()?;
 ```
 
 When one route answers with different shapes (Bitbucket's `src` route
@@ -326,7 +387,7 @@ whole OpenAPI directory untouched.
   must be unique, so a clash is renamed rather than rejected.
 
 The rename rule walks the operations in a fixed order: member APIs in
-registry order, each API's paths in declaration order, and methods in the
+module group order, each API's paths in declaration order, and methods in the
 order GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, TRACE. The first
 operation to declare an id keeps it. A later operation with a taken id gets
 its own API's name prefixed (PascalCase). If that name is taken too, or is
@@ -352,17 +413,28 @@ the original endpoint ids.
 
 A repeated segment such as `/api/api/items` is never an error by itself: a
 base URL ending in `/api` joined with a path starting `/api` can be correct.
-`schematic-gen` does not judge base-plus-path composition.
+For REST APIs `schematic-gen` does not judge base-plus-path composition.
+
+A WebSocket endpoint gets one **warning** when the last segment of its API's
+`base_url` path is exactly the first segment of the endpoint path, because
+the handshake URL then repeats it:
+
+```text
+[WARN] severity=warning api=Example endpoint=Live feature=websocket-definition output=rust: endpoints/Live/path: base_url `ws://host/ws` ends with segment `ws` and path `/ws` starts with it; the composed URL repeats `/ws/ws`
+```
+
+Only whole segments count: `ws://host/api` with `/apikeys`, or with
+`/v1/api`, reports nothing. The warning never blocks the Rust output.
 
 ### Embedded queries
 
 A path template such as `/repos/{owner}/{repo}/git/trees/{sha}?recursive=true`
 mixes a query into the path, where it cannot be separated, typed, or masked.
-Nine shipped endpoints still do this (one Gitea, one GitLab, seven OpenAI
-`Beta*` endpoints), so `query-in-path` is a warning reported once per output
-for each of them. Its severity is the constant `QUERY_IN_PATH_SEVERITY`.
-The generated client keeps such a query in the path exactly as written and
-appends declared query parameters after it; see
+All shipped paths use declared query parameters. `query-in-path` is a
+blocking error in every output, and endpoint/API builders reject it too.
+Diagnostics identify the API, endpoint, and offending path. An OpenAPI import
+normalizes supported query-bearing source paths before building endpoints;
+malformed or conflicting expressions fail import. See
 [request-side inputs](./request-side.md#path-templates-that-already-contain-a-query).
 
 ## Calling validation from code
@@ -379,8 +451,7 @@ for diagnostic in validate_rust_client(&batch) {
 }
 ```
 
-`validate_openapi_registry(module, apis, registry)` adds the schema-registry
-check for one module. `pipeline::generate_batch` runs every validator,
+`pipeline::generate_batch` runs every validator,
 publishes the outputs that pass, and returns a `GenerationReport` naming the
 succeeded and failed outputs.
 
@@ -393,6 +464,69 @@ reports an error. `export::openapi::build_openapi_grouped` returns a module's
 finished document without writing it, after the group checks above;
 `write_openapi_document` writes a built document.
 
-**Planned:** WebSocket definitions are not validated yet. When they are,
-they will report through the same `ValidationDiagnostic`, `Severity`,
-`Feature`, and `Output` types rather than a separate format.
+## WebSocket definitions
+
+Every Rust run writes a module for each shipped WebSocket definition (the
+`*_ws.rs` files), so `generate` and `validate` both lower those definitions
+and report what they find on the **Rust** output, through the same
+`ValidationDiagnostic` format, with the feature id `websocket-definition`.
+The message starts with where in the definition the finding is:
+
+```text
+[ERROR] severity=error api=Example endpoint=Live feature=websocket-definition output=rust: endpoints/Live/params/path/stray: path parameter `stray` has no `{stray}` placeholder in `/live/{room}`
+```
+
+- an **error** blocks the Rust output like any other Rust error; every
+  finding of that definition is reported, not only the first, and no module
+  is silently left out. Errors are:
+  - an empty API name or `base_url`, or an empty endpoint id
+  - an endpoint path that does not start with `/`, names its own origin, or
+    embeds a query or fragment
+  - a typed path parameter without its placeholder, a placeholder missing
+    from a non-empty `params.path`, or a path parameter that is not a
+    required `simple` scalar
+  - a query parameter declared twice, an enum or JSON query value, or a
+    query style the REST rules cannot send; any header or cookie parameter;
+    value constraints on any handshake parameter, which a handshake does not
+    enforce
+  - empty correlation field paths, an empty `responds_with`, an empty
+    selector field, an empty auth-flow name or indicator, and a zero
+    correlation timeout, heartbeat interval, or heartbeat timeout
+  - a message name that is not a Rust identifier or is declared twice in
+    one endpoint (names become enum variants)
+  - in a direction the endpoint receives: more than one fallback, a
+    fallback with selectors, a message without selectors beside other
+    messages, a repeated selector field, or two messages whose selectors
+    can match one frame without one being a strict subset of the other
+  - a `raw_binary` or `mixed` frame format (`runtime/frame_format`)
+  - a `responds_with` link set on a server message, naming no message of
+    the endpoint, naming a client message (one the client never
+    receives), or declared on an endpoint without `runtime.correlation`
+    hints; and a linked request named `Value`, whose method would be
+    `request_value`
+  - a `lifecycle.open_credential_field` that is empty or set on an endpoint
+    without a `lifecycle.open` message
+
+  See [WebSocket definitions](../websocket-definitions.md) for the rules
+  behind each one
+- a **warning** (for example the [repeated segment](#repeated-path-segments)
+  above, or an endpoint with no messages) is printed and generation goes on.
+  Correlation declarations nothing consumes warn: `runtime.correlation`
+  hints with no `responds_with` link, hints on a `Host`-only endpoint, and an
+  API whose `request_id_type` is declared as `string` while no client
+  endpoint correlates. The default `u64` id type never warns:
+
+  ```text
+  [WARN] severity=warning api=Example endpoint=Live feature=websocket-definition output=rust: endpoints/Live/runtime/correlation: correlation hints are declared, but no message links a response with responds_with
+  ```
+
+- **info** notes, such as auth messages declared on an API with a
+  handshake credential but without `AuthFlowHints`, have no severity in the
+  shared format; they print only in a verbose run (`-v`), labeled `[INFO]`
+  and `severity=info`
+
+From code, `output::ws_modules::validate_ws_apis` returns the diagnostics and
+the info notes for any WebSocket definitions, and
+`output::ws_modules::render_ws_api_module` renders one definition's module,
+returning `GeneratorError::Validation` for the Rust output when it has an
+error.

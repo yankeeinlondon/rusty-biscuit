@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, ParamDef,
+    ApiRequest, SuccessShape, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, ParamDef,
     ParamStyle, QueryParamType, RestApi, RestMethod,
 };
 
@@ -15,52 +15,22 @@ use crate::output::options::OutputOptions;
 use crate::validation::validate_rust_client;
 
 fn endpoint(id: &str, method: RestMethod, path: &str, description: &str) -> Endpoint {
-    Endpoint {
-        id: id.to_string(),
-        method,
-        path: path.to_string(),
-        description: description.to_string(),
-        request: None,
-        response: ApiResponse::json_type("Widget"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    }
+    { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = method; fixture.path = path.to_string(); fixture.description = description.to_string(); fixture.request = None; fixture.response = vec![SuccessShape::json_type("Widget")]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture }
 }
 
 fn param(name: &str, param_type: QueryParamType, description: Option<&str>) -> ParamDef {
-    ParamDef {
+    ParamDef { constraints: None, deprecated: false, rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required: false,
         description: description.map(str::to_string),
         param_type,
         explode: false,
-        style: ParamStyle::Simple,
+        style: ParamStyle::Form,
     }
 }
 
 fn api(name: &str, endpoints: Vec<Endpoint>) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{name} API"),
-        base_url: "https://api.example.com".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::BearerToken { header: None },
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints,
-        module_path: None,
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+    { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{name} API"); fixture.base_url = "https://api.example.com".to_string(); fixture.docs_url = None; fixture.auth = AuthStrategy::BearerToken { header: None }; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.env_mapping = None; fixture.headers = vec![]; fixture.endpoints = endpoints; fixture.module_path = None; fixture.request_suffix = None; fixture.version = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }
 }
 
 /// The fixture: required arguments in order, every optional-value location,
@@ -74,14 +44,13 @@ fn widgets() -> RestApi {
         "/owners/{owner}/widgets/{widget_id}",
         "Gets *one* widget: `code`, [a link](https://example.com), <b>tags</b> & snake_case_text.\n\nA second paragraph.",
     );
-    get_widget.params = Some(EndpointParams {
+    get_widget.params = Some(EndpointParams { path: vec![],
         query: vec![
             param("limit", QueryParamType::Integer, Some("Results per\n   page.")),
             param("tag", QueryParamType::Array(Box::new(QueryParamType::String)), None),
         ],
         header: vec![param("X-Trace-Id", QueryParamType::String, None)],
         cookie: vec![param("session", QueryParamType::String, None)],
-        ..Default::default()
     });
 
     let mut create_widget = endpoint("CreateWidget", RestMethod::Post, "/owners/{owner}/widgets", "Creates a widget.");
@@ -383,7 +352,7 @@ fn renames_are_warnings_and_conflicts_are_errors_of_the_rust_output() {
 #[test]
 fn a_call_type_name_shared_with_a_referenced_type_is_a_collision() {
     let mut list = endpoint("ListWidgets", RestMethod::Get, "/widgets", "");
-    list.response = ApiResponse::json_type("ListWidgetsCall");
+    list.response = vec![SuccessShape::json_type("ListWidgetsCall")];
     let errors: Vec<String> = validate_rust_client(&[&api("Widgets", vec![list])])
         .iter()
         .filter(|diagnostic| diagnostic.feature == Feature::GeneratedNameCollision)
@@ -613,11 +582,65 @@ fn example_invocation_passes_path_parameters_and_the_body() {
     let api = widgets();
     let invocation = |id: &str| {
         let endpoint = api.endpoints.iter().find(|endpoint| endpoint.id == id).unwrap();
-        example_invocation(&api, endpoint, "client")
+        example_call(&api, endpoint).method_call("client", "body")
     };
     assert_eq!(invocation("GetWidget"), r#"client.get_widget("owner", "widget_id")"#);
     assert_eq!(invocation("CreateWidget"), r#"client.create_widget("owner", body)"#);
     assert_eq!(invocation("New"), "client.new_endpoint()");
+}
+
+#[test]
+fn example_typed_send_builds_the_request_the_endpoint_method_builds() {
+    let api = widgets();
+    let example = |id: &str| example_call(&api, api.endpoints.iter().find(|endpoint| endpoint.id == id).unwrap());
+
+    let create = example("CreateWidget");
+    assert_eq!(create.typed_send("client", "body.clone()"), r#"client.send(CreateWidgetRequest::new("owner", body.clone()))"#);
+    assert_eq!(create.method_call("client", "body.clone()"), r#"client.create_widget("owner", body.clone())"#);
+    assert!(create.body_type.is_some());
+    let new = example("New");
+    assert_eq!(new.typed_send("client", "body"), "client.send(NewRequest::default())");
+    assert_eq!(new.body_type, None);
+}
+
+#[test]
+fn required_query_values_are_method_arguments_and_optional_ones_typed_setters() {
+    let mut search = endpoint("Search", RestMethod::Post, "/orgs/{org}/search", "Searches.");
+    search.request = Some(ApiRequest::json_type("Query"));
+    let mut since = param("since", QueryParamType::Integer, None);
+    since.required = true;
+    let mut scope = param("scope", QueryParamType::Enum(vec!["all".into(), "mine".into()]), None);
+    scope.required = true;
+    search.params = Some(EndpointParams {
+        query: vec![
+            since,
+            param("order", QueryParamType::Enum(vec!["asc".into(), "desc".into()]), None),
+            scope,
+        ],
+        ..Default::default()
+    });
+    let api = api("Finder", vec![search]);
+    let code = code(&api);
+    let flat = squash(&code);
+
+    assert!(
+        flat.contains(&squash(
+            "pub fn search(&self, org: impl Into<String>, since: i64, scope: SearchRequestScope, body: Query) \
+             -> SearchCall<'_> { SearchCall(self.0.send(SearchRequest::new(org, since, scope, body))) }"
+        )),
+        "{code}"
+    );
+    let setters = inherent_fns(&code, "SearchCall");
+    assert!(setters.contains("order"), "{setters:?}");
+    assert!(!setters.contains("since") && !setters.contains("scope"), "required values have no setter: {setters:?}");
+    assert!(flat.contains(&squash("pub fn order(self, value: SearchRequestOrder) -> Self")), "{code}");
+    let docs = fn_docs(&code, "Finder", "search").join("\n");
+    assert!(docs.contains("- `since: i64`: the required `since` query parameter"), "{docs}");
+    assert!(docs.contains("- `scope: SearchRequestScope`: the required `scope` query parameter"), "{docs}");
+    assert_eq!(
+        example_call(&api, &api.endpoints[0]).method_call("client", "body"),
+        r#"client.search("org", 1, SearchRequestScope::All, body)"#
+    );
 }
 
 // ---- reserved names stay true to the code they reserve (ruling 6) ----
@@ -643,7 +666,7 @@ fn api_client_methods_are_exactly_the_methods_api_client_emits() {
 #[test]
 fn api_struct_methods_are_exactly_the_methods_generate_api_struct_emits() {
     let mut basic = api("Widgets", vec![]);
-    basic.auth = AuthStrategy::Basic;
+    basic.auth = crate::test_utils::basic_auth(&["USER"], &["PASS"]);
     let code = format_generated_code(&generate_api_struct(&basic)).unwrap();
     let reserved: BTreeSet<String> = API_STRUCT_METHODS.iter().map(ToString::to_string).collect();
     assert_eq!(inherent_fns(&code, "Widgets"), reserved);
@@ -701,4 +724,91 @@ fn no_shipped_call_type_shares_a_name_with_a_definitions_type() {
         .filter(|call_type| defined.contains(call_type))
         .collect();
     assert!(shadowing.is_empty(), "call types that shadow definitions types: {shadowing:?}");
+}
+
+// ---- typed path parameters, deprecation, and endpoint auth ----
+
+fn typed_cell_api() -> RestApi {
+    let mut get_cell = endpoint("GetCell", RestMethod::Get, "/rows/{row}/kinds/{kind}", "Gets a cell.");
+    get_cell.params = Some(EndpointParams {
+        path: vec![
+            ParamDef::path("kind", QueryParamType::Enum(vec!["a-1".into(), "b".into()])),
+            ParamDef::path("row", QueryParamType::Integer),
+        ],
+        query: vec![],
+        header: vec![],
+        cookie: vec![],
+    });
+    api("Cells", vec![get_cell])
+}
+
+#[test]
+fn typed_path_arguments_follow_the_template_with_their_declared_types() {
+    let api = typed_cell_api();
+
+    let code = code(&api);
+
+    assert!(
+        squash(&code).contains(
+            "pubfnget_cell(&self,row:i64,kind:GetCellRequestKind)->GetCellCall<'_>{\
+             GetCellCall(self.0.send(GetCellRequest::new(row,kind)))}"
+        ),
+        "{code}"
+    );
+    let docs = fn_docs(&code, "Cells", "get_cell");
+    assert!(docs.contains(&" - `row: i64`: the `{row}` path parameter".to_string()), "{docs:?}");
+    assert!(docs.contains(&" - `kind: GetCellRequestKind`: the `{kind}` path parameter".to_string()), "{docs:?}");
+    let example = example_call(&api, &api.endpoints[0]);
+    assert_eq!(example.method_call("client", "body"), "client.get_cell(1, GetCellRequestKind::A1)");
+    assert_eq!(example.typed_send("client", "body"), "client.send(GetCellRequest::new(1, GetCellRequestKind::A1))");
+    assert_eq!(example.imports, ["GetCellRequest", "GetCellRequestKind"]);
+}
+
+#[test]
+fn deprecation_is_documented_on_methods_call_types_and_setters_without_attributes() {
+    let mut api = widgets();
+    let get_widget = api.endpoints.iter_mut().find(|endpoint| endpoint.id == "GetWidget").unwrap();
+    get_widget.deprecated = true;
+    get_widget.params.as_mut().unwrap().query[0].deprecated = true;
+
+    let code = code(&api);
+
+    let method_docs = fn_docs(&code, "Widgets", "get_widget");
+    let route = method_docs.iter().position(|line| line == " `GET /owners/{owner}/widgets/{widget_id}`").unwrap();
+    assert_eq!(method_docs[route + 1..route + 3], ["", " Deprecated."], "{method_docs:?}");
+    assert!(
+        method_docs.contains(&" - [`limit`](GetWidgetCall::limit): the `limit` query parameter (`i64`). Results per page. Deprecated.".to_string()),
+        "{method_docs:?}"
+    );
+    assert_eq!(
+        fn_docs(&code, "GetWidgetCall", "limit"),
+        [" Sets the `limit` query parameter (`i64`). Results per page.", "", " Deprecated."]
+    );
+    assert!(
+        squash(&code).contains(&squash(
+            "the call without sending it.\n///\n/// Deprecated.\n#[derive(Clone, Debug)]\n#[must_use = \"a call sends nothing until it is awaited\"]\npub struct GetWidgetCall"
+        )),
+        "{code}"
+    );
+    assert!(!code.contains("#[deprecated"), "{code}");
+    assert_eq!(fn_docs(&code, "GetWidgetCall", "tag").len(), 1, "an undeprecated setter is unchanged");
+}
+
+#[test]
+fn a_public_endpoint_method_says_it_sends_no_credential() {
+    let mut api = widgets();
+    api.endpoints[0].auth = Some(schematic_define::EndpointAuth::Public);
+    let method = names_of(&api, 0);
+
+    let code = code(&api);
+
+    assert!(
+        fn_docs(&code, "Widgets", &method).contains(&" This endpoint is public: it sends no credential.".to_string()),
+        "{code}"
+    );
+    assert!(!fn_docs(&code, "Widgets", &names_of(&api, 1)).iter().any(|line| line.contains("credential")));
+}
+
+fn names_of(api: &RestApi, index: usize) -> String {
+    resolve_names(api).endpoints[index].method.clone()
 }

@@ -43,6 +43,27 @@ md set doc.md draft false
 - The source file is not modified.
 - Frontmatter key order is preserved from the original document.
 
+## Formatting Is Preserved
+
+Only the property being set is rewritten. Every other byte of the document
+stays exactly as authored: indentation, comments, quoting, block scalars,
+line endings, and the body. A new property is appended as the last
+frontmatter entry; an existing one is replaced where it stands.
+
+```yaml
+# before                         # after: md set doc.md start_phase 6 --save
+phase: 1  # first phase          phase: 1  # first phase
+files:                           files:
+    - a.rs                           - a.rs
+                                 start_phase: 6
+```
+
+The new value itself is written in Darkmatter's standard YAML style. When the
+frontmatter cannot be edited in place (for example, its root mapping is
+indented), `set` falls back to rewriting the whole frontmatter block in the
+standard style; `md clean --save` fixes the indentation so later edits stay
+in place.
+
 **With `--save`**
 
 - Updates the source file in place.
@@ -59,3 +80,4 @@ md set doc.md draft false
 - Default-to-stdout makes `set` composable in shell pipelines without side effects.
 - `--save` is explicit opt-in for mutation, avoiding accidental file changes.
 - Key ordering is preserved using an insertion-order map, so frontmatter reads back in the same order it was written.
+- Re-serializing the whole frontmatter on every `set` turned a one-property change into a diff of every list in the file; editing only the changed property keeps scripted edits reviewable.

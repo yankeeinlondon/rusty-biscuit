@@ -8,7 +8,6 @@ pub(super) struct ConstructorInit<'a> {
     pub env_auth: &'a [String],
     pub auth_strategy_init: &'a TokenStream,
     pub auth_policy_init: &'a TokenStream,
-    pub env_username_init: &'a TokenStream,
     pub headers_init: &'a TokenStream,
     pub docs_url_init: &'a TokenStream,
 }
@@ -30,7 +29,6 @@ pub(super) fn generate_constructors(
     let env_auth = init.env_auth;
     let auth_strategy_init = init.auth_strategy_init;
     let auth_policy_init = init.auth_policy_init;
-    let env_username_init = init.env_username_init;
     let headers_init = init.headers_init;
     let docs_url_init = init.docs_url_init;
 
@@ -60,7 +58,6 @@ pub(super) fn generate_constructors(
                 env_auth: vec![#(#env_auth.to_string()),*],
                 auth_strategy: #auth_strategy_init,
                 auth_policy: #auth_policy_init,
-                env_username: #env_username_init,
                 headers: #headers_init,
                 api_key_param: None,
                 variant_hooks: crate::shared::VariantHooks::default(),
@@ -81,7 +78,6 @@ pub(super) fn generate_constructors(
                 env_auth: vec![#(#env_auth.to_string()),*],
                 auth_strategy: #auth_strategy_init,
                 auth_policy: #auth_policy_init,
-                env_username: #env_username_init,
                 headers: #headers_init,
                 api_key_param: None,
                 variant_hooks: crate::shared::VariantHooks::default(),
@@ -108,7 +104,6 @@ pub(super) fn generate_constructors(
                 env_auth: vec![#(#env_auth.to_string()),*],
                 auth_strategy: #auth_strategy_init,
                 auth_policy: #auth_policy_init,
-                env_username: #env_username_init,
                 headers: #headers_init,
                 api_key_param: None,
                 variant_hooks: crate::shared::VariantHooks::default(),
@@ -133,7 +128,6 @@ pub(super) fn generate_constructors(
                 env_auth: vec![#(#env_auth.to_string()),*],
                 auth_strategy: #auth_strategy_init,
                 auth_policy: #auth_policy_init,
-                env_username: #env_username_init,
                 headers: #headers_init,
                 api_key_param: None,
                 variant_hooks: crate::shared::VariantHooks::default(),

@@ -1,0 +1,307 @@
+{
+  "definition": {
+    "auth": {
+      "ApiKey": {
+        "header": "X-Api-Key",
+        "value_prefix": null
+      }
+    },
+    "auth_policy": null,
+    "base_url": "https://api.anthropic.com/v1",
+    "cross_origin": "SameOrigin",
+    "default_pagination": null,
+    "description": "Anthropic Messages API for Claude AI interactions and agent tool use",
+    "docs_url": "https://docs.anthropic.com/en/api/messages",
+    "endpoints": [
+      {
+        "description": "Create a message with optional tool use for agent interactions",
+        "headers": [],
+        "id": "CreateMessage",
+        "method": "POST",
+        "params": null,
+        "path": "/messages",
+        "request": {
+          "Json": {
+            "Named": "CreateMessageBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "MessageResponse"
+          }
+        }
+      },
+      {
+        "description": "Count tokens in a message before sending",
+        "headers": [],
+        "id": "CountTokens",
+        "method": "POST",
+        "params": null,
+        "path": "/messages/count_tokens",
+        "request": {
+          "Json": {
+            "Named": "CountTokensBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "CountTokensResponse"
+          }
+        }
+      },
+      {
+        "description": "List available Claude models",
+        "headers": [],
+        "id": "ListModels",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": "ModelInfo",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "data"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "params": null,
+        "path": "/models",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "ListModelsResponse"
+          }
+        }
+      },
+      {
+        "description": "Get information about a specific model",
+        "headers": [],
+        "id": "RetrieveModel",
+        "method": "GET",
+        "params": null,
+        "path": "/models/{model_id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "ModelInfo"
+          }
+        }
+      }
+    ],
+    "env_auth": [
+      "ANTHROPIC_API_KEY"
+    ],
+    "env_mapping": {
+      "api_key": {
+        "header": "X-Api-Key",
+        "names": {
+          "names": [
+            "ANTHROPIC_API_KEY"
+          ]
+        }
+      },
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    },
+    "env_username": null,
+    "headers": [
+      [
+        "anthropic-version",
+        "2023-06-01"
+      ]
+    ],
+    "module_path": null,
+    "name": "Anthropic",
+    "request_id_header": null,
+    "request_suffix": null,
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "31c89a43f3ae020020b44a0ca2c22f9f5583773e1b8a7080667eeac87c6827b9",
+    "endpoints": [
+      {
+        "blake3": "d109f6e12663c46e73211663ceaceaab6a036be3aa63a4bf249d521f139914cd",
+        "id": "CreateMessage"
+      },
+      {
+        "blake3": "5f454036e1a165c4a783185fa3e76f13ecfa356c556de9fca377bcaedae45f1f",
+        "id": "CountTokens"
+      },
+      {
+        "blake3": "f196ade5e1e3f38951f9b03f2a3364ff61362f2e3e95558698306f2e6deda62e",
+        "id": "ListModels"
+      },
+      {
+        "blake3": "e44f65ba4aad899e9717f450176c8fb074efb0c018d8782cfe54c7f3e3956395",
+        "id": "RetrieveModel"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "CreateMessage",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CountTokens",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListModels",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "ModelInfo",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "data"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "RetrieveModel",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "9aca13bb1d68fc6c6289338b996af5052aeeefd9062183548c13c3a7edb567d4",
+      "name": "CreateMessageBody",
+      "rust_path": "::schematic_definitions::anthropic::CreateMessageBody"
+    },
+    {
+      "blake3": "4f81bae3b9f76fe564bdae2befeae4149054f2e9598d2c90c3b2662c19afc5da",
+      "name": "CacheControl",
+      "rust_path": null
+    },
+    {
+      "blake3": "1a92287f45a3f572e226e1c2f39d511a240169122f5dc94a31bfe50ba37157b4",
+      "name": "ContentBlock",
+      "rust_path": "::schematic_definitions::anthropic::ContentBlock"
+    },
+    {
+      "blake3": "c97043e529ea0c08dbcae67397c460149db5fa0f2a3c76539f91ef39c82ac796",
+      "name": "DocumentSource",
+      "rust_path": null
+    },
+    {
+      "blake3": "bfcdfb4a3d764d9c2e041420bd6c9e3ed99ba87988ce3d8171c5a60d179c5818",
+      "name": "ImageSource",
+      "rust_path": null
+    },
+    {
+      "blake3": "7235254d9bd4b0ce0bebef215bbd150733ad0c386af177887105fb8c20cc2212",
+      "name": "Message",
+      "rust_path": "::schematic_definitions::anthropic::Message"
+    },
+    {
+      "blake3": "f4a400aa6275099b66db458dbe871168fcbcb92b49cad3b2831458d41652264d",
+      "name": "MessageRole",
+      "rust_path": null
+    },
+    {
+      "blake3": "de296730ccd5ce6a3ba8c3ba37229591f97c82e6f99e7393a10feb42f536db81",
+      "name": "Metadata",
+      "rust_path": null
+    },
+    {
+      "blake3": "0e90cf906787b8d96dddf32cb9519ee4880863ad05969d94d325a1e91974b087",
+      "name": "ServiceTier",
+      "rust_path": null
+    },
+    {
+      "blake3": "8e78481045b45d4b4b0a1f1517a0d38c4a55005a2e92b4fc163f8170472b8df5",
+      "name": "SystemContent",
+      "rust_path": null
+    },
+    {
+      "blake3": "ab621226fe0198851b566b550f85737279e4e14802b1935e68c5a321ee43c6de",
+      "name": "SystemPrompt",
+      "rust_path": null
+    },
+    {
+      "blake3": "71e7c3da101cc1a0663ead928d32cbbd11df7f681db577d46bb221b748366384",
+      "name": "ThinkingConfig",
+      "rust_path": null
+    },
+    {
+      "blake3": "fe42e3d1ebe346661c71fa5952fe637945085b3bce1d74eb7672062cde534d92",
+      "name": "ThinkingType",
+      "rust_path": null
+    },
+    {
+      "blake3": "15f0797b41a03f9b8c52ab7b6c6af59bd49a2ac90ea2def86582210cf1e25dc4",
+      "name": "Tool",
+      "rust_path": "::schematic_definitions::anthropic::Tool"
+    },
+    {
+      "blake3": "383aa928c43bb5d4be7809f15a571f0ae675ef3d47b5a82fe8a77142e339872c",
+      "name": "ToolChoice",
+      "rust_path": null
+    },
+    {
+      "blake3": "0494d610df59e6bbd27322381e9f47bd176ad04cb30c33f1b19114e876e60893",
+      "name": "ToolResultContent",
+      "rust_path": null
+    },
+    {
+      "blake3": "e50fa9a9fef0888998258c8dfb3f72ecb6010ca5ba248ad5969e66d69896e6bc",
+      "name": "CountTokensBody",
+      "rust_path": "::schematic_definitions::anthropic::CountTokensBody"
+    },
+    {
+      "blake3": "d35624f538b0d56bf998f3ec2b8ecf7c4775119f17c59fc9a57dc2562ea0423b",
+      "name": "MessageResponse",
+      "rust_path": "::schematic_definitions::anthropic::MessageResponse"
+    },
+    {
+      "blake3": "51097bd297a4d136b5c51d1c3d3e7b36eae16a02f20e7b67b60ced93f34b7e56",
+      "name": "StopReason",
+      "rust_path": null
+    },
+    {
+      "blake3": "d00ae41946ab1b8fa161d504482425a0769eb6e72743013bad712f5a24773b76",
+      "name": "Usage",
+      "rust_path": null
+    },
+    {
+      "blake3": "0d4f92f5bd2d23f8ccff34642a3a70a7c90f28ce5394a06b8cbca6be1349d839",
+      "name": "CountTokensResponse",
+      "rust_path": "::schematic_definitions::anthropic::CountTokensResponse"
+    },
+    {
+      "blake3": "5ecb960cd4d7b76405846ba6755d91dbff7cf3ce4116ecf427efbad59817ed12",
+      "name": "ListModelsResponse",
+      "rust_path": "::schematic_definitions::anthropic::ListModelsResponse"
+    },
+    {
+      "blake3": "00e22761c15797361060f8178e77845c1672b00aaa62eb5535b23925ac127078",
+      "name": "ModelInfo",
+      "rust_path": "::schematic_definitions::anthropic::ModelInfo"
+    }
+  ]
+}

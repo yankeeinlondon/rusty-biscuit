@@ -19,6 +19,8 @@ terminal-tests = ["dep:test-toolkit"]
 
 [dependencies]
 biscuit-terminal = { path = "../../biscuit-terminal/lib", features = ["image"] }
+# `GitGraph` for the `wt list` git graph.
+biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["terminal"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
@@ -34,9 +36,6 @@ test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 worktree = { path = "../lib", features = ["count-git"] }
 assert_cmd = "2"
 base64 = "0.22"
-# `MermaidDiagram::gitgraph_geometry`: the laid-out graph the image is drawn
-# from, for the gathered-graph layout tests. Already built via biscuit-terminal.
-biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["image"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 insta = "1"
@@ -48,6 +47,11 @@ sysinfo = "0.38.2"
 tempfile = "3"
 
 # ConPTY for the PowerShell move-first L2 test; already built for unchained-ai.
+# Reads `wt`'s parent process (its PID and name) on Windows, where std has
+# no `parent_id`.
+[target.'cfg(windows)'.dependencies]
+sysinfo = "0.38.2"
+
 [target.'cfg(windows)'.dev-dependencies]
 xpty = "0.3.6"
 

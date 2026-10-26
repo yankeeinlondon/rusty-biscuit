@@ -17,12 +17,12 @@ use indexmap::IndexMap;
 use openapiv3::{LinkOperation, OpenAPI, ReferenceOr};
 use schematic_define::RestApi;
 use schematic_define::openapi::{
-    ExportFormat, ExportOptions, SchemaRegistryLike, export, serialize,
+    ExportFormat, ExportOptions, export, serialize,
 };
 
 use crate::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use crate::errors::GeneratorError;
-use crate::export::resolve_module_name;
+use schematic_definitions::naming::resolve_module_name;
 use crate::validation::{ensure_no_errors, validate_openapi};
 
 /// Writes an OpenAPI specification file to the specified directory.
@@ -38,8 +38,8 @@ use crate::validation::{ensure_no_errors, validate_openapi};
 ///
 /// ## Parameters
 ///
-/// - `api` - The REST API definition to export
-/// - `registry` - Schema registry containing JSON schemas for response types
+/// - `api` - The REST API definition to export; `components.schemas` come
+///   from its [`RestApi::schemas`]
 /// - `options` - Export configuration options (format, version, extensions)
 /// - `dir` - Output directory for the generated file
 ///
@@ -60,19 +60,17 @@ use crate::validation::{ensure_no_errors, validate_openapi};
 /// ```text
 /// use std::path::Path;
 /// use schematic_define::openapi::ExportOptions;
-/// use schematic_definitions::openai::{define_openai_api, openapi_registry};
+/// use schematic_definitions::openai::define_openai_api;
 /// use schematic_gen::export::openapi::write_openapi;
 ///
 /// let api = define_openai_api();
-/// let registry = openapi_registry();
 /// let options = ExportOptions::new().with_version("1.0.0");
 ///
-/// let path = write_openapi(&api, &registry, &options, Path::new("./openapi"))?;
+/// let path = write_openapi(&api, &options, Path::new("./openapi"))?;
 /// assert_eq!(path.file_name().unwrap(), "openai.json");
 /// ```
-pub fn write_openapi<R: SchemaRegistryLike>(
+pub fn write_openapi(
     api: &RestApi,
-    registry: &R,
     options: &ExportOptions,
     dir: &Path,
 ) -> Result<std::path::PathBuf, GeneratorError> {
@@ -82,7 +80,7 @@ pub fn write_openapi<R: SchemaRegistryLike>(
         return Err(GeneratorError::OutputDirNotFound(dir.display().to_string()));
     }
 
-    let doc = export(api, registry, options)
+    let doc = export(api, options)
         .map_err(|e| GeneratorError::ConfigError(format!("OpenAPI export failed: {}", e)))?;
     ensure_no_errors(
         Output::OpenApi,
@@ -113,14 +111,13 @@ pub fn write_openapi<R: SchemaRegistryLike>(
 /// ## Panics
 ///
 /// Panics if `apis` is empty — callers must supply at least one API.
-pub fn write_openapi_grouped<R: SchemaRegistryLike>(
+pub fn write_openapi_grouped(
     apis: &[&RestApi],
     module_name: &str,
-    registry: &R,
     options: &ExportOptions,
     dir: &Path,
 ) -> Result<PathBuf, GeneratorError> {
-    let doc = build_openapi_grouped(apis, module_name, registry, options)?;
+    let doc = build_openapi_grouped(apis, module_name, options)?;
     write_openapi_document(&doc, module_name, options.format, dir)
 }
 
@@ -135,21 +132,26 @@ pub fn write_openapi_grouped<R: SchemaRegistryLike>(
 /// - **paths**: unioned across all members. Two members may declare the same
 ///   `path` + `method` only when the operations are equal apart from their
 ///   `security` (the EMQX Basic + Bearer pair); the merged operation then
-///   lists both security alternatives. Any other overlap is an OpenAPI-only
-///   `duplicate-method-path` error naming both APIs.
+///   accepts either side's requirements (see `merge_method`, including a
+///   public `security: []` side). Any other overlap is an OpenAPI-only
+///   `duplicate-method-path` error naming both APIs. Path-level parameters
+///   are declared once per `(name, in)`; a later member's differing
+///   declaration becomes an override on that member's operations.
 /// - **operationId**: unique across the document. The first member in
 ///   registry order keeps an id; a later member's clashing id is prefixed
 ///   with its API name in PascalCase (`OllamaOpenAIListModels`), plus a
 ///   numeric suffix if that name is taken or is any operation's original id.
 ///   Links that name a renamed operation are updated for the API that wrote
 ///   them.
-/// - **components.schemas**: unioned via the merged `registry` (callers
-///   should pass the registry returned by
-///   [`schematic_definitions::registry::get_registries_for_module`]).
+/// - **components.schemas**: unioned across members' [`RestApi::schemas`],
+///   first position kept. Equal same-named entries collapse (members of one
+///   module group carry the same components); different ones are an
+///   `invalid-schema-reference` error naming both APIs.
 /// - **components.security_schemes**: unioned across members. If two members
 ///   define the same scheme name with different security-scheme content, the
-///   second is renamed to `<scheme>_<api_snake>` and that API's operation and
-///   top-level `security` requirements reference the renamed scheme.
+///   second is renamed to `<scheme>_<api_snake>` (then `<scheme>_<api_snake>2`,
+///   ... while that name holds a different scheme) and that API's operation
+///   and top-level `security` requirements reference the renamed scheme.
 /// - **security**: top-level requirements unioned across members,
 ///   deduplicated while preserving insertion order.
 /// - **tags**: unioned across members (currently always empty in practice).
@@ -163,17 +165,17 @@ pub fn write_openapi_grouped<R: SchemaRegistryLike>(
 ///
 /// - [`GeneratorError::Validation`] when [`validate_openapi`] reports an
 ///   error for any member, when two members declare incompatible operations
-///   on one `path` + `method`, or when the finished document fails
+///   on one `path` + `method` or different schemas under one component
+///   name, or when the finished document fails
 ///   [`operation_id_diagnostics`].
 /// - [`GeneratorError::ConfigError`] when per-API export fails.
 ///
 /// ## Panics
 ///
 /// Panics if `apis` is empty — callers must supply at least one API.
-pub fn build_openapi_grouped<R: SchemaRegistryLike>(
+pub fn build_openapi_grouped(
     apis: &[&RestApi],
     module_name: &str,
-    registry: &R,
     options: &ExportOptions,
 ) -> Result<OpenAPI, GeneratorError> {
     assert!(
@@ -184,7 +186,7 @@ pub fn build_openapi_grouped<R: SchemaRegistryLike>(
 
     let mut docs: Vec<(String, OpenAPI)> = Vec::with_capacity(apis.len());
     for api in apis {
-        let doc = export(api, registry, options).map_err(|e| {
+        let doc = export(api, options).map_err(|e| {
             GeneratorError::ConfigError(format!(
                 "OpenAPI export failed for API '{}': {}",
                 api.name, e
@@ -348,6 +350,12 @@ fn merge_documents(
         }
     }
     let mut contributors: Vec<String> = vec![seed_name];
+    // Each contributor's document-level requirements, which its operations
+    // without their own `security` inherit.
+    let mut inherited_security: Vec<Vec<openapiv3::SecurityRequirement>> =
+        vec![merged.security.clone().unwrap_or_default()];
+    // Component name -> index of the API that supplied it; absent means the seed.
+    let mut schema_owners: IndexMap<String, usize> = IndexMap::new();
 
     for (api_name, mut doc) in docs {
         let api_index = contributors.len();
@@ -360,9 +368,31 @@ fn merge_documents(
         // API's.
         let merged_components = merged.components.get_or_insert_with(Default::default);
         if let Some(incoming_components) = doc.components.take() {
-            // Schemas: IndexMap insert overwrites; identical schemas collapse.
             for (name, schema) in incoming_components.schemas {
-                merged_components.schemas.insert(name, schema);
+                match merged_components.schemas.get(&name) {
+                    Some(existing) if !schemas_equal(existing, &schema) => {
+                        let owner = schema_owners.get(&name).map_or(&contributors[0], |&index| &contributors[index]);
+                        return Err(GeneratorError::Validation {
+                            output: Output::OpenApi,
+                            diagnostics: vec![ValidationDiagnostic::for_group(
+                                Severity::Error,
+                                [owner.as_str(), api_name.as_str()],
+                                Feature::InvalidSchemaReference,
+                                Output::OpenApi,
+                                format!(
+                                    "module '{module_name}': schema component \"{name}\" has \
+                                     different definitions in both APIs; an OpenAPI document \
+                                     holds one schema per component name"
+                                ),
+                            )],
+                        });
+                    }
+                    Some(_) => {}
+                    None => {
+                        schema_owners.insert(name.clone(), api_index);
+                        merged_components.schemas.insert(name, schema);
+                    }
+                }
             }
 
             let mut renames: IndexMap<String, String> = IndexMap::new();
@@ -373,9 +403,18 @@ fn merge_documents(
                             // Same scheme by content — drop the duplicate.
                             continue;
                         }
-                        let renamed = format!("{}_{}", name, snake_case(&api_name));
+                        let base = format!("{}_{}", name, snake_case(&api_name));
+                        let mut renamed = base.clone();
+                        let mut suffix = 2;
+                        while let Some(taken) = merged_components.security_schemes.get(&renamed) {
+                            if security_schemes_equal(taken, &scheme) {
+                                break;
+                            }
+                            renamed = format!("{base}{suffix}");
+                            suffix += 1;
+                        }
                         renames.insert(name.clone(), renamed.clone());
-                        merged_components.security_schemes.insert(renamed, scheme);
+                        merged_components.security_schemes.entry(renamed).or_insert(scheme);
                     }
                     None => {
                         merged_components.security_schemes.insert(name, scheme);
@@ -395,11 +434,14 @@ fn merge_documents(
             }
         }
 
+        inherited_security.push(doc.security.clone().unwrap_or_default());
+
         // ---- Merge paths ----
         for (path, item_ref) in std::mem::take(&mut doc.paths.paths) {
             match merged.paths.paths.get_mut(&path) {
                 Some(ReferenceOr::Item(existing)) => {
-                    if let ReferenceOr::Item(incoming) = item_ref {
+                    if let ReferenceOr::Item(mut incoming) = item_ref {
+                        merge_path_parameters(existing, &mut incoming);
                         for (method, incoming_op) in path_methods_present(&incoming) {
                             if let Some(existing_op) = method_slot(existing, method)
                                 && !operations_compatible(existing_op, incoming_op)
@@ -425,27 +467,25 @@ fn merge_documents(
                                 });
                             }
                         }
-                        for (method, _op) in path_methods_present(&incoming) {
-                            operations
-                                .entry((path.clone(), method))
-                                .or_default()
-                                .push(api_index);
-                        }
-
                         // Move method operations from incoming into existing,
                         // or union security requirements when the existing
                         // operation is structurally equivalent.
-                        merge_method(&mut existing.get, incoming.get);
-                        merge_method(&mut existing.post, incoming.post);
-                        merge_method(&mut existing.put, incoming.put);
-                        merge_method(&mut existing.patch, incoming.patch);
-                        merge_method(&mut existing.delete, incoming.delete);
-                        merge_method(&mut existing.head, incoming.head);
-                        merge_method(&mut existing.options, incoming.options);
-                        merge_method(&mut existing.trace, incoming.trace);
-
-                        // Append any new path-level parameters.
-                        existing.parameters.extend(incoming.parameters);
+                        for method in METHODS {
+                            let Some(incoming_op) = method_slot_mut(&mut incoming, method).take() else {
+                                continue;
+                            };
+                            let owners = operations.entry((path.clone(), method)).or_default();
+                            let existing_inherited = union_requirements(
+                                owners.iter().map(|&index| inherited_security[index].as_slice()),
+                            );
+                            owners.push(api_index);
+                            merge_method(
+                                method_slot_mut(existing, method),
+                                incoming_op,
+                                &existing_inherited,
+                                &inherited_security[api_index],
+                            );
+                        }
                     }
                 }
                 Some(ReferenceOr::Reference { .. }) | None => {
@@ -677,32 +717,118 @@ fn operations_compatible(a: &openapiv3::Operation, b: &openapiv3::Operation) -> 
 ///
 /// - If the slot is empty, the incoming operation is moved in wholesale.
 /// - If both are present and structurally equivalent
-///   (see [`operations_compatible`]), the incoming security requirements are
-///   unioned into the existing operation, deduplicated while preserving order.
+///   (see [`operations_compatible`]), the merged operation accepts what
+///   either side accepts. When neither declares its own `security`, both
+///   inherit and nothing changes. Otherwise each side's effective
+///   requirements (its own `security`, else `*_inherited`, its document's)
+///   are unioned, deduplicated in order. A side that needs no authentication
+///   (`security: []`, or inheriting none) contributes the empty requirement
+///   `{}`, so a public alternative is never lost; two such sides stay
+///   `security: []`.
 /// - Otherwise the incoming operation is dropped (the caller has already
 ///   verified compatibility before calling this function).
 fn merge_method(
     existing: &mut Option<openapiv3::Operation>,
-    incoming: Option<openapiv3::Operation>,
+    incoming_op: openapiv3::Operation,
+    existing_inherited: &[openapiv3::SecurityRequirement],
+    incoming_inherited: &[openapiv3::SecurityRequirement],
 ) {
-    let Some(incoming_op) = incoming else {
+    let Some(existing_op) = existing.as_mut() else {
+        *existing = Some(incoming_op);
         return;
     };
-    match existing.as_mut() {
-        None => {
-            *existing = Some(incoming_op);
+    if existing_op.security.is_none() && incoming_op.security.is_none() {
+        return;
+    }
+    let sides = [
+        existing_op.security.as_deref().unwrap_or(existing_inherited),
+        incoming_op.security.as_deref().unwrap_or(incoming_inherited),
+    ];
+    let merged = if sides.iter().all(|side| side.is_empty()) {
+        Vec::new()
+    } else {
+        let anonymous = [openapiv3::SecurityRequirement::new()];
+        union_requirements(
+            sides.into_iter().map(|side| if side.is_empty() { &anonymous[..] } else { side }),
+        )
+    };
+    existing_op.security = Some(merged);
+}
+
+/// Unions requirement lists, deduplicated in first-seen order.
+fn union_requirements<'a>(
+    lists: impl IntoIterator<Item = &'a [openapiv3::SecurityRequirement]>,
+) -> Vec<openapiv3::SecurityRequirement> {
+    let mut out: Vec<openapiv3::SecurityRequirement> = Vec::new();
+    for requirement in lists.into_iter().flatten() {
+        if !out.contains(requirement) {
+            out.push(requirement.clone());
         }
-        Some(existing_op) => {
-            if let Some(incoming_security) = incoming_op.security {
-                let bucket = existing_op.security.get_or_insert_with(Vec::new);
-                for req in incoming_security {
-                    if !bucket.iter().any(|present| present == &req) {
-                        bucket.push(req);
+    }
+    out
+}
+
+/// Every method label a path item can hold, in [`path_methods_present`] order.
+const METHODS: [&str; 8] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE"];
+
+/// The operation slot of `item` for a [`METHODS`] label.
+fn method_slot_mut<'a>(item: &'a mut openapiv3::PathItem, method: &str) -> &'a mut Option<openapiv3::Operation> {
+    match method {
+        "GET" => &mut item.get,
+        "POST" => &mut item.post,
+        "PUT" => &mut item.put,
+        "PATCH" => &mut item.patch,
+        "DELETE" => &mut item.delete,
+        "HEAD" => &mut item.head,
+        "OPTIONS" => &mut item.options,
+        _ => &mut item.trace,
+    }
+}
+
+/// Merges `incoming`'s path-level parameters into `existing`.
+///
+/// A parameter `existing` declares differently under the same `(name, in)`
+/// becomes an operation-level override on each of `incoming`'s operations
+/// that does not already override it, so the earlier API's declaration stays
+/// common. Every other parameter is appended.
+///
+/// ## Notes
+///
+/// Appending an identical declaration repeats it in the path item, which
+/// OpenAPI forbids. The committed `emqx.json` holds such repeats, so removing
+/// them is an artifact change of its own rather than part of this merge.
+fn merge_path_parameters(existing: &mut openapiv3::PathItem, incoming: &mut openapiv3::PathItem) {
+    for param in std::mem::take(&mut incoming.parameters) {
+        let key = parameter_key(&param);
+        match existing.parameters.iter().find(|present| key.is_some() && parameter_key(present) == key) {
+            None => existing.parameters.push(param),
+            // Already declared identically: one declaration serves both.
+            Some(present) if present == &param => {}
+            Some(_) => {
+                for method in METHODS {
+                    if let Some(op) = method_slot_mut(incoming, method).as_mut()
+                        && !op.parameters.iter().any(|own| parameter_key(own) == key)
+                    {
+                        op.parameters.insert(0, param.clone());
                     }
                 }
             }
         }
     }
+}
+
+/// `(in, name)` of an inline parameter.
+fn parameter_key(param: &ReferenceOr<openapiv3::Parameter>) -> Option<(&'static str, &str)> {
+    let ReferenceOr::Item(param) = param else {
+        return None;
+    };
+    let location = match param {
+        openapiv3::Parameter::Query { .. } => "query",
+        openapiv3::Parameter::Header { .. } => "header",
+        openapiv3::Parameter::Path { .. } => "path",
+        openapiv3::Parameter::Cookie { .. } => "cookie",
+    };
+    Some((location, param.parameter_data_ref().name.as_str()))
 }
 
 /// Returns each method label that has an attached operation.
@@ -742,6 +868,13 @@ fn path_methods_present(
 /// `openapiv3::SecurityScheme` does not implement `PartialEq`, so we compare
 /// the JSON form. Equal serialization means identical scheme definitions for
 /// merge purposes.
+fn schemas_equal(a: &ReferenceOr<openapiv3::Schema>, b: &ReferenceOr<openapiv3::Schema>) -> bool {
+    match (serde_json::to_value(a).ok(), serde_json::to_value(b).ok()) {
+        (Some(va), Some(vb)) => va == vb,
+        _ => false,
+    }
+}
+
 fn security_schemes_equal(
     a: &ReferenceOr<openapiv3::SecurityScheme>,
     b: &ReferenceOr<openapiv3::SecurityScheme>,
@@ -837,7 +970,7 @@ mod tests {
     use biscuit_file::serde_yaml_ng;
     use schematic_define::CrossOrigin;
     use schematic_define::openapi::ExportFormat;
-    use schematic_definitions::openai::{define_openai_api, openapi_registry};
+    use schematic_definitions::openai::define_openai_api;
     use tempfile::TempDir;
 
     // =============================================
@@ -847,11 +980,10 @@ mod tests {
     #[test]
     fn write_openapi_creates_json_file() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new().with_version("1.0.0");
         let temp_dir = TempDir::new().unwrap();
 
-        let result = write_openapi(&api, &registry, &options, temp_dir.path());
+        let result = write_openapi(&api, &options, temp_dir.path());
         assert!(result.is_ok());
 
         let path = result.unwrap();
@@ -862,13 +994,12 @@ mod tests {
     #[test]
     fn write_openapi_creates_yaml_file() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new()
             .with_version("1.0.0")
             .with_format(ExportFormat::Yaml);
         let temp_dir = TempDir::new().unwrap();
 
-        let result = write_openapi(&api, &registry, &options, temp_dir.path());
+        let result = write_openapi(&api, &options, temp_dir.path());
         assert!(result.is_ok());
 
         let path = result.unwrap();
@@ -879,11 +1010,10 @@ mod tests {
     #[test]
     fn write_openapi_json_produces_valid_json() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new().with_version("1.0.0");
         let temp_dir = TempDir::new().unwrap();
 
-        let path = write_openapi(&api, &registry, &options, temp_dir.path()).unwrap();
+        let path = write_openapi(&api, &options, temp_dir.path()).unwrap();
         let content = fs::read_to_string(&path).unwrap();
 
         // Should be parseable as JSON
@@ -898,13 +1028,12 @@ mod tests {
     #[test]
     fn write_openapi_yaml_produces_valid_yaml() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new()
             .with_version("1.0.0")
             .with_format(ExportFormat::Yaml);
         let temp_dir = TempDir::new().unwrap();
 
-        let path = write_openapi(&api, &registry, &options, temp_dir.path()).unwrap();
+        let path = write_openapi(&api, &options, temp_dir.path()).unwrap();
         let content = fs::read_to_string(&path).unwrap();
 
         // Should be parseable as YAML
@@ -915,11 +1044,10 @@ mod tests {
     #[test]
     fn write_openapi_file_name_lowercase() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new();
         let temp_dir = TempDir::new().unwrap();
 
-        let path = write_openapi(&api, &registry, &options, temp_dir.path()).unwrap();
+        let path = write_openapi(&api, &options, temp_dir.path()).unwrap();
 
         // API name is "OpenAI" with module_path = None, so the filename falls
         // back to the lowercased name and produces "openai.json".
@@ -941,7 +1069,7 @@ mod tests {
         );
         let temp_dir = TempDir::new().unwrap();
 
-        let path = write_openapi(&api, &EmptyRegistry, &ExportOptions::new(), temp_dir.path())
+        let path = write_openapi(&api, &ExportOptions::new(), temp_dir.path())
             .expect("write_openapi should succeed");
 
         assert_eq!(
@@ -954,10 +1082,9 @@ mod tests {
     #[test]
     fn write_openapi_error_on_missing_directory() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new();
 
-        let result = write_openapi(&api, &registry, &options, Path::new("/nonexistent/path"));
+        let result = write_openapi(&api, &options, Path::new("/nonexistent/path"));
         assert!(result.is_err());
 
         match result {
@@ -971,11 +1098,10 @@ mod tests {
     #[test]
     fn write_openapi_respects_version_option() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new().with_version("2.5.0");
         let temp_dir = TempDir::new().unwrap();
 
-        let path = write_openapi(&api, &registry, &options, temp_dir.path()).unwrap();
+        let path = write_openapi(&api, &options, temp_dir.path()).unwrap();
         let content = fs::read_to_string(&path).unwrap();
         let doc: serde_json::Value = serde_json::from_str(&content).unwrap();
 
@@ -985,11 +1111,10 @@ mod tests {
     #[test]
     fn write_openapi_includes_schemas() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new();
         let temp_dir = TempDir::new().unwrap();
 
-        let path = write_openapi(&api, &registry, &options, temp_dir.path()).unwrap();
+        let path = write_openapi(&api, &options, temp_dir.path()).unwrap();
         let content = fs::read_to_string(&path).unwrap();
         let doc: serde_json::Value = serde_json::from_str(&content).unwrap();
 
@@ -1001,11 +1126,10 @@ mod tests {
     #[test]
     fn write_openapi_can_skip_extensions() {
         let api = define_openai_api();
-        let registry = openapi_registry();
         let options = ExportOptions::new().skip_extensions();
         let temp_dir = TempDir::new().unwrap();
 
-        let path = write_openapi(&api, &registry, &options, temp_dir.path()).unwrap();
+        let path = write_openapi(&api, &options, temp_dir.path()).unwrap();
         let content = fs::read_to_string(&path).unwrap();
         let doc: serde_json::Value = serde_json::from_str(&content).unwrap();
 
@@ -1036,51 +1160,12 @@ mod tests {
         auth: schematic_define::AuthStrategy,
         endpoints: &[(&str, schematic_define::RestMethod, &str)],
     ) -> schematic_define::RestApi {
-        use schematic_define::{ApiResponse, Endpoint, RestApi};
+        use schematic_define::{SuccessShape, Endpoint, RestApi};
 
-        RestApi {
-            name: name.to_string(),
-            description: format!("{} synthetic API", name),
-            base_url: format!("https://{}.example.com", name.to_lowercase()),
-            docs_url: None,
-            auth,
-            auth_policy: None,
-            env_auth: vec![],
-            env_username: None,
-            headers: vec![],
-            endpoints: endpoints
+        { let mut fixture = RestApi::builder(&schematic_define::DefinitionContext::types_in("::fixture"), "Fixture", "https://example.test").describes("Fixture").no_auth().build().unwrap(); fixture.name = name.to_string(); fixture.description = format!("{} synthetic API", name); fixture.base_url = format!("https://{}.example.com", name.to_lowercase()); fixture.docs_url = None; fixture.auth = auth; fixture.auth_policy = None; fixture.env_auth = vec![]; fixture.headers = vec![]; fixture.endpoints = endpoints
                 .iter()
-                .map(|(id, method, path)| Endpoint {
-                    id: id.to_string(),
-                    method: *method,
-                    path: path.to_string(),
-                    description: format!("Endpoint {}", id),
-                    request: None,
-                    response: ApiResponse::Empty,
-                    headers: vec![],
-                    params: None,
-                    oauth_scopes: None,
-                })
-                .collect(),
-            module_path: Some(module.to_string()),
-            request_suffix: None,
-            version: None,
-            env_mapping: None,
-            cross_origin: CrossOrigin::default(),
-            request_id_header: None,
-            secret_names: vec![],
-            default_pagination: None,
-            pagination_exceptions: vec![],
-        }
-    }
-
-    /// Empty registry: synthetic APIs use `ApiResponse::Empty` so no schemas
-    /// need to be registered for these tests.
-    struct EmptyRegistry;
-    impl SchemaRegistryLike for EmptyRegistry {
-        fn to_openapi_schemas(&self) -> indexmap::IndexMap<String, openapiv3::Schema> {
-            indexmap::IndexMap::new()
-        }
+                .map(|(id, method, path)| { let mut fixture = Endpoint::get("Fixture", "/").describes("Fixture").returns_empty().build().unwrap(); fixture.id = id.to_string(); fixture.method = *method; fixture.path = path.to_string(); fixture.description = format!("Endpoint {}", id); fixture.request = None; fixture.response = vec![SuccessShape::empty()]; fixture.headers = vec![]; fixture.params = None; fixture.cross_origin = None; fixture.pagination = None; fixture })
+                .collect(); fixture.module_path = Some(module.to_string()); fixture.request_suffix = None; fixture.version = None; fixture.env_mapping = None; fixture.cross_origin = CrossOrigin::default(); fixture.request_id_header = None; fixture.secret_names = vec![]; fixture.default_pagination = None; crate::test_utils::with_referenced_components(fixture) }
     }
 
     #[test]
@@ -1094,7 +1179,6 @@ mod tests {
         let path = write_openapi_grouped(
             &[&a, &b],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new(),
             temp.path(),
         )
@@ -1115,7 +1199,6 @@ mod tests {
         let path = write_openapi_grouped(
             &[&a, &b],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new(),
             temp.path(),
         )
@@ -1147,7 +1230,6 @@ mod tests {
         let err = write_openapi_grouped(
             &[&a, &b],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new(),
             temp.path(),
         )
@@ -1178,6 +1260,44 @@ mod tests {
     }
 
     #[test]
+    fn grouped_members_with_different_same_named_components_fail_and_equal_ones_collapse() {
+        use schematic_define::{AuthStrategy, RestMethod, SchemaComponent};
+
+        let with_status = |name: &str, path: &str, value_type: &str| {
+            let mut api = synthetic_api(name, "foo", RestMethod::Get, path, AuthStrategy::None);
+            api.schemas.push(SchemaComponent {
+                name: "Status".into(),
+                rust_path: None,
+                schema: serde_json::json!({"type": "object", "properties": {"value": {"type": value_type}}}),
+            });
+            api
+        };
+        let left = with_status("FooA", "/a", "string");
+        let same = with_status("FooB", "/b", "string");
+        let right = with_status("FooC", "/c", "boolean");
+
+        let merged = build_openapi_grouped(&[&left, &same], "foo", &ExportOptions::new()).unwrap();
+        let schemas = &merged.components.unwrap().schemas;
+        assert_eq!(schemas.keys().filter(|name| *name == "Status").count(), 1);
+
+        let err = build_openapi_grouped(&[&left, &same, &right], "foo", &ExportOptions::new())
+            .expect_err("different same-named components must not merge");
+        let GeneratorError::Validation { output, diagnostics } = err else {
+            panic!("expected a validation error, got {err:?}");
+        };
+        assert_eq!(output, Output::OpenApi);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        let rendered = diagnostics[0].to_string();
+        assert!(
+            rendered.starts_with(
+                "severity=error api=FooA,FooC endpoint=<none> \
+                 feature=invalid-schema-reference output=openapi: module 'foo': schema component \"Status\""
+            ),
+            "{rendered}"
+        );
+    }
+
+    #[test]
     fn write_openapi_grouped_unions_security_schemes_distinct() {
         use schematic_define::{AuthStrategy, RestMethod};
 
@@ -1194,14 +1314,13 @@ mod tests {
             "foo",
             RestMethod::Get,
             "/basic",
-            AuthStrategy::Basic,
+            crate::test_utils::basic_auth(&["USER"], &["PASS"]),
         );
         let temp = TempDir::new().unwrap();
 
         let path = write_openapi_grouped(
             &[&bearer_api, &basic_api],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new(),
             temp.path(),
         )
@@ -1223,7 +1342,6 @@ mod tests {
         let path = write_openapi_grouped(
             &[&a],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new(),
             temp.path(),
         )
@@ -1245,7 +1363,6 @@ mod tests {
         let path = write_openapi_grouped(
             &[&a, &b],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new(),
             temp.path(),
         )
@@ -1272,7 +1389,6 @@ mod tests {
         let path = write_openapi_grouped(
             &[&a],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new().skip_extensions(),
             temp.path(),
         )
@@ -1294,7 +1410,6 @@ mod tests {
         let path = write_openapi_grouped(
             &[&a],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new().with_format(ExportFormat::Yaml),
             temp.path(),
         )
@@ -1309,17 +1424,14 @@ mod tests {
     #[test]
     fn write_openapi_grouped_real_ollama_module() {
         use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
-        use schematic_definitions::registry::get_registries_for_module;
 
         let native = define_ollama_native_api();
         let openai = define_ollama_openai_api();
-        let registry = get_registries_for_module("ollama").expect("ollama registry");
         let temp = TempDir::new().unwrap();
 
         let path = write_openapi_grouped(
             &[&native, &openai],
             "ollama",
-            &registry,
             &ExportOptions::new(),
             temp.path(),
         )
@@ -1347,7 +1459,7 @@ mod tests {
             "expected at least one openai-compatible path",
         );
 
-        // Schemas must be non-empty (registries provided).
+        // Schemas come from the members' own components.
         let schemas = doc.components.expect("components present").schemas;
         assert!(!schemas.is_empty(), "components.schemas must not be empty");
     }
@@ -1360,7 +1472,6 @@ mod tests {
         let err = write_openapi_grouped(
             &[&a],
             "foo",
-            &EmptyRegistry,
             &ExportOptions::new(),
             Path::new("/nonexistent/never/here"),
         )
@@ -1389,7 +1500,7 @@ mod tests {
     }
 
     fn build(apis: &[&RestApi]) -> Result<OpenAPI, GeneratorError> {
-        build_openapi_grouped(apis, "foo", &EmptyRegistry, &ExportOptions::new())
+        build_openapi_grouped(apis, "foo", &ExportOptions::new())
     }
 
     #[test]
@@ -1400,7 +1511,7 @@ mod tests {
         let basic = api_with_endpoints(
             "FooBasic",
             "foo",
-            AuthStrategy::Basic,
+            crate::test_utils::basic_auth(&["USER"], &["PASS"]),
             &[("ListThings", RestMethod::Get, "/things")],
         );
         let bearer = api_with_endpoints(
@@ -1564,15 +1675,11 @@ mod tests {
     #[test]
     fn unique_ids_are_unchanged_for_every_live_module() {
         use schematic_definitions::apis_by_module;
-        use schematic_definitions::registry::get_registries_for_module;
 
         for (module_name, apis) in apis_by_module() {
-            let Some(registry) = get_registries_for_module(&module_name) else {
-                continue;
-            };
             let refs: Vec<&RestApi> = apis.iter().collect();
             let doc =
-                build_openapi_grouped(&refs, &module_name, &registry, &ExportOptions::new())
+                build_openapi_grouped(&refs, &module_name, &ExportOptions::new())
                     .unwrap_or_else(|e| panic!("module {module_name}: {e}"));
 
             let declared: HashSet<&str> = apis
@@ -1653,8 +1760,8 @@ mod tests {
             ],
         );
         let options = ExportOptions::new();
-        let mut doc_a = export(&a, &EmptyRegistry, &options).unwrap();
-        let mut doc_b = export(&b, &EmptyRegistry, &options).unwrap();
+        let mut doc_a = export(&a, &options).unwrap();
+        let mut doc_b = export(&b, &options).unwrap();
         // Both documents link to their own `List`; the raw id is ambiguous
         // across them.
         add_link(&mut doc_a, "/a", "POST", "list", "List");
@@ -1687,7 +1794,7 @@ mod tests {
                 ("Other", RestMethod::Get, "/b"),
             ],
         );
-        let mut doc = export(&api, &EmptyRegistry, &ExportOptions::new()).unwrap();
+        let mut doc = export(&api, &ExportOptions::new()).unwrap();
         assert!(operation_id_diagnostics(&doc, &["FooA"]).is_empty());
 
         operation_mut(&mut doc, "/b", "GET").unwrap().operation_id = Some("List".to_string());

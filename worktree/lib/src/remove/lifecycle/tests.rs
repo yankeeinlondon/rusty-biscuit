@@ -1,52 +1,44 @@
-//! The removal lifecycle against real repositories: refusals before the
-//! move, stops after it, crash injection at each phase boundary (in process,
-//! and one real process kill), and retry by the original name.
+//! A confirmed removal against real repositories: one run from "yes" to
+//! nothing left, every flowchart edge crashed and finished by a later run
+//! without a question, and each kind of target the question can describe.
 //!
-//! Policy cases use the injected observer and an injected usage source, so
-//! they never depend on host timing or on what else the host runs; the
-//! `native_*` tests use this platform's real observer.
+//! The usage source, mount table, clock, and filesystem faults are injected,
+//! so no test sleeps, mounts, or depends on what the host runs.
 
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use serde_json::json;
-use sniff::filesystem::query::{
-    Evidence, EvidenceKind, FileIdentity, MatchBasis, Mechanism, NativeString, PathUsageError, PathUsageReport,
-    ProcessRecord,
-};
-
 use super::*;
-use crate::git::recorder;
-use crate::remove::missing::inspect_missing;
-use crate::remove::observation::injected::Injector;
-use crate::remove::observation::{EventKind, Root};
-use crate::remove::outcome::{BranchState, EntryCounts, MAX_REPORTED_DELETED};
-use crate::remove::recovery::journal::EntryState;
-use crate::remove::recovery::store::fault::{self as store_fault, Fault};
-use crate::remove::recovery::store::{JOURNAL_FILE, RECORD_FILE, REPORT_FILE, ReopenStep};
-use crate::remove::test_support::TestRepo;
+use crate::remove::clock::Slept;
+use crate::remove::facts::{Caller, Host, Sources, gather};
+use crate::remove::faults::{FsOp, NoFaults};
+use crate::remove::handoff::{OperationHandoff, canonical};
+use crate::remove::recovery::compact::{UnboundTarget, parse};
+use sniff::filesystem::query::FileIdentity;
+use crate::remove::recovery::lock::LOCKS_DIR;
+use crate::remove::recovery::store::compact_fault::Fault;
+use crate::remove::recovery::store::{RECORD_FILE, STORE_DIR};
+use crate::remove::repair;
+use crate::remove::test_support::{ClearUsage, FixedMounts, LiveMounts, ManualClock, MountDuringDeletion, TestRepo, link_dir, replace_with_link};
 use crate::worktree::parse_worktree_list;
 
 const BRANCH: &str = "feat/gone";
 
-/// A repository with a linked worktree `gone` holding a dirty tracked file,
-/// an untracked file, and ignored build output in two directories, plus,
-/// with [`fixture_with_neighbor`], a second worktree that must survive.
+/// A repository with a linked worktree `gone` on [`BRANCH`] holding a dirty
+/// tracked file, an untracked file, and ignored build output.
 struct Fixture {
     repo: TestRepo,
+    base: PathBuf,
     gone: PathBuf,
-    keep: Option<PathBuf>,
 }
 
 fn fixture() -> Fixture {
     let repo = TestRepo::new();
-    // Every worktree reads the common `info/exclude`; a file write, not a
-    // commit, which keeps Windows setup inside the time budget.
-    let common = crate::remove::admin_entry::common_git_dir(&repo.path()).unwrap();
+    let common = common_git_dir(&repo.path()).unwrap();
     fs::create_dir_all(common.join("info")).unwrap();
     fs::write(common.join("info").join("exclude"), "target/\n").unwrap();
     let gone = repo.add_worktree(BRANCH, "gone", "main");
@@ -58,1472 +50,1758 @@ fn fixture() -> Fixture {
             fs::write(gone.join(directory).join(file), "object").unwrap();
         }
     }
-    Fixture { repo, gone, keep: None }
-}
-
-fn fixture_with_neighbor() -> Fixture {
-    let mut fixture = fixture();
-    fixture.keep = Some(fixture.repo.add_worktree("feat/keep", "keep", "main"));
-    fixture
+    Fixture { base: repo.path(), repo, gone }
 }
 
 impl Fixture {
     fn base(&self) -> PathBuf {
-        self.repo.path()
+        self.base.clone()
     }
 
-    fn entry_at(&self, path: &Path) -> WorktreeEntry {
-        let listing = self.repo.git(&["worktree", "list", "--porcelain"]);
-        parse_worktree_list(&listing).into_iter().find(|entry| same_location(&entry.path, path)).expect("listed")
+    fn listed(&self) -> Vec<WorktreeEntry> {
+        parse_worktree_list(&self.repo.git(&["worktree", "list", "--porcelain"]))
     }
 
     fn entry(&self) -> WorktreeEntry {
-        self.entry_at(&self.gone)
+        self.listed().into_iter().find(|entry| same_location(&entry.path, &self.gone)).expect("listed")
     }
 
-    /// What the user approves from a report of the checkout at `checkout`.
-    fn approval_at(&self, checkout: &Path) -> Approval {
-        let (inventory, fingerprint) = consent_state(&self.base(), checkout, Some(BRANCH)).unwrap();
-        Approval { inventory, fingerprint, tip: self.repo.sha(&format!("refs/heads/{BRANCH}")), discard_files: true }
+    /// Whether Git still registers any worktree on [`BRANCH`].
+    fn registered(&self) -> bool {
+        self.listed().iter().any(|entry| entry.branch.as_deref() == Some(BRANCH))
     }
 
-    fn approval(&self) -> Approval {
-        self.approval_at(&self.gone)
+    /// What the question shows, gathered as `wt remove` does.
+    fn facts_with(&self, mounts: &FixedMounts) -> Facts {
+        let entry = self.entry();
+        let caller = Caller { cwd: self.base(), shell_wrapper: false, shell: None, parent: None };
+        gather(&Sources { base: &self.base(), entry: &entry, usage: &ClearUsage, mounts, git: &repair::Git, caller: &caller, host: &Host::default() })
     }
 
-    fn delete_branch(&self) -> BranchActions {
-        BranchActions {
-            local: Some(LocalBranchDeletion { name: BRANCH.into(), expected_tip: self.repo.sha(&format!("refs/heads/{BRANCH}")) }),
-            remote: None,
-        }
+    fn facts(&self) -> Facts {
+        self.facts_with(&FixedMounts::default())
+    }
+
+    fn tip(&self) -> String {
+        self.repo.sha(&format!("refs/heads/{BRANCH}"))
+    }
+
+    fn delete_branch(&self, approval: StepApproval) -> ApprovedBranch {
+        ApprovedBranch { action: BranchAction::Local { name: BRANCH.into(), expected_tip: self.tip() }, approval }
     }
 
     fn branch_exists(&self) -> bool {
         self.repo.try_git(&["rev-parse", "--verify", &format!("refs/heads/{BRANCH}")]).is_ok()
     }
 
-    fn listed_at(&self, path: &Path) -> usize {
-        let listing = self.repo.git(&["worktree", "list", "--porcelain"]);
-        parse_worktree_list(&listing).iter().filter(|entry| same_location(&entry.path, path)).count()
+    fn store(&self) -> PathBuf {
+        common_git_dir(&self.base()).unwrap().join(STORE_DIR)
     }
 
-    fn store(&self) -> RecoveryStore {
-        RecoveryStore::open(&crate::remove::admin_entry::common_git_dir(&self.base()).unwrap()).unwrap()
+    /// Everything in the removal store except its locks.
+    fn stored(&self) -> Vec<String> {
+        let Ok(entries) = fs::read_dir(self.store()) else { return Vec::new() };
+        let mut names: Vec<String> =
+            entries.map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).filter(|name| name != LOCKS_DIR).collect();
+        names.sort();
+        names
     }
 
-    /// The one pending operation.
-    fn pending(&self) -> OperationId {
-        let pending = self.store().pending().unwrap();
-        let [only] = pending.as_slice() else { panic!("expected one pending operation, found {pending:?}") };
-        only.id.clone()
+    /// The one saved record.
+    fn record(&self) -> CompactRecord {
+        let [id] = self.stored().try_into().expect("exactly one operation");
+        parse(&fs::read(self.store().join(id).join(RECORD_FILE)).unwrap()).unwrap()
     }
 
-    fn no_pending(&self) -> bool {
-        self.store().pending().unwrap().is_empty()
-    }
-
-    fn quarantine_of(&self, id: &OperationId) -> PathBuf {
-        self.store().read_record(id).unwrap().quarantine.as_path().to_path_buf()
-    }
-
-    /// Whether the checkout is untouched at its original path.
-    fn untouched(&self) -> bool {
-        self.gone.join("README.md").is_file()
-            && self.gone.join("target/debug/a.o").is_file()
-            && self.listed_at(&self.gone) == 1
-            && self.branch_exists()
-    }
-}
-
-/// A usage source answering every query with `processes` (or, after the
-/// first, `then` when set), counting queries and recording the pauses before
-/// a Windows Search recheck instead of sleeping.
-struct Usage {
-    outcome: &'static str,
-    processes: Vec<ProcessRecord>,
-    then: Option<Vec<ProcessRecord>>,
-    /// The shared budget ran out (partial discovery).
-    exhausted: bool,
-    /// Queries after this many fail.
-    fail_after: Option<usize>,
-    /// The system directory a Windows Search image must be in; `None` (the
-    /// default, whatever the host) never rechecks.
-    system: Option<&'static str>,
-    queries: AtomicUsize,
-    pauses: Mutex<Vec<Duration>>,
-}
-
-impl Usage {
-    fn clear() -> Self {
-        Self {
-            outcome: "usable",
-            exhausted: false,
-            processes: Vec::new(),
-            then: None,
-            fail_after: None,
-            system: None,
-            queries: AtomicUsize::new(0),
-            pauses: Mutex::new(Vec::new()),
+    fn pending_id(&self) -> OperationId {
+        match resolve(&self.base(), "gone").unwrap() {
+            Resolved::Pending(id) => id,
+            other => panic!("expected a pending removal, got {other:?}"),
         }
     }
 
-    /// First `first`, then `then` for every later query, on a Windows host
-    /// whose system directory is [`SYSTEM32`].
-    fn search_first(first: Vec<ProcessRecord>, then: Vec<ProcessRecord>) -> Self {
-        Self { processes: first, then: Some(then), system: Some(SYSTEM32), ..Self::clear() }
+    fn admin_dir(&self) -> PathBuf {
+        common_git_dir(&self.base()).unwrap().join("worktrees").join("gone")
     }
 
-    fn pauses(&self) -> Vec<Duration> {
-        self.pauses.lock().unwrap().clone()
-    }
-}
-
-impl UsageSource for Usage {
-    fn system_directory(&self) -> Option<NativeString> {
-        self.system.map(NativeString::from)
-    }
-
-    fn pause(&self, wait: Duration) {
-        self.pauses.lock().unwrap().push(wait);
-    }
-
-    fn query(&self, path: &Path) -> Result<PathUsageReport, PathUsageError> {
-        let earlier = self.queries.fetch_add(1, Ordering::SeqCst);
-        if self.fail_after.is_some_and(|after| earlier >= after) {
-            return Err(PathUsageError::RootIdentity { path: path.to_path_buf(), source: io::Error::other("injected") });
-        }
-        let mut report: PathUsageReport = serde_json::from_value(json!({
-            "schema_version": 1,
-            "target": {
-                "requested": {"display": path},
-                "resolved": {"display": path},
-                "kind": "directory",
-                "identity": {"kind": "unix", "device": "7", "inode": "3"},
-                "recursive": true
-            },
-            "outcome": self.outcome,
-            "started_at": "2026-10-12T00:00:00Z",
-            "finished_at": "2026-10-12T00:00:01Z",
-            "budget_ms": 2000,
-            "elapsed_us": 1000,
-            "budget_exhausted": self.exhausted,
-            "processes": [],
-            "coverage": [],
-            "limitations": []
-        }))
-        .unwrap();
-        report.processes = match &self.then {
-            Some(then) if earlier > 0 => then.clone(),
-            _ => self.processes.clone(),
-        };
-        Ok(report)
+    /// Nothing of the worktree is left: no checkout, registration, record,
+    /// journal, report, or hidden quarantine.
+    fn assert_gone(&self) {
+        assert!(absent(&self.gone), "the checkout is gone");
+        assert!(!self.registered(), "Git's record is gone");
+        assert!(absent(&self.admin_dir()), "the worktree record directory is gone");
+        assert_eq!(self.stored(), Vec::<String>::new(), "a finished removal keeps nothing");
+        let hidden: Vec<_> = fs::read_dir(self.gone.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(".wt-remove-"))
+            .collect();
+        assert!(hidden.is_empty(), "{hidden:?}");
     }
 }
 
-/// Another process with an open file in the checkout.
-fn holder(path: &Path) -> ProcessRecord {
-    let file = path.join(".gitnexus/index.db");
-    ProcessRecord {
-        pid: 8124,
-        creation_token: Some(77),
-        start_time: None,
-        identity_uncertain: false,
-        name: Some(NativeString::from("node")),
-        executable: Some(NativeString::from("/usr/bin/node")),
-        user: None,
-        evidence: vec![Evidence {
-            kind: EvidenceKind::OpenHandle,
-            mechanism: Mechanism::OpenHandles,
-            matched_paths: vec![NativeString::from(file.as_path())],
-            observed_path: Some(NativeString::from(file.as_path())),
-            match_basis: MatchBasis::Identity,
-            identity: Some(FileIdentity::Unix { device: 7, inode: 9 }),
-            descriptor: Some(12),
-            watch: None,
-            access: None,
-            event_only: None,
-        }],
-    }
-}
-
-const SYSTEM32: &str = r"C:\Windows\System32";
-
-/// Windows Search's protocol host, from the system directory, with an open
-/// file in the checkout.
-fn search_holder(path: &Path) -> ProcessRecord {
-    let file = path.join("notes.txt");
-    ProcessRecord {
-        pid: 6808,
-        creation_token: Some(91),
-        name: Some(NativeString::from("SearchProtocolHost.exe")),
-        executable: Some(NativeString::from(r"C:\WINDOWS\System32\SearchProtocolHost.exe")),
-        evidence: vec![Evidence {
-            matched_paths: vec![NativeString::from(file.as_path())],
-            observed_path: Some(NativeString::from(file.as_path())),
-            descriptor: None,
-            ..holder(path).evidence.remove(0)
-        }],
-        ..holder(path)
-    }
-}
-
-/// Injected observers; the last one started is reachable through
-/// [`Observers::injector`].
+/// Records what the removal told the user.
 #[derive(Default)]
-struct Observers {
-    last: Mutex<Option<Injector>>,
-    started: AtomicUsize,
+struct Notes {
+    running: AtomicUsize,
+    waits: Mutex<Vec<String>>,
 }
 
-impl Observers {
-    fn start(&self, targets: Targets, moved: bool) -> Result<Observation, ObservationError> {
-        self.started.fetch_add(1, Ordering::SeqCst);
-        let (observation, injector) = if moved {
-            Observation::injected_at_quarantine(targets, ObserverOptions::default())
-        } else {
-            Observation::injected(targets, ObserverOptions::default())
-        };
-        *self.last.lock().unwrap() = Some(injector);
-        Ok(observation)
+impl Notify for Notes {
+    fn removal_running(&self) {
+        self.running.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn injector(&self) -> Injector {
-        self.last.lock().unwrap().clone().expect("an observer started")
+    fn waiting(&self, wait: &Wait) {
+        self.waits.lock().unwrap().push(format!("{wait:?}"));
     }
 }
 
-/// Runs `body` with an environment over `usage`, injected observers, and
-/// `interrupted`.
-fn with_env<R>(usage: &Usage, observers: &Observers, interrupted: &dyn Fn() -> bool, body: impl FnOnce(&Environment<'_>) -> R) -> R {
-    let observe = |targets, moved| observers.start(targets, moved);
-    body(&Environment { usage, interrupted, observe: &observe })
-}
+/// Every conditional branch is still safe.
+struct Safe;
 
-fn run(fixture: &Fixture, approval: &Approval, branches: &BranchActions, usage: &Usage, observers: &Observers, hook: &mut Hook<'_>) -> Result<Removal, Crashed> {
-    let entry = fixture.entry();
-    let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval, branches };
-    with_env(usage, observers, &|| false, |env| run_with(&request, env, hook))
-}
-
-fn run_plain(fixture: &Fixture) -> Removal {
-    run(fixture, &fixture.approval(), &fixture.delete_branch(), &Usage::clear(), &Observers::default(), &mut |_| false).unwrap()
-}
-
-fn refused(removal: Removal) -> Refusal {
-    match removal {
-        Removal::Refused(refusal) => *refusal,
-        Removal::Finished(finished) => panic!("expected a refusal, got {:?}", finished.report),
+impl Revalidate for Safe {
+    fn still_safe(&self, _name: &str, _tip: &str, _remote_deleted: bool) -> Result<(), String> {
+        Ok(())
     }
+}
+
+fn never() -> bool {
+    false
+}
+
+/// The injected surroundings of one run.
+struct Doubles {
+    clock: Box<dyn Clock>,
+    faults: Box<dyn FsFaults>,
+    mounts: Box<dyn MountInfo>,
+    revalidate: Box<dyn Revalidate>,
+    notes: Notes,
+}
+
+impl Default for Doubles {
+    fn default() -> Self {
+        Self {
+            clock: Box::new(ManualClock::new()),
+            faults: Box::new(NoFaults),
+            mounts: Box::new(FixedMounts::default()),
+            revalidate: Box::new(Safe),
+            notes: Notes::default(),
+        }
+    }
+}
+
+impl Doubles {
+    fn env(&self) -> Env<'_> {
+        Env {
+            usage: &ClearUsage,
+            mounts: &*self.mounts,
+            clock: &*self.clock,
+            faults: &*self.faults,
+            cancelled: &never,
+            revalidate: &*self.revalidate,
+            notify: &self.notes,
+        }
+    }
+}
+
+fn request<'a>(f: &'a Fixture, entry: &'a WorktreeEntry, facts: &'a Facts, branches: &'a [ApprovedBranch]) -> Request<'a> {
+    Request { base: &f.base, entry, requested_name: "gone", facts, branches }
 }
 
 fn finished(removal: Removal) -> Finished {
     match removal {
         Removal::Finished(finished) => *finished,
-        Removal::Refused(refusal) => panic!("expected the operation to run, got {refusal:?}"),
+        Removal::Refused(refusal) => panic!("refused: {refusal}"),
     }
 }
 
-fn saved_report(finished: &Finished) -> OperationReport {
-    serde_json::from_slice(&fs::read(&finished.report_path).unwrap()).unwrap()
-}
-
-/// Asserts a completed removal: both locations and the registration gone,
-/// the other worktree untouched, and the record closed.
-fn assert_removed(fixture: &Fixture, finished: &Finished) {
-    assert_eq!(finished.exit_class(), ExitClass::Success, "{:?}", finished.report);
-    assert_eq!(finished.report.outcome, RemovalOutcome::Removed);
-    assert_eq!(finished.report.registration, RegistrationState::Removed);
-    assert!(!fixture.gone.exists());
-    let quarantine = finished.report.quarantine.as_ref().expect("moved");
-    assert_eq!(quarantine.state, QuarantineState::Removed);
-    assert!(!quarantine.path.as_path().exists());
-    assert_eq!(fixture.listed_at(&fixture.gone) + fixture.listed_at(quarantine.path.as_path()), 0);
-    if let Some(keep) = &fixture.keep {
-        assert_eq!(fixture.listed_at(keep), 1, "the other worktree is untouched");
-        assert!(keep.join("README.md").is_file());
+fn refused(removal: Removal) -> Refusal {
+    match removal {
+        Removal::Refused(refusal) => *refusal,
+        Removal::Finished(finished) => panic!("finished: {finished:?}"),
     }
-    assert!(fixture.no_pending(), "the record is closed");
-    let dir = finished.report_path.parent().unwrap();
-    assert!(!dir.join(JOURNAL_FILE).exists(), "the journal is deleted after completion");
-    assert!(!dir.join("journal-1.jsonl").exists(), "earlier attempts' journals are deleted after completion");
-    assert_eq!(saved_report(finished), finished.report, "the saved report is the one returned");
 }
 
-/// The fixture checkout's entries: the `.git` link, `README.md`,
-/// `notes.txt`, and four object files under three directories.
-const FIXTURE_ENTRIES: EntryCounts = EntryCounts { files: 7, directories: 3, links: 0 };
-
-/// Asserts that `report` accounts for every one of `expected` entries
-/// exactly once, as deleted or uncertain, across every attempt: the counts,
-/// the full entry list, and the capped list of deleted paths agree.
-fn assert_accounted_once(report: &OperationReport, expected: EntryCounts) {
-    let journal = &report.journal;
-    let accounted = EntryCounts {
-        files: journal.deleted.files + journal.uncertain.files,
-        directories: journal.deleted.directories + journal.uncertain.directories,
-        links: journal.deleted.links + journal.uncertain.links,
-    };
-    assert_eq!(accounted, expected, "{journal:?}");
-    assert_eq!(report.journal_entries.len() as u64, expected.total(), "{:?}", report.journal_entries);
-    let paths: std::collections::BTreeSet<&Path> = report.journal_entries.iter().map(|entry| entry.path.as_path()).collect();
-    assert_eq!(paths.len(), report.journal_entries.len(), "an entry is listed twice");
-    let deleted = report.journal_entries.iter().filter(|entry| entry.state == EntryState::Deleted).count();
-    assert_eq!(deleted as u64, journal.deleted.total());
-    assert_eq!(report.deleted.len().min(MAX_REPORTED_DELETED) as u64 + report.truncation.deleted_omitted, journal.deleted.total());
+/// Runs the removal and stops it at `at` as a crash would.
+fn crash_at(f: &Fixture, facts: &Facts, branches: &[ApprovedBranch], doubles: &Doubles, at: Boundary) {
+    crash_with(f, facts, branches, doubles, at, Faults::default());
 }
 
-// ---- A first attempt ------------------------------------------------------
+fn crash_with(f: &Fixture, facts: &Facts, branches: &[ApprovedBranch], doubles: &Doubles, at: Boundary, moves: Faults) {
+    let entry = f.entry();
+    let mut seams = Seams { hook: Box::new(move |boundary| boundary == at), moves };
+    let result = run_with(&request(f, &entry, facts, branches), &doubles.env(), &mut seams);
+    assert!(result.is_err(), "the run reached {at:?} and crashed there");
+}
 
-/// Acceptance items 2 and 3 at library level, with the real observer: the
-/// dirty and ignored content is deleted, only this worktree is unregistered,
-/// the branch goes after the checkout, and the record is completed.
+/// A file named `name`, anywhere, fails its removal with `kind`: the first
+/// `times` attempts, or every one.
+struct FailingName {
+    name: &'static str,
+    kind: io::ErrorKind,
+    times: Option<usize>,
+    fired: AtomicUsize,
+}
+
+impl FailingName {
+    fn always(name: &'static str, kind: io::ErrorKind) -> Self {
+        Self { name, kind, times: None, fired: AtomicUsize::new(0) }
+    }
+}
+
+impl FsFaults for FailingName {
+    fn inject(&self, op: FsOp, path: &Path) -> Option<io::Error> {
+        if op != FsOp::RemoveFile || path.file_name().is_none_or(|name| name != self.name) {
+            return None;
+        }
+        let fired = self.fired.fetch_add(1, Ordering::SeqCst);
+        self.times.is_none_or(|times| fired < times).then(|| io::Error::from(self.kind))
+    }
+}
+
+// --- One run --------------------------------------------------------------
+
+/// The ordinary case: yes deletes the checkout with its dirty, untracked,
+/// and ignored files, unregisters it, deletes the approved branch, and
+/// leaves nothing behind.
 #[test]
-fn native_a_removal_runs_end_to_end_and_closes_its_record() {
-    let fixture = fixture_with_neighbor();
-    let copy_record = crate::copy_record::record_path(&fixture.base(), &fixture.gone).unwrap();
-    fs::create_dir_all(copy_record.parent().unwrap()).unwrap();
-    fs::write(&copy_record, "{}").unwrap();
-    let usage = Usage::clear();
-    let entry = fixture.entry();
-    let (approval, branches) = (fixture.approval(), fixture.delete_branch());
-    assert!(!approval.inventory.ignored.is_empty(), "the build output is ignored, so no consent covers it");
-    let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
+fn a_confirmed_checkout_is_deleted_in_one_run_and_leaves_nothing() {
+    let f = fixture();
+    let facts = f.facts();
+    assert!(facts.needs_force(), "the dirty files are a warning");
+    let doubles = Doubles::default();
+    let entry = f.entry();
+    let branches = [f.delete_branch(StepApproval::Explicit)];
 
-    recorder::start_recording();
-    let removal = remove_checkout(&request, &Environment { usage: &usage, interrupted: &|| false, observe: &native_observation });
-    let calls = recorder::finish_recording();
+    let finished = finished(remove(&request(&f, &entry, &facts, &branches), &doubles.env()));
 
-    let finished = finished(removal);
-    assert_removed(&fixture, &finished);
+    assert!(matches!(finished.checkout, CheckoutResult::Removed), "{finished:?}");
+    assert_eq!(finished.exit_class(), ExitClass::Success);
+    assert!(finished.entries.is_some_and(|entries| entries >= 10), "{:?}", finished.entries);
+    assert_eq!(finished.branches, [BranchResult { target: UnboundTarget::Local { name: BRANCH.into() }, outcome: BranchOutcome::Deleted }]);
+    assert!(finished.late_changes.is_empty());
     assert!(finished.warnings.is_empty(), "{:?}", finished.warnings);
-    assert!(!fixture.branch_exists(), "the branch is deleted after the checkout");
-    assert_eq!(finished.report.branches, [BranchOutcome { target: BranchTarget::Local { name: BRANCH.into() }, state: BranchState::Deleted }]);
-    assert!(!copy_record.exists(), "the original's copy record is deleted after verification");
-    assert_eq!(usage.queries.load(Ordering::SeqCst), 1, "one decisive query, no diagnostics");
-    assert_eq!(finished.report.discovery.len(), 1);
-    assert_eq!(finished.report.discovery[0].purpose, DiscoveryPurpose::Preflight);
-    assert!(finished.report.deleted.iter().any(|path| path.as_path().ends_with("target/debug/a.o")));
-    assert!(finished.report.journal.deleted.files >= 6, "{:?}", finished.report.journal);
-    let forbidden = ["--force", "-f", "prune", "repair", "move", "unlock"];
-    assert!(!calls.iter().flatten().any(|arg| forbidden.contains(&arg.as_str())), "{calls:?}");
-    let completed = fixture.store().read_record(finished.report.operation_id.as_ref().unwrap()).unwrap();
-    assert_eq!(completed.completed_phase, Phase::Completed);
+    assert!(!f.branch_exists());
+    f.assert_gone();
+    assert!(doubles.notes.waits.lock().unwrap().is_empty());
 }
 
-/// The Git processes a clean removal starts, so a redundant read cannot come
-/// back unnoticed: each costs 20–50 ms on Windows. Every listing and index
-/// read here is a deliberate re-read (docs/cli/remove.md, "Deleting the
-/// checkout"): the plan's checks, the recheck after discovery, the index
-/// binding, the checks again just before the rename, the association
-/// verified after it, and the final unregister's listing and index check.
-/// Common directory, refs, branch tips, and, in a plain repository, the
-/// worktree listings and the index reads without `--debug` are read
-/// in-process.
+/// R3 / N7: the lock the question showed is removed through Git after the
+/// approval is saved, and the worktree is deleted.
 #[test]
-fn a_clean_removal_starts_only_its_deliberate_git_processes() {
-    let fixture = fixture();
-    let (approval, branches) = (fixture.approval(), fixture.delete_branch());
+fn a_locked_worktree_is_unlocked_and_deleted() {
+    let f = fixture();
+    f.repo.git(&["worktree", "lock", "--reason", "on a USB disk", f.gone.to_str().unwrap()]);
+    let facts = f.facts();
+    assert!(matches!(facts.warnings.first(), Some(Warning::Locked { reason: Some(reason) }) if reason == "on a USB disk"));
+    let doubles = Doubles::default();
+    let entry = f.entry();
 
-    let scope = crate::git::calls::CallScope::enter();
-    recorder::start_recording();
-    crate::questions::start_recording();
-    let removal = run(&fixture, &approval, &branches, &Usage::clear(), &Observers::default(), &mut |_| false).unwrap();
-    let asked = crate::questions::finish_recording();
-    let calls = recorder::finish_recording();
-    let started = scope.finish();
+    let finished = finished(remove(&request(&f, &entry, &facts, &[]), &doubles.env()));
 
-    assert_removed(&fixture, &finished(removal));
-    // Each call's subcommand and options, without `-c` settings or paths.
-    let commands: Vec<String> = calls
-        .iter()
-        .map(|args| {
-            let mut kept = Vec::new();
-            let mut args = args.iter();
-            while let Some(arg) = args.next() {
-                match arg.as_str() {
-                    "-c" => {
-                        args.next();
-                    }
-                    arg if Path::new(arg).is_absolute() => {}
-                    arg => kept.push(arg),
-                }
-            }
-            kept.join(" ")
-        })
-        .collect();
-    assert_eq!(
-        commands,
-        [
-            "status --porcelain=v1 -z --untracked-files=all --ignored=matching", // recheck: the consent fingerprint
-            "ls-files --stage --debug -z", // bind_index: Git's reading of every entry
-            "worktree list --porcelain",  // unregister: its content is gone, so Git marks it prunable
-            "ls-files --stage --debug -z", //   the index still as approved
-            "worktree remove",
-            "branch -D feat/gone",
-        ],
-        "{calls:?}"
+    assert_eq!(finished.exit_class(), ExitClass::Success, "{finished:?}");
+    f.assert_gone();
+}
+
+/// A lock the question did not show was never approved: the move refuses,
+/// and the worktree and its lock stay as they were.
+#[test]
+fn a_lock_added_after_the_question_is_never_removed() {
+    let f = fixture();
+    let facts = f.facts();
+    f.repo.git(&["worktree", "lock", "--reason", "mine", f.gone.to_str().unwrap()]);
+    let doubles = Doubles::default();
+    let entry = f.entry();
+
+    let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &doubles.env()));
+
+    assert!(matches!(&refusal, Refusal::Move(MoveError::Refused(MoveRefusal::Locked { .. }))), "{refusal:?}");
+    assert_eq!(refusal.exit_class(), ExitClass::Refused);
+    assert!(f.gone.join("notes.txt").is_file());
+    assert_eq!(fs::read_to_string(f.admin_dir().join("locked")).unwrap().trim(), "mine");
+    assert!(f.stored().is_empty(), "nothing is pending");
+}
+
+/// R2: a submodule holding an uncommitted file and a commit on no remote
+/// warns about both, and yes deletes it with the worktree, its
+/// `modules/<name>` under the worktree's record included. (A clean
+/// submodule adding no warning is `facts::tests`'.)
+#[test]
+fn a_worktree_with_a_submodule_is_deleted_with_its_module_data() {
+    let f = fixture();
+    let source = TestRepo::new();
+    f.repo.git_in(&f.gone, &["-c", "protocol.file.allow=always", "submodule", "add", "-q", source.path().to_str().unwrap(), "sub"]);
+    let module = f.admin_dir().join("modules").join("sub");
+    assert!(module.is_dir());
+    crate::test_support::append_config(
+        &module.join("config"),
+        &[("user.email", "test@example.com"), ("user.name", "Test User"), ("commit.gpgsign", "false")],
     );
-    assert_eq!(started, commands.len() as u64, "every recorded call started one process");
-    // Every listing and plain index read is asked at its own step and read
-    // in-process (`git::worktree_list_from`, `git::staged_entries_*`) unless
-    // only Git can answer it: the last listing, above.
-    let asked: Vec<String> = asked.iter().map(|args| args.join(" ")).collect();
-    assert_eq!(
-        asked,
-        [
-            "worktree list --porcelain", // plan_move: listed once, not prunable
-            "ls-files --stage -z",       //   no submodules in the index
-            "ls-files --stage -z",       // recheck: the fingerprint's index part
-            "worktree list --porcelain", // just before the rename: the plan's checks again
-            "ls-files --stage -z",       //   no submodules
-            "worktree list --porcelain", // after it: the association verified
-            "worktree list --porcelain", // unregister: listed once at the quarantine (by Git)
-        ],
-        "{asked:?}"
-    );
+    f.repo.commit_in(&f.gone.join("sub"), "unpushed.txt");
+    fs::write(f.gone.join("sub").join("scratch.txt"), "only here").unwrap();
+    let facts = f.facts();
+    let at_risk: Vec<&Warning> = facts.warnings.iter().filter(|warning| matches!(warning, Warning::SubmoduleAtRisk { .. })).collect();
+    let [Warning::SubmoduleAtRisk { path, dirty, unique_commits, .. }] = at_risk.as_slice() else { panic!("{:?}", facts.warnings) };
+    assert_eq!((path.as_path(), dirty.as_slice(), *unique_commits), (Path::new("sub"), &[PathBuf::from("scratch.txt")][..], 1));
+    let doubles = Doubles::default();
+    let entry = f.entry();
+
+    let finished = finished(remove(&request(&f, &entry, &facts, &[]), &doubles.env()));
+
+    assert_eq!(finished.exit_class(), ExitClass::Success, "{finished:?}");
+    assert!(absent(&module), "the submodule's Git data went with the worktree's record");
+    f.assert_gone();
+    assert!(source.path().join("README.md").is_file(), "the submodule's source repository is untouched");
 }
 
-/// More deletions than the report names: the named list is capped, and the
-/// saved report still lists every entry after the journal is deleted.
+/// R14: a file created after the question is deleted too, and named.
 #[test]
-fn a_completed_report_lists_every_entry_past_the_deleted_cap() {
-    let fixture = fixture();
-    let extra = MAX_REPORTED_DELETED + 5;
-    for n in 0..extra {
-        fs::write(fixture.gone.join("target/debug").join(format!("extra-{n}.o")), "object").unwrap();
-    }
-    let finished = finished(run_plain(&fixture));
-    assert_removed(&fixture, &finished);
-    let expected = EntryCounts { files: FIXTURE_ENTRIES.files + extra as u64, ..FIXTURE_ENTRIES };
-    assert_eq!(finished.report.journal.deleted, expected);
-    assert_eq!(finished.report.deleted.len(), MAX_REPORTED_DELETED);
-    assert_eq!(finished.report.truncation.deleted_omitted, expected.total() - MAX_REPORTED_DELETED as u64);
-    assert_accounted_once(&saved_report(&finished), expected);
+fn a_file_created_after_the_question_is_deleted_and_named() {
+    let f = fixture();
+    let facts = f.facts();
+    fs::write(f.gone.join("late.rs"), "written while the question was open").unwrap();
+    let doubles = Doubles::default();
+    let entry = f.entry();
+
+    let finished = finished(remove(&request(&f, &entry, &facts, &[]), &doubles.env()));
+
+    assert_eq!(finished.late_changes, [PathBuf::from("late.rs")]);
+    assert_eq!(finished.exit_class(), ExitClass::Success);
+    f.assert_gone();
 }
 
-/// Partial, unavailable, and unsupported discovery take the move-then-delete
-/// path and keep their coverage in the report.
-fn assert_incomplete_discovery_removes(outcome: &'static str, exhausted: bool) {
-    let fixture = fixture();
-    let usage = Usage { outcome, exhausted, ..Usage::clear() };
-    let finished = finished(run(&fixture, &fixture.approval(), &BranchActions::default(), &usage, &Observers::default(), &mut |_| false).unwrap());
-    assert_removed(&fixture, &finished);
-    assert!(fixture.branch_exists(), "no branch action was requested");
-    match &finished.report.discovery[0].result {
-        DiscoveryResult::Report(report) => {
-            assert_eq!(serde_json::to_value(report.outcome).unwrap(), json!(outcome));
-            assert_eq!(report.budget_exhausted, exhausted);
-        }
-        other => panic!("{other:?}"),
-    }
-}
-
+/// R14: a tracked file changed and a new file staged while the question was
+/// open are deleted and named; a file the question already showed and that
+/// changed again is not named twice.
 #[test]
-fn partial_discovery_still_removes_and_is_kept_in_the_report() {
-    assert_incomplete_discovery_removes("usable", true);
+fn files_changed_and_staged_while_the_question_was_open_are_deleted_and_named() {
+    let f = fixture();
+    fs::write(f.gone.join("tracked.rs"), "committed\n").unwrap();
+    f.repo.git_in(&f.gone, &["add", "tracked.rs"]);
+    f.repo.git_in(&f.gone, &["commit", "-q", "-m", "tracked"]);
+    let facts = f.facts();
+    fs::write(f.gone.join("tracked.rs"), "changed after the question\n").unwrap();
+    fs::write(f.gone.join("staged.rs"), "staged after the question\n").unwrap();
+    f.repo.git_in(&f.gone, &["add", "staged.rs"]);
+    fs::write(f.gone.join("README.md"), "dirty again\n").unwrap();
+    let doubles = Doubles::default();
+    let entry = f.entry();
+
+    let finished = finished(remove(&request(&f, &entry, &facts, &[]), &doubles.env()));
+
+    let mut named = finished.late_changes.clone();
+    named.sort();
+    assert_eq!(named, [PathBuf::from("staged.rs"), PathBuf::from("tracked.rs")]);
+    assert_eq!(finished.exit_class(), ExitClass::Success);
+    f.assert_gone();
 }
 
+/// R29: an approval that cannot be saved deletes, unlocks, and moves
+/// nothing, and says so.
 #[test]
-fn unavailable_discovery_still_removes_and_is_kept_in_the_report() {
-    assert_incomplete_discovery_removes("unavailable", false);
-}
+fn an_approval_that_cannot_be_saved_changes_nothing() {
+    let f = fixture();
+    f.repo.git(&["worktree", "lock", f.gone.to_str().unwrap()]);
+    let facts = f.facts();
+    let doubles = Doubles::default();
+    let entry = f.entry();
+    let _fault = crate::remove::recovery::store::compact_fault::inject(|_| Some(Fault::Fail));
 
-#[test]
-fn unsupported_discovery_still_removes_and_is_kept_in_the_report() {
-    assert_incomplete_discovery_removes("unsupported", false);
-}
+    let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &doubles.env()));
 
-/// Acceptance item 1: usage refuses before anything moves; consent to
-/// discard does not override it.
-#[test]
-fn observed_usage_refuses_before_anything_moves() {
-    let fixture = fixture();
-    let usage = Usage { processes: vec![holder(&fixture.gone)], ..Usage::clear() };
-    let refusal = refused(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &Observers::default(), &mut |_| false).unwrap());
-    match &refusal {
-        Refusal::Usage(UsageRefusal::InUse(in_use)) => assert_eq!(in_use.holders[0].pid, 8124),
-        other => panic!("{other:?}"),
-    }
-    assert_eq!(refusal.exit_class(), ExitClass::Refused);
-    assert!(fixture.untouched());
-    assert!(fixture.no_pending(), "no record is created before the decisive query clears");
-}
-
-/// A query that could not verify the checkout refuses.
-#[test]
-fn an_unverified_checkout_refuses() {
-    let fixture = fixture();
-    let usage = Usage { fail_after: Some(0), ..Usage::clear() };
-    let refusal = refused(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &Observers::default(), &mut |_| false).unwrap());
-    assert!(matches!(refusal, Refusal::Usage(UsageRefusal::Unverified(_))), "{refusal:?}");
-    assert_eq!(refusal.exit_class(), ExitClass::Refused);
-    assert!(fixture.untouched());
-}
-
-/// Only Windows Search holding a file: one 500 ms pause, exactly one more
-/// query, and the removal goes ahead with the recheck in the saved report
-/// (`assert_removed` compares it with the returned one).
-#[test]
-fn a_windows_search_hold_is_rechecked_once_and_recorded() {
-    let fixture = fixture();
-    let usage = Usage::search_first(vec![search_holder(&fixture.gone)], Vec::new());
-
-    let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &Observers::default(), &mut |_| false).unwrap());
-
-    assert_removed(&fixture, &finished);
-    assert_eq!(usage.queries.load(Ordering::SeqCst), 2);
-    assert_eq!(usage.pauses(), [crate::remove::usage::SEARCH_RECHECK_WAIT]);
-    let purposes: Vec<_> = finished.report.discovery.iter().map(|run| run.purpose).collect();
-    assert_eq!(purposes, [DiscoveryPurpose::WindowsSearchHold, DiscoveryPurpose::Preflight]);
-    let DiscoveryResult::Report(first) = &finished.report.discovery[0].result else { panic!("{:?}", finished.report.discovery) };
-    assert_eq!(first.processes[0].pid, 6808, "the first query's report is kept");
-    let discovery = finished.report.timeline.iter().find(|event| event.step == Step::Discovery).expect("a discovery step");
-    assert_eq!(discovery.detail.as_deref(), Some("Windows Search held 1 file(s); rechecked after 500 ms; released"));
-}
-
-/// Windows Search still holding a file at the recheck refuses, as any
-/// holder does, after exactly one recheck.
-#[test]
-fn a_windows_search_hold_that_outlasts_the_recheck_refuses() {
-    let fixture = fixture();
-    let usage = Usage::search_first(vec![search_holder(&fixture.gone)], vec![search_holder(&fixture.gone)]);
-
-    let refusal = refused(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &Observers::default(), &mut |_| false).unwrap());
-
-    let Refusal::Usage(UsageRefusal::InUse(in_use)) = &refusal else { panic!("{refusal:?}") };
-    assert_eq!(in_use.holders[0].pid, 6808);
-    assert_eq!(in_use.search_recheck.as_ref().map(|search| search.held), Some(1), "the refusal says a recheck happened");
-    assert_eq!(usage.queries.load(Ordering::SeqCst), 2, "one recheck, never a loop");
-    assert_eq!(usage.pauses().len(), 1);
-    assert_eq!(refusal.exit_class(), ExitClass::Refused);
-    assert!(fixture.untouched());
-    assert!(fixture.no_pending());
-}
-
-/// Any other holder beside Windows Search refuses at once: no pause and no
-/// second query.
-#[test]
-fn a_windows_search_hold_beside_another_holder_refuses_without_waiting() {
-    let fixture = fixture();
-    let usage = Usage::search_first(vec![holder(&fixture.gone), search_holder(&fixture.gone)], Vec::new());
-
-    let refusal = refused(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &Observers::default(), &mut |_| false).unwrap());
-
-    let Refusal::Usage(UsageRefusal::InUse(in_use)) = &refusal else { panic!("{refusal:?}") };
-    assert_eq!(in_use.holders.len(), 2);
-    assert!(in_use.search_recheck.is_none());
-    assert_eq!(usage.queries.load(Ordering::SeqCst), 1);
-    assert!(usage.pauses().is_empty());
-    assert!(fixture.untouched());
-}
-
-/// A retry rechecks the quarantine the same way and records it.
-#[test]
-fn a_retry_rechecks_a_windows_search_hold_of_the_quarantine() {
-    let fixture = fixture();
-    let observers = Observers::default();
-    let id = crash_at(&fixture, &observers, Boundary::Moved);
-    let quarantine = fixture.quarantine_of(&id);
-    let fresh = fixture.approval_at(&quarantine);
-    let usage = Usage::search_first(vec![search_holder(&quarantine)], Vec::new());
-    let base = fixture.base();
-    let request = ResumeRequest { base: &base, id: &id, approval: Some(&fresh), record: None, branches: &BranchActions::default() };
-
-    let resumed = finished(with_env(&usage, &observers, &|| false, |env| resume(&request, env)));
-
-    assert_removed(&fixture, &resumed);
-    assert_eq!((usage.queries.load(Ordering::SeqCst), usage.pauses().len()), (2, 1));
-    let purposes: Vec<_> = resumed.report.discovery.iter().map(|run| run.purpose).collect();
-    assert_eq!(purposes, [DiscoveryPurpose::WindowsSearchHold, DiscoveryPurpose::Preflight]);
-    assert!(resumed.report.timeline.iter().any(|event| event.step == Step::Discovery
-        && event.detail.as_deref() == Some("Windows Search held 1 file(s); rechecked after 500 ms; released")));
-}
-
-#[test]
-fn files_that_need_consent_refuse_without_it() {
-    let fixture = fixture();
-    let approval = Approval { discard_files: false, ..fixture.approval() };
-    let refusal = refused(run(&fixture, &approval, &BranchActions::default(), &Usage::clear(), &Observers::default(), &mut |_| false).unwrap());
-    assert!(matches!(refusal, Refusal::ConsentRequired), "{refusal:?}");
-    assert_eq!(refusal.exit_class(), ExitClass::Refused);
-    assert!(fixture.untouched());
-}
-
-/// The consent fingerprint and the tip are rechecked after discovery.
-#[test]
-fn files_changed_after_approval_refuse() {
-    let fixture = fixture();
-    let approval = fixture.approval();
-    fs::write(fixture.gone.join("README.md"), "changed after the report\n").unwrap();
-    let refusal = refused(run(&fixture, &approval, &BranchActions::default(), &Usage::clear(), &Observers::default(), &mut |_| false).unwrap());
-    assert!(matches!(&refusal, Refusal::Changed(why) if why.contains("files")), "{refusal:?}");
-    assert_eq!(refusal.exit_class(), ExitClass::Refused);
-    assert_eq!(fs::read_to_string(fixture.gone.join("README.md")).unwrap(), "changed after the report\n");
-    assert!(fixture.no_pending());
-}
-
-#[test]
-fn a_tip_moved_after_approval_refuses() {
-    let fixture = fixture();
-    let approval = fixture.approval();
-    let other = fixture.repo.commit("later.txt");
-    fixture.repo.git(&["update-ref", &format!("refs/heads/{BRANCH}"), &other]);
-    let refusal = refused(run(&fixture, &approval, &BranchActions::default(), &Usage::clear(), &Observers::default(), &mut |_| false).unwrap());
-    assert!(matches!(&refusal, Refusal::Changed(why) if why.contains("HEAD moved")), "{refusal:?}");
-    assert!(fixture.gone.join("README.md").is_file());
-}
-
-/// Observation that cannot be established is an environment limit (exit
-/// 4), before anything moves.
-#[test]
-fn unavailable_observation_is_an_environment_limit() {
-    let fixture = fixture();
-    let usage = Usage::clear();
-    let observe = |_: Targets, _: bool| Err(ObservationError::Unsupported { reason: "injected" });
-    let entry = fixture.entry();
-    let (approval, branches) = (fixture.approval(), BranchActions::default());
-    let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
-    let refusal = refused(remove_checkout(&request, &Environment { usage: &usage, interrupted: &|| false, observe: &observe }));
-    assert!(matches!(refusal, Refusal::Observation(_)), "{refusal:?}");
-    assert_eq!(refusal.exit_class(), ExitClass::Blocked);
-    assert_eq!(usage.queries.load(Ordering::SeqCst), 0, "no discovery without observation");
-    assert!(fixture.untouched());
-}
-
-#[test]
-fn a_locked_worktree_refuses() {
-    let fixture = fixture();
-    fixture.repo.git(&["worktree", "lock", "--reason", "in use", &fixture.gone.to_string_lossy()]);
-    let refusal = refused(run_plain(&fixture));
-    assert!(matches!(&refusal, Refusal::Ineligible(MoveRefusal::Locked { .. })), "{refusal:?}");
-    assert_eq!(refusal.exit_class(), ExitClass::Refused);
-    assert!(fixture.untouched());
-}
-
-/// A change between the record's creation and the move refuses (exit 3),
-/// and the record of an operation that changed nothing is discarded.
-#[test]
-fn a_change_just_before_the_move_refuses_and_discards_the_record() {
-    let fixture = fixture();
-    let observers = Observers::default();
-    let mut hook = |boundary: Boundary| {
-        if boundary == Boundary::Begun {
-            fs::write(fixture.gone.join("late.txt"), "late").unwrap();
-            observers.injector().event(Root::Tree, "late.txt", EventKind::Created);
-        }
-        false
-    };
-    let refusal = refused(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &Usage::clear(), &observers, &mut hook).unwrap());
-    assert!(matches!(&refusal, Refusal::Inventory(InventoryRefusal::Changed { .. })), "{refusal:?}");
-    assert_eq!(refusal.exit_class(), ExitClass::Refused);
-    assert!(fixture.untouched() && fixture.gone.join("late.txt").is_file());
-    assert!(fixture.no_pending());
-    let store_dirs: Vec<_> = fs::read_dir(fixture.store().root()).unwrap().map(|entry| entry.unwrap().file_name()).collect();
-    assert_eq!(store_dirs, ["locks"], "the operation directory is gone");
-}
-
-/// An interrupt that arrives before the move (during the usage query, say)
-/// refuses with nothing moved and the record discarded, so a Ctrl-C there
-/// never leaves a pending removal behind.
-#[test]
-fn an_interrupt_before_the_move_refuses_and_discards_the_record() {
-    let fixture = fixture();
-    let observers = Observers::default();
-    let entry = fixture.entry();
-    let (approval, branches) = (fixture.approval(), fixture.delete_branch());
-    let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
-
-    let refusal = refused(with_env(&Usage::clear(), &observers, &|| true, |env| remove_checkout(&request, env)));
-
-    assert!(matches!(refusal, Refusal::Interrupted), "{refusal:?}");
+    assert!(matches!(refusal, Refusal::NotSaved(_)), "{refusal:?}");
     assert_eq!(refusal.exit_class(), ExitClass::Failure);
-    assert!(fixture.untouched());
-    assert!(fixture.no_pending());
+    assert!(refusal.to_string().contains("nothing was deleted"), "{refusal}");
+    assert!(f.gone.join("target/debug/a.o").is_file());
+    assert!(f.admin_dir().join("locked").exists(), "still locked");
+    assert!(f.stored().is_empty());
 }
 
-/// An admin event other than the move's own `gitdir` rewrite stops the
-/// removal after the move: exit 1, both paths and the registration in their
-/// actual state, the branch kept, and the record pending.
+/// R29: a permanent failure deletes everything else, is not retried or
+/// waited on, ends with one plain sentence, and a later run finishes
+/// without a question once the cause is gone.
 #[test]
-fn unexplained_activity_during_the_move_stops_after_it() {
-    let fixture = fixture();
-    let observers = Observers::default();
-    let mut hook = |boundary: Boundary| {
-        if boundary == Boundary::Moved {
-            observers.injector().event(Root::Admin, "index", EventKind::Modified);
-        }
-        false
-    };
-    let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &Usage::clear(), &observers, &mut hook).unwrap());
-    assert_eq!(finished.report.outcome, RemovalOutcome::ActivityDetected);
-    assert_eq!(finished.exit_class(), ExitClass::Failure);
-    assert_eq!(finished.report.activity[0].location, ActivityLocation::Admin);
-    assert_eq!(finished.report.original_state, OriginalState::Moved);
-    assert_eq!(finished.report.registration, RegistrationState::AtQuarantine);
-    let quarantine = finished.report.quarantine.as_ref().unwrap();
-    assert_eq!(quarantine.state, QuarantineState::Present);
-    assert!(quarantine.path.as_path().join("README.md").is_file(), "nothing was deleted");
-    assert_eq!(finished.report.journal.deleted.total(), 0);
-    assert_eq!(finished.report.branches[0].state, BranchState::NotAttempted);
-    assert!(fixture.branch_exists());
-    assert_eq!(saved_report(&finished), finished.report);
-    assert_eq!(fixture.pending(), *finished.report.operation_id.as_ref().unwrap());
+fn a_permanent_failure_deletes_the_rest_and_a_later_run_finishes() {
+    let f = fixture();
+    let facts = f.facts();
+    let failing = FailingName::always("notes.txt", io::ErrorKind::ReadOnlyFilesystem);
+    let doubles = Doubles { faults: Box::new(failing), ..Doubles::default() };
+    let entry = f.entry();
+    let branches = [f.delete_branch(StepApproval::Explicit)];
+
+    let first = finished(remove(&request(&f, &entry, &facts, &branches), &doubles.env()));
+
+    let CheckoutResult::Permanent { failures, .. } = &first.checkout else { panic!("{first:?}") };
+    let [failure] = failures.as_slice() else { panic!("{failures:?}") };
+    assert!(failure.path.ends_with("notes.txt"));
+    assert!(first.checkout.to_string().ends_with("notes.txt could not be deleted: the disk is read-only"), "{}", first.checkout);
+    assert_eq!(first.exit_class(), ExitClass::Failure);
+    assert!(first.branches.is_empty(), "branch steps wait for the checkout");
+    assert!(f.branch_exists());
+    let deletion = f.record().deletion_path.as_path().to_path_buf();
+    let left: Vec<_> = fs::read_dir(&deletion).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+    assert_eq!(left, ["notes.txt"], "only the failed entry is left");
+
+    let second = finished(finish_pending(&f.base(), &f.pending_id(), &Doubles::default().env()));
+
+    assert_eq!(second.exit_class(), ExitClass::Success, "{second:?}");
+    assert!(!f.branch_exists());
+    f.assert_gone();
 }
 
-/// Acceptance item 3 at lifecycle level: a retained-cwd style write into
-/// the quarantine during deletion stops it, keeps the new file and the
-/// rest, reports both paths and the deletions so far, and runs no branch
-/// action.
+/// R22: a file another program holds is waited on after everything else
+/// is deleted, the wait is shown once, and the removal finishes in the same
+/// run once it is released.
 #[test]
-fn a_write_into_the_quarantine_during_deletion_stops_with_an_honest_report() {
-    let fixture = fixture();
-    let observers = Observers::default();
-    let quarantine = std::cell::RefCell::new(None::<PathBuf>);
-    let mut hook = |boundary: Boundary| {
-        if boundary == Boundary::Moved {
-            *quarantine.borrow_mut() = Some(fixture.quarantine_of(&fixture.pending()));
-        }
-        if boundary == Boundary::DeletionBatch(2) {
-            let quarantine = quarantine.borrow().clone().unwrap();
-            fs::write(quarantine.join("written-late.txt"), "new work").unwrap();
-            observers.injector().event(Root::Tree, "written-late.txt", EventKind::Created);
-        }
-        false
-    };
-    let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &Usage::clear(), &observers, &mut hook).unwrap());
-    let quarantine = quarantine.into_inner().unwrap();
-    assert_eq!(finished.report.outcome, RemovalOutcome::ActivityDetected);
-    assert_eq!(finished.exit_class(), ExitClass::Failure);
-    assert_eq!(fs::read_to_string(quarantine.join("written-late.txt")).unwrap(), "new work");
-    assert!(finished.report.journal.deleted.total() >= 1, "batch 1 was deleted before the write");
-    assert_eq!(finished.report.deleted.len() as u64, finished.report.journal.deleted.total());
-    let reported = finished.report.quarantine.as_ref().unwrap();
-    assert_eq!(reported.state, QuarantineState::Present);
-    assert!(reported.retained.iter().any(|path| path.as_path() == Path::new("written-late.txt")));
-    assert_eq!(reported.retained_entries as usize, retained_entries(&quarantine, &reported.identity).unwrap().len());
-    assert!(finished.report.notes.contains(&crate::remove::outcome::ReportNote::ConcurrentWriteLimit));
-    assert_eq!(finished.report.registration, RegistrationState::AtQuarantine);
-    assert!(fixture.branch_exists(), "no branch operation");
-    assert_eq!(finished.report.branches[0].state, BranchState::NotAttempted);
-    // Diagnostics ask who uses the quarantine, a validated real directory.
-    assert!(finished.report.discovery.iter().any(|run| run.purpose == DiscoveryPurpose::Diagnostic
-        && run.path.as_path() == quarantine.as_path()));
+fn a_held_file_is_waited_on_and_the_removal_finishes_in_the_same_run() {
+    let f = fixture();
+    let facts = f.facts();
+    let held = FailingName { times: Some(2), ..FailingName::always("notes.txt", io::ErrorKind::WouldBlock) };
+    let doubles = Doubles { faults: Box::new(held), ..Doubles::default() };
+    let entry = f.entry();
 
-    // A retry that deletes the rest keeps the activity that stopped this one.
-    let id = fixture.pending();
-    let fresh = fixture.approval_at(&quarantine);
-    let resumed = finished_resume(&fixture, &id, Some(&fresh), None, &fixture.delete_branch(), &Observers::default());
-    assert_removed(&fixture, &resumed);
-    let report = &resumed.report;
-    let with_late_file = EntryCounts { files: FIXTURE_ENTRIES.files + 1, ..FIXTURE_ENTRIES };
-    assert_accounted_once(report, with_late_file);
-    let [earlier] = report.earlier_attempts.as_slice() else { panic!("{:?}", report.earlier_attempts) };
-    assert_eq!(earlier.outcome, RemovalOutcome::ActivityDetected);
-    assert!(!earlier.activity.is_empty());
-    assert_eq!(earlier.activity, finished.report.activity);
-    assert_eq!(earlier.original_state, finished.report.original_state);
-    assert_eq!(earlier.discovery, finished.report.discovery);
-    assert!(report.activity.is_empty(), "the retry saw no activity of its own");
+    let finished = finished(remove(&request(&f, &entry, &facts, &[]), &doubles.env()));
+
+    assert_eq!(finished.exit_class(), ExitClass::Success, "{finished:?}");
+    let waits = doubles.notes.waits.lock().unwrap().clone();
+    assert_eq!(waits.len(), 1, "{waits:?}");
+    assert!(waits[0].contains("notes.txt"), "{waits:?}");
+    f.assert_gone();
 }
 
-/// Acceptance item 3's other half: recreation at the original path stops
-/// the removal; the recreated tree is never touched or deleted.
+/// R7: a nested mount is never crossed, and everything else goes; the
+/// registration, record, and branch stay until it is unmounted, then a
+/// later run finishes without a question. The table is injected, with a
+/// same-device bind mount.
 #[test]
-fn recreation_at_the_original_path_stops_and_is_left_alone() {
-    let fixture = fixture();
-    let observers = Observers::default();
-    let usage = Usage::clear();
-    let mut hook = |boundary: Boundary| {
-        if boundary == Boundary::DeletionBatch(1) {
-            fs::create_dir(&fixture.gone).unwrap();
-            fs::write(fixture.gone.join("index.db"), "recreated").unwrap();
-            observers.injector().event(Root::Parent, "gone", EventKind::Created);
-        }
-        false
-    };
-    let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &observers, &mut hook).unwrap());
-    assert_eq!(finished.report.outcome, RemovalOutcome::ActivityDetected);
-    assert_eq!(finished.report.original_state, OriginalState::Recreated);
-    assert_eq!(fs::read_to_string(fixture.gone.join("index.db")).unwrap(), "recreated");
-    assert!(fixture.branch_exists());
-    let diagnostics: Vec<_> = finished.report.discovery.iter().filter(|run| run.purpose == DiscoveryPurpose::Diagnostic).collect();
-    assert!(diagnostics.iter().any(|run| same_location(run.path.as_path(), &fixture.gone)), "{diagnostics:?}");
+fn a_nested_mount_is_kept_until_unmounted_and_then_finished() {
+    let f = fixture();
+    fs::create_dir_all(f.gone.join("data").join("cache")).unwrap();
+    fs::write(f.gone.join("data").join("cache").join("blob"), "on the other filesystem").unwrap();
+    let real = biscuit_file::canonicalize_simplified(&f.gone).unwrap();
+    let mount = Mount { mount_point: real.join("data"), source: "/srv/data".into(), fs_type: "ext4".into(), super_options: String::new() };
+    let mounted = FixedMounts(vec![mount]);
+    let facts = f.facts_with(&mounted);
+    assert!(facts.warnings.iter().any(|warning| matches!(warning, Warning::NestedMounts { .. })));
+    let doubles = Doubles { mounts: Box::new(mounted), ..Doubles::default() };
+    let entry = f.entry();
+    let branches = [f.delete_branch(StepApproval::Explicit)];
+
+    let first = finished(remove(&request(&f, &entry, &facts, &branches), &doubles.env()));
+
+    assert!(matches!(&first.checkout, CheckoutResult::RetainedMounts(mounts) if mounts.len() == 1), "{first:?}");
+    assert_eq!(first.exit_class(), ExitClass::Failure);
+    assert!(first.checkout.to_string().contains("unmount it"), "{}", first.checkout);
+    assert!(f.gone.join("data").join("cache").join("blob").is_file(), "nothing on the mount is deleted");
+    assert!(!f.gone.join("notes.txt").exists() && !f.gone.join("target").exists(), "everything else is");
+    assert!(f.registered() && f.branch_exists());
+    assert_eq!(f.record().deletion_mode, DeletionMode::InPlace, "a nested mount is deleted in place, never moved");
+
+    let second = finished(finish_pending(&f.base(), &f.pending_id(), &Doubles::default().env()));
+
+    assert_eq!(second.exit_class(), ExitClass::Success, "{second:?}");
+    assert!(!f.branch_exists());
+    f.assert_gone();
 }
 
-/// Lost coverage right after the move stops as unverified state, and a
-/// diagnostic query that fails is recorded without changing the stop.
+/// Doubles whose mount table gains a same-device mount at `target/debug`
+/// once deletion has begun, before deletion reaches it; the table is
+/// returned to unmount it.
+fn mounted_during_deletion() -> (Doubles, LiveMounts) {
+    let live = LiveMounts::default();
+    let publish = MountDuringDeletion::new(&live, Path::new("target").join("debug"));
+    (Doubles { faults: Box::new(publish), mounts: Box::new(live.clone()), ..Doubles::default() }, live)
+}
+
+/// Asserts that only `target/debug` under `root` was kept, as a mount.
+fn assert_kept_mount(result: &Finished, root: &Path) {
+    let point = root.join("target").join("debug");
+    assert!(
+        matches!(&result.checkout, CheckoutResult::RetainedMounts(mounts) if mounts.iter().map(|mount| &mount.mount_point).eq([&point])),
+        "{result:?}"
+    );
+    assert_eq!(result.exit_class(), ExitClass::Failure);
+    assert!(point.join("a.o").is_file(), "nothing on the mount is deleted");
+    assert!(!root.join("notes.txt").exists() && !root.join("target").join("release").exists(), "everything else is");
+}
+
+/// R7, R2-F3.1: a mount made while a moved checkout is deleted is kept with
+/// the registration, record, and branch; once it is unmounted, a later run
+/// finishes without a question.
 #[test]
-fn lost_coverage_after_the_move_stops_and_a_failed_diagnostic_is_recorded() {
-    let fixture = fixture();
-    let observers = Observers::default();
-    let usage = Usage { fail_after: Some(1), ..Usage::clear() };
-    let mut hook = |boundary: Boundary| {
-        if boundary == Boundary::Moved {
-            observers.injector().overflow();
-        }
-        false
-    };
-    let finished = finished(run(&fixture, &fixture.approval(), &fixture.delete_branch(), &usage, &observers, &mut hook).unwrap());
-    assert_eq!(finished.report.outcome, RemovalOutcome::StateUnverified);
-    assert_eq!(finished.exit_class(), ExitClass::Failure);
-    assert_eq!(finished.report.activity.last().unwrap().kind, ActivityKind::CoverageLost);
-    let diagnostic = finished.report.discovery.iter().find(|run| run.purpose == DiscoveryPurpose::Diagnostic).expect("a diagnostic query");
-    assert!(matches!(&diagnostic.result, DiscoveryResult::Failed { kind, .. } if kind == "root_identity"), "{diagnostic:?}");
-    assert!(fixture.branch_exists());
+fn a_mount_made_while_a_moved_checkout_is_deleted_is_kept_until_unmounted() {
+    let f = fixture();
+    let facts = f.facts();
+    let (doubles, live) = mounted_during_deletion();
+    let entry = f.entry();
+    let branches = [f.delete_branch(StepApproval::Explicit)];
+
+    let first = finished(remove(&request(&f, &entry, &facts, &branches), &doubles.env()));
+
+    let record = f.record();
+    assert_eq!(record.deletion_mode, DeletionMode::Moved, "no mount was there to keep it in place");
+    assert_kept_mount(&first, record.deletion_path.as_path());
+    assert!(f.registered() && f.branch_exists());
+
+    live.unmount_all();
+    let second = finished(finish_pending(&f.base(), &f.pending_id(), &doubles.env()));
+
+    assert_eq!(second.exit_class(), ExitClass::Success, "{second:?}");
+    assert!(!f.branch_exists());
+    f.assert_gone();
 }
 
-/// An interrupt stops at the next entry boundary; the operation stays
-/// pending and a retry finishes it.
-///
-/// The retry's report keeps the first attempt: its deletions alongside the
-/// retry's, each counted once, and its stop (outcome, error, timeline,
-/// diagnostics) as an earlier attempt.
+/// A rename failure that deletes in place: no exclusive rename on Unix
+/// (drvfs), a held file on Windows.
+fn in_place_rename_failure() -> io::Error {
+    #[cfg(unix)]
+    return io::Error::from_raw_os_error(libc::EINVAL);
+    #[cfg(windows)]
+    return io::Error::from_raw_os_error(windows_sys::Win32::Foundation::ERROR_SHARING_VIOLATION as i32);
+}
+
+/// R7, R2-F3.2: a saved in-place removal that resumes while a mount is made
+/// keeps the mount, the registration, the branch, and the approval.
 #[test]
-fn an_interrupted_removal_is_resumed() {
-    let fixture = fixture();
-    let observers = Observers::default();
-    let entry = fixture.entry();
-    let (approval, branches) = (fixture.approval(), fixture.delete_branch());
-    let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
-    let usage = Usage::clear();
-    // Interrupted once two batches are deleted.
-    let interrupted = std::sync::atomic::AtomicBool::new(false);
-    let mut hook = |boundary: Boundary| {
-        if boundary == Boundary::DeletionBatch(3) {
-            interrupted.store(true, Ordering::SeqCst);
-        }
-        false
-    };
-    let stop = || interrupted.load(Ordering::SeqCst);
-    let finished = finished(with_env(&usage, &observers, &stop, |env| run_with(&request, env, &mut hook)).unwrap());
-    assert_eq!(finished.report.outcome, RemovalOutcome::CleanupFailed);
-    assert_eq!(finished.exit_class(), ExitClass::Failure);
-    assert!(fixture.branch_exists());
-    let first = finished.report;
-    let deleted_first = first.journal.deleted.total();
-    assert!(deleted_first >= 2 && deleted_first < FIXTURE_ENTRIES.total(), "{:?}", first.journal);
+fn a_mount_made_while_a_saved_in_place_removal_resumes_keeps_the_approval() {
+    let f = fixture();
+    let facts = f.facts();
+    let branches = [f.delete_branch(StepApproval::Explicit)];
+    let moves = Faults { rename_instead: Some(in_place_rename_failure), ..Faults::default() };
+    crash_with(&f, &facts, &branches, &Doubles::default(), Boundary::MarkedInPlace, moves);
+    assert_eq!(f.record().deletion_mode, DeletionMode::InPlace);
+    let id = f.pending_id();
+    let (doubles, live) = mounted_during_deletion();
 
-    let id = fixture.pending();
-    let quarantine = fixture.quarantine_of(&id);
-    let fresh = fixture.approval_at(&quarantine);
-    let resumed = finished_resume(&fixture, &id, Some(&fresh), None, &fixture.delete_branch(), &observers);
-    assert_removed(&fixture, &resumed);
-    assert!(!fixture.branch_exists());
+    let first = finished(finish_pending(&f.base(), &id, &doubles.env()));
 
-    let report = &resumed.report;
-    assert_accounted_once(report, FIXTURE_ENTRIES);
-    assert_eq!(report.journal.deleted, FIXTURE_ENTRIES, "nothing is uncertain");
-    let from_first: Vec<_> = report.journal_entries.iter().filter(|entry| entry.attempt == 1).collect();
-    let deleted_by_first: Vec<_> = first.journal_entries.iter().filter(|entry| entry.state == EntryState::Deleted).collect();
-    assert_eq!(from_first, deleted_by_first, "the first attempt's deletions are kept as they were");
-    assert!(report.journal_entries.iter().all(|entry| entry.attempt <= 2));
-    let [earlier] = report.earlier_attempts.as_slice() else { panic!("{:?}", report.earlier_attempts) };
-    assert_eq!(earlier.outcome, RemovalOutcome::CleanupFailed);
-    assert_eq!(earlier.errors, first.errors);
-    assert_eq!(earlier.timeline, first.timeline);
-    assert_eq!(earlier.discovery, first.discovery);
-    assert_eq!(earlier.branches, first.branches);
-    assert!(report.errors.is_empty(), "the earlier stop is not this attempt's: {:?}", report.errors);
+    assert_kept_mount(&first, f.record().deletion_path.as_path());
+    assert!(f.registered() && f.branch_exists());
+    assert_eq!(f.pending_id(), id, "the approval is kept");
+
+    live.unmount_all();
+    let second = finished(finish_pending(&f.base(), &id, &doubles.env()));
+
+    assert_eq!(second.exit_class(), ExitClass::Success, "{second:?}");
+    assert!(!f.branch_exists());
+    f.assert_gone();
 }
 
+/// R7, R2-F3.3: deleting an own link's checkout never crosses a mount made
+/// during it; the link and the approval are kept, and a later run finishes.
 #[test]
-fn a_failed_branch_deletion_keeps_the_record_and_a_retry_needs_fresh_approval() {
-    let fixture = fixture();
-    let stale = BranchActions {
-        local: Some(LocalBranchDeletion { name: BRANCH.into(), expected_tip: "0".repeat(40) }),
-        remote: Some(RemoteBranchDeletion {
-            remote: "origin".into(),
-            destination: BRANCH.into(),
-            endpoint: "https://example.invalid/repo.git".into(),
-            expected_sha: "0".repeat(40),
-        }),
-    };
-    let finished = finished(run(&fixture, &fixture.approval(), &stale, &Usage::clear(), &Observers::default(), &mut |_| false).unwrap());
-    assert_eq!(finished.report.outcome, RemovalOutcome::Removed, "the checkout is removed");
-    assert!(finished.report.branch_failed());
-    assert_eq!(finished.exit_class(), ExitClass::Failure);
-    assert!(matches!(finished.report.branches[0].state, BranchState::Failed { .. }));
-    assert_eq!(finished.report.branches[1].state, BranchState::NotAttempted, "nothing after a failed step runs");
-    assert!(fixture.branch_exists());
-    assert!(!fixture.gone.exists());
+fn a_mount_made_while_an_own_links_checkout_is_deleted_keeps_the_link_and_approval() {
+    let f = fixture();
+    let real = replace_with_link(&f.gone, "real");
+    let facts = f.facts();
+    let (doubles, live) = mounted_during_deletion();
+    let entry = f.entry();
 
-    // Retry by the original name finds the pending record, though Git no
-    // longer registers anything by that name.
-    let id = match resolve_target(&fixture.base(), BRANCH).unwrap() {
-        Target::Pending(target) => target.id,
-        other => panic!("{other:?}"),
-    };
-    assert_eq!(inspect(&fixture.base(), &id).unwrap().resolution, Resolution::CheckoutRemoved);
-    // The saved approval is never reused: an empty set of actions deletes
-    // nothing.
-    let resumed = finished_resume(&fixture, &id, None, None, &BranchActions::default(), &Observers::default());
-    assert_removed(&fixture, &resumed);
-    assert!(fixture.branch_exists(), "no branch deletion was approved again");
+    let first = finished(remove(&request(&f, &entry, &facts, &[]), &doubles.env()));
+
+    let record = f.record();
+    assert!(matches!(record.target, ApprovedTarget::OwnLink { .. }), "{:?}", record.target);
+    assert_kept_mount(&first, record.deletion_path.as_path());
+    assert!(fs::symlink_metadata(&f.gone).is_ok(), "the link is kept");
+    assert!(f.registered());
+    let id = f.pending_id();
+
+    live.unmount_all();
+    let second = finished(finish_pending(&f.base(), &id, &doubles.env()));
+
+    assert_eq!(second.exit_class(), ExitClass::Success, "{second:?}");
+    assert!(absent(&real));
+    f.assert_gone();
 }
 
-// ---- Crash injection at each phase boundary --------------------------------
-
-fn crash_at(fixture: &Fixture, observers: &Observers, at: Boundary) -> OperationId {
-    let crashed = run(fixture, &fixture.approval(), &fixture.delete_branch(), &Usage::clear(), observers, &mut |boundary| boundary == at);
-    assert!(crashed.is_err(), "the hook crashed the run at {at:?}");
-    fixture.pending()
-}
-
-fn finished_resume(
-    fixture: &Fixture,
-    id: &OperationId,
-    approval: Option<&Approval>,
-    record: Option<&RecordApproval>,
-    branches: &BranchActions,
-    observers: &Observers,
-) -> Finished {
-    let base = fixture.base();
-    let request = ResumeRequest { base: &base, id, approval, record, branches };
-    finished(with_env(&Usage::clear(), observers, &|| false, |env| resume(&request, env)))
-}
-
+/// R4: a filesystem without a no-replacement rename (drvfs) deletes in
+/// place under the same record; nothing is renamed by a check-then-move.
+#[cfg(unix)]
 #[test]
-fn a_crash_after_the_record_leaves_nothing_moved_and_blocks_a_new_run() {
-    let fixture = fixture();
-    let id = crash_at(&fixture, &Observers::default(), Boundary::Begun);
-    assert!(fixture.untouched());
-    let inspection = inspect(&fixture.base(), &id).unwrap();
-    assert_eq!(inspection.resolution, Resolution::NotStarted);
-    assert_eq!((inspection.original.clone(), inspection.quarantine.clone()), (Presence::Checkout, Presence::Absent));
+fn a_filesystem_without_exclusive_rename_deletes_in_place() {
+    let f = fixture();
+    let facts = f.facts();
+    let doubles = Doubles::default();
+    let moves = Faults { rename_instead: Some(|| io::Error::from_raw_os_error(libc::EINVAL)), ..Faults::default() };
+    crash_with(&f, &facts, &[], &doubles, Boundary::MarkedInPlace, moves);
 
-    let refusal = refused(run_plain(&fixture));
-    assert!(matches!(&refusal, Refusal::Store(StoreError::Pending(pending)) if *pending == id), "{refusal:?}");
+    let record = f.record();
+    assert_eq!(record.deletion_mode, DeletionMode::InPlace);
+    assert_eq!(record.deletion_path, record.original);
+    assert!(f.gone.join("notes.txt").is_file(), "marked, not yet deleted");
+
+    let finished = finished(finish_pending(&f.base(), &f.pending_id(), &doubles.env()));
+    assert_eq!(finished.exit_class(), ExitClass::Success);
+    f.assert_gone();
+}
+
+/// R15 (Windows): the question's blocker refuses before anything changes.
+#[test]
+fn the_shell_inside_blocker_refuses_with_exit_4() {
+    let f = fixture();
+    let mut facts = f.facts();
+    facts.blocker = Some(crate::remove::facts::Blocker::ShellInside { shell: Some("pwsh".into()) });
+    let entry = f.entry();
+
+    let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+    assert_eq!(refusal.exit_class(), ExitClass::Blocked);
+    assert!(f.gone.join("notes.txt").is_file());
+}
+
+/// The main checkout is never removed, whatever was answered.
+#[test]
+fn the_main_checkout_is_never_removed() {
+    let f = fixture();
+    let facts = f.facts();
+    let main = f.listed().into_iter().find(|entry| entry.is_main).unwrap();
+
+    let refusal = refused(remove(&request(&f, &main, &facts, &[]), &Doubles::default().env()));
+
+    assert!(matches!(refusal, Refusal::MainCheckout));
     assert_eq!(refusal.exit_class(), ExitClass::Refused);
-    assert!(fixture.untouched());
-    // The name resolves to the pending operation: the live checkout is the
-    // same one.
-    assert!(matches!(resolve_target(&fixture.base(), "gone").unwrap(), Target::Pending(target) if target.id == id));
+    assert!(f.base().join(".git").exists());
 }
 
+// --- Crashes, and the run that finishes ----------------------------------
+
+/// Every edge of the flowchart: a crash there is finished by the next
+/// `wt remove` of the same name, with the saved approval, asking nothing.
+/// The worktree is locked and has a branch step so that every edge is
+/// passed.
 #[test]
-fn a_released_unstarted_record_lets_a_new_removal_run() {
-    let fixture = fixture();
-    let id = crash_at(&fixture, &Observers::default(), Boundary::Begun);
-    release_unstarted(&fixture.base(), &id).unwrap();
-    assert!(fixture.no_pending() && fixture.untouched());
-    assert!(matches!(resolve_target(&fixture.base(), "gone").unwrap(), Target::Live(_)));
-    assert_removed(&fixture, &finished(run_plain(&fixture)));
-}
+fn a_crash_at_every_step_is_finished_by_the_next_run() {
+    for at in [
+        Boundary::Begun,
+        Boundary::Unlocked,
+        Boundary::Moved,
+        Boundary::ContentRemoved,
+        Boundary::Unregistered,
+        Boundary::BranchAction(0),
+        Boundary::BranchesDone,
+    ] {
+        let f = fixture();
+        f.repo.git(&["worktree", "lock", f.gone.to_str().unwrap()]);
+        let facts = f.facts();
+        let doubles = Doubles::default();
+        let branches = [f.delete_branch(StepApproval::Explicit)];
+        crash_at(&f, &facts, &branches, &doubles, at);
+        assert_eq!(f.stored().len(), 1, "{at:?}: the record survives the crash");
 
-/// The process stopped between the rename and Git's record update; the
-/// retry moves the checkout back rather than deleting anything.
-#[test]
-fn a_crash_between_the_rename_and_the_association_is_moved_back() {
-    let fixture = fixture();
-    let id = crash_at(&fixture, &Observers::default(), Boundary::Begun);
-    let quarantine = fixture.quarantine_of(&id);
-    rename::rename_no_replace(&fixture.gone, &quarantine).unwrap();
-    assert_eq!(inspect(&fixture.base(), &id).unwrap().resolution, Resolution::MovedUnassociated);
-    let refusal = refused(with_env(&Usage::clear(), &Observers::default(), &|| false, |env| {
-        resume(&ResumeRequest { base: &fixture.base(), id: &id, approval: None, record: None, branches: &BranchActions::default() }, env)
-    }));
-    assert!(matches!(&refusal, Refusal::Recovery(inspection) if inspection.resolution == Resolution::MovedUnassociated));
+        let finished = finished(finish_pending(&f.base(), &f.pending_id(), &doubles.env()));
 
-    release_unstarted(&fixture.base(), &id).unwrap();
-    assert!(fixture.untouched() && !quarantine.exists());
-    assert!(fixture.no_pending());
-}
-
-/// Acceptance items 6 and 10: after the move Git no longer registers the
-/// original name; the retry finds the record by it, takes a fresh
-/// inventory and fresh consent, and finishes.
-#[test]
-fn a_crash_after_the_move_is_resumed_by_the_original_name() {
-    let fixture = fixture();
-    let observers = Observers::default();
-    let id = crash_at(&fixture, &observers, Boundary::Moved);
-    let quarantine = fixture.quarantine_of(&id);
-    assert_eq!(fixture.listed_at(&fixture.gone), 0);
-    assert_eq!(fixture.listed_at(&quarantine), 1);
-    let inspection = inspect(&fixture.base(), &id).unwrap();
-    assert_eq!(inspection.resolution, Resolution::Quarantined);
-    assert_eq!(inspection.journal.unwrap().deleted.total(), 0);
-    assert!(inspection.retained.unwrap().iter().any(|path| path.as_path() == Path::new("README.md")));
-
-    for name in ["gone", BRANCH, &quarantine.file_name().unwrap().to_string_lossy()] {
-        assert!(matches!(resolve_target(&fixture.base(), name).unwrap(), Target::Pending(target) if target.id == id), "{name}");
+        assert_eq!(finished.exit_class(), ExitClass::Success, "{at:?}: {finished:?}");
+        assert!(!f.branch_exists(), "{at:?}");
+        f.assert_gone();
     }
-    // The original approval is bound to the original path; the retry must
-    // be approved again from the quarantine.
-    let fresh = fixture.approval_at(&quarantine);
-    let resumed = finished_resume(&fixture, &id, Some(&fresh), None, &fixture.delete_branch(), &observers);
-    assert_removed(&fixture, &resumed);
-    assert!(!fixture.branch_exists());
-    assert!(observers.started.load(Ordering::SeqCst) >= 2, "the retry observes again");
 }
 
-/// A retry never deletes content its fresh consent does not cover.
+/// A built checkout spans several deletion batches. A crash during
+/// deletion leaves the placed checkout partly deleted; the next run deletes
+/// the rest from the saved approval, asking nothing, and counts only what it
+/// deleted itself.
 #[test]
-fn new_content_in_the_quarantine_needs_fresh_consent() {
-    let fixture = fixture();
-    let observers = Observers::default();
-    let id = crash_at(&fixture, &observers, Boundary::Moved);
-    let quarantine = fixture.quarantine_of(&id);
-    let before = fixture.approval_at(&quarantine);
-    fs::write(quarantine.join("new-work.txt"), "written after the crash").unwrap();
+fn a_crash_part_way_through_deleting_a_built_checkout_is_finished_by_the_next_run() {
+    let f = fixture();
+    let build = f.gone.join("target").join("build");
+    fs::create_dir_all(&build).unwrap();
+    let built = 2 * crate::remove::delete::BATCH_ENTRIES + 100;
+    for n in 0..built {
+        fs::write(build.join(format!("{n}.o")), "o").unwrap();
+    }
+    let facts = f.facts();
+    let doubles = Doubles::default();
+    let branches = [f.delete_branch(StepApproval::Explicit)];
+    crash_at(&f, &facts, &branches, &doubles, Boundary::Moved);
+    let record = f.record();
+    assert_eq!(record.progress, Progress::Placed);
+    // What the first batch deleted before the crash.
+    let moved_build = record.deletion_path.as_path().join("target").join("build");
+    for n in 0..crate::remove::delete::BATCH_ENTRIES {
+        fs::remove_file(moved_build.join(format!("{n}.o"))).unwrap();
+    }
+    let left = fs::read_dir(&moved_build).unwrap().count() as u64;
 
-    let base = fixture.base();
-    let request = ResumeRequest { base: &base, id: &id, approval: Some(&before), record: None, branches: &BranchActions::default() };
-    let refusal = refused(with_env(&Usage::clear(), &observers, &|| false, |env| resume(&request, env)));
-    assert!(matches!(&refusal, Refusal::Changed(_)), "{refusal:?}");
-    assert_eq!(fs::read_to_string(quarantine.join("new-work.txt")).unwrap(), "written after the crash");
-    assert_eq!(fixture.pending(), id);
+    let finished = finished(finish_pending(&f.base(), &f.pending_id(), &doubles.env()));
 
-    let without_consent = Approval { discard_files: false, ..fixture.approval_at(&quarantine) };
-    let request = ResumeRequest { approval: Some(&without_consent), ..request };
-    assert!(matches!(refused(with_env(&Usage::clear(), &observers, &|| false, |env| resume(&request, env))), Refusal::ConsentRequired));
-    assert!(quarantine.join("new-work.txt").is_file());
+    assert_eq!(finished.exit_class(), ExitClass::Success, "{finished:?}");
+    let entries = finished.entries.expect("counted");
+    assert!(entries > left && entries < built, "only this run's deletions count: {entries}, {left} built files were left");
+    assert!(!f.branch_exists());
+    f.assert_gone();
 }
 
-/// Usage of the quarantine refuses the retry, as it would a first attempt.
+/// A crash between the rename and Git's record: the checkout is moved
+/// back and placed again, without a question.
 #[test]
-fn usage_of_the_quarantine_refuses_the_retry() {
-    let fixture = fixture();
-    let observers = Observers::default();
-    let id = crash_at(&fixture, &observers, Boundary::Moved);
-    let quarantine = fixture.quarantine_of(&id);
-    let fresh = fixture.approval_at(&quarantine);
-    let usage = Usage { processes: vec![holder(&quarantine)], ..Usage::clear() };
-    let base = fixture.base();
-    let request = ResumeRequest { base: &base, id: &id, approval: Some(&fresh), record: None, branches: &BranchActions::default() };
-    let refusal = refused(with_env(&usage, &observers, &|| false, |env| resume(&request, env)));
-    assert!(matches!(refusal, Refusal::Usage(UsageRefusal::InUse(_))), "{refusal:?}");
-    assert!(quarantine.join("README.md").is_file());
+fn a_crash_between_the_rename_and_the_registration_is_finished() {
+    let f = fixture();
+    let facts = f.facts();
+    let doubles = Doubles::default();
+    crash_at(&f, &facts, &[], &doubles, Boundary::Begun);
+    let record = f.record();
+    fs::rename(&f.gone, record.deletion_path.as_path()).unwrap();
+
+    let finished = finished(finish_pending(&f.base(), &f.pending_id(), &doubles.env()));
+
+    assert_eq!(finished.exit_class(), ExitClass::Success, "{finished:?}");
+    f.assert_gone();
 }
 
+/// New content at the original path after the move is never deleted; the
+/// moved checkout still is, and the run says what was kept.
 #[test]
-fn a_replaced_quarantine_is_never_resumed() {
-    let fixture = fixture();
-    let id = crash_at(&fixture, &Observers::default(), Boundary::Moved);
-    let quarantine = fixture.quarantine_of(&id);
-    let aside = fixture.base().parent().unwrap().join("aside");
-    fs::rename(&quarantine, &aside).unwrap();
+fn a_recreated_original_is_kept_and_the_moved_checkout_deleted() {
+    let f = fixture();
+    let facts = f.facts();
+    let doubles = Doubles::default();
+    crash_at(&f, &facts, &[], &doubles, Boundary::Moved);
+    fs::create_dir(&f.gone).unwrap();
+    fs::write(f.gone.join("new.txt"), "someone else's").unwrap();
+
+    let finished = finished(finish_pending(&f.base(), &f.pending_id(), &doubles.env()));
+
+    assert_eq!(finished.exit_class(), ExitClass::Success, "{finished:?}");
+    assert!(finished.original_kept.as_deref().is_some_and(|kept| same_location(kept, &f.gone)), "{finished:?}");
+    assert_eq!(fs::read_to_string(f.gone.join("new.txt")).unwrap(), "someone else's");
+    assert!(!f.registered());
+    assert!(f.stored().is_empty());
+}
+
+/// A different directory at the hidden path is never deleted; the record
+/// is kept so the next run explains it again.
+#[test]
+fn a_replaced_quarantine_is_never_deleted() {
+    let f = fixture();
+    let facts = f.facts();
+    let doubles = Doubles::default();
+    crash_at(&f, &facts, &[], &doubles, Boundary::Moved);
+    let quarantine = f.record().deletion_path.as_path().to_path_buf();
+    fs::rename(&quarantine, f.gone.with_file_name("moved-away")).unwrap();
     fs::create_dir(&quarantine).unwrap();
     fs::write(quarantine.join("stranger.txt"), "not the checkout").unwrap();
 
-    let inspection = inspect(&fixture.base(), &id).unwrap();
-    assert!(matches!(&inspection.resolution, Resolution::Unresumable(_)), "{:?}", inspection.resolution);
-    assert_eq!(inspection.journal, None, "nothing in a stranger's directory is checked");
-    let fresh = fixture.approval_at(&aside);
-    let base = fixture.base();
-    let request = ResumeRequest { base: &base, id: &id, approval: Some(&fresh), record: None, branches: &BranchActions::default() };
-    let refusal = refused(with_env(&Usage::clear(), &Observers::default(), &|| false, |env| resume(&request, env)));
-    assert!(matches!(refusal, Refusal::Recovery(_)));
-    assert!(quarantine.join("stranger.txt").is_file() && aside.join("README.md").is_file());
+    let refusal = refused(finish_pending(&f.base(), &f.pending_id(), &doubles.env()));
+
+    assert_eq!(refusal.exit_class(), ExitClass::Refused, "{refusal}");
+    assert!(refusal.to_string().contains(&quarantine.display().to_string()), "names the path: {refusal}");
+    assert!(quarantine.join("stranger.txt").is_file());
+    assert_eq!(f.stored().len(), 1);
 }
 
-/// A partial checkout whose `.git` link is gone is reported, never
-/// repaired or cleaned up.
-#[test]
-fn a_partial_checkout_without_its_git_link_is_kept() {
-    let fixture = fixture();
-    let id = crash_at(&fixture, &Observers::default(), Boundary::Moved);
-    let quarantine = fixture.quarantine_of(&id);
-    fs::remove_file(quarantine.join(".git")).unwrap();
-    let inspection = inspect(&fixture.base(), &id).unwrap();
-    assert_eq!(inspection.resolution, Resolution::PartialCheckout);
-    assert!(inspection.retained.unwrap().iter().any(|path| path.as_path() == Path::new("README.md")));
-    let refusal = refused(with_env(&Usage::clear(), &Observers::default(), &|| false, |env| {
-        resume(&ResumeRequest { base: &fixture.base(), id: &id, approval: None, record: None, branches: &BranchActions::default() }, env)
-    }));
-    assert!(matches!(refusal, Refusal::Recovery(_)));
-    assert!(quarantine.join("README.md").is_file());
-    assert!(!quarantine.join(".git").exists(), "nothing was repaired");
-}
-
-/// A crash after the content is gone resumes as the missing-directory
-/// record removal, re-checking the index; an unlink whose result was never
-/// persisted is reported as uncertain, not as deleted.
-#[test]
-fn a_crash_after_the_content_is_removed_resumes_with_the_record_and_uncertain_entries() {
-    let fixture = fixture();
-    let id = crash_at(&fixture, &Observers::default(), Boundary::ContentRemoved);
-    let quarantine = fixture.quarantine_of(&id);
-    assert!(!quarantine.exists() && fixture.listed_at(&quarantine) == 1);
-    // The crash window between the last unlink and its result: drop the
-    // final results line.
-    let journal = fixture.store().operation_dir(&id).join(JOURNAL_FILE);
-    let text = fs::read_to_string(&journal).unwrap();
-    let kept: Vec<&str> = text.lines().collect();
-    fs::write(&journal, format!("{}\n", kept[..kept.len() - 1].join("\n"))).unwrap();
-
-    let inspection = inspect(&fixture.base(), &id).unwrap();
-    assert_eq!(inspection.resolution, Resolution::ContentRemoved);
-    let summary = inspection.journal.unwrap();
-    assert!(summary.uncertain.total() >= 1 && summary.deleted.total() >= 1, "{summary:?}");
-
-    let base = fixture.base();
-    let request = ResumeRequest { base: &base, id: &id, approval: None, record: None, branches: &BranchActions::default() };
-    assert!(matches!(refused(with_env(&Usage::clear(), &Observers::default(), &|| false, |env| resume(&request, env))), Refusal::ConsentRequired));
-
-    let inspected = inspect_missing(&base, &fixture.entry_at(&quarantine)).unwrap();
-    let record = RecordApproval { inspected, discard_staged: true };
-    let resumed = finished_resume(&fixture, &id, None, Some(&record), &fixture.delete_branch(), &Observers::default());
-    assert_removed(&fixture, &resumed);
-    assert!(!fixture.branch_exists());
-    // The first attempt's deletions stay confirmed, and its unconfirmed
-    // unlink stays uncertain.
-    let report = &resumed.report;
-    assert_eq!(report.journal.deleted, summary.deleted);
-    assert_eq!(report.journal.uncertain, summary.uncertain);
-    assert_accounted_once(report, FIXTURE_ENTRIES);
-    assert!(report.journal_entries.iter().all(|entry| entry.attempt == 1), "the retry deleted nothing");
-    assert!(report.earlier_attempts.is_empty(), "the crashed attempt saved no report");
-}
-
-#[test]
-fn a_crash_after_unregistering_runs_only_the_branch_actions_on_retry() {
-    let fixture = fixture();
-    let id = crash_at(&fixture, &Observers::default(), Boundary::Unregistered);
-    assert_eq!(inspect(&fixture.base(), &id).unwrap().resolution, Resolution::CheckoutRemoved);
-    let resumed = finished_resume(&fixture, &id, None, None, &fixture.delete_branch(), &Observers::default());
-    assert_removed(&fixture, &resumed);
-    assert!(!fixture.branch_exists());
-    // The checkout's removal by the crashed attempt is still reported.
-    assert_eq!(resumed.report.journal.deleted, FIXTURE_ENTRIES);
-    assert_accounted_once(&resumed.report, FIXTURE_ENTRIES);
-    assert_eq!(resumed.report.deleted.len() as u64, FIXTURE_ENTRIES.total());
-}
-
-/// Completion is the record's last write; a crash before it leaves a record
-/// whose retry finds nothing left to delete, and a completed record never
-/// authorizes another removal.
-#[test]
-fn a_completed_record_never_authorizes_a_second_removal() {
-    let fixture = fixture();
-    let id = crash_at(&fixture, &Observers::default(), Boundary::BranchesDone);
-    assert!(!fixture.branch_exists());
-    assert_eq!(inspect(&fixture.base(), &id).unwrap().resolution, Resolution::CheckoutRemoved);
-    let resumed = finished_resume(&fixture, &id, None, None, &BranchActions::default(), &Observers::default());
-    assert_removed(&fixture, &resumed);
-
-    assert!(matches!(inspect(&fixture.base(), &id), Err(StoreError::Completed(_))));
-    let base = fixture.base();
-    let request = ResumeRequest { base: &base, id: &id, approval: None, record: None, branches: &BranchActions::default() };
-    let refusal = refused(with_env(&Usage::clear(), &Observers::default(), &|| false, |env| resume(&request, env)));
-    assert!(matches!(refusal, Refusal::Store(StoreError::Completed(_))), "{refusal:?}");
-    assert!(matches!(resolve_target(&base, BRANCH), Err(ResolveError::NotFound(_))));
-}
-
-// ---- A retry whose journal replacement stops part-way -----------------------
-
-/// Runs `retry` once with `RecoveryStore::reopen` stopped at each of its
-/// steps, as a crash or a failed write would stop it. Each stopped retry is
-/// refused before it changes anything, the pending operation inspects
-/// exactly as before, and `unchanged` holds.
-fn each_stopped_reopen(fixture: &Fixture, id: &OperationId, retry: impl Fn() -> Refusal, unchanged: impl Fn()) {
-    let header_only = |path: &Path| {
-        let journal = fs::read(path.with_file_name(JOURNAL_FILE)).unwrap();
-        fs::write(path, &journal[..=journal.iter().position(|byte| *byte == b'\n').unwrap()]).unwrap();
-    };
-    let summary = |inspection: Inspection| (inspection.resolution, inspection.journal, inspection.torn_tail, inspection.retained);
-    let before = summary(inspect(&fixture.base(), id).unwrap());
-    for (at, fault, header) in [
-        (ReopenStep::Archived, Fault::Crash, false),
-        (ReopenStep::Created, Fault::Crash, true),
-        (ReopenStep::Initialized, Fault::Crash, false),
-        (ReopenStep::Created, Fault::Fail, true),
-    ] {
-        let injected = store_fault::inject(move |step, path| {
-            (step == at).then(|| {
-                if header {
-                    header_only(path);
-                }
-                fault
-            })
-        });
-        let refusal = retry();
-        drop(injected);
-        assert!(matches!(refusal, Refusal::Store(StoreError::Io(_))), "{at:?} {fault:?}: {refusal:?}");
-        assert_eq!(summary(inspect(&fixture.base(), id).unwrap()), before, "{at:?} {fault:?}");
-        assert_eq!(fixture.pending(), *id);
-        unchanged();
-    }
-}
-
-#[test]
-fn a_quarantine_retry_stopped_while_replacing_the_journal_stays_recoverable() {
-    let fixture = fixture();
-    let observers = Observers::default();
-    let (approval, branches) = (fixture.approval(), fixture.delete_branch());
-    let entry = fixture.entry();
-    let request = RemovalRequest { base: &fixture.base(), entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
-    // Interrupted after some entries are deleted, so the journal holds
-    // confirmed deletions: the polls are the one before the move, the first
-    // batch's, and its first entry's.
-    let checks = AtomicUsize::new(0);
-    let interrupted = || checks.fetch_add(1, Ordering::SeqCst) >= 3;
-    let stopped = finished(with_env(&Usage::clear(), &observers, &interrupted, |env| remove_checkout(&request, env)));
-    assert_eq!(stopped.report.outcome, RemovalOutcome::CleanupFailed);
-    let id = fixture.pending();
-    let quarantine = fixture.quarantine_of(&id);
-    assert!(inspect(&fixture.base(), &id).unwrap().journal.unwrap().deleted.total() >= 1);
-
-    let fresh = fixture.approval_at(&quarantine);
-    let base = fixture.base();
-    let request = ResumeRequest { base: &base, id: &id, approval: Some(&fresh), record: None, branches: &branches };
-    each_stopped_reopen(
-        &fixture,
-        &id,
-        || refused(with_env(&Usage::clear(), &observers, &|| false, |env| resume(&request, env))),
-        || assert!(quarantine.join("README.md").is_file(), "a stopped retry deletes nothing"),
-    );
-    assert_removed(&fixture, &finished_resume(&fixture, &id, Some(&fresh), None, &branches, &observers));
-}
-
-#[test]
-fn a_registration_retry_stopped_while_replacing_the_journal_stays_recoverable() {
-    let fixture = fixture();
-    let id = crash_at(&fixture, &Observers::default(), Boundary::ContentRemoved);
-    let quarantine = fixture.quarantine_of(&id);
-    let base = fixture.base();
-    let inspected = inspect_missing(&base, &fixture.entry_at(&quarantine)).unwrap();
-    let record = RecordApproval { inspected, discard_staged: true };
-    let request = ResumeRequest { base: &base, id: &id, approval: None, record: Some(&record), branches: &BranchActions::default() };
-    each_stopped_reopen(
-        &fixture,
-        &id,
-        || refused(with_env(&Usage::clear(), &Observers::default(), &|| false, |env| resume(&request, env))),
-        || assert_eq!(fixture.listed_at(&quarantine), 1, "a stopped retry keeps the registration"),
-    );
-    assert_removed(&fixture, &finished_resume(&fixture, &id, None, Some(&record), &BranchActions::default(), &Observers::default()));
-}
-
-#[test]
-fn a_branch_retry_stopped_while_replacing_the_journal_stays_recoverable() {
-    let fixture = fixture();
-    let id = crash_at(&fixture, &Observers::default(), Boundary::Unregistered);
-    let base = fixture.base();
-    let branches = fixture.delete_branch();
-    let request = ResumeRequest { base: &base, id: &id, approval: None, record: None, branches: &branches };
-    each_stopped_reopen(
-        &fixture,
-        &id,
-        || refused(with_env(&Usage::clear(), &Observers::default(), &|| false, |env| resume(&request, env))),
-        || assert!(fixture.branch_exists(), "a stopped retry deletes no branch"),
-    );
-    assert_removed(&fixture, &finished_resume(&fixture, &id, None, None, &branches, &Observers::default()));
-    assert!(!fixture.branch_exists());
-}
-
-#[test]
-fn a_release_stopped_while_replacing_the_journal_stays_recoverable() {
-    let fixture = fixture();
-    let id = crash_at(&fixture, &Observers::default(), Boundary::Begun);
-    each_stopped_reopen(
-        &fixture,
-        &id,
-        || release_unstarted(&fixture.base(), &id).unwrap_err(),
-        || assert!(fixture.untouched()),
-    );
-    release_unstarted(&fixture.base(), &id).unwrap();
-    assert!(fixture.no_pending() && fixture.untouched());
-}
-
-/// A stale lock file (its holder crashed) never blocks; a held lock does.
-#[test]
-fn only_a_held_lock_blocks_a_retry() {
-    let fixture = fixture();
-    let id = crash_at(&fixture, &Observers::default(), Boundary::Unregistered);
-    let store = fixture.store();
-    let record = store.read_record(&id).unwrap();
-    let held = store.lock(&record.repository).unwrap();
-    let base = fixture.base();
-    let request = ResumeRequest { base: &base, id: &id, approval: None, record: None, branches: &BranchActions::default() };
-    let refusal = refused(with_env(&Usage::clear(), &Observers::default(), &|| false, |env| resume(&request, env)));
-    assert!(matches!(refusal, Refusal::Store(StoreError::Lock(LockError::Busy))), "{refusal:?}");
-    assert_eq!(refusal.exit_class(), ExitClass::Blocked);
-    drop(held);
-    assert_removed(&fixture, &finished_resume(&fixture, &id, None, None, &BranchActions::default(), &Observers::default()));
-}
-
-#[test]
-fn an_unreadable_record_blocks_a_new_removal() {
-    let fixture = fixture();
-    let id = crash_at(&fixture, &Observers::default(), Boundary::Begun);
-    fs::write(fixture.store().operation_dir(&id).join(RECORD_FILE), "{ not json").unwrap();
-    let refusal = refused(run_plain(&fixture));
-    assert!(matches!(refusal, Refusal::Store(StoreError::Record { .. }) | Refusal::Store(StoreError::Storage { .. })), "{refusal:?}");
-    assert_eq!(refusal.exit_class(), ExitClass::Refused);
-    assert!(fixture.untouched());
-}
-
-/// A record or journal that cannot be written after the move stops further
-/// destructive work and reports the last durable phase.
+/// In place, a replaced root is outside the approval: it is kept, and the
+/// operation closes so a later run asks afresh.
 #[cfg(unix)]
 #[test]
-fn an_unwritable_record_stops_before_deleting() {
-    use std::os::unix::fs::PermissionsExt;
-    let fixture = fixture();
-    let operation_dir = std::cell::RefCell::new(None::<PathBuf>);
-    let mut hook = |boundary: Boundary| {
-        if boundary == Boundary::Moved {
-            let dir = fixture.store().operation_dir(&fixture.pending());
-            fs::set_permissions(&dir, fs::Permissions::from_mode(0o500)).unwrap();
-            *operation_dir.borrow_mut() = Some(dir);
-        }
-        false
+fn a_replaced_in_place_root_is_kept_and_the_operation_closed() {
+    let f = fixture();
+    let facts = f.facts();
+    let doubles = Doubles::default();
+    let moves = Faults { rename_instead: Some(|| io::Error::from_raw_os_error(libc::EINVAL)), ..Faults::default() };
+    crash_with(&f, &facts, &[], &doubles, Boundary::MarkedInPlace, moves);
+    let id = f.pending_id();
+    fs::rename(&f.gone, f.gone.with_file_name("elsewhere")).unwrap();
+    fs::create_dir(&f.gone).unwrap();
+    fs::write(f.gone.join("stranger.txt"), "not the checkout").unwrap();
+
+    let refusal = refused(finish_pending(&f.base(), &id, &doubles.env()));
+
+    assert_eq!(refusal.exit_class(), ExitClass::Refused);
+    assert!(f.gone.join("stranger.txt").is_file());
+    assert!(f.stored().is_empty());
+}
+
+/// A worktree record reused for another worktree is never resumed into.
+#[test]
+fn a_replaced_worktree_record_is_never_resumed() {
+    let f = fixture();
+    let facts = f.facts();
+    let doubles = Doubles::default();
+    crash_at(&f, &facts, &[], &doubles, Boundary::ContentRemoved);
+    let id = f.pending_id();
+    let admin = f.admin_dir();
+    fs::rename(&admin, admin.with_file_name("gone-old")).unwrap();
+    fs::create_dir(&admin).unwrap();
+    fs::write(admin.join("gitdir"), "elsewhere\n").unwrap();
+
+    let refusal = refused(finish_pending(&f.base(), &id, &doubles.env()));
+
+    assert_eq!(refusal.exit_class(), ExitClass::Refused, "{refusal}");
+    assert!(admin.join("gitdir").is_file());
+    assert_eq!(f.stored().len(), 1);
+}
+
+// --- Branches -------------------------------------------------------------
+
+/// A branch that moved after it was approved is kept and reported; the
+/// checkout is deleted all the same and nothing is asked.
+#[test]
+fn a_branch_that_moved_is_kept_after_the_checkout_is_deleted() {
+    let f = fixture();
+    let facts = f.facts();
+    let branches = [f.delete_branch(StepApproval::Explicit)];
+    let moved = f.repo.commit_in(&f.gone, "later.txt");
+    let doubles = Doubles::default();
+    let entry = f.entry();
+
+    let finished = finished(remove(&request(&f, &entry, &facts, &branches), &doubles.env()));
+
+    assert!(matches!(&finished.branches[0].outcome, BranchOutcome::Kept(why) if why.contains(&moved)), "{finished:?}");
+    assert_eq!(finished.exit_class(), ExitClass::Failure);
+    assert_eq!(f.tip(), moved);
+    f.assert_gone();
+}
+
+/// A branch already gone completes its step.
+#[test]
+fn an_absent_branch_completes_its_step() {
+    let f = fixture();
+    let facts = f.facts();
+    let branches = [ApprovedBranch {
+        action: BranchAction::Local { name: "feat/never".into(), expected_tip: f.tip() },
+        approval: StepApproval::Explicit,
+    }];
+    let entry = f.entry();
+
+    let finished = finished(remove(&request(&f, &entry, &facts, &branches), &Doubles::default().env()));
+
+    assert_eq!(finished.branches[0].outcome, BranchOutcome::AlreadyAbsent);
+    assert_eq!(finished.exit_class(), ExitClass::Success);
+}
+
+/// A conditional step is rechecked by a later run: kept when it is no
+/// longer safe, deleted when it is.
+#[test]
+fn a_conditional_branch_is_rechecked_by_a_later_run() {
+    for (revalidate, deleted) in [(Box::new(branches::Unverifiable) as Box<dyn Revalidate>, false), (Box::new(Safe), true)] {
+        let f = fixture();
+        let facts = f.facts();
+        let doubles = Doubles { revalidate, ..Doubles::default() };
+        let branches = [f.delete_branch(StepApproval::Conditional)];
+        crash_at(&f, &facts, &branches, &doubles, Boundary::Unregistered);
+
+        let finished = finished(finish_pending(&f.base(), &f.pending_id(), &doubles.env()));
+
+        assert_eq!(finished.branches[0].outcome.is_done(), deleted, "{finished:?}");
+        assert_eq!(f.branch_exists(), !deleted);
+        assert_eq!(finished.exit_class() == ExitClass::Success, deleted);
+        assert!(f.stored().is_empty(), "a kept branch finishes the operation too");
+    }
+}
+
+// --- Concurrent runs, names, and the handoff ------------------------------
+
+/// A clock that releases a held lock at its first sleep.
+struct Releasing {
+    held: Mutex<Option<OperationLock>>,
+}
+
+impl Clock for Releasing {
+    fn sleep(&self, _duration: Duration, _cancelled: &dyn Fn() -> bool) -> Slept {
+        self.held.lock().unwrap().take();
+        Slept::Elapsed
+    }
+}
+
+/// R16: a run that finds another removal of the worktree running says so,
+/// waits for its lock, and then continues what that run left.
+#[test]
+fn a_second_run_waits_for_the_running_removal_and_continues_it() {
+    let f = fixture();
+    let facts = f.facts();
+    crash_at(&f, &facts, &[], &Doubles::default(), Boundary::Moved);
+    let store = RecoveryStore::open(&common_git_dir(&f.base()).unwrap()).unwrap();
+    let held = store.lock(&f.record().repository).unwrap();
+    let doubles = Doubles { clock: Box::new(Releasing { held: Mutex::new(Some(held)) }), ..Doubles::default() };
+
+    let finished = finished(finish_pending(&f.base(), &f.pending_id(), &doubles.env()));
+
+    assert_eq!(doubles.notes.running.load(Ordering::SeqCst), 1);
+    assert_eq!(finished.exit_class(), ExitClass::Success, "{finished:?}");
+    f.assert_gone();
+}
+
+/// R16: the wait for the lock ends on Ctrl-C with nothing more deleted.
+#[test]
+fn the_wait_for_a_running_removal_honors_cancellation() {
+    let f = fixture();
+    let facts = f.facts();
+    crash_at(&f, &facts, &[], &Doubles::default(), Boundary::Moved);
+    let store = RecoveryStore::open(&common_git_dir(&f.base()).unwrap()).unwrap();
+    let _held = store.lock(&f.record().repository).unwrap();
+    let doubles = Doubles { clock: Box::new(ManualClock::cancelled_after(2)), ..Doubles::default() };
+
+    let refusal = refused(finish_pending(&f.base(), &f.pending_id(), &doubles.env()));
+
+    assert!(matches!(refusal, Refusal::Cancelled), "{refusal:?}");
+    assert!(f.record().deletion_path.as_path().join("notes.txt").is_file());
+}
+
+/// A fresh run of a worktree whose earlier removal exited finishes that one
+/// instead of saving a second approval.
+#[test]
+fn a_fresh_run_continues_the_removal_an_earlier_run_left() {
+    let f = fixture();
+    let facts = f.facts();
+    crash_at(&f, &facts, &[], &Doubles::default(), Boundary::Begun);
+    let entry = f.entry();
+
+    let finished = finished(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+    assert_eq!(finished.exit_class(), ExitClass::Success, "{finished:?}");
+    f.assert_gone();
+}
+
+/// A name that matches a pending removal and a different live worktree is
+/// ambiguous; each alone resolves to itself.
+#[test]
+fn a_name_matching_a_pending_removal_and_another_worktree_is_ambiguous() {
+    let f = fixture();
+    let facts = f.facts();
+    crash_at(&f, &facts, &[], &Doubles::default(), Boundary::Moved);
+    assert!(matches!(resolve(&f.base(), "gone").unwrap(), Resolved::Pending(_)));
+    assert!(matches!(resolve(&f.base(), BRANCH).unwrap(), Resolved::Pending(_)), "the branch is an alias");
+
+    f.repo.add_worktree("gone", "other", "main");
+
+    match resolve(&f.base(), "gone").unwrap() {
+        Resolved::Ambiguous(candidates) => assert_eq!(candidates.len(), 2),
+        other => panic!("{other:?}"),
+    }
+    assert!(matches!(resolve(&f.base(), "other").unwrap(), Resolved::Live(_)));
+}
+
+/// A legacy operation an earlier `wt` finished but kept a record of is
+/// deleted when a name is resolved, and its name then means only the live
+/// worktree.
+#[test]
+fn a_finished_legacy_operation_is_discarded_and_matches_no_name() {
+    use crate::remove::recovery::record::{BranchBinding, IntendedAction, Phase, RECORD_VERSION, RecoveryRecord};
+
+    let f = fixture();
+    let facts = f.facts();
+    crash_at(&f, &facts, &[], &Doubles::default(), Boundary::Begun);
+    let compact = f.record();
+    let legacy = RecoveryRecord {
+        record_version: RECORD_VERSION,
+        operation_id: compact.operation_id.clone(),
+        created_at_ms: compact.created_at_ms,
+        requested_name: compact.requested_name.clone(),
+        aliases: compact.aliases.clone(),
+        original: compact.original.clone(),
+        quarantine: compact.deletion_path.clone(),
+        checkout_identity: compact.target.checkout_identity().unwrap(),
+        repository: compact.repository.clone(),
+        branch: BranchBinding::Named(BRANCH.into()),
+        approved_tip: f.tip(),
+        consent_fingerprint: "b".repeat(64),
+        discovery: crate::remove::test_support::clear_report(&f.gone),
+        intended_actions: vec![IntendedAction::RemoveCheckout],
+        completed_phase: Phase::Completed,
     };
-    let removal = run(&fixture, &fixture.approval(), &fixture.delete_branch(), &Usage::clear(), &Observers::default(), &mut hook).unwrap();
-    let dir = operation_dir.into_inner().unwrap();
-    if fs::write(dir.join("probe"), "x").is_ok() {
-        // Running as root: permissions cannot make the write fail.
-        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
-        return;
-    }
-    let finished = finished(removal);
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
-    assert_eq!(finished.report.outcome, RemovalOutcome::CleanupFailed);
-    assert_eq!(finished.report.journal.deleted.total(), 0, "nothing was deleted");
-    assert!(finished.warnings.iter().any(|warning| warning.contains("report could not be saved")), "{:?}", finished.warnings);
-    let id = finished.report.operation_id.clone().unwrap();
-    assert_eq!(fixture.store().read_record(&id).unwrap().completed_phase, Phase::Associated, "the last durable phase");
-    assert!(fixture.quarantine_of(&id).join("README.md").is_file());
+    let dir = f.store().join(compact.operation_id.as_str());
+    fs::write(dir.join(RECORD_FILE), legacy.to_json()).unwrap();
+
+    assert!(matches!(resolve(&f.base(), "gone").unwrap(), Resolved::Live(_)));
+    assert!(f.stored().is_empty(), "{:?}", f.stored());
 }
 
-// ---- Retry resolution -----------------------------------------------------
-
-/// A new worktree at the original path is ambiguous with the pending
-/// removal, and the pending one refuses while the original is recreated.
+/// `wt list` and `--ff` learn which checkouts a removal is working on, at
+/// the original path before the move and at the hidden one after it.
 #[test]
-fn a_new_worktree_at_the_original_path_is_ambiguous_and_never_cleaned_up() {
-    let fixture = fixture();
-    let id = crash_at(&fixture, &Observers::default(), Boundary::Moved);
-    let quarantine = fixture.quarantine_of(&id);
-    fixture.repo.git(&["worktree", "add", "-q", "-b", "feat/new", &fixture.gone.to_string_lossy(), "main"]);
+fn pending_removals_name_the_checkout_at_either_path() {
+    let f = fixture();
+    let facts = f.facts();
+    crash_at(&f, &facts, &[], &Doubles::default(), Boundary::Begun);
+    let entries = crate::worktree::parse_worktree_list(&crate::git::worktree_list_from(&f.base(), &f.base()).unwrap());
+    let pending = PendingRemovals::read(&f.base(), &entries);
+    assert_eq!(pending.name_for(&f.entry().path), Some("gone"), "unmoved");
+    assert_eq!(pending.name_for(&f.base()), None, "the main checkout");
 
-    match resolve_target(&fixture.base(), "gone").unwrap() {
-        Target::Ambiguous(candidates) => {
-            assert_eq!(candidates.len(), 2);
-            assert!(candidates.iter().any(|candidate| matches!(candidate, Candidate::Live(entry) if entry.branch.as_deref() == Some("feat/new"))));
-            assert!(candidates.iter().any(|candidate| matches!(candidate, Candidate::Pending { id: pending, .. } if *pending == id)));
+    let f = fixture();
+    let facts = f.facts();
+    crash_at(&f, &facts, &[], &Doubles::default(), Boundary::Moved);
+    let moved = f.record().deletion_path.as_path().to_path_buf();
+    let entries = crate::worktree::parse_worktree_list(&crate::git::worktree_list_from(&f.base(), &f.base()).unwrap());
+    let listed = entries.iter().find(|entry| same_location(&entry.path, &moved)).expect("Git lists the moved checkout");
+    assert_eq!(PendingRemovals::read(&f.base(), &entries).name_for(&listed.path), Some("gone"), "moved");
+}
+
+/// R18, R14, R2-F4.1: the first run only saves its approval
+/// ([`save_approval`]); the handoff's second run finishes that operation
+/// once the caller has left the worktree, without comparing its content,
+/// and names the file created after the question but not one it showed.
+#[test]
+fn the_handoff_second_run_finishes_once_the_caller_left() {
+    let f = fixture();
+    let facts = f.facts();
+    let entry = f.entry();
+    let id = save_approval(&request(&f, &entry, &facts, &[]), &Doubles::default().env()).unwrap();
+    assert_eq!(f.record().progress, Progress::Approved, "the first run only saves its approval");
+    assert!(f.gone.join("notes.txt").is_file());
+    let handoff = OperationHandoff::new(id, canonical(&f.base()), canonical(&f.gone), 0, late::shown(facts.inventory.as_ref()));
+    fs::write(f.gone.join("after-question.txt"), "content is not compared").unwrap();
+    fs::write(f.gone.join("README.md"), "shown, and changed again\n").unwrap();
+
+    let inside = refused(finish_handoff(&f.base(), &handoff, &f.gone.join("target"), &Doubles::default().env()));
+    assert_eq!(inside.exit_class(), ExitClass::Refused);
+    assert!(f.gone.join("notes.txt").is_file());
+
+    let finished = finished(finish_handoff(&f.base(), &handoff, &f.base(), &Doubles::default().env()));
+    assert_eq!(finished.exit_class(), ExitClass::Success, "{finished:?}");
+    assert_eq!(finished.late_changes, [PathBuf::from("after-question.txt")]);
+    f.assert_gone();
+}
+
+/// R14, R2-F4.1, R2-F4.4: with no question's list (a handoff whose question
+/// showed no inventory, or an interrupted removal finished later) a file
+/// created since is still deleted, and nothing is named.
+#[test]
+fn without_the_questions_list_late_files_are_deleted_unnamed() {
+    let f = fixture();
+    let facts = f.facts();
+    let entry = f.entry();
+    let id = save_approval(&request(&f, &entry, &facts, &[]), &Doubles::default().env()).unwrap();
+    fs::write(f.gone.join("after-question.txt"), "late").unwrap();
+    let handoff = OperationHandoff::new(id, canonical(&f.base()), canonical(&f.gone), 0, None);
+
+    let handed_off = finished(finish_handoff(&f.base(), &handoff, &f.base(), &Doubles::default().env()));
+
+    assert_eq!(handed_off.exit_class(), ExitClass::Success, "{handed_off:?}");
+    assert!(handed_off.late_changes.is_empty(), "{:?}", handed_off.late_changes);
+    f.assert_gone();
+
+    let f = fixture();
+    let facts = f.facts();
+    crash_at(&f, &facts, &[], &Doubles::default(), Boundary::Moved);
+    let moved = f.record().deletion_path.as_path().to_path_buf();
+    fs::write(moved.join("after-crash.txt"), "late").unwrap();
+
+    let resumed = finished(finish_pending(&f.base(), &f.pending_id(), &Doubles::default().env()));
+
+    assert_eq!(resumed.exit_class(), ExitClass::Success, "{resumed:?}");
+    assert!(resumed.late_changes.is_empty(), "{:?}", resumed.late_changes);
+    f.assert_gone();
+}
+
+/// R14, R2-F4.3: a checkout deleted in place names a file created after the
+/// question, as a moved one does.
+#[test]
+fn a_file_created_after_the_question_is_named_when_deleted_in_place() {
+    let f = fixture();
+    let facts = f.facts();
+    fs::write(f.gone.join("late.rs"), "written while the question was open").unwrap();
+    let entry = f.entry();
+    let moves = Faults { rename_instead: Some(in_place_rename_failure), ..Faults::default() };
+    let passed = Mutex::new(Vec::new());
+    let mut seams = Seams {
+        hook: Box::new(|boundary| {
+            passed.lock().unwrap().push(boundary);
+            false
+        }),
+        moves,
+    };
+
+    let finished = finished(run_with(&request(&f, &entry, &facts, &[]), &Doubles::default().env(), &mut seams).unwrap());
+
+    drop(seams);
+    let passed = passed.into_inner().unwrap();
+    assert!(passed.contains(&Boundary::MarkedInPlace) && !passed.contains(&Boundary::Moved), "{passed:?}");
+    assert_eq!(finished.late_changes, [PathBuf::from("late.rs")]);
+    assert_eq!(finished.exit_class(), ExitClass::Success, "{finished:?}");
+    f.assert_gone();
+}
+
+// --- Targets without a checkout directory ---------------------------------
+
+/// R12 / R3: a locked worktree whose directory is gone is unlocked and its
+/// record removed; its branch step runs.
+#[test]
+fn a_missing_locked_worktree_has_its_record_removed() {
+    let f = fixture();
+    f.repo.git(&["worktree", "lock", f.gone.to_str().unwrap()]);
+    fs::remove_dir_all(&f.gone).unwrap();
+    let facts = f.facts();
+    assert_eq!(facts.target, Target::Missing);
+    let branches = [f.delete_branch(StepApproval::Explicit)];
+    let entry = f.entry();
+
+    let finished = finished(remove(&request(&f, &entry, &facts, &branches), &Doubles::default().env()));
+
+    assert!(matches!(finished.checkout, CheckoutResult::AlreadyRemoved), "{finished:?}");
+    assert_eq!(finished.exit_class(), ExitClass::Success);
+    assert!(!f.branch_exists());
+    f.assert_gone();
+}
+
+/// R11: a file where the directory should be is deleted with Git's record.
+#[test]
+fn a_file_at_the_path_is_deleted_with_the_record() {
+    let f = fixture();
+    fs::remove_dir_all(&f.gone).unwrap();
+    fs::write(&f.gone, "not a checkout").unwrap();
+    let facts = f.facts();
+    assert_eq!(facts.target, Target::NotADirectory);
+    let entry = f.entry();
+
+    let finished = finished(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+    assert_eq!(finished.exit_class(), ExitClass::Success, "{finished:?}");
+    f.assert_gone();
+}
+
+/// R11 / R3: a locked worktree whose path holds a file is gathered as the
+/// file, not as a checkout: yes unlocks it and deletes the file with Git's
+/// record. (Git does not mark a locked entry prunable.)
+#[test]
+fn a_file_at_a_locked_worktrees_path_is_unlocked_and_deleted() {
+    let f = fixture();
+    f.repo.git(&["worktree", "lock", "--reason", "on a USB disk", f.gone.to_str().unwrap()]);
+    fs::remove_dir_all(&f.gone).unwrap();
+    fs::write(&f.gone, "not a checkout").unwrap();
+    let facts = f.facts();
+    assert_eq!(facts.target, Target::NotADirectory);
+    assert!(matches!(facts.warnings.first(), Some(Warning::Locked { reason: Some(reason) }) if reason == "on a USB disk"));
+    assert!(facts.warnings.iter().any(|warning| matches!(warning, Warning::PathOccupied { .. })), "{:?}", facts.warnings);
+    let entry = f.entry();
+
+    let finished = finished(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+    assert_eq!(finished.exit_class(), ExitClass::Success, "{finished:?}");
+    f.assert_gone();
+}
+
+/// R9: a link to the worktree's own checkout deletes both.
+#[test]
+fn a_link_to_the_own_checkout_deletes_both() {
+    let f = fixture();
+    let real = replace_with_link(&f.gone, "real");
+    let facts = f.facts();
+    assert!(matches!(facts.target, Target::Link { own: true, .. }), "{:?}", facts.target);
+    let entry = f.entry();
+
+    let finished = finished(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+    assert_eq!(finished.exit_class(), ExitClass::Success, "{finished:?}");
+    assert!(absent(&real), "the real checkout is deleted");
+    f.assert_gone();
+}
+
+/// R14, R2-F4.2: an own link's question lists the real checkout's files,
+/// so a file created there after the question is named, and one it showed
+/// is not.
+#[test]
+fn a_file_created_in_an_own_links_checkout_after_the_question_is_named() {
+    let f = fixture();
+    let real = replace_with_link(&f.gone, "real");
+    let facts = f.facts();
+    assert!(facts.inventory.as_ref().is_some_and(|inventory| !inventory.dirty.is_empty()), "the real checkout's files are listed");
+    fs::write(real.join("after-question.txt"), "late").unwrap();
+    fs::write(real.join("README.md"), "shown, and changed again\n").unwrap();
+    let entry = f.entry();
+
+    let finished = finished(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+    assert_eq!(finished.exit_class(), ExitClass::Success, "{finished:?}");
+    assert_eq!(finished.late_changes, [PathBuf::from("after-question.txt")]);
+    assert!(absent(&real));
+    f.assert_gone();
+}
+
+/// R9: a link to anything else deletes only the link and Git's record.
+#[test]
+fn a_link_to_another_directory_deletes_only_the_link_and_the_record() {
+    let f = fixture();
+    fs::remove_dir_all(&f.gone).unwrap();
+    let unrelated = f.gone.with_file_name("unrelated");
+    fs::create_dir(&unrelated).unwrap();
+    fs::write(unrelated.join("keep.txt"), "never deleted").unwrap();
+    link_dir(&unrelated, &f.gone);
+    let facts = f.facts();
+    assert!(matches!(facts.target, Target::Link { own: false, .. }), "{:?}", facts.target);
+    let entry = f.entry();
+
+    let finished = finished(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+    assert_eq!(finished.exit_class(), ExitClass::Success, "{finished:?}");
+    assert_eq!(fs::read_to_string(unrelated.join("keep.txt")).unwrap(), "never deleted");
+    f.assert_gone();
+}
+
+// --- What the question showed is what is removed ---------------------------
+
+/// The identity of whatever is at `path`, without following a link.
+fn identity_at(path: &Path) -> FileIdentity {
+    rename::identity(path).unwrap()
+}
+
+fn assert_changed(refusal: &Refusal, path: &Path) {
+    assert!(matches!(refusal, Refusal::Replaced(_)), "{refusal:?}");
+    assert_eq!(refusal.exit_class(), ExitClass::Refused);
+    // Git spells a Windows worktree path with forward slashes.
+    let sentence = refusal.to_string().replace('\\', "/");
+    let named = path.display().to_string().replace('\\', "/");
+    assert!(sentence.contains(&named) && sentence.contains("after the question"), "{sentence}");
+}
+
+/// Replaces the link at `path` (a junction on Windows) with a distinct file.
+fn replace_link_with_file(path: &Path) {
+    // Allocate before unlinking: Linux can immediately reuse a freed inode.
+    let replacement = path.with_file_name("replacement");
+    fs::write(&replacement, "a file that was never shown").unwrap();
+    remove_link(path).unwrap();
+    fs::rename(replacement, path).unwrap();
+}
+
+/// R2-F1.1, and the handoff consumer: a checkout directory swapped for
+/// another after the question, even one carrying the original `.git` link,
+/// is not the approved checkout. Neither a removal nor a handoff touches it.
+#[test]
+fn a_checkout_replaced_after_the_question_is_refused_and_kept() {
+    let f = fixture();
+    let facts = f.facts();
+    let entry = f.entry();
+    let aside = f.gone.with_file_name("aside");
+    fs::rename(&f.gone, &aside).unwrap();
+    fs::create_dir(&f.gone).unwrap();
+    fs::copy(aside.join(".git"), f.gone.join(".git")).unwrap();
+    fs::write(f.gone.join("stranger.txt"), "never shown").unwrap();
+    let doubles = Doubles::default();
+
+    let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &doubles.env()));
+    let handoff = save_approval(&request(&f, &entry, &facts, &[]), &doubles.env()).unwrap_err();
+
+    assert_changed(&refusal, &f.gone);
+    assert_changed(&handoff, &f.gone);
+    assert!(f.gone.join("stranger.txt").is_file());
+    assert!(aside.join("target/debug/a.o").is_file());
+    assert!(f.registered());
+    assert!(f.stored().is_empty(), "nothing was saved");
+}
+
+/// R2-F1.2: a checkout Git cannot read is bound by identity too, so a
+/// directory put in its place after the question is kept.
+#[test]
+fn an_unreadable_checkout_replaced_after_the_question_is_refused_and_kept() {
+    let f = fixture();
+    fs::write(f.gone.join(".git"), "not a gitdir link\n").unwrap();
+    let facts = f.facts();
+    let unreadable = |warning: &Warning| matches!(warning, Warning::GitUnreadable { .. } | Warning::Unchecked { .. });
+    assert!(facts.warnings.iter().any(unreadable), "{:?}", facts.warnings);
+    let entry = f.entry();
+    fs::rename(&f.gone, f.gone.with_file_name("aside")).unwrap();
+    fs::create_dir(&f.gone).unwrap();
+    fs::write(f.gone.join("stranger.txt"), "never shown").unwrap();
+
+    let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+    assert_changed(&refusal, &f.gone);
+    assert!(f.gone.join("stranger.txt").is_file());
+    assert!(f.registered());
+}
+
+/// R2-F1.3: the checkout an own link led to, replaced after the question
+/// while the link stays, is kept, and so is the link.
+#[test]
+fn an_own_links_checkout_replaced_after_the_question_is_kept() {
+    let f = fixture();
+    let real = replace_with_link(&f.gone, "real");
+    let facts = f.facts();
+    assert!(matches!(facts.target, Target::Link { own: true, .. }), "{:?}", facts.target);
+    let entry = f.entry();
+    fs::rename(&real, real.with_file_name("real-old")).unwrap();
+    fs::create_dir(&real).unwrap();
+    fs::write(real.join("stranger.txt"), "never shown").unwrap();
+    let link = identity_at(&f.gone);
+
+    let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+    let Target::Link { resolved: LinkTarget::Resolved(resolved), .. } = &facts.target else { unreachable!() };
+    assert_changed(&refusal, resolved);
+    assert!(real.join("stranger.txt").is_file());
+    assert!(real.with_file_name("real-old").join("notes.txt").is_file());
+    assert_eq!(identity_at(&f.gone), link, "the link is kept");
+    assert!(f.registered());
+}
+
+/// R2-F1.4: a file at the checkout path swapped for another file after the
+/// question is kept.
+#[test]
+fn a_file_replaced_after_the_question_is_kept() {
+    let f = fixture();
+    fs::remove_dir_all(&f.gone).unwrap();
+    fs::write(&f.gone, "shown").unwrap();
+    let facts = f.facts();
+    assert_eq!(facts.target, Target::NotADirectory);
+    let entry = f.entry();
+    fs::rename(&f.gone, f.gone.with_file_name("aside")).unwrap();
+    fs::write(&f.gone, "never shown").unwrap();
+
+    let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+    assert_changed(&refusal, &f.gone);
+    assert_eq!(fs::read_to_string(&f.gone).unwrap(), "never shown");
+    assert!(f.registered());
+}
+
+/// R2-F1.5: a link to another directory replaced by a file after the
+/// question: the file and the directory are both kept.
+#[test]
+fn an_unrelated_link_replaced_by_a_file_after_the_question_is_kept() {
+    let f = fixture();
+    fs::remove_dir_all(&f.gone).unwrap();
+    let unrelated = f.gone.with_file_name("unrelated");
+    fs::create_dir(&unrelated).unwrap();
+    fs::write(unrelated.join("keep.txt"), "never deleted").unwrap();
+    link_dir(&unrelated, &f.gone);
+    let facts = f.facts();
+    assert!(matches!(facts.target, Target::Link { own: false, .. }), "{:?}", facts.target);
+    let entry = f.entry();
+    replace_link_with_file(&f.gone);
+
+    let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+    assert_changed(&refusal, &f.gone);
+    assert_eq!(fs::read_to_string(&f.gone).unwrap(), "a file that was never shown");
+    assert!(unrelated.join("keep.txt").is_file());
+    assert!(f.registered());
+}
+
+/// R2-F1.6: an own link replaced by a file after the question: neither the
+/// file nor the real checkout the link led to is deleted.
+#[test]
+fn an_own_link_replaced_by_a_file_after_the_question_deletes_neither() {
+    let f = fixture();
+    let real = replace_with_link(&f.gone, "real");
+    let facts = f.facts();
+    assert!(matches!(facts.target, Target::Link { own: true, .. }), "{:?}", facts.target);
+    let entry = f.entry();
+    replace_link_with_file(&f.gone);
+
+    let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+    assert_changed(&refusal, &f.gone);
+    assert!(f.gone.is_file());
+    assert!(real.join("target/debug/a.o").is_file(), "the real checkout is kept");
+    assert!(f.registered());
+}
+
+/// Copies the directory tree at `from` to the new directory `to`.
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &to.join(entry.file_name()));
+        } else {
+            fs::copy(entry.path(), to.join(entry.file_name())).unwrap();
         }
-        other => panic!("{other:?}"),
-    }
-    assert!(matches!(resolve_target(&fixture.base(), "feat/new").unwrap(), Target::Live(_)));
-
-    assert_eq!(inspect(&fixture.base(), &id).unwrap().resolution, Resolution::OriginalRecreated);
-    let fresh = fixture.approval_at(&quarantine);
-    let base = fixture.base();
-    let request = ResumeRequest { base: &base, id: &id, approval: Some(&fresh), record: None, branches: &BranchActions::default() };
-    assert!(matches!(refused(with_env(&Usage::clear(), &Observers::default(), &|| false, |env| resume(&request, env))), Refusal::Recovery(_)));
-    assert!(fixture.gone.join("README.md").is_file() && quarantine.join("README.md").is_file());
-}
-
-/// The branch reused by a new worktree after the checkout was removed is
-/// ambiguous with the pending removal (its branch actions are unfinished).
-#[test]
-fn a_reused_branch_is_ambiguous_with_the_pending_removal() {
-    let fixture = fixture();
-    let id = crash_at(&fixture, &Observers::default(), Boundary::Unregistered);
-    let again = fixture.base().parent().unwrap().join("again");
-    fixture.repo.git(&["worktree", "add", "-q", &again.to_string_lossy(), BRANCH]);
-    match resolve_target(&fixture.base(), BRANCH).unwrap() {
-        Target::Ambiguous(candidates) => {
-            assert!(candidates.iter().any(|candidate| matches!(candidate, Candidate::Live(entry) if same_location(&entry.path, &again))));
-            assert!(candidates.iter().any(|candidate| matches!(candidate, Candidate::Pending { id: pending, .. } if *pending == id)));
-        }
-        other => panic!("{other:?}"),
     }
 }
 
+/// R2-F1.7: Git's record of the worktree rebuilt at the same path after the
+/// question is not the record the question read. It is kept aside outside
+/// `worktrees/`, so no second record names the checkout.
 #[test]
-fn names_that_match_nothing_are_not_found_and_base_is_never_pending() {
-    let fixture = fixture();
-    assert!(matches!(resolve_target(&fixture.base(), "nothing-here"), Err(ResolveError::NotFound(_))));
-    assert!(matches!(resolve_target(&fixture.base(), "base").unwrap(), Target::Live(entry) if entry.is_main));
-    assert!(matches!(resolve_target(&fixture.base(), "gone").unwrap(), Target::Live(entry) if same_location(&entry.path, &fixture.gone)));
-    assert!(!fixture.store().root().join("locks").exists() || fixture.no_pending());
+fn a_worktree_record_rebuilt_after_the_question_is_refused() {
+    let f = fixture();
+    let facts = f.facts();
+    let entry = f.entry();
+    let admin = f.admin_dir();
+    let aside = common_git_dir(&f.base()).unwrap().join("gone-record-aside");
+    fs::rename(&admin, &aside).unwrap();
+    copy_tree(&aside, &admin);
+
+    let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+    assert_changed(&refusal, &admin);
+    assert!(f.gone.join("target/debug/a.o").is_file());
+    assert!(admin.join("gitdir").is_file());
+    assert!(f.registered());
+    assert!(f.stored().is_empty());
 }
 
-// ---- Real process termination ----------------------------------------------
-
-const CHILD_BASE: &str = "WT_LIFECYCLE_CHILD_BASE";
-const CHILD_TARGET: &str = "WT_LIFECYCLE_CHILD_TARGET";
-const CHILD_READY: &str = "wt-lifecycle-child: blocked";
-
-/// Run by [`native_a_killed_removal_is_found_and_resumed_by_its_original_name`]
-/// in its own process: a removal with the real observer that blocks before
-/// deletion batch 2 until the parent kills it.
+/// Git's record rebuilt while the checkout is being deleted is not the one
+/// the approval bound: it is kept, with the operation, for a later run.
 #[test]
-#[ignore = "subprocess fixture invoked by the process termination test"]
-fn lifecycle_child_blocks_mid_deletion() {
-    use std::io::Write;
-    let (Ok(base), Ok(target)) = (std::env::var(CHILD_BASE), std::env::var(CHILD_TARGET)) else { return };
-    let (base, target) = (PathBuf::from(base), PathBuf::from(target));
-    let listing = crate::git::git_from(&base, &base, &["worktree", "list", "--porcelain"]).unwrap();
-    let entry = parse_worktree_list(&listing).into_iter().find(|entry| same_location(&entry.path, &target)).unwrap();
-    let (inventory, fingerprint) = consent_state(&base, &target, Some(BRANCH)).unwrap();
-    let tip = crate::git::git_from(&base, &base, &["rev-parse", &format!("refs/heads/{BRANCH}")]).unwrap();
-    let approval = Approval { inventory, fingerprint, tip: tip.clone(), discard_files: true };
-    let branches = BranchActions { local: Some(LocalBranchDeletion { name: BRANCH.into(), expected_tip: tip }), remote: None };
-    let request = RemovalRequest { base: &base, entry: &entry, requested_name: BRANCH, approval: &approval, branches: &branches };
-    let usage = Usage::clear();
-    let env = Environment { usage: &usage, interrupted: &|| false, observe: &native_observation };
-    let _ = run_with(&request, &env, &mut |boundary| {
-        if boundary == Boundary::DeletionBatch(2) {
-            println!("{CHILD_READY}");
-            std::io::stdout().flush().unwrap();
-            std::thread::sleep(Duration::from_secs(120));
-        }
-        false
-    });
-    panic!("the parent should have killed this process");
-}
-
-/// Acceptance items 6 and 11 with a real process kill mid-deletion: the
-/// lock dies with the process, the record is found by the original name,
-/// the journal keeps what was deleted, and the retry finishes.
-#[test]
-fn native_a_killed_removal_is_found_and_resumed_by_its_original_name() {
-    let fixture = fixture();
-    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["remove::lifecycle::tests::lifecycle_child_blocks_mid_deletion", "--exact", "--ignored", "--nocapture"])
-        .env(CHILD_BASE, fixture.base())
-        .env(CHILD_TARGET, &fixture.gone)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
-    let stdout = child.stdout.take().unwrap();
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let reader = std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            let Ok(line) = line else { break };
-            if line.contains(CHILD_READY) {
-                let _ = sender.send(());
+fn a_worktree_record_rebuilt_during_the_removal_is_kept() {
+    let f = fixture();
+    let facts = f.facts();
+    let entry = f.entry();
+    let admin = f.admin_dir();
+    let aside = common_git_dir(&f.base()).unwrap().join("gone-record-aside");
+    let (from, to) = (admin.clone(), aside.clone());
+    let mut seams = Seams {
+        hook: Box::new(move |boundary| {
+            if boundary == Boundary::ContentRemoved {
+                fs::rename(&from, &to).unwrap();
+                copy_tree(&to, &from);
             }
-        }
-    });
-    let ready = receiver.recv_timeout(Duration::from_secs(60));
-    let _ = child.kill();
-    let _ = child.wait();
-    let _ = reader.join();
-    ready.expect("the child reached deletion batch 2");
-
-    let id = match resolve_target(&fixture.base(), "gone").unwrap() {
-        Target::Pending(target) => target.id,
-        other => panic!("{other:?}"),
+            false
+        }),
+        moves: Faults::default(),
     };
-    let inspection = inspect(&fixture.base(), &id).unwrap();
-    assert_eq!(inspection.resolution, Resolution::Quarantined);
-    let summary = inspection.journal.unwrap();
-    assert!(summary.deleted.total() >= 1 && summary.uncertain.total() == 0, "{summary:?}");
-    assert!(fixture.branch_exists());
 
-    let quarantine = inspection.record.quarantine.as_path().to_path_buf();
-    let fresh = fixture.approval_at(&quarantine);
-    let request = ResumeRequest { base: &fixture.base(), id: &id, approval: Some(&fresh), record: None, branches: &fixture.delete_branch() };
-    let usage = Usage::clear();
-    let resumed = finished(resume(&request, &Environment { usage: &usage, interrupted: &|| false, observe: &native_observation }));
-    assert_removed(&fixture, &resumed);
-    assert!(!fixture.branch_exists());
-    let archived = fixture.store().operation_dir(&id).join("journal-1.jsonl");
-    assert!(!archived.exists(), "completion deletes the earlier journal too");
-    assert!(fixture.store().operation_dir(&id).join(REPORT_FILE).is_file());
+    let removal = run_with(&request(&f, &entry, &facts, &[]), &Doubles::default().env(), &mut seams).unwrap();
+
+    let finished = finished(removal);
+    assert!(matches!(&finished.checkout, CheckoutResult::Stopped(sentence) if sentence.contains("no longer this worktree's")), "{finished:?}");
+    assert!(admin.join("gitdir").is_file(), "the rebuilt record is kept");
+    assert_eq!(f.stored().len(), 1, "the operation is kept");
+}
+
+/// R2-F1.9: no content was approved for a missing or vanished checkout, so
+/// a directory that appears at its path after the question is kept with
+/// Git's record.
+#[test]
+fn a_directory_appearing_where_the_checkout_was_missing_is_kept() {
+    for vanished in [false, true] {
+        let f = fixture();
+        fs::remove_dir_all(&f.gone).unwrap();
+        let mut facts = f.facts();
+        assert_eq!(facts.target, Target::Missing);
+        if vanished {
+            facts.target = Target::Vanished;
+        }
+        let entry = f.entry();
+        fs::create_dir(&f.gone).unwrap();
+        fs::write(f.gone.join("new.txt"), "never shown").unwrap();
+
+        let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+        assert!(matches!(&refusal, Refusal::Replaced(sentence) if sentence.contains("appeared after the question")), "{refusal:?}");
+        assert!(f.gone.join("new.txt").is_file(), "vanished: {vanished}");
+        assert!(f.registered(), "vanished: {vanished}");
+    }
+}
+
+/// R14, R2-F4.5: a target without a checkout directory has nothing to
+/// compare, so even with a question's list nothing is named and nothing
+/// blocks.
+#[test]
+fn a_target_without_a_checkout_names_no_late_change() {
+    type Setup = fn(&Fixture) -> Option<Target>;
+    let cases: [(&str, Setup); 5] = [
+        ("unrelated link", |f| {
+            fs::remove_dir_all(&f.gone).unwrap();
+            let unrelated = f.gone.with_file_name("unrelated");
+            fs::create_dir(&unrelated).unwrap();
+            fs::write(unrelated.join("new.txt"), "outside the approval").unwrap();
+            link_dir(&unrelated, &f.gone);
+            None
+        }),
+        ("file", |f| {
+            fs::remove_dir_all(&f.gone).unwrap();
+            fs::write(&f.gone, "a file").unwrap();
+            None
+        }),
+        ("missing", |f| {
+            fs::remove_dir_all(&f.gone).unwrap();
+            None
+        }),
+        ("vanished", |f| {
+            fs::remove_dir_all(&f.gone).unwrap();
+            Some(Target::Vanished)
+        }),
+        ("uninspectable", |f| {
+            fs::remove_dir_all(&f.gone).unwrap();
+            fs::write(&f.gone, "a file").unwrap();
+            Some(Target::Uninspectable)
+        }),
+    ];
+    for (case, setup) in cases {
+        let f = fixture();
+        let injected = setup(&f);
+        let mut facts = f.facts();
+        if let Some(target) = injected {
+            facts.target = target;
+        }
+        facts.inventory = Some(crate::remove::inventory::Inventory::default());
+        let entry = f.entry();
+
+        let finished = finished(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+        assert_eq!(finished.exit_class(), ExitClass::Success, "{case}: {finished:?}");
+        assert!(finished.late_changes.is_empty(), "{case}: {:?}", finished.late_changes);
+        f.assert_gone();
+    }
+}
+
+/// A path the question could not identify is not removed at all.
+#[test]
+fn a_target_the_question_could_not_identify_is_not_removed() {
+    let f = fixture();
+    fs::remove_dir_all(&f.gone).unwrap();
+    fs::write(&f.gone, "unreadable to the question").unwrap();
+    let mut facts = f.facts();
+    facts.target = Target::Uninspectable;
+    facts.identities.entry = None;
+    let entry = f.entry();
+
+    let refusal = refused(remove(&request(&f, &entry, &facts, &[]), &Doubles::default().env()));
+
+    assert!(matches!(&refusal, Refusal::Replaced(sentence) if sentence.contains("could not be identified before the question")), "{refusal:?}");
+    assert_eq!(refusal.exit_class(), ExitClass::Refused);
+    assert!(f.gone.is_file());
+    assert!(f.registered());
+    assert!(f.stored().is_empty());
+}
+
+// --- Every target is saved before it is changed -----------------------------
+
+/// Makes the removal store unusable: a file where its directory goes.
+fn break_store(f: &Fixture) {
+    assert!(absent(&f.store()));
+    fs::write(f.store(), "not a directory").unwrap();
+}
+
+/// R2-F2.1–F2.6: for every kind of target, an approval that cannot be saved
+/// unlocks, deletes, and unregisters nothing, and runs no branch step.
+#[test]
+fn an_unsavable_approval_of_any_target_changes_nothing() {
+    type Setup = fn(&Fixture) -> Option<Target>;
+    let cases: [(&str, Setup); 6] = [
+        ("own link", |f| {
+            replace_with_link(&f.gone, "real");
+            None
+        }),
+        ("unrelated link", |f| {
+            fs::remove_dir_all(&f.gone).unwrap();
+            let unrelated = f.gone.with_file_name("unrelated");
+            fs::create_dir(&unrelated).unwrap();
+            link_dir(&unrelated, &f.gone);
+            None
+        }),
+        ("file", |f| {
+            fs::remove_dir_all(&f.gone).unwrap();
+            fs::write(&f.gone, "a file").unwrap();
+            None
+        }),
+        ("missing", |f| {
+            fs::remove_dir_all(&f.gone).unwrap();
+            None
+        }),
+        ("vanished", |f| {
+            fs::remove_dir_all(&f.gone).unwrap();
+            Some(Target::Vanished)
+        }),
+        ("uninspectable", |f| {
+            fs::remove_dir_all(&f.gone).unwrap();
+            fs::write(&f.gone, "a file").unwrap();
+            Some(Target::Uninspectable)
+        }),
+    ];
+    for (case, setup) in cases {
+        let f = fixture();
+        f.repo.git(&["worktree", "lock", f.gone.to_str().unwrap()]);
+        let injected = setup(&f);
+        let mut facts = f.facts();
+        if let Some(target) = injected {
+            facts.target = target;
+        }
+        let before = rename::identity(&f.gone).ok();
+        let real = f.gone.with_file_name("real");
+        let entry = f.entry();
+        let branches = [f.delete_branch(StepApproval::Explicit)];
+        break_store(&f);
+
+        let refusal = refused(remove(&request(&f, &entry, &facts, &branches), &Doubles::default().env()));
+
+        assert!(matches!(refusal, Refusal::NotSaved(_)), "{case}: {refusal:?}");
+        assert_eq!(refusal.exit_class(), ExitClass::Failure, "{case}");
+        assert_eq!(rename::identity(&f.gone).ok(), before, "{case}: the entry at the path is kept");
+        if case == "own link" {
+            assert!(real.join("target/debug/a.o").is_file(), "{case}: the real checkout is kept");
+        }
+        assert!(f.registered(), "{case}: Git's record is kept");
+        assert!(f.admin_dir().join("locked").exists(), "{case}: the lock is kept");
+        assert!(f.branch_exists(), "{case}: the branch is kept");
+        assert!(f.store().is_file(), "{case}: nothing was saved");
+    }
+}
+
+/// R2-F2.1: Ctrl-C while an own link's checkout is deleted keeps the
+/// operation; the name now finds it pending, and the next run finishes it
+/// without asking.
+#[test]
+fn a_cancelled_own_link_removal_is_pending_and_finished_without_a_question() {
+    let f = fixture();
+    let real = replace_with_link(&f.gone, "real");
+    let facts = f.facts();
+    let entry = f.entry();
+    let doubles = Doubles::default();
+    let cancelled = || true;
+    let env = Env { cancelled: &cancelled, ..doubles.env() };
+
+    let first = finished(remove(&request(&f, &entry, &facts, &[]), &env));
+
+    assert!(matches!(first.checkout, CheckoutResult::Cancelled { .. }), "{first:?}");
+    assert_eq!(first.exit_class(), ExitClass::Failure);
+    let record = f.record();
+    assert_eq!(
+        record.target,
+        ApprovedTarget::OwnLink { link: identity_at(&f.gone), checkout: facts.identities.resolved.unwrap() }
+    );
+    assert!(same_location(record.deletion_path.as_path(), &biscuit_file::canonicalize_simplified(&real).unwrap()));
+    let id = f.pending_id();
+
+    let second = finished(finish_pending(&f.base(), &id, &doubles.env()));
+
+    assert_eq!(second.exit_class(), ExitClass::Success, "{second:?}");
+    assert!(absent(&real), "the real checkout is deleted");
+    f.assert_gone();
+}
+
+/// A crash at every step of removing a missing checkout's record, its
+/// approved unlock and branch step included, is finished by the next run
+/// without a question.
+#[test]
+fn a_crash_at_every_step_of_a_missing_checkout_is_finished_by_the_next_run() {
+    for at in [Boundary::Begun, Boundary::Unlocked, Boundary::Unregistered, Boundary::BranchAction(0)] {
+        let f = fixture();
+        f.repo.git(&["worktree", "lock", f.gone.to_str().unwrap()]);
+        fs::remove_dir_all(&f.gone).unwrap();
+        let facts = f.facts();
+        let branches = [f.delete_branch(StepApproval::Explicit)];
+        let doubles = Doubles::default();
+        crash_at(&f, &facts, &branches, &doubles, at);
+        assert_eq!(f.record().target, ApprovedTarget::Absent, "{at:?}");
+
+        let finished = finished(finish_pending(&f.base(), &f.pending_id(), &doubles.env()));
+
+        assert!(matches!(finished.checkout, CheckoutResult::AlreadyRemoved), "{at:?}: {finished:?}");
+        assert_eq!(finished.exit_class(), ExitClass::Success, "{at:?}");
+        assert!(!f.branch_exists(), "{at:?}");
+        f.assert_gone();
+    }
+}
+
+/// A crash at every step of removing an own link and its checkout is
+/// finished by the next run without a question.
+#[test]
+fn a_crash_at_every_step_of_an_own_link_is_finished_by_the_next_run() {
+    for at in [Boundary::Begun, Boundary::Unlocked, Boundary::ContentRemoved, Boundary::Unregistered] {
+        let f = fixture();
+        let real = replace_with_link(&f.gone, "real");
+        let facts = f.facts();
+        let doubles = Doubles::default();
+        crash_at(&f, &facts, &[], &doubles, at);
+
+        let finished = finished(finish_pending(&f.base(), &f.pending_id(), &doubles.env()));
+
+        assert_eq!(finished.exit_class(), ExitClass::Success, "{at:?}: {finished:?}");
+        assert!(absent(&real), "{at:?}");
+        f.assert_gone();
+    }
+}
+
+/// A file saved for removal and swapped for another before the next run
+/// is kept: the operation closes and Git's record stays.
+#[test]
+fn a_file_replaced_before_a_saved_removal_resumes_is_kept() {
+    let f = fixture();
+    fs::remove_dir_all(&f.gone).unwrap();
+    fs::write(&f.gone, "shown").unwrap();
+    let facts = f.facts();
+    let doubles = Doubles::default();
+    crash_at(&f, &facts, &[], &doubles, Boundary::Unlocked);
+    let id = f.pending_id();
+    // Keep both objects live until the replacement has its own identity.
+    let replacement = f.gone.with_file_name("replacement");
+    fs::write(&replacement, "never shown").unwrap();
+    fs::remove_file(&f.gone).unwrap();
+    fs::rename(replacement, &f.gone).unwrap();
+
+    let refusal = refused(finish_pending(&f.base(), &id, &doubles.env()));
+
+    assert_changed(&refusal, &f.gone);
+    assert_eq!(fs::read_to_string(&f.gone).unwrap(), "never shown");
+    assert!(f.registered());
+    assert!(f.stored().is_empty(), "the operation is closed");
+}
+
+// --- An operation an earlier wt saved -------------------------------------
+
+/// R19: a legacy (version 1) operation with a version 6 report is finished
+/// by the next run without a question. Its own branch is rebuilt as a
+/// conditional step and deleted once rechecked; its remote step binds no
+/// endpoint or head, so it is never run and the run exits 1.
+#[test]
+fn a_legacy_operation_is_finished_and_its_unbound_remote_step_left_undone() {
+    use crate::remove::recovery::record::{BranchBinding, IntendedAction, Phase, RECORD_VERSION, RecoveryRecord};
+    use crate::remove::recovery::store::REPORT_FILE;
+
+    let f = fixture();
+    let facts = f.facts();
+    crash_at(&f, &facts, &[], &Doubles::default(), Boundary::Moved);
+    let compact = f.record();
+    let legacy = RecoveryRecord {
+        record_version: RECORD_VERSION,
+        operation_id: compact.operation_id.clone(),
+        created_at_ms: compact.created_at_ms,
+        requested_name: compact.requested_name.clone(),
+        aliases: compact.aliases.clone(),
+        original: compact.original.clone(),
+        quarantine: compact.deletion_path.clone(),
+        checkout_identity: compact.target.checkout_identity().unwrap(),
+        repository: compact.repository.clone(),
+        branch: BranchBinding::Named(BRANCH.into()),
+        approved_tip: f.tip(),
+        consent_fingerprint: "b".repeat(64),
+        discovery: crate::remove::test_support::clear_report(&f.gone),
+        intended_actions: vec![
+            IntendedAction::RemoveCheckout,
+            IntendedAction::DeleteLocalBranch { name: BRANCH.into() },
+            IntendedAction::DeleteRemoteBranch { remote: "origin".into(), name: BRANCH.into() },
+        ],
+        completed_phase: Phase::Associated,
+    };
+    let dir = f.store().join(compact.operation_id.as_str());
+    // Overwriting keeps the record's owner-only mode.
+    fs::write(dir.join(RECORD_FILE), legacy.to_json()).unwrap();
+    let report = serde_json::json!({"report_version": 6, "operation_id": compact.operation_id, "outcome": "activity_detected"});
+    fs::write(dir.join(REPORT_FILE), serde_json::to_vec(&report).unwrap()).unwrap();
+    fs::write(dir.join("journal.jsonl"), b"{\"torn").unwrap();
+
+    let finished = finished(finish_pending(&f.base(), &f.pending_id(), &Doubles::default().env()));
+
+    assert_eq!(finished.branches.len(), 2, "{finished:?}");
+    assert_eq!(finished.branches[0].outcome, BranchOutcome::Deleted);
+    assert_eq!(finished.branches[1].outcome, BranchOutcome::NotCarriedOver);
+    assert_eq!(finished.exit_class(), ExitClass::Failure);
+    assert!(!f.branch_exists());
+    f.assert_gone();
+}
+
+/// A pending removal whose record is corrupt, of an unknown version, or
+/// another operation's is explained, never resumed, and never followed by a
+/// speculative deletion: the placed checkout and the record stay as they are.
+#[test]
+fn an_unreadable_record_of_a_pending_removal_is_explained_and_nothing_is_deleted() {
+    type Edit = fn(serde_json::Value) -> Vec<u8>;
+    let cells: [(&str, Edit, &str); 3] = [
+        ("corrupt", |_| b"{\"record_version\": 3,".to_vec(), "malformed"),
+        ("unknown version", |mut doc| { doc["record_version"] = serde_json::json!(4); serde_json::to_vec(&doc).unwrap() }, "version 4"),
+        ("another operation's", |mut doc| { doc["operation_id"] = serde_json::json!("f".repeat(32)); serde_json::to_vec(&doc).unwrap() }, "operation id"),
+    ];
+    for (cell, edit, explained) in cells {
+        let f = fixture();
+        let facts = f.facts();
+        crash_at(&f, &facts, &[], &Doubles::default(), Boundary::Moved);
+        let id = f.pending_id();
+        let deletion = f.record().deletion_path.as_path().to_path_buf();
+        let path = f.store().join(id.as_str()).join(RECORD_FILE);
+        let bytes = edit(serde_json::from_slice(&fs::read(&path).unwrap()).unwrap());
+        fs::write(&path, &bytes).unwrap();
+
+        let Err(ResolveError::Store(error)) = resolve(&f.base(), "gone") else { panic!("{cell}: the saved name is explained") };
+        assert!(error.to_string().contains(id.as_str()) && error.to_string().contains(explained), "{cell}: {error}");
+        assert!(matches!(resolve(&f.base(), "unrelated"), Err(ResolveError::Store(_))), "{cell}: no name can tell it is not this operation's");
+        let refusal = refused(finish_pending(&f.base(), &id, &Doubles::default().env()));
+        assert!(refusal.to_string().contains(id.as_str()) && refusal.to_string().contains(explained), "{cell}: {refusal}");
+        assert_eq!(refusal.exit_class(), ExitClass::Refused, "{cell}");
+        assert!(deletion.join("notes.txt").is_file(), "{cell}: nothing is deleted");
+        assert_eq!(fs::read(&path).unwrap(), bytes, "{cell}: the record is kept as it was");
+    }
 }

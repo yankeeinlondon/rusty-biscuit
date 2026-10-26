@@ -214,8 +214,9 @@ fn terminal_mermaid_defaults_to_code() {
     let md = Markdown::try_from_content(MERMAID_DOC).expect("parse mermaid doc");
     let out = page(80).render(&md).expect("terminal render");
 
+    // The Mermaid syntax colors `graph` and `TD` separately.
     assert!(
-        out.contains("graph TD"),
+        darkmatter::testing::strip_ansi_codes(&out).contains("graph TD"),
         "the diagram source must render as code on the terminal, got: {out}"
     );
     assert!(

@@ -1,0 +1,27 @@
+[package]
+name = "schematic-registration-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+negative-cases = []
+
+[[example]]
+name = "mismatched_type"
+required-features = ["negative-cases"]
+
+[[example]]
+name = "misspelled_path"
+required-features = ["negative-cases"]
+
+[[example]]
+name = "private_descriptor"
+required-features = ["negative-cases"]

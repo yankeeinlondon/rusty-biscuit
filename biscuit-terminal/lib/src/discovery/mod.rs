@@ -34,5 +34,5 @@ pub mod mode_2027;
 pub mod os_detection;
 pub mod osc_queries;
 pub mod raw_mode;
-#[cfg(unix)]
+pub(crate) mod startup_exchange;
 pub(crate) mod tty_query;

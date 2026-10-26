@@ -31,6 +31,13 @@ const PAYLOAD: &str = "$schema:\n  model: string(required)\n";
 const DOC: &str = "---\nprompt: hello\n---\n\n# Heading\n\nBody.\n";
 const PLAIN: &str = "# Plain\n\nNo frontmatter.\n";
 
+/// Editor settings that change the effective configuration, and nothing a
+/// trigger registry reads.
+#[allow(non_snake_case)]
+fn CHANGED_SETTINGS() -> Value {
+    json!({ "dmls": { "formatting": { "markdown": { "unwrap": true } } } })
+}
+
 fn write(path: &Path, text: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, text).unwrap();
@@ -449,7 +456,7 @@ fn a_configuration_reload_prepares_off_the_dispatch_thread() {
     assert_refresh_prepares_off_dispatch(
         watched_params,
         &[RegistryJobKind::Workspace, RegistryJobKind::Document],
-        |_, fixture| fixture.notify("workspace/didChangeConfiguration", json!({ "settings": {} })),
+        |_, fixture| fixture.notify("workspace/didChangeConfiguration", json!({ "settings": CHANGED_SETTINGS() })),
     );
 }
 
@@ -491,5 +498,172 @@ fn requests_on_a_ready_document_do_no_registry_work() {
     }
     let work = work_counts().since(before);
     assert_eq!((work.registry_scans, work.enumerations), (0, 0), "{work:?}");
+    fixture.shutdown();
+}
+
+// ── Configuration reloads ───────────────────────────────────────────────────
+
+/// A `didChangeConfiguration` that leaves the effective configuration as it
+/// was (a client sending `{"settings": {}}` after `initialized`) rebuilds the
+/// dropped contexts identically, so every registry stays fresh: no job is
+/// queued and nothing is scanned, then or on the next request.
+#[test]
+fn an_unchanged_configuration_notification_prepares_nothing() {
+    let workspace = trigger_workspace();
+    let doc = doc_uri(&workspace);
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_params(workspace.path()));
+    open(&fixture, &doc, "markdown", DOC);
+    fixture.flush_server();
+
+    let before = work_counts();
+    fixture.notify("workspace/didChangeConfiguration", json!({ "settings": {} }));
+    fixture.round_trip();
+    assert_eq!(fixture.registry_jobs_until_idle(), Vec::<RegistryJobKind>::new(), "no job was queued");
+    let hover = fixture.request("textDocument/hover", at(&doc));
+    assert!(hover.error.is_none(), "{hover:?}");
+    let work = work_counts().since(before);
+    assert_eq!((work.registry_scans, work.enumerations), (0, 0), "{work:?}");
+    fixture.shutdown();
+}
+
+/// Control for the unchanged case: an effective change marks every registry
+/// stale and queues exactly one workspace pass, and the open document's
+/// registry is prepared again.
+#[test]
+fn an_effective_configuration_change_prepares_one_workspace_pass_and_the_open_document() {
+    let workspace = trigger_workspace();
+    let doc = doc_uri(&workspace);
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(watched_params(workspace.path()));
+    open(&fixture, &doc, "markdown", DOC);
+    fixture.flush_server();
+
+    let before = work_counts();
+    fixture.notify("workspace/didChangeConfiguration", json!({ "settings": CHANGED_SETTINGS() }));
+    fixture.round_trip();
+    let mut jobs = fixture.registry_jobs_until_idle();
+    jobs.sort_by_key(|job| format!("{job:?}"));
+    assert_eq!(jobs, vec![RegistryJobKind::Document, RegistryJobKind::Workspace], "{jobs:?}");
+    assert!(work_counts().since(before).registry_scans > 0);
+    fixture.shutdown();
+}
+
+// ── Job order ───────────────────────────────────────────────────────────────
+
+/// Two repositories, each its own workspace folder, with a trigger, its
+/// payload, and a frontmatter document in each.
+fn two_repository_workspace() -> (LspWorkspace, PathBuf, PathBuf) {
+    let workspace = LspWorkspace::new();
+    let first = workspace.path().join("first");
+    let second = workspace.path().join("second");
+    for repo in [&first, &second] {
+        std::fs::create_dir_all(repo.join(".git/objects")).unwrap();
+        std::fs::create_dir_all(repo.join(".git/refs/heads")).unwrap();
+        write(&repo.join(".git/HEAD"), "ref: refs/heads/main\n");
+        write(&repo.join(".git/config"), "[core]\n\trepositoryformatversion = 0\n\tbare = false\n");
+        write(&repo.join("schemas/prompt.trigger.yaml"), ENVELOPE);
+        write(&repo.join("schemas/prompt.yaml"), PAYLOAD);
+        write(&repo.join("a.md"), DOC);
+        write(&repo.join("b.md"), DOC);
+    }
+    (workspace, first, second)
+}
+
+fn two_folder_params(first: &Path, second: &Path) -> Value {
+    let mut params = watched_params(first);
+    params["workspaceFolders"] = json!([
+        { "uri": url::Url::from_directory_path(first).unwrap().as_str(), "name": "first" },
+        { "uri": url::Url::from_directory_path(second).unwrap().as_str(), "name": "second" },
+    ]);
+    params
+}
+
+/// Edits the second repository's trigger and reports it, which marks only
+/// the second repository's scopes stale and schedules a workspace pass.
+fn touch_second_trigger(fixture: &LspFixture<'_>, second: &Path, field: &str) {
+    let trigger = second.join("schemas/prompt.trigger.yaml");
+    write(&trigger, &ENVELOPE.replace("prompt: string", &format!("{field}: string")));
+    watched(fixture, &trigger, 2);
+}
+
+/// With a document job held, two workspace schedules and a second document
+/// are queued: the second document runs before the workspace pass, and the
+/// two schedules make one pass.
+#[test]
+fn a_queued_document_runs_before_a_merged_workspace_pass() {
+    let (workspace, first, second) = two_repository_workspace();
+    let mut fixture = LspFixture::start_with_registry_gate(&workspace);
+    fixture.initialize(two_folder_params(&first, &second));
+    open(&fixture, &uri(&first.join("a.md")), "markdown", DOC);
+    fixture.wait_for_event(StartupEvent::RegistryPreparing);
+
+    touch_second_trigger(&fixture, &second, "headline");
+    touch_second_trigger(&fixture, &second, "summary");
+    open(&fixture, &uri(&first.join("b.md")), "markdown", DOC);
+    fixture.send_request_with_id(RequestId::from(700), "textDocument/hover", at(&uri(&first.join("b.md"))));
+    fixture.round_trip();
+
+    fixture.open_registry_gate();
+    let answer = fixture.expect_response(RequestId::from(700));
+    assert!(answer.error.is_none(), "{answer:?}");
+    let jobs = fixture.registry_jobs_until_idle();
+    assert_eq!(
+        jobs,
+        vec![RegistryJobKind::Document, RegistryJobKind::Document, RegistryJobKind::Workspace],
+        "both documents first, then one pass for both schedules"
+    );
+    fixture.shutdown();
+}
+
+/// A document job queued while a workspace pass holds its first probe runs
+/// once that probe finishes and before the next one: its waiting request is
+/// answered while the pass is still held at the second probe.
+#[test]
+fn a_document_job_runs_between_two_probes_of_a_running_pass() {
+    let (workspace, first, second) = two_repository_workspace();
+    let doc = uri(&first.join("a.md"));
+    let mut fixture = LspFixture::start_with_registry_probe_gate(&workspace);
+    fixture.initialize(two_folder_params(&first, &second));
+    fixture.flush_server();
+
+    touch_second_trigger(&fixture, &second, "headline");
+    fixture.wait_for_event(StartupEvent::WorkspaceProbePreparing);
+    open(&fixture, &doc, "markdown", DOC);
+    fixture.send_request_with_id(RequestId::from(800), "textDocument/hover", at(&doc));
+    // Handled while the first probe is held, so the document job is queued
+    // before that probe runs.
+    fixture.round_trip();
+
+    fixture.release_registry_probe();
+    let answer = fixture.expect_response(RequestId::from(800));
+    assert!(answer.error.is_none(), "{answer:?}");
+    fixture.wait_for_event(StartupEvent::WorkspaceProbePreparing);
+    let (job, _) = fixture.next_registry_prepared();
+    assert_eq!(job, RegistryJobKind::Document, "the document finished while the pass is held");
+
+    fixture.open_registry_probe_gate();
+    assert_eq!(fixture.registry_jobs_until_idle(), vec![RegistryJobKind::Workspace]);
+    fixture.shutdown();
+}
+
+/// Workspace schedules made while a pass runs (held at a probe) add exactly
+/// one follow-up pass.
+#[test]
+fn schedules_during_a_running_pass_add_one_follow_up() {
+    let (workspace, first, second) = two_repository_workspace();
+    let mut fixture = LspFixture::start_with_registry_probe_gate(&workspace);
+    fixture.initialize(two_folder_params(&first, &second));
+    fixture.flush_server();
+
+    touch_second_trigger(&fixture, &second, "headline");
+    fixture.wait_for_event(StartupEvent::WorkspaceProbePreparing);
+    touch_second_trigger(&fixture, &second, "summary");
+    touch_second_trigger(&fixture, &second, "title");
+    fixture.round_trip();
+
+    fixture.open_registry_probe_gate();
+    let jobs = fixture.registry_jobs_until_idle();
+    assert_eq!(jobs, vec![RegistryJobKind::Workspace, RegistryJobKind::Workspace], "the pass and one follow-up");
     fixture.shutdown();
 }

@@ -1379,7 +1379,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     // Placeholders of a `$( … )` value are read from the frontmatter as it
     // stands now, after the first interpolation pass.
     let hole_state = templates.map(|_| {
-        let map: HashMap<String, Value> = frontmatter
+        let map: serde_json::Map<String, Value> = frontmatter
             .as_map()
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
@@ -1439,7 +1439,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
                 let state = match seed_state.as_ref() {
                     Some(s) => s,
                     None => {
-                        let map: HashMap<String, Value> = frontmatter
+                        let map: serde_json::Map<String, Value> = frontmatter
                             .as_map()
                             .iter()
                             .map(|(k, v)| (k.clone(), v.clone()))
@@ -1687,7 +1687,7 @@ pub(crate) fn directive_reachable_pipelines(
             else_branch,
             ..
         } => {
-            let map: HashMap<String, Value> = frontmatter
+            let map: serde_json::Map<String, Value> = frontmatter
                 .as_map()
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))

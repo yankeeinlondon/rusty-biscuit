@@ -5,15 +5,14 @@
 //! `pipeline::generate_batch` and the `schematic-gen` binary into temporary
 //! directories and assert what each output root holds afterward.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::Command;
 
 use biscuit_test_harness::bin_exe;
 use schematic_define::auth::ApiKeyLocation;
 use schematic_define::params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
-use schematic_define::{ApiResponse, AuthStrategy, CrossOrigin, Endpoint, RestApi, RestMethod};
-use schematic_definitions::registry::{SchemaRegistry, get_registries_for_module};
+use schematic_define::{SuccessShape, AuthStrategy, Endpoint, RestApi, SchemaComponent};
 use schematic_gen::codegen::endpoint_methods::{endpoint_method_renames, resolve_names};
 use schematic_gen::diagnostics::{Feature, Output, Severity, ValidationDiagnostic};
 use schematic_gen::errors::GeneratorError;
@@ -22,43 +21,32 @@ use schematic_gen::pipeline::{
     BatchScope, GenerateOpts, OpenApiFormat, generate_batch, resolve_all_apis,
 };
 use schematic_gen::validation::{
-    validate_openapi, validate_openapi_registry, validate_postman, validate_rust_client,
+    validate_openapi, validate_postman, validate_rust_client,
 };
 
 use crate::common::fresh_output::{TreeSnapshot, snapshot_tree};
 
-fn fixture_api(name: &str, module: &str, response_type: &str) -> RestApi {
-    RestApi {
-        name: name.to_string(),
-        description: format!("{name} fixture"),
-        base_url: "https://fixture.example/v1".to_string(),
-        docs_url: None,
-        auth: AuthStrategy::None,
-        auth_policy: None,
-        env_auth: vec![],
-        env_username: None,
-        env_mapping: None,
-        headers: vec![],
-        endpoints: vec![Endpoint {
-            id: "ListThings".to_string(),
-            method: RestMethod::Get,
-            path: "/things".to_string(),
-            description: "List things".to_string(),
-            request: None,
-            response: ApiResponse::json_type(response_type),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        }],
-        module_path: Some(module.to_string()),
-        request_suffix: None,
-        version: None,
-        cross_origin: CrossOrigin::default(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
-    }
+/// A one-endpoint API in `module` whose response is free-form JSON.
+fn fixture_api(name: &str, module: &str) -> RestApi {
+    let mut context = schematic_define::DefinitionContext::types_in("::fixture");
+    let endpoint = Endpoint::get("ListThings", "/things").describes("List things")
+        .returns_json::<serde_json::Value>(&mut context).build().unwrap();
+    RestApi::builder(&context, name, "https://fixture.example/v1")
+        .describes(format!("{name} fixture")).no_auth().module_path(module)
+        .endpoints([endpoint]).build().unwrap()
+}
+
+/// `api` with its response naming a `Thing` component spelled `rust_path`.
+/// The stored Rust path may be malformed while the component's wire schema
+/// is valid, as in a deserialized definition.
+fn with_thing_component(mut api: RestApi, rust_path: &str) -> RestApi {
+    api.schemas.push(SchemaComponent {
+        name: "Thing".into(),
+        rust_path: Some(rust_path.into()),
+        schema: serde_json::json!({"type": "object"}),
+    });
+    api.endpoints[0].response = vec![SuccessShape::json_type("Thing")];
+    api
 }
 
 /// Output roots for one batch run, under one temporary directory.
@@ -92,6 +80,7 @@ impl Roots {
             postman_out: Some(&self.postman),
             no_openapi: false,
             no_postman: false,
+            postman_environment: false,
         }
     }
 
@@ -113,21 +102,14 @@ fn malformed_rust_type_blocks_only_the_rust_client() {
     std::fs::write(Path::new(&roots.rust).join("old.rs"), "// earlier module\n").unwrap();
     let rust_before = snapshot_tree(roots.schema_dir());
 
-    let valid = fixture_api("Inventory", "inventory", "serde_json::Value");
-    let broken = fixture_api("Broken", "broken", "Vec<Thing");
-    let registry_for = |module: &str| match module {
-        // The export carries the malformed name as plain data.
-        "broken" => Some(SchemaRegistry::new().register::<serde_json::Value>("Vec<Thing")),
-        "inventory" => Some(SchemaRegistry::new()),
-        _ => None,
-    };
+    let valid = fixture_api("Inventory", "inventory");
+    // The component's Rust path is Rust-only data; exports name the component.
+    let broken = with_thing_component(fixture_api("Broken", "broken"), "Vec<Thing");
 
     let report = generate_batch(
         &[valid, broken],
         &BatchScope::Complete,
-        &roots.opts(),
-        &registry_for,
-    );
+        &roots.opts());
 
     // Every requested output was attempted; only Rust failed.
     assert_eq!(
@@ -158,10 +140,11 @@ fn malformed_rust_type_blocks_only_the_rust_client() {
     assert_eq!(snapshot_tree(roots.schema_dir()), rust_before);
     assert!(!roots.schema_dir().join("Cargo.toml").exists());
 
-    // Both exports were written for both APIs, the malformed name included.
+    // Both exports were written for both APIs; OpenAPI names the component.
     let openapi_broken =
         std::fs::read_to_string(Path::new(&roots.openapi).join("broken.json")).unwrap();
-    assert!(openapi_broken.contains("Vec<Thing"), "{openapi_broken}");
+    assert!(openapi_broken.contains("#/components/schemas/Thing"), "{openapi_broken}");
+    assert!(!openapi_broken.contains("Vec<Thing"), "{openapi_broken}");
     assert!(Path::new(&roots.openapi).join("inventory.json").is_file());
     for module in ["inventory", "broken"] {
         assert!(
@@ -183,33 +166,31 @@ fn malformed_rust_type_blocks_only_the_rust_client() {
 }
 
 #[test]
-fn incomplete_registry_blocks_only_openapi() {
+fn dangling_reference_blocks_rust_and_openapi_but_not_postman() {
     let roots = Roots::new();
-    let inventory = fixture_api("Inventory", "inventory", "serde_json::Value");
-    let catalog = fixture_api("Catalog", "catalog", "CatalogPage");
-    // `catalog` has no registry, so no OpenAPI document may be written,
-    // not even the valid `inventory` one.
-    let registry_for = |module: &str| (module == "inventory").then(SchemaRegistry::new);
+    let inventory = fixture_api("Inventory", "inventory");
+    let mut catalog = fixture_api("Catalog", "catalog");
+    // `catalog` names a component it does not carry, so neither the Rust
+    // client nor any OpenAPI document may be written, not even the valid
+    // `inventory` ones. Postman never reads a schema.
+    catalog.endpoints[0].response = vec![SuccessShape::json_vec_type("CatalogPage")];
 
-    let report = generate_batch(
-        &[inventory, catalog],
-        &BatchScope::Complete,
-        &roots.opts(),
-        &registry_for,
-    );
+    let report = generate_batch(&[inventory, catalog], &BatchScope::Complete, &roots.opts());
 
-    assert_eq!(report.failed(), vec![Output::OpenApi]);
-    assert_eq!(report.succeeded(), vec![Output::Rust, Output::Postman]);
-    let openapi = &report.get(Output::OpenApi).unwrap().diagnostics;
-    assert_eq!(openapi.len(), 1, "{openapi:#?}");
-    assert_eq!(openapi[0].feature, Feature::IncompleteSchemaRegistry);
-    assert_eq!(openapi[0].api, vec!["Catalog"]);
-    assert!(openapi[0].message.contains("catalog"), "{}", openapi[0]);
+    assert_eq!(report.failed(), vec![Output::Rust, Output::OpenApi]);
+    assert_eq!(report.succeeded(), vec![Output::Postman]);
+    for output in [Output::Rust, Output::OpenApi] {
+        let diagnostics = &report.get(output).unwrap().diagnostics;
+        assert_eq!(diagnostics.len(), 1, "{output}: {diagnostics:#?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.feature, Feature::InvalidSchemaReference);
+        assert_eq!(diagnostic.api, vec!["Catalog"]);
+        assert_eq!(diagnostic.endpoint.as_deref(), Some("ListThings"));
+        assert!(diagnostic.message.contains("`CatalogPage`"), "{diagnostic}");
+    }
 
     assert_eq!(snapshot_or_absent(Path::new(&roots.openapi)), None);
-    assert!(Path::new(&roots.rust).join("catalog.rs").is_file());
-    assert!(Path::new(&roots.rust).join("inventory.rs").is_file());
-    assert!(roots.schema_dir().join("Cargo.toml").is_file());
+    assert_eq!(snapshot_or_absent(roots.schema_dir()), None);
     assert!(
         Path::new(&roots.postman)
             .join("catalog.postman_collection.json")
@@ -221,8 +202,8 @@ fn incomplete_registry_blocks_only_openapi() {
 /// Two members of module `paired`. `PairedA` declares `ListThings` at
 /// `GET /things`; `PairedB` declares the given id, path, and request suffix.
 fn paired_group(second_id: &str, second_path: &str, second_suffix: Option<&str>) -> [RestApi; 2] {
-    let first = fixture_api("PairedA", "paired", "serde_json::Value");
-    let mut second = fixture_api("PairedB", "paired", "serde_json::Value");
+    let first = fixture_api("PairedA", "paired");
+    let mut second = fixture_api("PairedB", "paired");
     second.endpoints[0].id = second_id.to_string();
     second.endpoints[0].path = second_path.to_string();
     second.request_suffix = second_suffix.map(str::to_string);
@@ -234,16 +215,13 @@ fn incompatible_group_route_blocks_only_openapi_and_writes_no_document() {
     let roots = Roots::new();
     // `inventory` is valid and comes first, so a writer that published module
     // by module would already have written it when `paired` fails.
-    let inventory = fixture_api("Inventory", "inventory", "serde_json::Value");
+    let inventory = fixture_api("Inventory", "inventory");
     let [paired_a, paired_b] = paired_group("FetchThings", "/things", None);
-    let registry_for = |_: &str| Some(SchemaRegistry::new());
 
     let report = generate_batch(
         &[inventory, paired_a, paired_b],
         &BatchScope::Complete,
-        &roots.opts(),
-        &registry_for,
-    );
+        &roots.opts());
 
     assert_eq!(report.failed(), vec![Output::OpenApi]);
     assert_eq!(report.succeeded(), vec![Output::Rust, Output::Postman]);
@@ -276,21 +254,18 @@ fn incompatible_group_route_blocks_only_openapi_and_writes_no_document() {
 #[test]
 fn same_api_duplicate_route_blocks_every_output() {
     let roots = Roots::new();
-    let mut routes = fixture_api("Routes", "routes", "serde_json::Value");
+    let mut routes = fixture_api("Routes", "routes");
     routes.endpoints[0].path = "/things/{id}".to_string();
     // Only the path-parameter name differs, so the route is the same.
     let mut twin = routes.endpoints[0].clone();
     twin.id = "FetchThing".to_string();
     twin.path = "/things/{name}".to_string();
     routes.endpoints.push(twin);
-    let registry_for = |_: &str| Some(SchemaRegistry::new());
 
     let report = generate_batch(
         &[routes],
         &BatchScope::Complete,
-        &roots.opts(),
-        &registry_for,
-    );
+        &roots.opts());
 
     assert_eq!(
         report.failed(),
@@ -320,7 +295,7 @@ fn same_api_duplicate_route_blocks_every_output() {
 }
 
 fn located_param(name: &str, required: bool) -> ParamDef {
-    ParamDef {
+    ParamDef { constraints: None, deprecated: false, rust_name: None, secret: false, pager_managed: false,
         name: name.to_string(),
         required,
         description: Some(format!("{name} input")),
@@ -333,7 +308,7 @@ fn located_param(name: &str, required: bool) -> ParamDef {
 /// An API whose one endpoint declares a required and an optional parameter
 /// in both the header and the cookie location.
 fn header_and_cookie_api() -> RestApi {
-    let mut api = fixture_api("Located", "located", "serde_json::Value");
+    let mut api = fixture_api("Located", "located");
     api.endpoints[0].params = Some(EndpointParams {
         header: vec![
             located_param("x-required", true),
@@ -378,11 +353,12 @@ fn read_json(path: &Path) -> serde_json::Value {
 
 #[test]
 fn header_and_cookie_parameters_reach_every_postman_writer() {
+    // Values are collection variables; the optional header is disabled, and
+    // the cookies share one `Cookie` header holding the required one.
     let expected = vec![
-        ("x-required".to_string(), "<x-required>".to_string(), false),
-        ("x-optional".to_string(), "<x-optional>".to_string(), true),
-        ("Cookie".to_string(), "session=<session>".to_string(), false),
-        ("Cookie".to_string(), "theme=<theme>".to_string(), true),
+        ("x-required".to_string(), "{{header_x-required}}".to_string(), false),
+        ("x-optional".to_string(), "{{header_x-optional}}".to_string(), true),
+        ("Cookie".to_string(), "session={{cookie_session}}".to_string(), false),
     ];
     let api = header_and_cookie_api();
 
@@ -392,7 +368,6 @@ fn header_and_cookie_parameters_reach_every_postman_writer() {
         std::slice::from_ref(&api),
         &BatchScope::Complete,
         &roots.opts(),
-        &|_: &str| Some(SchemaRegistry::new()),
     );
     assert!(report.failed().is_empty(), "{:#?}", report.outputs);
     for output in [Output::Rust, Output::OpenApi, Output::Postman] {
@@ -404,6 +379,10 @@ fn header_and_cookie_parameters_reach_every_postman_writer() {
     }
     let batch = read_json(&Path::new(&roots.postman).join("located.postman_collection.json"));
     assert_eq!(request_headers(&batch), expected);
+    let cookie = batch.pointer("/item/0/item/0/request/header/2").unwrap_or_else(|| panic!("{batch:#}"));
+    assert_eq!(cookie["description"], "Optional cookies, sent only when added: theme.");
+    let declared: Vec<&str> = batch["variable"].as_array().unwrap().iter().map(|v| v["key"].as_str().unwrap()).collect();
+    assert_eq!(declared, ["baseUrl", "header_x-required", "header_x-optional", "cookie_session"]);
 
     // OpenAPI declares all four in their own locations.
     let openapi = std::fs::read_to_string(Path::new(&roots.openapi).join("located.json")).unwrap();
@@ -441,7 +420,7 @@ fn header_and_cookie_parameters_reach_every_postman_writer() {
 
 #[test]
 fn cookie_api_key_rides_a_cookie_header_in_postman() {
-    let mut api = fixture_api("CookieKey", "cookie_key", "serde_json::Value");
+    let mut api = fixture_api("CookieKey", "cookie_key");
     api.auth = AuthStrategy::ApiKeyParam {
         name: "sid".to_string(),
         location: ApiKeyLocation::Cookie,
@@ -476,8 +455,8 @@ fn api_with_located_type(
     place: fn(ParamDef) -> EndpointParams,
     param_type: QueryParamType,
 ) -> RestApi {
-    let mut api = fixture_api("Located", "located", "serde_json::Value");
-    api.endpoints[0].params = Some(place(ParamDef {
+    let mut api = fixture_api("Located", "located");
+    api.endpoints[0].params = Some(place(ParamDef { rust_name: None, secret: false, pager_managed: false,
         param_type,
         ..located_param("flags", false)
     }));
@@ -512,19 +491,28 @@ fn nested_arrays_fail_the_rust_client_at_every_parameter_location() {
 
         let nested = api_with_located_type(place, array_of(array_of(QueryParamType::Boolean)));
         let diagnostics = validate_rust_client(&[&nested]);
-        assert_eq!(
-            diagnostics,
-            vec![ValidationDiagnostic::new(
+        // An optional query parameter the client cannot serialize is left
+        // out of the request type (a warning); header and cookie parameters
+        // have no such fallback.
+        let (severity, message) = if feature == Feature::QueryParameter {
+            (
+                Severity::Warning,
+                "query parameter `flags` is an array of arrays in `form` style with explode false, \
+                 which the Rust client cannot serialize; it is left out of the request type"
+                    .to_string(),
+            )
+        } else {
+            (
                 Severity::Error,
-                "Located",
-                Some("ListThings"),
-                feature,
-                Output::Rust,
                 format!(
                     "{location} parameter `flags` is an array of arrays, which has no \
                      {location} serialization"
                 ),
-            )],
+            )
+        };
+        assert_eq!(
+            diagnostics,
+            vec![ValidationDiagnostic::new(severity, "Located", Some("ListThings"), feature, Output::Rust, message)],
             "{location}"
         );
         // OpenAPI states the nested shape as a schema; Postman carries no
@@ -541,10 +529,15 @@ fn nested_query_array_leaves_earlier_rust_output_untouched() {
     std::fs::write(Path::new(&roots.rust).join("lib.rs"), "// earlier output\n").unwrap();
     let rust_before = snapshot_tree(roots.schema_dir());
     let (_, _, query) = PLACEMENTS[0];
-    let api = api_with_located_type(query, array_of(array_of(QueryParamType::Boolean)));
-    let registry_for = |module: &str| (module == "located").then(SchemaRegistry::new);
+    let mut api = api_with_located_type(query, array_of(array_of(QueryParamType::Boolean)));
+    // Required, so the client cannot leave it out: the Rust output fails.
+    api.endpoints[0].params.as_mut().unwrap().query[0].required = true;
+    assert!(
+        validate_rust_client(&[&api]).iter().any(|d| d.is_error() && d.feature == Feature::QueryParameter),
+        "the required nested array is a Rust validation error"
+    );
 
-    let report = generate_batch(&[api], &BatchScope::Complete, &roots.opts(), &registry_for);
+    let report = generate_batch(&[api], &BatchScope::Complete, &roots.opts());
 
     assert_eq!(report.failed(), vec![Output::Rust]);
     assert_eq!(report.succeeded(), vec![Output::OpenApi, Output::Postman]);
@@ -624,14 +617,11 @@ fn grouped_document_renames_a_shared_raw_id() {
     // The Ollama shape: one raw id in two group members, distinct routes,
     // distinct request suffixes.
     let [paired_a, paired_b] = paired_group("ListThings", "/v2/things", Some("Compat"));
-    let registry_for = |_: &str| Some(SchemaRegistry::new());
 
     let report = generate_batch(
         &[paired_a, paired_b],
         &BatchScope::Complete,
-        &roots.opts(),
-        &registry_for,
-    );
+        &roots.opts());
     assert!(report.failed().is_empty(), "{:?}", report.failed());
 
     let written: serde_json::Value = serde_json::from_str(
@@ -650,47 +640,106 @@ fn grouped_document_renames_a_shared_raw_id() {
     );
 }
 
-/// The nine shipped endpoints whose path template embeds a query string.
-const EMBEDDED_QUERY_ENDPOINTS: [(&str, &str); 9] = [
-    ("Gitea", "GetGitTreeRecursive"),
-    ("GitLab", "GetRepositoryFile"),
-    ("OpenAI", "BetaCancelResponse"),
-    ("OpenAI", "BetaCompactconversation"),
-    ("OpenAI", "BetaCreateResponse"),
-    ("OpenAI", "BetaDeleteResponse"),
-    ("OpenAI", "BetaGetResponse"),
-    ("OpenAI", "BetaGetinputtokencounts"),
-    ("OpenAI", "BetaListInputItems"),
+/// All nine original query-bearing routes have been normalized or merged.
+const EMBEDDED_QUERY_ENDPOINTS: [(&str, &str); 0] = [];
+
+/// The request value rules of the live definitions that the Rust client does
+/// not check, by endpoint: rules beneath a generic composition (OpenAI's
+/// request models' `anyOf`/`oneOf` unions and multi-member `allOf`s, at
+/// component roots and inside free-form values, which the emitted
+/// definitions keep), in an API whose author accepts unchecked compositions
+/// (OpenAI's overlay sets `unchecked_compositions`). Each is a
+/// `type-constraint` warning of the Rust output; without the opt-in each
+/// would be an error. `CreateChatCompletion` and `CreateResponse` each count
+/// eight more than a direct import of the OpenAPI document: their rebuilt
+/// `allOf` structs flatten `CreateModelResponseProperties`, whose rules are
+/// reported both beneath the kept `allOf` and at the merged properties.
+const UNCHECKED_VALUE_RULES: [(&str, &str, usize); 30] = [
+    ("OpenAI", "AcceptRealtimeCall", 25),
+    ("OpenAI", "Compactconversation", 225),
+    ("OpenAI", "CreateChatCompletion", 72),
+    ("OpenAI", "CreateChatSessionMethod", 1),
+    ("OpenAI", "CreateCompletion", 6),
+    ("OpenAI", "CreateContainer", 16),
+    ("OpenAI", "CreateConversation", 205),
+    ("OpenAI", "CreateEmbedding", 8),
+    ("OpenAI", "CreateEval", 19),
+    ("OpenAI", "CreateEvalRun", 102),
+    ("OpenAI", "CreateFineTuningJob", 61),
+    ("OpenAI", "CreateImage", 2),
+    ("OpenAI", "CreateImageEdit", 1),
+    ("OpenAI", "CreateModeration", 3),
+    ("OpenAI", "CreateRealtimeClientSecret", 34),
+    ("OpenAI", "CreateRealtimeSession", 9),
+    ("OpenAI", "CreateRealtimeTranscriptionSession", 1),
+    ("OpenAI", "CreateResponse", 262),
+    ("OpenAI", "CreateSkill", 1),
+    ("OpenAI", "CreateSkillVersion", 1),
+    ("OpenAI", "CreateSpeech", 1),
+    ("OpenAI", "CreateVectorStore", 4),
+    ("OpenAI", "CreateVectorStoreFile", 5),
+    ("OpenAI", "CreateVectorStoreFileBatch", 5),
+    ("OpenAI", "Getinputtokencounts", 237),
+    ("OpenAI", "ModifyVectorStore", 3),
+    ("OpenAI", "RunGrader", 17),
+    ("OpenAI", "SearchVectorStore", 2),
+    ("OpenAI", "UpdateVectorStoreFileAttributes", 1),
+    ("OpenAI", "ValidateGrader", 17),
+];
+
+/// The fixed headers of the live definitions that OpenAPI operations cannot
+/// carry: an `Accept` value no success response declares as its media type.
+/// The value stays in `x-schematic`.
+const FIXED_HEADER_GAPS: [(&str, &str, &str); 17] = [
+    ("Gitea", "GetRepositoryContentRaw", "Accept: application/json"),
+    ("GitHub", "GetRepository", "Accept: application/vnd.github+json"),
+    ("GitHub", "GetGitTree", "Accept: application/vnd.github+json"),
+    ("GitHub", "GetRepositoryContentRaw", "Accept: application/vnd.github.raw+json"),
+    ("GitHub", "ListPullRequests", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListPullRequestFiles", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListIssues", "Accept: application/vnd.github+json"),
+    ("GitHub", "GetIssue", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListIssueComments", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListIssueTimeline", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListTags", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListReleases", "Accept: application/vnd.github+json"),
+    ("GitHub", "GetTagReference", "Accept: application/vnd.github+json"),
+    ("GitHub", "GetBranchReference", "Accept: application/vnd.github+json"),
+    ("GitHub", "GetAnnotatedTag", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListWorkflowRuns", "Accept: application/vnd.github+json"),
+    ("GitHub", "ListOrgRepos", "Accept: application/vnd.github+json"),
+];
+
+/// The query parameters of the live definitions that the Rust client cannot
+/// serialize, so it leaves them out of their request types: JSON values
+/// (OpenAI's import maps some `$ref`'d enums and objects to JSON) and one
+/// `deepObject` filter.
+const OMITTED_RUST_QUERY_PARAMS: [(&str, &str, &str); 15] = [
+    ("OpenAI", "CreateConversationItems", "include"),
+    ("OpenAI", "GetConversationItem", "include"),
+    ("OpenAI", "GetResponse", "include"),
+    ("OpenAI", "ListAuditLogs", "effective_at"),
+    ("OpenAI", "ListAuditLogs", "event_types[]"),
+    ("OpenAI", "ListChatCompletions", "metadata"),
+    ("OpenAI", "ListConversationItems", "include"),
+    ("OpenAI", "ListInputItems", "include"),
+    ("OpenAI", "ListPaginatedFineTuningJobs", "metadata"),
+    ("OpenAI", "ListSkills", "order"),
+    ("OpenAI", "ListSkillVersions", "order"),
+    ("OpenAI", "ListThreadItemsMethod", "order"),
+    ("OpenAI", "ListThreadsMethod", "order"),
+    ("OpenAI", "ListVideos", "order"),
+    ("OpenAI", "RetrieveVideoContent", "variant"),
 ];
 
 #[test]
-fn live_definitions_warn_once_per_output_for_each_embedded_query() {
+fn live_definitions_have_no_embedded_queries_or_validation_gaps() {
     let apis = resolve_all_apis();
     let refs: Vec<&RestApi> = apis.iter().collect();
 
-    let mut openapi = validate_openapi(&refs);
-    let mut modules: Vec<String> = Vec::new();
-    for api in &refs {
-        let module = schematic_gen::export::resolve_module_name(api);
-        if !modules.contains(&module) {
-            modules.push(module);
-        }
-    }
-    for module in &modules {
-        let members: Vec<&RestApi> = refs
-            .iter()
-            .copied()
-            .filter(|api| &schematic_gen::export::resolve_module_name(api) == module)
-            .collect();
-        openapi.extend(validate_openapi_registry(
-            module,
-            &members,
-            get_registries_for_module(module).as_ref(),
-        ));
-    }
     let by_output = [
         (Output::Rust, validate_rust_client(&refs)),
-        (Output::OpenApi, openapi),
+        (Output::OpenApi, validate_openapi(&refs)),
         (Output::Postman, validate_postman(&refs)),
     ];
 
@@ -703,10 +752,66 @@ fn live_definitions_warn_once_per_output_for_each_embedded_query() {
     for (output, diagnostics) in &by_output {
         let errors: Vec<_> = diagnostics.iter().filter(|d| d.is_error()).collect();
         assert!(errors.is_empty(), "{output}: {errors:#?}");
-        // Embedded queries are the only accepted gap in any output.
+        // The Rust client leaves out exactly the listed query parameters.
+        let omitted: BTreeSet<(String, String, String)> = diagnostics
+            .iter()
+            .filter(|d| d.feature == Feature::QueryParameter)
+            .map(|d| {
+                assert_eq!((d.severity, d.output), (Severity::Warning, Output::Rust), "{d}");
+                assert!(d.message.ends_with("it is left out of the request type"), "{d}");
+                let param = d.message.split('`').nth(1).unwrap().to_string();
+                (d.api.join(","), d.endpoint.clone().unwrap(), param)
+            })
+            .collect();
+        let expected_omitted: BTreeSet<(String, String, String)> = if *output == Output::Rust {
+            OMITTED_RUST_QUERY_PARAMS
+                .iter()
+                .map(|(api, endpoint, param)| (api.to_string(), endpoint.to_string(), param.to_string()))
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
+        assert_eq!(omitted, expected_omitted, "{output}");
+        let header_gaps: BTreeSet<(String, String, String)> = diagnostics
+            .iter()
+            .filter(|d| d.feature == Feature::FixedHeader)
+            .map(|d| {
+                assert_eq!((d.severity, d.output), (Severity::Warning, Output::OpenApi), "{d}");
+                let header = d.message.split('`').nth(1).unwrap().to_string();
+                (d.api.join(","), d.endpoint.clone().unwrap(), header)
+            })
+            .collect();
+        let expected_header_gaps: BTreeSet<(String, String, String)> = if *output == Output::OpenApi {
+            FIXED_HEADER_GAPS
+                .iter()
+                .map(|(api, endpoint, header)| (api.to_string(), endpoint.to_string(), header.to_string()))
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
+        assert_eq!(header_gaps, expected_header_gaps, "{output}");
+        let mut unchecked_rules: BTreeMap<(String, String), usize> = BTreeMap::new();
+        for d in diagnostics.iter().filter(|d| d.feature == Feature::TypeConstraint) {
+            assert_eq!((d.severity, d.output), (Severity::Warning, Output::Rust), "{d}");
+            assert!(d.message.ends_with("a composition whose members are not checked; the API accepts unchecked compositions"), "{d}");
+            *unchecked_rules.entry((d.api.join(","), d.endpoint.clone().unwrap())).or_default() += 1;
+        }
+        let expected_unchecked: BTreeMap<(String, String), usize> = if *output == Output::Rust {
+            UNCHECKED_VALUE_RULES
+                .iter()
+                .map(|(api, endpoint, count)| ((api.to_string(), endpoint.to_string()), *count))
+                .collect()
+        } else {
+            BTreeMap::new()
+        };
+        assert_eq!(unchecked_rules, expected_unchecked, "{output}");
+        // Embedded queries are the only other accepted gap in any output.
         let other: Vec<_> = diagnostics
             .iter()
-            .filter(|d| d.feature != Feature::QueryInPath)
+            .filter(|d| {
+                ![Feature::QueryInPath, Feature::QueryParameter, Feature::FixedHeader, Feature::TypeConstraint]
+                    .contains(&d.feature)
+            })
             .collect();
         assert!(other.is_empty(), "{output}: {other:#?}");
 
@@ -719,15 +824,14 @@ fn live_definitions_warn_once_per_output_for_each_embedded_query() {
                 (d.api.join(","), d.endpoint.clone().unwrap())
             })
             .collect();
-        assert_eq!(warned.len(), 9, "{output}: {warned:#?}");
+        assert_eq!(warned.len(), expected.len(), "{output}: {warned:#?}");
         let warned: BTreeSet<_> = warned.into_iter().collect();
         assert_eq!(warned, expected, "{output}");
-        all_lines += 9;
+        all_lines += warned.len();
         unique.extend(warned);
     }
-    // Nine distinct endpoints, reported once for each of the three outputs.
-    assert_eq!(all_lines, 27);
-    assert_eq!(unique.len(), 9);
+    assert_eq!(all_lines, expected.len() * by_output.len());
+    assert_eq!(unique.len(), expected.len());
 }
 
 #[test]
@@ -772,8 +876,11 @@ fn run_cli(args: &[&str]) -> std::process::Output {
         .expect("run schematic-gen")
 }
 
+/// Gitea's one warning is real: its raw-content endpoint inherits the API's
+/// fixed `Accept: application/json` but returns text, so the OpenAPI
+/// operation cannot express that header.
 #[test]
-fn cli_warnings_alone_exit_successfully() {
+fn cli_migrated_provider_generates_all_outputs_with_only_its_known_warning() {
     let roots = Roots::new();
     let output = run_cli(&[
         "generate",
@@ -791,14 +898,15 @@ fn cli_warnings_alone_exit_successfully() {
 
     assert!(output.status.success(), "stdout:\n{stdout}\nstderr:\n{stderr}");
     for target in ["rust", "openapi", "postman"] {
-        let line = format!(
-            "severity=warning api=Gitea endpoint=GetGitTreeRecursive feature=query-in-path \
-             output={target}: "
-        );
-        assert_eq!(stderr.matches(&line).count(), 1, "{target}:\n{stderr}");
         assert!(stdout.contains(&format!("[OK] {target} output")), "{stdout}");
     }
-    assert!(!stderr.contains("severity=error"), "{stderr}");
+    let warnings: Vec<&str> = stderr.lines().filter(|line| line.contains("severity=")).collect();
+    assert_eq!(warnings.len(), 1, "{stderr}");
+    assert!(
+        warnings[0].contains("endpoint=GetRepositoryContentRaw feature=fixed-header output=openapi")
+            && warnings[0].contains("`Accept: application/json`"),
+        "{stderr}"
+    );
     assert!(Path::new(&roots.openapi).join("gitea.json").is_file());
 }
 
@@ -843,4 +951,348 @@ fn cli_reports_each_output_and_exits_nonzero_when_one_fails() {
         std::fs::read_to_string(&roots.openapi).unwrap(),
         "not a directory"
     );
+}
+
+/// `fixture_api`'s endpoint with `query` as its only parameters.
+fn with_query(query: Vec<ParamDef>) -> RestApi {
+    let mut api = fixture_api("Located", "located");
+    api.endpoints[0].params = Some(EndpointParams { query, ..EndpointParams::default() });
+    api
+}
+
+fn query_param(name: &str, required: bool, param_type: QueryParamType, style: ParamStyle, explode: bool) -> ParamDef {
+    let mut param = ParamDef::new(name, param_type);
+    param.required = required;
+    param.style = style;
+    param.explode = explode;
+    param
+}
+
+fn rust_findings(api: &RestApi) -> Vec<(Severity, Feature, String)> {
+    validate_rust_client(&[api]).into_iter().map(|d| (d.severity, d.feature, d.message)).collect()
+}
+
+#[test]
+fn query_shapes_are_checked_for_the_rust_client_only() {
+    let array = || QueryParamType::Array(Box::new(QueryParamType::String));
+    // Control: every supported combination validates cleanly.
+    let supported = with_query(vec![
+        query_param("q", true, QueryParamType::String, ParamStyle::Form, false),
+        query_param("n", false, QueryParamType::Number, ParamStyle::Form, true),
+        query_param("form", false, array(), ParamStyle::Form, false),
+        query_param("exploded", false, array(), ParamStyle::Form, true),
+        query_param("spaces", false, array(), ParamStyle::SpaceDelimited, false),
+        query_param("pipes", false, array(), ParamStyle::PipeDelimited, false),
+        query_param("kind", false, QueryParamType::Enum(vec!["a".into()]), ParamStyle::Form, false),
+    ]);
+    assert!(rust_findings(&supported).is_empty(), "{:?}", rust_findings(&supported));
+
+    let cases = [
+        (QueryParamType::Json, ParamStyle::Form, false, "a JSON value in `form` style with explode false"),
+        (QueryParamType::Json, ParamStyle::DeepObject, true, "a JSON value in `deepObject` style with explode true"),
+        (QueryParamType::String, ParamStyle::Simple, false, "a single value in `simple` style with explode false"),
+        (QueryParamType::String, ParamStyle::PipeDelimited, false, "a single value in `pipeDelimited` style with explode false"),
+        (array(), ParamStyle::SpaceDelimited, true, "an array in `spaceDelimited` style with explode true"),
+        (array(), ParamStyle::PipeDelimited, true, "an array in `pipeDelimited` style with explode true"),
+        (array(), ParamStyle::Simple, false, "an array in `simple` style with explode false"),
+        (
+            QueryParamType::Array(Box::new(QueryParamType::Json)),
+            ParamStyle::Form,
+            true,
+            "an array of JSON values in `form` style with explode true",
+        ),
+    ];
+    for (param_type, style, explode, declared) in cases {
+        let optional = with_query(vec![query_param("p", false, param_type.clone(), style, explode)]);
+        assert_eq!(
+            rust_findings(&optional),
+            [(
+                Severity::Warning,
+                Feature::QueryParameter,
+                format!(
+                    "query parameter `p` is {declared}, which the Rust client cannot serialize; it is left \
+                     out of the request type"
+                ),
+            )],
+            "optional {declared}"
+        );
+        let required = with_query(vec![query_param("p", true, param_type, style, explode)]);
+        assert_eq!(
+            rust_findings(&required),
+            [(
+                Severity::Error,
+                Feature::QueryParameter,
+                format!("required query parameter `p` is {declared}, which the Rust client cannot serialize"),
+            )],
+            "required {declared}"
+        );
+        // The exports state any style; they have nothing to report.
+        assert!(validate_openapi(&[&required]).is_empty(), "{declared}");
+        assert!(validate_postman(&[&required]).is_empty(), "{declared}");
+    }
+}
+
+#[test]
+fn query_enums_need_values_distinct_variants_and_a_free_type_name() {
+    let enum_param = |values: &[&str]| {
+        query_param(
+            "sort",
+            false,
+            QueryParamType::Enum(values.iter().map(|value| value.to_string()).collect()),
+            ParamStyle::Form,
+            false,
+        )
+    };
+    assert_eq!(
+        rust_findings(&with_query(vec![enum_param(&[])])),
+        [(Severity::Error, Feature::QueryParameter, "query parameter `sort` declares an enum with no values".to_string())]
+    );
+    assert_eq!(
+        rust_findings(&with_query(vec![enum_param(&["a-b", "a_b"])])),
+        [(
+            Severity::Error,
+            Feature::GeneratedNameCollision,
+            "query parameter `sort` enum values `a-b`, `a_b` all generate the variant `AB`".to_string()
+        )]
+    );
+    // An array of enums is checked the same way.
+    let mut array = enum_param(&["x", "x"]);
+    array.param_type = QueryParamType::Array(Box::new(array.param_type));
+    array.explode = true;
+    assert_eq!(rust_findings(&with_query(vec![array]))[0].1, Feature::GeneratedNameCollision);
+
+    // A grouped API in the same module whose request suffix spells its
+    // `ListThings` request type `ListThingsRequestSort`.
+    let api = with_query(vec![enum_param(&["asc", "desc"])]);
+    let mut other = fixture_api("Other", "located");
+    other.request_suffix = Some("RequestSort".to_string());
+    let collisions: Vec<_> = validate_rust_client(&[&api, &other])
+        .into_iter()
+        .filter(|d| {
+            d.is_error()
+                && d.feature == Feature::GeneratedNameCollision
+                && d.message.contains("`ListThingsRequestSort`")
+                && d.message.contains("query-parameter enum")
+        })
+        .collect();
+    assert_eq!(collisions.len(), 1, "{:?}", validate_rust_client(&[&api, &other]));
+}
+
+#[test]
+fn a_contradictory_constraint_edited_after_build_blocks_every_output() {
+    use schematic_define::constraints::Constraints;
+    let mut api = fixture_api("Rules", "rules");
+    let mut params = EndpointParams::new();
+    params.query.push(ParamDef::new("limit", QueryParamType::Integer).constraints(Constraints::new().minimum(1).maximum(100)));
+    api.endpoints[0].params = Some(params);
+    assert!(validate_rust_client(&[&api]).iter().all(|d| d.feature != Feature::TypeConstraint), "control");
+
+    api.endpoints[0].params.as_mut().unwrap().query[0].constraints = Some(Box::new(Constraints::new().minimum(10).maximum(1)));
+    for (output, diagnostics) in [(Output::Rust, validate_rust_client(&[&api])),
+        (Output::OpenApi, validate_openapi(&[&api])), (Output::Postman, validate_postman(&[&api]))] {
+        let found: Vec<_> = diagnostics.iter().filter(|d| d.feature == Feature::TypeConstraint).collect();
+        assert_eq!(found.len(), 1, "{output}: {diagnostics:?}");
+        assert_eq!(found[0].severity, Severity::Error);
+        assert_eq!(found[0].endpoint.as_deref(), Some("ListThings"));
+        assert_eq!(found[0].output, output);
+        assert_eq!(found[0].message, "query.limit `minimum` leaves no number between the lower and upper bounds");
+    }
+}
+
+/// A malformed or contradictory rule in a stored component blocks every
+/// output, located by component and pointer: whether the component is the
+/// body, referenced from it, or typed by a JSON form field.
+#[test]
+fn a_malformed_component_rule_blocks_every_output() {
+    let inner = SchemaComponent {
+        name: "Inner".into(),
+        rust_path: Some("Inner".into()),
+        schema: serde_json::json!({"type": "object", "properties": {"code": {"type": "string", "maxLength": 3}}}),
+    };
+    let referencing = |mut api: RestApi| { api.schemas.push(inner.clone()); api };
+    let nested = serde_json::json!({"$ref": "#/components/schemas/Inner"});
+    let control = referencing(with_wrapper_body(fixture_api("Wrapped", "wrapped"), nested.clone()));
+    assert!(validate_rust_client(&[&control]).iter().all(|d| d.feature != Feature::TypeConstraint), "control");
+
+    let mut form = fixture_api("Wrapped", "wrapped");
+    form.schemas.push(inner.clone());
+    form.endpoints[0].method = schematic_define::RestMethod::Post;
+    form.endpoints[0].request = Some(schematic_define::ApiRequest::FormData {
+        fields: vec![schematic_define::FormField::json("inner", schematic_define::TypeRef::Named("Inner".into()))],
+    });
+    let cases = [
+        ("body component", with_wrapper_body(fixture_api("Wrapped", "wrapped"), serde_json::json!({"type": "string", "maxLength": "3"})),
+            "component `Wrapper` #/properties/value `maxLength` must be a nonnegative integer, not a string"),
+        ("referenced component", referencing(with_wrapper_body(fixture_api("Wrapped", "wrapped"), nested)),
+            "component `Inner` #/properties/code `multipleOf` must be greater than zero"),
+        ("form field component", form, "component `Inner` #/properties/code `multipleOf` must be greater than zero"),
+    ];
+    for (label, mut api, message) in cases {
+        if let Some(inner) = api.schemas.iter_mut().find(|component| component.name == "Inner") {
+            inner.schema["properties"]["code"]["multipleOf"] = serde_json::json!(0);
+        }
+        for (output, diagnostics) in [(Output::Rust, validate_rust_client(&[&api])),
+            (Output::OpenApi, validate_openapi(&[&api])), (Output::Postman, validate_postman(&[&api]))] {
+            let found: Vec<_> = diagnostics.iter().filter(|d| d.feature == Feature::TypeConstraint && d.is_error()).collect();
+            assert_eq!(found.len(), 1, "{label} {output}: {diagnostics:?}");
+            assert_eq!((found[0].endpoint.as_deref(), found[0].output, found[0].message.as_str()), (None, output, message), "{label}");
+        }
+    }
+}
+
+/// `api` whose `ListThings` posts a `Wrapper` body; `value` is the schema of
+/// its one property.
+fn with_wrapper_body(mut api: RestApi, value: serde_json::Value) -> RestApi {
+    api.schemas.push(SchemaComponent {
+        name: "Wrapper".into(),
+        rust_path: Some("Wrapper".into()),
+        schema: serde_json::json!({"type": "object", "properties": {"value": value}}),
+    });
+    api.endpoints[0].method = schematic_define::RestMethod::Post;
+    api.endpoints[0].request = Some(schematic_define::ApiRequest::json_type("Wrapper"));
+    api
+}
+
+#[test]
+fn a_request_rule_beneath_a_composition_blocks_only_the_rust_client() {
+    // Control: the same rule outside a composition is enforced, not reported.
+    let enforced = with_wrapper_body(fixture_api("Wrapped", "wrapped"), serde_json::json!({"type": "string", "maxLength": 3}));
+    assert!(validate_rust_client(&[&enforced]).iter().all(|d| d.feature != Feature::TypeConstraint));
+
+    let roots = Roots::new();
+    let rust_before = snapshot_or_absent(roots.schema_dir());
+    let composed = with_wrapper_body(
+        fixture_api("Wrapped", "wrapped"),
+        serde_json::json!({"oneOf": [{"type": "string", "maxLength": 3}, {"type": "integer"}]}),
+    );
+    let report = generate_batch(&[composed], &BatchScope::Complete, &roots.opts());
+    assert_eq!(report.succeeded(), vec![Output::OpenApi, Output::Postman], "only the Rust client cannot enforce it");
+    let rust = report.get(Output::Rust).unwrap();
+    assert_eq!(
+        rust.diagnostics,
+        vec![ValidationDiagnostic::new(
+            Severity::Error,
+            "Wrapped",
+            Some("ListThings"),
+            Feature::TypeConstraint,
+            Output::Rust,
+            "body (component `Wrapper` at `#/properties/value/oneOf/0`) `maxLength` is not enforced: \
+             beneath the `oneOf` at `#/properties/value` of component `Wrapper`; the client cannot check it, \
+             so remove the rule or the composition, or accept unchecked compositions for the API with \
+             `accept_unchecked_compositions`",
+        )]
+    );
+    assert!(matches!(&rust.result, Err(GeneratorError::Validation { output: Output::Rust, .. })));
+    assert_eq!(snapshot_or_absent(roots.schema_dir()), rust_before, "no Rust output is written");
+}
+
+#[test]
+fn an_api_accepting_unchecked_compositions_generates_the_rust_client_with_a_warning() {
+    let composed = serde_json::json!({"oneOf": [{"type": "string", "maxLength": 3}, {"type": "integer"}]});
+    let mut api = with_wrapper_body(fixture_api("Wrapped", "wrapped"), composed);
+    api.unchecked_compositions = true;
+    let roots = Roots::new();
+    let report = generate_batch(&[api], &BatchScope::Complete, &roots.opts());
+    assert_eq!(report.succeeded(), vec![Output::Rust, Output::OpenApi, Output::Postman]);
+    let rust = report.get(Output::Rust).unwrap();
+    assert_eq!(
+        rust.diagnostics,
+        vec![ValidationDiagnostic::new(
+            Severity::Warning,
+            "Wrapped",
+            Some("ListThings"),
+            Feature::TypeConstraint,
+            Output::Rust,
+            "body (component `Wrapper` at `#/properties/value/oneOf/0`) `maxLength` is not enforced: \
+             beneath the `oneOf` at `#/properties/value` of component `Wrapper`, a composition whose members are \
+             not checked; the API accepts unchecked compositions",
+        )]
+    );
+}
+
+/// The opt-in relaxes only a valid rule whose sole blocker is a
+/// composition: an unresolved reference beneath the composition, and a
+/// contradictory or malformed rule there, still block the Rust client.
+#[test]
+fn accepting_unchecked_compositions_never_relaxes_unresolved_references_or_definition_errors() {
+    let opted = |value: serde_json::Value| {
+        let mut api = with_wrapper_body(fixture_api("Wrapped", "wrapped"), value);
+        api.unchecked_compositions = true;
+        api
+    };
+    let control = opted(serde_json::json!({"anyOf": [{"type": "string", "maxLength": 3}, {"type": "integer"}]}));
+    let control = validate_rust_client(&[&control]);
+    assert!(control.iter().all(|d| !d.is_error()), "control: {control:?}");
+
+    let unresolved = opted(serde_json::json!({"anyOf": [{"$ref": "#/components/schemas/Gone", "maxLength": 3}, {"type": "integer"}]}));
+    let diagnostics = validate_rust_client(&[&unresolved]);
+    let errors: Vec<(Feature, &str)> = diagnostics.iter().filter(|d| d.is_error()).map(|d| (d.feature, d.message.as_str())).collect();
+    assert!(errors.iter().any(|(feature, message)| *feature == Feature::InvalidSchemaReference && message.contains("Gone")), "{errors:?}");
+    assert!(
+        errors.iter().any(|(feature, message)| *feature == Feature::TypeConstraint
+            && message.contains("beside the unresolved reference \"#/components/schemas/Gone\"")),
+        "{errors:?}"
+    );
+
+    for (label, member) in [
+        ("contradictory", serde_json::json!({"type": "string", "minLength": 5, "maxLength": 3})),
+        ("malformed", serde_json::json!({"type": "string", "maxLength": "3"})),
+    ] {
+        let api = opted(serde_json::json!({"anyOf": [member, {"type": "integer"}]}));
+        let errors: Vec<_> = validate_rust_client(&[&api])
+            .into_iter()
+            .filter(|d| d.is_error() && d.feature == Feature::TypeConstraint && d.endpoint.is_none())
+            .collect();
+        assert_eq!(errors.len(), 1, "{label}: {errors:?}");
+        assert!(errors[0].message.starts_with("component `Wrapper` #/properties/value/anyOf/0 `"), "{label}: {errors:?}");
+    }
+}
+
+#[test]
+fn a_request_rule_in_positional_items_blocks_the_rust_client() {
+    // Control: an `items` object is the enforced item schema.
+    let item_object = serde_json::json!({"type": "array", "items": {"type": "string", "maxLength": 3}});
+    let enforced = with_wrapper_body(fixture_api("Wrapped", "wrapped"), item_object);
+    assert!(validate_rust_client(&[&enforced]).iter().all(|d| d.feature != Feature::TypeConstraint));
+
+    let positional = serde_json::json!({"type": "array", "prefixItems": [{"type": "string", "maxLength": 3}, {"type": "integer"}]});
+    let api = with_wrapper_body(fixture_api("Wrapped", "wrapped"), positional);
+    let found: Vec<_> = validate_rust_client(&[&api]).into_iter().filter(|d| d.feature == Feature::TypeConstraint).collect();
+    assert_eq!(
+        found,
+        vec![ValidationDiagnostic::new(
+            Severity::Error,
+            "Wrapped",
+            Some("ListThings"),
+            Feature::TypeConstraint,
+            Output::Rust,
+            "body (component `Wrapper` at `#/properties/value/prefixItems/0`) `maxLength` is not enforced: \
+             beneath the `prefixItems` at `#/properties/value` of component `Wrapper`, which the client does not \
+             traverse; the client cannot check it, so remove the rule or restructure the schema",
+        )]
+    );
+}
+
+/// A pattern that is not a regular expression, or an endpoint pattern
+/// outside the enforced subset that is not marked unenforced, is one
+/// definition error; the value-rule planner adds no second diagnostic.
+#[test]
+fn an_invalid_or_unenforceable_pattern_is_reported_once() {
+    use schematic_define::constraints::Constraints;
+    let component = with_wrapper_body(fixture_api("Wrapped", "wrapped"), serde_json::json!({"type": "string", "pattern": "("}));
+    let mut endpoint_invalid = fixture_api("Rules", "rules");
+    let mut endpoint_unsupported = fixture_api("Rules", "rules");
+    for (api, pattern) in [(&mut endpoint_invalid, "("), (&mut endpoint_unsupported, r"^\p{Lu}")] {
+        let mut params = EndpointParams::new();
+        params.query.push(ParamDef::new("code", QueryParamType::String).constraints(Constraints::new().max_length(3)));
+        api.endpoints[0].params = Some(params);
+        assert!(validate_rust_client(&[&*api]).iter().all(|d| d.feature != Feature::TypeConstraint), "control");
+        api.endpoints[0].params.as_mut().unwrap().query[0].constraints = Some(Box::new(Constraints::new().pattern(pattern)));
+    }
+    for (label, api) in [("component", component), ("endpoint invalid", endpoint_invalid), ("endpoint unsupported", endpoint_unsupported)] {
+        let diagnostics = validate_rust_client(&[&api]);
+        let found: Vec<_> = diagnostics.iter().filter(|d| d.feature == Feature::TypeConstraint).collect();
+        assert_eq!(found.len(), 1, "{label}: {found:?}");
+        assert!(found[0].is_error() && found[0].message.contains("`pattern`"), "{label}: {found:?}");
+    }
 }

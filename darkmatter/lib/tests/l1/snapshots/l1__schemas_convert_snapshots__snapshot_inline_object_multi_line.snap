@@ -1,10 +1,9 @@
 ---
-source: darkmatter/lib/tests/schemas_convert_snapshots.rs
-assertion_line: 300
+source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: convert_yaml(yaml)
 ---
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
   "additionalProperties": true,
   "properties": {
     "endpoints": {
@@ -13,9 +12,18 @@ expression: convert_yaml(yaml)
           "type": "null"
         },
         {
+          "type": "array",
           "items": {
+            "type": "object",
             "additionalProperties": false,
             "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "x-darkmatter-url-scheme": [
+                  "https"
+                ]
+              },
               "method": {
                 "enum": [
                   "GET",
@@ -34,25 +42,16 @@ expression: convert_yaml(yaml)
                   }
                 ],
                 "default": 30
-              },
-              "url": {
-                "format": "uri",
-                "type": "string",
-                "x-darkmatter-url-scheme": [
-                  "https"
-                ]
               }
             },
             "required": [
               "url",
               "method"
-            ],
-            "type": "object"
-          },
-          "type": "array"
+            ]
+          }
         }
       ]
     }
   },
-  "type": "object"
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

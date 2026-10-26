@@ -313,11 +313,6 @@ use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node}
 use biscuit_terminal::terminal::Terminal;
 use renderable::tree::{RenderNode, RenderStrictness, TreeRenderable};
 
-#[cfg(feature = "image")]
-use biscuit_terminal::components::graph_expression::{GraphExpression, GraphInputSyntax};
-#[cfg(feature = "image")]
-use biscuit_terminal::components::mermaid::MermaidDiagram;
-
 /// A boxed closure that builds a component under a [`Scenario`] and renders
 /// it both ways, returning `(via_render_output, via_tree_direct_output)`.
 ///
@@ -494,8 +489,7 @@ pub fn component_cases() -> Vec<ComponentCase> {
         };
     }
 
-    #[allow(unused_mut)]
-    let mut cases = vec![
+    let cases = vec![
         dual!("BlockQuote", |s: &Scenario| {
             BlockQuote::new(
                 "The best way to predict the future is to invent it.".into(),
@@ -684,28 +678,27 @@ pub fn component_cases() -> Vec<ComponentCase> {
         ),
     ];
 
-    #[cfg(feature = "image")]
-    {
-        cases.push(tree_only!(
-            "GraphExpression",
-            |s: &Scenario| {
-                GraphExpression::parse("a -> b -> c", GraphInputSyntax::Auto)
-                    .expect("parse graph")
-                    .with_layout(s.layout.clone())
-                    .with_style(s.style.clone())
-            },
-            "bespoke rasterized graph; outer placement parity is in graph_expression_parity.rs"
-        ));
-        cases.push(tree_only!(
-            "MermaidDiagram",
-            |s: &Scenario| {
-                MermaidDiagram::new("flowchart LR\n    A --> B --> C")
-                    .with_layout(s.layout.clone())
-                    .with_style(s.style.clone())
-            },
-            "bespoke external render; outer placement parity is in mermaid_parity.rs"
-        ));
-    }
-
     cases
+}
+
+/// Builds a row whose both columns are the folded tree, as the `tree_only!`
+/// rows of [`component_cases`] do.
+///
+/// `biscuit-visualized` includes this module to run its diagram components
+/// through the same scenarios, and builds its rows with this function.
+pub fn tree_only_case<C, F>(name: &'static str, build: F, notes: &'static str) -> ComponentCase
+where
+    C: TerminalRenderable + TreeRenderable,
+    F: Fn(&Scenario) -> C + Clone + 'static,
+{
+    let project = build.clone();
+    ComponentCase {
+        name,
+        render: Box::new(move |s| {
+            let (_, tree, _) = render_and_tree(&build(s), s);
+            (tree.clone(), tree)
+        }),
+        project_tree: Some(Box::new(move |s| render_and_tree(&project(s), s).2)),
+        notes,
+    }
 }

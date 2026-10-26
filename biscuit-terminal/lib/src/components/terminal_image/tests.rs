@@ -449,7 +449,7 @@ fn test_render_kitty_small_data() {
     let result = term_img.render_kitty(&png_data, 100, 100);
 
     // Should start with Kitty escape sequence
-    assert!(result.starts_with("\x1b_G"));
+    assert!(result.starts_with("\x1b_Gq=2,i="), "quiet, with an image ID: {result:?}");
     // Should contain format and action parameters
     assert!(result.contains("f=100")); // PNG format
     assert!(result.contains("a=T")); // Transmit and display
@@ -472,6 +472,9 @@ fn test_render_kitty_chunking() {
     // First chunk should have m=1 (more), last should have m=0
     assert!(result.contains("m=1"));
     assert!(result.contains("m=0"));
+    // Only the first chunk names the image.
+    assert_eq!(result.matches("i=").count(), 1, "{result:?}");
+    assert!(result.split("\x1b_G").skip(2).all(|chunk| chunk.starts_with("m=")));
 }
 
 #[test]
@@ -799,7 +802,7 @@ fn test_render_as_kitty_produces_valid_output() {
     let result = img.render_as_kitty(80).unwrap();
 
     // Should be a valid Kitty escape sequence
-    assert!(result.starts_with("\x1b_G"));
+    assert!(result.starts_with("\x1b_Gq=2,i="), "quiet, with an image ID: {result:?}");
     assert!(result.contains("\x1b\\"));
     assert!(result.contains("f=100")); // PNG format
 }
@@ -1350,4 +1353,798 @@ fn covered_rows_are_exact_on_whole_rows() {
     assert_eq!(covered_rows(56, (784, 326), (14, 25)), 14);
     // Drawn at half its pixel width, so half its height: 200 px in 20 px rows.
     assert_eq!(covered_rows(50, (1000, 400), (10, 20)), 10);
+}
+
+// Route-driven dispatch: `render_with_route` picks the encoder from the
+// terminal's graphics route, or the alt-text fallback with the route's reason.
+mod route_dispatch {
+    use super::*;
+    use crate::discovery::detection::{
+        GraphicsRoute, GraphicsTransport, ImageSupport, RouteConfidence, RouteInputs,
+        RouteReasonKind, resolve_graphics_route,
+    };
+
+    fn terminal_with_route(app: TerminalApp, route: GraphicsRoute) -> Terminal {
+        Terminal::builder()
+            .app(app)
+            .is_tty(true)
+            .graphics_route(route)
+            .width(80)
+            .height(24)
+            .cell_size(CellSize {
+                width: 8,
+                height: 16,
+            })
+            .build()
+    }
+
+    fn route_for(vars: &[(&str, &str)]) -> GraphicsRoute {
+        let inputs = vars
+            .iter()
+            .fold(RouteInputs::new(true), |inputs, (k, v)| inputs.with_var(k, *v));
+        resolve_graphics_route(&inputs)
+    }
+
+    #[test]
+    fn a_valid_image_without_a_pixel_route_falls_back_to_its_alt_text_with_the_reason() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap();
+        let route = route_for(&[("TERM_PROGRAM", "Apple_Terminal")]);
+        let mut term = terminal_with_route(TerminalApp::AppleTerminal, route.clone());
+        // Without truecolor, so `render` cannot draw half-blocks either.
+        term.color_depth = crate::discovery::detection::ColorDepth::Enhanced;
+
+        let output = image.render_with_route(&term).unwrap();
+
+        assert_eq!(
+            output,
+            ImageOutput::Fallback {
+                text: "[Image: test.png]".to_string(),
+                reason: route.reason.clone(),
+            }
+        );
+        assert_eq!(image.render(&term), "[Image: test.png]");
+    }
+
+    #[test]
+    fn a_user_disabled_route_falls_back_and_keeps_the_user_disabled_reason() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap().with_alt_text("a red square");
+        let route = route_for(&[("TERM_PROGRAM", "WezTerm"), ("BISCUIT_GRAPHICS", "none")]);
+        let term = terminal_with_route(TerminalApp::Wezterm, route);
+
+        match image.render_with_route(&term).unwrap() {
+            ImageOutput::Fallback { text, reason } => {
+                assert_eq!(text, "a red square", "explicit alt text wins over the file name");
+                assert_eq!(reason.kind, RouteReasonKind::UserDisabled);
+            }
+            other => panic!("expected a fallback, got {other:?}"),
+        }
+    }
+
+    fn windows_ssh_iterm2_route() -> GraphicsRoute {
+        let mut inputs = RouteInputs::new(true)
+            .with_var("SSH_CONNECTION", "1 2 3 4")
+            .with_var("LC_TERMINAL", "WezTerm");
+        inputs.is_windows = true;
+        let route = resolve_graphics_route(&inputs);
+        assert!(route.needs_cursor_resync, "{route:?}");
+        route
+    }
+
+    /// `output` with `" \r"` inserted right after the image sequence's
+    /// closing restore-cursor.
+    fn with_resync_after_image(output: &str) -> String {
+        let end = output.rfind("\x1b[u").expect("restore cursor") + "\x1b[u".len();
+        format!("{} \r{}", &output[..end], &output[end..])
+    }
+
+    /// On the Windows SSH server the console host drops a CR it thinks is a
+    /// no-op, so the iTerm2 image is followed by a space and a CR before the
+    /// usual tail. Everything else is the bytes the route sent before.
+    #[test]
+    fn a_windows_ssh_iterm2_image_is_followed_by_a_space_and_a_carriage_return() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap().with_width(ImageWidth::Characters(10));
+        let route = windows_ssh_iterm2_route();
+        let mut unflagged_route = route.clone();
+        unflagged_route.needs_cursor_resync = false;
+        let term = terminal_with_route(TerminalApp::Wezterm, route);
+        let unflagged = terminal_with_route(TerminalApp::Wezterm, unflagged_route);
+
+        let ImageOutput::Pixels(output) = image.render_with_route(&term).unwrap() else {
+            panic!("the Windows SSH iTerm2 route draws pixels");
+        };
+        let ImageOutput::Pixels(before) = image.render_with_route(&unflagged).unwrap() else {
+            panic!("the unflagged route draws pixels");
+        };
+
+        let (sequence, rows, _) = image.render_iterm2_for_terminal(&term).unwrap();
+        assert!(sequence.ends_with("\x07\x1b[u"), "{sequence:?}");
+        assert!(
+            output.starts_with(&format!("{sequence} \r\x1b[{rows}B\r")),
+            "image, space, CR, then the existing tail: {:?}",
+            &output[sequence.len()..]
+        );
+        assert_eq!(output, with_resync_after_image(&before));
+        assert!(!before.contains(" \r"), "{before:?}");
+    }
+
+    /// A direct iTerm2 route (macOS iTerm2) gets no resync.
+    #[test]
+    fn a_direct_iterm2_image_gets_no_space_and_carriage_return() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap().with_width(ImageWidth::Characters(10));
+        let route = route_for(&[("TERM_PROGRAM", "iTerm.app")]);
+        assert!(!route.needs_cursor_resync);
+        let term = terminal_with_route(TerminalApp::ITerm2, route);
+
+        let ImageOutput::Pixels(output) = image.render_with_route(&term).unwrap() else {
+            panic!("iTerm2 draws pixels");
+        };
+        let (sequence, rows, _) = image.render_iterm2_for_terminal(&term).unwrap();
+        assert!(output.starts_with(&format!("{sequence}\x1b[{rows}B\r")), "{output:?}");
+        let (inline, _) = image.render_inline(&term).unwrap().into_overlay();
+        assert!(inline.ends_with("\x07\x1b[u"), "{inline:?}");
+    }
+
+    /// The inline overlay on the Windows SSH route carries the same space and
+    /// CR right after the image, and starts the standalone output.
+    #[test]
+    fn inline_and_standalone_windows_ssh_images_share_the_resync() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap().with_width(ImageWidth::Characters(10));
+        let route = windows_ssh_iterm2_route();
+        let mut unflagged_route = route.clone();
+        unflagged_route.needs_cursor_resync = false;
+        let term = terminal_with_route(TerminalApp::Wezterm, route);
+        let unflagged = terminal_with_route(TerminalApp::Wezterm, unflagged_route);
+
+        let (inline, rows) = image.render_inline(&term).unwrap().into_overlay();
+        let (inline_before, rows_before) = image.render_inline(&unflagged).unwrap().into_overlay();
+        assert_eq!(rows, rows_before);
+        assert_eq!(inline, format!("{inline_before} \r"));
+
+        let ImageOutput::Pixels(standalone) = image.render_with_route(&term).unwrap() else {
+            panic!("the Windows SSH iTerm2 route draws pixels");
+        };
+        assert!(standalone.starts_with(&inline), "inline {inline:?} vs standalone {standalone:?}");
+    }
+
+    /// A 4-column image on an 8x16 cell is 32 pixels wide; the 2x2 fixture
+    /// is square, so 32 pixels tall: two rows.
+    fn sixel_image(file_path: &Path) -> TerminalImage {
+        TerminalImage::new(file_path).unwrap().with_width(ImageWidth::Characters(4))
+    }
+
+    #[test]
+    fn a_sixel_route_reserves_its_rows_then_draws_and_moves_below_the_image() {
+        let (_dir, file_path) = create_temp_test_image();
+        let route = route_for(&[("BISCUIT_GRAPHICS", "sixel")]);
+        let term = terminal_with_route(TerminalApp::Other("xterm".into()), route);
+
+        let ImageOutput::Pixels(output) = sixel_image(&file_path).render_with_route(&term).unwrap() else {
+            panic!("expected pixels");
+        };
+
+        // Index twice (scrolling at the viewport bottom), back up, save the
+        // cursor, draw, restore it, then move below the two rows.
+        let (prefix, rest) = output.split_at(output.find("\x1bP").expect("a DCS"));
+        assert_eq!(prefix, "\x1bD\x1bD\x1b[2A\x1b[s");
+        assert!(rest.starts_with("\x1bP9;1;0q\"1;1;32;32"), "{rest:?}");
+        assert!(rest.ends_with("\x1b\\\x1b[u\x1b[2B\r"), "{rest:?}");
+        assert!(!output.contains("\x1b[?"), "no private mode is set or reset: {output:?}");
+    }
+
+    #[test]
+    fn a_sixel_image_with_a_left_offset_moves_right_after_saving_the_cursor() {
+        let (_dir, file_path) = create_temp_test_image();
+        let route = route_for(&[("BISCUIT_GRAPHICS", "sixel")]);
+        let term = terminal_with_route(TerminalApp::Other("xterm".into()), route);
+        let image = sixel_image(&file_path).with_margins(10, 0);
+
+        let output = image.render_with_route(&term).unwrap().into_text();
+
+        assert!(output.contains("\x1b[s\x1b[10C\x1bP"), "{output:?}");
+    }
+
+    #[test]
+    fn a_sixel_image_leaves_transparency_unset_and_blends_edges_on_the_background() {
+        let png = |alpha: u8| {
+            let img = image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, alpha]));
+            let mut buffer = std::io::Cursor::new(Vec::new());
+            img.write_to(&mut buffer, image::ImageFormat::Png).unwrap();
+            TerminalImage::from_encoded_png(EncodedPng::new(buffer.into_inner()).unwrap())
+                .with_width(ImageWidth::Characters(2))
+        };
+        let route = route_for(&[("BISCUIT_GRAPHICS", "sixel")]);
+        let mut term = terminal_with_route(TerminalApp::Other("xterm".into()), route);
+        term.background_color = Some(crate::discovery::osc_queries::RgbValue { r: 0, g: 128, b: 255 });
+
+        use crate::discovery::osc_queries::ColorSource;
+        for source in [ColorSource::Measured, ColorSource::Estimated] {
+            term.background_source = source;
+            let transparent = png(0).render_with_route(&term).unwrap().into_text();
+            assert!(!transparent.contains("#0;2;"), "{source:?}: no color is painted: {transparent:?}");
+            let edge = png(128).render_with_route(&term).unwrap().into_text();
+            assert!(edge.contains("#0;2;50;25;50"), "{source:?}: blended onto the background: {edge:?}");
+        }
+
+        term.background_color = None;
+        term.color_mode = crate::discovery::detection::ColorMode::Light;
+        let estimated = png(0).render_with_route(&term).unwrap().into_text();
+        assert!(!estimated.contains("#0;2;"), "the light estimate is never painted: {estimated:?}");
+    }
+
+    #[test]
+    fn a_sixel_inline_image_is_an_overlay_that_returns_the_cursor() {
+        let (_dir, file_path) = create_temp_test_image();
+        let route = route_for(&[("BISCUIT_GRAPHICS", "sixel")]);
+        let term = terminal_with_route(TerminalApp::Other("xterm".into()), route);
+
+        let (sequence, rows) = sixel_image(&file_path).render_inline(&term).unwrap().into_overlay();
+
+        assert_eq!(rows, 2);
+        assert!(sequence.starts_with("\x1bD\x1bD\x1b[2A\x1b[s\x1bP9;1;0q"), "{sequence:?}");
+        assert!(sequence.ends_with("\x1b\\\x1b[u"), "{sequence:?}");
+    }
+
+    #[test]
+    fn a_sixel_route_through_tmux_passthrough_wraps_only_the_image() {
+        let (_dir, file_path) = create_temp_test_image();
+        let route = route_for(&[
+            ("BISCUIT_GRAPHICS", "sixel"),
+            ("BISCUIT_GRAPHICS_TRANSPORT", "tmux"),
+        ]);
+        assert_eq!(route.transport, GraphicsTransport::Tmux);
+        let term = terminal_with_route(TerminalApp::Other("xterm".into()), route);
+
+        let output = sixel_image(&file_path).render_with_route(&term).unwrap().into_text();
+
+        assert!(
+            output.starts_with("\x1bD\x1bD\x1b[2A\x1b[s\x1bPtmux;\x1b\x1bP9;1;0q"),
+            "{output:?}"
+        );
+        assert!(output.ends_with("\x1b\x1b\\\x1b\\\x1b[u\x1b[2B\r"), "{output:?}");
+    }
+
+    #[test]
+    fn a_corrupt_image_stays_an_error_without_a_pixel_route() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("broken.png");
+        std::fs::write(&file_path, b"\x89PNG\r\n\x1a\nnot really a png").unwrap();
+        let image = TerminalImage::new(&file_path).unwrap();
+        let term = terminal_with_route(TerminalApp::AppleTerminal, ImageSupport::None.into());
+
+        assert!(image.render_with_route(&term).is_err());
+        assert_eq!(image.render(&term), "", "a load error renders nothing");
+    }
+
+    #[test]
+    fn fallback_text_cannot_carry_terminal_controls() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path)
+            .unwrap()
+            .with_alt_text("evil\x1b]0;title\x07\x1b[31mred\n");
+        let term = terminal_with_route(TerminalApp::AppleTerminal, ImageSupport::None.into());
+
+        let ImageOutput::Fallback { text, .. } = image.render_with_route(&term).unwrap() else {
+            panic!("expected a fallback");
+        };
+        assert_eq!(text, "evil]0;title[31mred");
+    }
+
+    // The pixel cases assert the encoder choice: rendering pixels queries
+    // the live cursor position, which tests cannot answer.
+    use super::protocol::{Encoder, encoder_for};
+
+    #[test]
+    fn a_known_kitty_route_to_iterm2_uses_iterm2s_format() {
+        let term = terminal_with_route(TerminalApp::ITerm2, ImageSupport::Kitty.into());
+        assert_eq!(encoder_for(&term), Encoder::Iterm2);
+        let elsewhere = terminal_with_route(TerminalApp::Kitty, ImageSupport::Kitty.into());
+        assert_eq!(encoder_for(&elsewhere), Encoder::Kitty);
+    }
+
+    #[test]
+    fn a_forced_kitty_route_to_iterm2_keeps_kitty() {
+        let route = route_for(&[("TERM_PROGRAM", "iTerm.app"), ("BISCUIT_GRAPHICS", "kitty")]);
+        assert_eq!(route.confidence, RouteConfidence::Forced);
+        let term = terminal_with_route(TerminalApp::ITerm2, route);
+        assert_eq!(encoder_for(&term), Encoder::Kitty);
+    }
+
+    /// A Kitty route through a declared tmux (`BISCUIT_GRAPHICS_TRANSPORT=tmux`).
+    fn tmux_terminal(format: &str) -> Terminal {
+        let route = route_for(&[
+            ("SSH_CONNECTION", "10.0.0.1 50000 10.0.0.2 22"),
+            ("BISCUIT_GRAPHICS_TRANSPORT", "tmux"),
+            ("BISCUIT_GRAPHICS", format),
+        ]);
+        assert_eq!(route.transport, crate::discovery::detection::GraphicsTransport::Tmux);
+        terminal_with_route(TerminalApp::Other("tmux".into()), route)
+    }
+
+    /// Every APC in `text`, each of which must sit in its own tmux envelope.
+    fn wrapped_kitty_chunks(text: &str) -> Vec<&str> {
+        text.split("\x1bPtmux;").skip(1).collect()
+    }
+
+    #[test]
+    fn a_tmux_kitty_route_wraps_each_chunk_with_an_id_and_explicit_rows() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap().with_width(ImageWidth::Characters(10));
+        let term = tmux_terminal("kitty");
+        assert_eq!(encoder_for(&term), Encoder::Kitty);
+
+        let (sequence, rows) = image.render_inline(&term).unwrap().into_overlay();
+
+        assert!(sequence.starts_with("\x1b[s"), "cursor save stays unwrapped: {sequence:?}");
+        assert!(sequence.ends_with("\x1b[u"), "cursor restore stays unwrapped: {sequence:?}");
+        let chunks = wrapped_kitty_chunks(&sequence);
+        assert!(!chunks.is_empty(), "{sequence:?}");
+        for chunk in &chunks {
+            assert!(chunk.starts_with("\x1b\x1b_G"), "ESC doubled once: {chunk:?}");
+            assert!(chunk.contains("\x1b\x1b\\\x1b\\"), "inner ST doubled, then the envelope's: {chunk:?}");
+        }
+        let first = chunks[0];
+        assert!(first.contains("q=2,"), "quiet mode: {first:?}");
+        let id: u32 = first
+            .split("i=")
+            .nth(1)
+            .and_then(|rest| rest.split(',').next())
+            .and_then(|id| id.parse().ok())
+            .expect("the upload carries an image ID");
+        assert_ne!(id, 0);
+        assert!(first.contains(&format!(",c=10,r={rows},")), "{first:?}");
+
+        let (again, _) = image.render_inline(&term).unwrap().into_overlay();
+        assert!(!again.contains(&format!("i={id},")), "every upload gets a fresh ID");
+    }
+
+    #[test]
+    fn a_direct_kitty_route_is_not_wrapped() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap();
+        let term = terminal_with_route(TerminalApp::Kitty, ImageSupport::Kitty.into());
+        let (sequence, _) = image.render_inline(&term).unwrap().into_overlay();
+        assert!(!sequence.contains("tmux;"), "{sequence:?}");
+    }
+
+    /// A PNG of `side`x`side` noise, which does not compress: at 64 pixels
+    /// on a side its base64 needs several 4096-byte Kitty chunks.
+    fn create_noise_test_image(side: u32) -> (tempfile::TempDir, std::path::PathBuf) {
+        use image::{ImageBuffer, Rgb};
+        let mut state: u32 = 0x1234_5678;
+        let img = ImageBuffer::from_fn(side, side, |_, _| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let [r, g, b, _] = state.to_le_bytes();
+            Rgb([r, g, b])
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("noise.png");
+        img.save(&path).unwrap();
+        (dir, path)
+    }
+
+    /// The parameters of the single Kitty upload in `output`, which must be
+    /// quiet and carry a nonzero image ID on its first chunk only, spread
+    /// over more than one chunk. Returns the parameters and the ID.
+    fn numbered_upload(output: &str) -> (String, u32) {
+        assert!(!output.contains("tmux;"), "a direct upload: {output:?}");
+        let chunks: Vec<&str> = output.split("\x1b_G").skip(1).collect();
+        assert!(chunks.len() > 1, "a multi-chunk upload: {} chunk(s)", chunks.len());
+        let params = &chunks[0][..chunks[0].find(';').expect("parameters end at ';'")];
+        assert!(params.starts_with("q=2,i="), "quiet, then the ID: {params:?}");
+        let id: u32 = params["q=2,i=".len()..]
+            .split(',')
+            .next()
+            .and_then(|id| id.parse().ok())
+            .unwrap_or_else(|| panic!("a numeric ID: {params:?}"));
+        assert_ne!(id, 0, "{params:?}");
+        assert!(params.ends_with(",m=1"), "{params:?}");
+        for chunk in &chunks[1..] {
+            assert!(chunk.starts_with("m="), "a continuation carries only m=: {chunk:?}");
+            assert!(!chunk[..chunk.find(';').unwrap()].contains("i="), "{chunk:?}");
+        }
+        (params.to_string(), id)
+    }
+
+    fn direct_kitty_image(file_path: &Path) -> TerminalImage {
+        TerminalImage::new(file_path).unwrap().with_width(ImageWidth::Characters(4))
+    }
+
+    fn standalone_upload(image: &TerminalImage, term: &Terminal) -> (String, u32) {
+        let ImageOutput::Pixels(output) = image.render_with_route(term).unwrap() else {
+            panic!("a direct Kitty route draws pixels");
+        };
+        numbered_upload(&output)
+    }
+
+    fn two_column_upload(image: TerminalImage, term: &Terminal) -> (String, u32) {
+        use crate::components::two_column::TwoColumn;
+        numbered_upload(&TwoColumn::new(image, "Caption").render(term))
+    }
+
+    /// Kitty sizes by width alone; each standalone upload is quiet and
+    /// carries its own nonzero ID on the first chunk.
+    #[test]
+    fn a_standalone_direct_kitty_upload_is_numbered_and_sized_by_width() {
+        let (_dir, file_path) = create_noise_test_image(64);
+        let image = direct_kitty_image(&file_path);
+        let term = terminal_with_route(TerminalApp::Kitty, ImageSupport::Kitty.into());
+
+        let (params, id) = standalone_upload(&image, &term);
+        assert!(params.contains(",f=100,a=T,t=d,c=4,m=1"), "width only: {params:?}");
+        let (_, again) = standalone_upload(&image, &term);
+        assert_ne!(again, id, "every upload gets a fresh ID");
+    }
+
+    #[test]
+    fn an_inline_direct_kitty_upload_is_numbered_and_sized_by_width() {
+        let (_dir, file_path) = create_noise_test_image(64);
+        let term = terminal_with_route(TerminalApp::Kitty, ImageSupport::Kitty.into());
+
+        let (params, id) = two_column_upload(direct_kitty_image(&file_path), &term);
+        assert!(params.contains(",f=100,a=T,t=d,c=4,m=1"), "width only: {params:?}");
+        let (_, again) = two_column_upload(direct_kitty_image(&file_path), &term);
+        assert_ne!(again, id, "every upload gets a fresh ID");
+    }
+
+    /// WezTerm gets explicit rows; the 64-pixel square on 8x16 cells is
+    /// four columns by two rows.
+    #[test]
+    fn a_standalone_direct_wezterm_upload_is_numbered_with_explicit_cells() {
+        let (_dir, file_path) = create_noise_test_image(64);
+        let image = direct_kitty_image(&file_path);
+        let term = terminal_with_route(TerminalApp::Wezterm, ImageSupport::Kitty.into());
+
+        let (params, id) = standalone_upload(&image, &term);
+        assert!(params.contains(",f=100,a=T,t=d,c=4,r=2,m=1"), "explicit cells: {params:?}");
+        let (_, again) = standalone_upload(&image, &term);
+        assert_ne!(again, id, "every upload gets a fresh ID");
+    }
+
+    #[test]
+    fn an_inline_direct_wezterm_upload_is_numbered_with_explicit_cells() {
+        let (_dir, file_path) = create_noise_test_image(64);
+        let term = terminal_with_route(TerminalApp::Wezterm, ImageSupport::Kitty.into());
+
+        let (params, id) = two_column_upload(direct_kitty_image(&file_path), &term);
+        assert!(params.contains(",f=100,a=T,t=d,c=4,r=2,m=1"), "explicit cells: {params:?}");
+        let (_, again) = two_column_upload(direct_kitty_image(&file_path), &term);
+        assert_ne!(again, id, "every upload gets a fresh ID");
+    }
+
+    #[test]
+    fn a_tmux_iterm2_route_wraps_the_file_message_once() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path).unwrap();
+        let term = tmux_terminal("iterm2");
+        assert_eq!(encoder_for(&term), Encoder::Iterm2);
+
+        let (sequence, _) = image.render_inline(&term).unwrap().into_overlay();
+
+        assert_eq!(sequence.matches("\x1bPtmux;").count(), 1, "{sequence:?}");
+        assert!(sequence.contains("\x1bPtmux;\x1b\x1b]1337;File="), "{sequence:?}");
+        assert!(sequence.contains("\x07\x1b\\\x1b[u"), "BEL ends the OSC, then the envelope: {sequence:?}");
+    }
+
+    /// An iTerm2 message whose tmux envelope is exactly `wrapped` bytes.
+    fn iterm2_message_wrapping_to(wrapped: usize) -> String {
+        let head = "\x1b]1337;File=inline=1:";
+        // The closing BEL, the head's ESC doubled (the message's only ESC),
+        // and the 9-byte envelope.
+        let overhead = head.len() + 1 + 1 + 9;
+        format!("{head}{}\x07", "A".repeat(wrapped - overhead))
+    }
+
+    #[test]
+    fn the_tmux_message_budget_holds_at_its_boundary() {
+        use super::tmux::TMUX_MESSAGE_BUDGET;
+        let term = tmux_terminal("iterm2");
+        for (size, fits) in [
+            (TMUX_MESSAGE_BUDGET - 1, true),
+            (TMUX_MESSAGE_BUDGET, true),
+            (TMUX_MESSAGE_BUDGET + 1, false),
+        ] {
+            let message = iterm2_message_wrapping_to(size);
+            match super::protocol::for_transport(&term, "iterm2", message) {
+                Ok(wrapped) => {
+                    assert!(fits, "{size} bytes must be refused");
+                    assert_eq!(wrapped.len(), size, "the envelope is exactly {size} bytes");
+                }
+                Err(reason) => {
+                    assert!(!fits, "{size} bytes must fit: {reason:?}");
+                    assert_eq!(reason.kind, RouteReasonKind::BlockedTransport);
+                    assert!(reason.message.contains(&size.to_string()), "{}", reason.message);
+                    assert!(reason.message.contains("1048576-byte"), "{}", reason.message);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_budget_only_applies_through_tmux() {
+        use super::tmux::TMUX_MESSAGE_BUDGET;
+        let direct = terminal_with_route(TerminalApp::ITerm2, ImageSupport::ITerm.into());
+        let message = iterm2_message_wrapping_to(TMUX_MESSAGE_BUDGET + 1);
+        assert_eq!(
+            super::protocol::for_transport(&direct, "iterm2", message.clone()),
+            Ok(message)
+        );
+    }
+
+    /// A PNG of noise, which does not compress, so its base64 iTerm2 message
+    /// is over tmux's 1 MiB limit.
+    fn create_oversized_test_image() -> (tempfile::TempDir, std::path::PathBuf) {
+        create_noise_test_image(640)
+    }
+
+    #[test]
+    fn an_oversized_tmux_iterm2_image_falls_back_before_reserving_rows() {
+        let (_dir, file_path) = create_oversized_test_image();
+        let image = TerminalImage::new(&file_path).unwrap();
+        let mut term = tmux_terminal("iterm2");
+        // Without truecolor, so the inline path cannot draw half-blocks.
+        term.color_depth = crate::discovery::detection::ColorDepth::Enhanced;
+
+        let ImageOutput::Fallback { text, reason } = image.render_with_route(&term).unwrap() else {
+            panic!("an image over the tmux limit must fall back");
+        };
+        assert_eq!(text, "[Image: noise.png]", "alt text only: no escapes, no reserved rows");
+        assert_eq!(reason.kind, RouteReasonKind::BlockedTransport);
+        assert!(reason.message.contains("tmux passthrough"), "{}", reason.message);
+        assert!(matches!(
+            image.render_inline(&term),
+            Err(TerminalImageError::UnsupportedTerminal)
+        ));
+    }
+
+    /// A Zellij pane that answered the probe, without (then with) a measured
+    /// cell size.
+    #[test]
+    fn a_route_needing_measured_cells_falls_back_without_a_cell_size() {
+        use crate::discovery::detection::{KittyReply, ProbeReply, ProbeResult};
+        let mut inputs = RouteInputs::new(true).with_var("ZELLIJ", "0");
+        inputs.zellij_version = Some(crate::discovery::detection::ToolVersion::new(0, 45, 0));
+        inputs.probe.direct = Some(ProbeResult::Replied(ProbeReply {
+            kitty: KittyReply::Accepted,
+            da1: None,
+        }));
+        let route = resolve_graphics_route(&inputs);
+        assert!(route.needs_measured_cells, "{route:?}");
+
+        let reason = super::protocol::unmeasured_cells_reason(&route, None)
+            .expect("no measured cell size means no pixels");
+        assert!(reason.message.contains("cell size"), "{}", reason.message);
+        let cell = CellSize {
+            width: 8,
+            height: 16,
+        };
+        assert_eq!(super::protocol::unmeasured_cells_reason(&route, Some(cell)), None);
+        let unaffected: GraphicsRoute = ImageSupport::Kitty.into();
+        assert_eq!(super::protocol::unmeasured_cells_reason(&unaffected, None), None);
+
+        let measured = terminal_with_route(TerminalApp::Other("zellij".into()), route);
+        assert_eq!(encoder_for(&measured), Encoder::Kitty);
+    }
+
+    /// `route_has_pixels` answers as `render_with_route` draws: no for a
+    /// route without a pixel format, yes for each pixel format and for a
+    /// Zellij route with a measured cell size. (An unmeasured cell size is
+    /// the encoder's own test above; `Terminal::cell_size` would measure the
+    /// host here.)
+    #[test]
+    fn route_has_pixels_matches_the_routes_encoder() {
+        use crate::discovery::detection::{KittyReply, ProbeReply, ProbeResult};
+        let plain = route_for(&[("TERM_PROGRAM", "Apple_Terminal")]);
+        assert!(!TerminalImage::route_has_pixels(&terminal_with_route(TerminalApp::AppleTerminal, plain)));
+        for support in [ImageSupport::Kitty, ImageSupport::ITerm, ImageSupport::Sixel] {
+            let term = terminal_with_route(TerminalApp::Kitty, support.clone().into());
+            assert!(TerminalImage::route_has_pixels(&term), "{support:?}");
+        }
+
+        let mut inputs = RouteInputs::new(true).with_var("ZELLIJ", "0");
+        inputs.zellij_version = Some(crate::discovery::detection::ToolVersion::new(0, 45, 0));
+        inputs.probe.direct = Some(ProbeResult::Replied(ProbeReply {
+            kitty: KittyReply::Accepted,
+            da1: None,
+        }));
+        let route = resolve_graphics_route(&inputs);
+        assert!(route.needs_measured_cells, "{route:?}");
+        let zellij = terminal_with_route(TerminalApp::Other("zellij".into()), route);
+        assert!(TerminalImage::route_has_pixels(&zellij), "a measured cell size");
+    }
+
+    #[test]
+    fn an_iterm2_route_uses_the_iterm2_format_on_any_app() {
+        let route = route_for(&[("TERM_PROGRAM", "mintty")]);
+        let term = terminal_with_route(TerminalApp::Other("mintty".into()), route);
+        assert_eq!(encoder_for(&term), Encoder::Iterm2);
+    }
+}
+
+/// Kitty through tmux with Unicode placeholders: a `U=1` upload in tmux
+/// envelopes, then the placeholder grid as ordinary, unwrapped text.
+mod placeholder_dispatch {
+    use super::*;
+    use crate::discovery::detection::{
+        GraphicsPlacement, GraphicsTransport, Passthrough, RouteInputs, TmuxClient, TmuxFacts,
+        ToolVersion, resolve_graphics_route,
+    };
+
+    /// A terminal inside tmux 3.4 with passthrough on and one kitty client,
+    /// `width` columns wide, its route resolved from those facts.
+    fn kitty_in_tmux(width: u32, termfeatures: &str) -> Terminal {
+        let mut inputs = RouteInputs::new(true)
+            .with_var("TMUX", "/tmp/tmux-501/default,1234,0")
+            .with_var("TMUX_PANE", "%3")
+            .with_var("TERM", "tmux-256color");
+        inputs.tmux = TmuxFacts {
+            version: Some(ToolVersion::new(3, 4, 0)),
+            passthrough: Passthrough::On,
+            clients: Some(vec![TmuxClient {
+                termname: "xterm-kitty".into(),
+                termtype: "kitty(0.49.2)".into(),
+                utf8: true,
+                termfeatures: termfeatures.into(),
+            }]),
+        };
+        let route = resolve_graphics_route(&inputs);
+        assert_eq!(route.transport, GraphicsTransport::Tmux, "{route:?}");
+        Terminal::builder()
+            .app(TerminalApp::Other("tmux".into()))
+            .is_tty(true)
+            .graphics_route(route)
+            .width(width)
+            .height(24)
+            .cell_size(CellSize {
+                width: 8,
+                height: 16,
+            })
+            .build()
+    }
+
+    /// The `key=` value from the first Kitty chunk's parameters.
+    fn param(first_chunk: &str, key: &str) -> u32 {
+        first_chunk
+            .split(&format!(",{key}="))
+            .nth(1)
+            .and_then(|rest| rest.split([',', ';']).next())
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_else(|| panic!("no {key}= in {first_chunk:?}"))
+    }
+
+    /// Splits `text` after its last tmux envelope: the envelopes, then the rest.
+    fn split_after_envelopes(text: &str) -> (&str, &str) {
+        let end = text.rfind("\x1b\\").expect("an envelope") + 2;
+        text.split_at(end)
+    }
+
+    fn id_color(id: u32) -> String {
+        format!("\x1b[38;2;{};{};{}m", id >> 16, (id >> 8) & 0xFF, id & 0xFF)
+    }
+
+    #[test]
+    fn the_standalone_path_uploads_a_virtual_placement_then_prints_the_grid() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path)
+            .unwrap()
+            .with_width(ImageWidth::Characters(10));
+        let term = kitty_in_tmux(80, "RGB,title");
+        assert_eq!(term.graphics_route.placement, GraphicsPlacement::Placeholders);
+
+        let ImageOutput::Pixels(output) = image.render_with_route(&term).unwrap() else {
+            panic!("a placeholder route draws pixels");
+        };
+
+        let (upload, grid) = split_after_envelopes(&output);
+        let chunks: Vec<&str> = upload.split("\x1bPtmux;").skip(1).collect();
+        assert!(!chunks.is_empty(), "{upload:?}");
+        for chunk in &chunks {
+            assert!(chunk.starts_with("\x1b\x1b_G"), "each chunk wrapped once: {chunk:?}");
+        }
+        let first = chunks[0];
+        assert!(first.contains("q=2,"), "quiet: {first:?}");
+        assert!(first.contains(",a=T,U=1,"), "virtual placement: {first:?}");
+        let id = param(first, "i");
+        assert!((1..=0xFF_FFFF).contains(&id), "a 24-bit nonzero ID: {id}");
+        assert_eq!(param(first, "c"), 10);
+        let rows = param(first, "r");
+        assert!(rows > 0);
+
+        assert!(!grid.contains("tmux;"), "the grid is never wrapped: {grid:?}");
+        assert!(!grid.contains("\x1b[s") && !grid.contains("\x1b[u"), "no cursor overlay: {grid:?}");
+        let lines: Vec<&str> = grid.split_terminator("\r\n").collect();
+        assert_eq!(lines.len(), rows as usize, "{grid:?}");
+        assert!(grid.ends_with("\x1b[39m\r\n"), "fg reset, cursor below the image: {grid:?}");
+        for (row, line) in lines.iter().enumerate() {
+            assert!(line.starts_with(&id_color(id)), "row {row}: {line:?}");
+            assert!(line.ends_with("\x1b[39m"), "row {row}: {line:?}");
+            assert_eq!(line.matches('\u{10EEEE}').count(), 10, "row {row}: {line:?}");
+        }
+
+        let ImageOutput::Pixels(again) = image.render_with_route(&term).unwrap() else {
+            panic!("a placeholder route draws pixels");
+        };
+        let again_first = split_after_envelopes(&again).0.split("\x1bPtmux;").nth(1).unwrap();
+        assert_ne!(param(again_first, "i"), id, "every upload gets a fresh ID");
+    }
+
+    #[test]
+    fn the_inline_path_returns_one_text_line_per_image_row() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path)
+            .unwrap()
+            .with_width(ImageWidth::Characters(6));
+        let term = kitty_in_tmux(40, "RGB");
+
+        let InlineImage::Lines(lines) = image.render_inline(&term).unwrap() else {
+            panic!("placeholders render as lines of text");
+        };
+
+        let (upload, first_row) = split_after_envelopes(&lines[0]);
+        assert!(upload.starts_with("\x1bPtmux;\x1b\x1b_G"), "{upload:?}");
+        assert!(upload.contains(",U=1,"), "{upload:?}");
+        let first_chunk = upload.split("\x1bPtmux;").nth(1).unwrap();
+        let id = param(first_chunk, "i");
+        assert!((1..=0xFF_FFFF).contains(&id), "a 24-bit nonzero ID: {id}");
+        assert!(first_row.starts_with(&id_color(id)), "the grid draws that ID: {first_row:?}");
+        let rows = param(first_chunk, "r");
+        assert_eq!(lines.len(), rows as usize);
+        for line in std::iter::once(first_row).chain(lines[1..].iter().map(String::as_str)) {
+            assert!(!line.contains("tmux;"), "{line:?}");
+            assert_eq!(line.matches('\u{10EEEE}').count(), 6, "{line:?}");
+            assert!(line.ends_with("\x1b[39m"), "{line:?}");
+            assert_eq!(crate::utils::block_constraint::visible_width(line), 6, "{line:?}");
+        }
+        assert_eq!(
+            crate::utils::block_constraint::visible_width(&lines[0]),
+            6,
+            "the wrapped upload takes no columns: {:?}",
+            lines[0]
+        );
+    }
+
+    #[test]
+    fn without_rgb_the_same_client_gets_an_ordinary_overlay() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path)
+            .unwrap()
+            .with_width(ImageWidth::Characters(10));
+        let term = kitty_in_tmux(80, "title");
+        assert_eq!(term.graphics_route.placement, GraphicsPlacement::Ordinary);
+
+        let (sequence, _) = image.render_inline(&term).unwrap().into_overlay();
+        assert!(!sequence.contains("U=1"), "{sequence:?}");
+        assert!(!sequence.contains('\u{10EEEE}'), "{sequence:?}");
+        let ImageOutput::Pixels(output) = image.render_with_route(&term).unwrap() else {
+            panic!("an ordinary tmux route draws pixels");
+        };
+        assert!(output.starts_with("\x1b[s"), "{output:?}");
+        assert!(!output.contains("U=1"), "{output:?}");
+        let first = output.split("\x1bPtmux;").nth(1).expect("a wrapped upload");
+        assert!(first.contains("q=2,"), "quiet: {first:?}");
+        assert_ne!(param(first, "i"), 0, "{first:?}");
+    }
+
+    #[test]
+    fn a_grid_wider_than_the_diacritic_table_places_the_image_ordinarily() {
+        let (_dir, file_path) = create_temp_test_image();
+        let image = TerminalImage::new(&file_path)
+            .unwrap()
+            .with_width(ImageWidth::Characters(300));
+        let term = kitty_in_tmux(400, "RGB");
+        assert_eq!(term.graphics_route.placement, GraphicsPlacement::Placeholders);
+
+        let ImageOutput::Pixels(output) = image.render_with_route(&term).unwrap() else {
+            panic!("the ordinary placement still draws pixels");
+        };
+        assert!(output.starts_with("\x1b[s"), "ordinary overlay: {output:?}");
+        assert!(!output.contains("U=1"), "{output:?}");
+        assert!(output.contains(",c=300,"), "{output:?}");
+        let (sequence, _) = image.render_inline(&term).unwrap().into_overlay();
+        assert!(!sequence.contains("U=1"), "{sequence:?}");
+    }
 }

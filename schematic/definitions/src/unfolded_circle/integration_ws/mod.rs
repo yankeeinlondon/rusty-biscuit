@@ -36,59 +36,50 @@ mod types;
 pub use types::*;
 
 use schematic_define::websocket::{
-    ConnectionLifecycle, MessageDirection, MessageSchema, WebSocketApi, WebSocketEndpoint,
+    AuthFlowHints, ConnectionLifecycle, CorrelationHints, EndpointRole, MessageDirection,
+    MessageSchema, WebSocketApi, WebSocketEndpoint, WebSocketEndpointHints,
 };
-use schematic_define::{AuthStrategy, Schema};
+use schematic_define::{ApiKeyEnv, AuthStrategy, EnvList, EnvMapping, Schema};
+
+fn message(name: &str, direction: MessageDirection, schema: &str, description: &str) -> MessageSchema {
+    MessageSchema::new(name, direction, Schema::new(schema)).describe(description)
+}
 
 /// Build the Unfolded Circle Integration WebSocket API definition.
+///
+/// The integration driver is the WebSocket server and the remote is the
+/// client, so the endpoint's role is [`EndpointRole::Both`]: drivers use the
+/// generated host. Directions are client-relative: `Client` messages are what
+/// the remote sends to the driver.
 #[must_use]
-#[allow(clippy::vec_init_then_push)]
 pub fn define_unfolded_circle_integration_ws_api() -> WebSocketApi {
-    let mut messages = Vec::with_capacity(6);
-    messages.push(MessageSchema {
-        name: "RequestEnvelope".to_string(),
-        direction: MessageDirection::Bidirectional,
-        schema: Schema::new("IntegrationWsRequestEnvelope"),
-        description: Some(
-            "Bidirectional request envelope used by both remote-client and driver-host roles."
-                .to_string(),
-        ),
-    });
-    messages.push(MessageSchema {
-        name: "ResponseEnvelope".to_string(),
-        direction: MessageDirection::Bidirectional,
-        schema: Schema::new("IntegrationWsResponseEnvelope"),
-        description: Some(
-            "Bidirectional response envelope for request correlation (`req_id`).".to_string(),
-        ),
-    });
-    messages.push(MessageSchema {
-        name: "EventEnvelope".to_string(),
-        direction: MessageDirection::Bidirectional,
-        schema: Schema::new("IntegrationWsEventEnvelope"),
-        description: Some(
-            "Bidirectional asynchronous event envelope for integration entity lifecycle events."
-                .to_string(),
-        ),
-    });
-    messages.push(MessageSchema {
-        name: "AuthRequired".to_string(),
-        direction: MessageDirection::Bidirectional,
-        schema: Schema::new("IntegrationWsAuthRequired"),
-        description: Some("Auth challenge message (`msg=auth_required`).".to_string()),
-    });
-    messages.push(MessageSchema {
-        name: "Auth".to_string(),
-        direction: MessageDirection::Bidirectional,
-        schema: Schema::new("IntegrationWsAuthMessage"),
-        description: Some("Message-based authentication request (`msg=auth`).".to_string()),
-    });
-    messages.push(MessageSchema {
-        name: "Authentication".to_string(),
-        direction: MessageDirection::Bidirectional,
-        schema: Schema::new("IntegrationWsAuthenticationMessage"),
-        description: Some("Authentication result message (`msg=authentication`).".to_string()),
-    });
+    use MessageDirection::{Bidirectional, Client, Server};
+    let messages = vec![
+        message("RequestEnvelope", Client, "IntegrationWsRequestEnvelope",
+            "Request envelope `{kind=req,id,msg,msg_data}` sent by the remote to the driver.")
+            .matches("kind", "req")
+            .responds_with("ResponseEnvelope"),
+        message("ResponseEnvelope", Server, "IntegrationWsResponseEnvelope",
+            "Driver response envelope; `req_id` echoes the request `id`.")
+            .fallback(),
+        message("EventEnvelope", Bidirectional, "IntegrationWsEventEnvelope",
+            "Asynchronous event envelope (`kind=event`): the driver pushes entity and device \
+             state, the remote sends connection and setup events.")
+            .matches("kind", "event"),
+        message("AuthRequired", Server, "IntegrationWsAuthRequired",
+            "Driver challenge for message-based auth (`msg=auth_required`).")
+            .matches("kind", "event")
+            .matches("msg", "auth_required"),
+        message("Auth", Client, "IntegrationWsAuthMessage",
+            "Remote's message-based authentication request (`msg=auth`).")
+            .matches("kind", "req")
+            .matches("msg", "auth")
+            .responds_with("Authentication"),
+        message("Authentication", Server, "IntegrationWsAuthenticationMessage",
+            "Driver's authentication result (`msg=authentication`); `code` is the outcome.")
+            .matches("kind", "resp")
+            .matches("msg", "authentication"),
+    ];
 
     WebSocketApi {
         name: "UnfoldedCircleIntegrationWs".to_string(),
@@ -99,16 +90,41 @@ pub fn define_unfolded_circle_integration_ws_api() -> WebSocketApi {
             header: "auth-token".to_string(),
             value_prefix: None,
         },
+        auth_policy: None,
         env_auth: vec!["UCR_INTEGRATION_TOKEN".to_string()],
+        env_mapping: Some(EnvMapping {
+            api_key: Some(ApiKeyEnv {
+                names: EnvList::single("UCR_INTEGRATION_TOKEN"),
+                header: "auth-token".to_string(),
+            }),
+            ..EnvMapping::default()
+        }),
+        headers: vec![],
         version: None,
         endpoints: vec![WebSocketEndpoint {
             id: "Integration".to_string(),
             path: "/intg".to_string(),
-            description: "Integration driver channel with role inversion support (driver-as-server). This endpoint is intentionally bidirectional for command handling and outbound event push.".to_string(),
-            connection_params: vec![],
+            description: "Integration driver channel. The driver hosts it and the remote connects; requests flow from the remote, responses and entity events from the driver.".to_string(),
+            role: EndpointRole::Both,
             lifecycle: ConnectionLifecycle::default(),
             messages,
-            runtime: None,
+            runtime: Some(WebSocketEndpointHints {
+                correlation: Some(CorrelationHints {
+                    request_id_field: "id".to_string(),
+                    response_id_field: "req_id".to_string(),
+                    default_timeout_secs: 30,
+                }),
+                // Sent only when the driver does not accept the `auth-token`
+                // handshake header.
+                auth_flow: Some(AuthFlowHints {
+                    challenge_message: "auth_required".to_string(),
+                    auth_request_schema: "IntegrationWsAuthMessage".to_string(),
+                    success_indicator: Some("authentication".to_string()),
+                    failure_indicator: None,
+                }),
+                heartbeat: None,
+            }),
+            ..WebSocketEndpoint::default()
         }],
         runtime: None,
     }
@@ -134,20 +150,26 @@ mod tests {
     }
 
     #[test]
-    fn integration_ws_channel_is_bidirectional_and_has_auth_messages() {
+    fn integration_ws_declares_both_roles_and_true_directions() {
+        use MessageDirection::{Bidirectional, Client, Server};
         let api = define_unfolded_circle_integration_ws_api();
-        let messages = &api.endpoints[0].messages;
-        assert!(
-            messages
-                .iter()
-                .all(|msg| msg.direction == MessageDirection::Bidirectional)
+        let endpoint = &api.endpoints[0];
+        assert_eq!(endpoint.role, EndpointRole::Both);
+        let directions: Vec<(&str, MessageDirection)> = endpoint
+            .messages
+            .iter()
+            .map(|m| (m.name.as_str(), m.direction))
+            .collect();
+        assert_eq!(
+            directions,
+            [
+                ("RequestEnvelope", Client),
+                ("ResponseEnvelope", Server),
+                ("EventEnvelope", Bidirectional),
+                ("AuthRequired", Server),
+                ("Auth", Client),
+                ("Authentication", Server),
+            ]
         );
-        let names: Vec<&str> = messages.iter().map(|m| m.name.as_str()).collect();
-        assert!(names.contains(&"RequestEnvelope"));
-        assert!(names.contains(&"ResponseEnvelope"));
-        assert!(names.contains(&"EventEnvelope"));
-        assert!(names.contains(&"AuthRequired"));
-        assert!(names.contains(&"Auth"));
-        assert!(names.contains(&"Authentication"));
     }
 }

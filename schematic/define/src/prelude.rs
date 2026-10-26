@@ -9,27 +9,11 @@
 //! ```
 //! use schematic_define::prelude::*;
 //!
-//! let api = RestApi {
-//!     name: "MyAPI".to_string(),
-//!     description: "My API".to_string(),
-//!     base_url: "https://api.example.com".to_string(),
-//!     docs_url: None,
-//!     auth: AuthStrategy::BearerToken { header: None },
-//!     auth_policy: None,
-//!     env_auth: vec!["API_KEY".to_string()],
-//!     env_username: None,
-//!     headers: vec![],
-//!     endpoints: vec![],
-//!     module_path: None,
-//!     request_suffix: None,
-//!     version: None,
-//!     env_mapping: None,
-//!     cross_origin: CrossOrigin::default(),
-//!     request_id_header: None,
-//!     secret_names: vec![],
-//!     default_pagination: None,
-//!     pagination_exceptions: vec![],
-//! };
+//! let ctx = DefinitionContext::types_in("crate::types");
+//! let api = RestApi::builder(&ctx, "MyAPI", "https://api.example.com")
+//!     .describes("My API")
+//!     .bearer_env(["API_KEY"])
+//!     .build().unwrap();
 //! ```
 //!
 //! ### WebSocket API
@@ -43,28 +27,42 @@
 //!     base_url: "wss://stream.example.com".to_string(),
 //!     docs_url: None,
 //!     auth: AuthStrategy::BearerToken { header: None },
+//!     auth_policy: None,
 //!     env_auth: vec!["STREAM_KEY".to_string()],
+//!     env_mapping: None,
+//!     headers: vec![],
 //!     version: None,
 //!     endpoints: vec![],
 //!     runtime: None,
 //! };
 //! ```
 
-pub use crate::auth::{AuthMethod, AuthPolicy, AuthStrategy, EnvAuthStrategy, UpdateStrategy};
+pub use crate::auth::{
+    AuthMethod, AuthPolicy, AuthStrategy, EndpointAuth, EnvAuthStrategy, UpdateStrategy,
+};
+pub use crate::metadata::{
+    Backoff, MetadataError, RateLimit, ResetUnit, RetryGuidance, StatusSelector,
+};
 pub use crate::cross_origin::CrossOrigin;
-pub use crate::oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
+pub use crate::oauth::{
+    AuthorizationCodeGrant, ClientCredentialsGrant, DeviceCodeGrant, OAuth2ClientAuthMethod,
+    OAuth2Config, OAuth2ConfigError, OAuth2GrantType, PkceRequirement,
+};
 pub use crate::pagination::{
     Carry, Collection, CursorLeg, CursorSource, FollowUp, InputParam, KeepAlive, LinkSource,
-    MoreSignal, PageSize, PaginationException, PaginationResponse, PaginationStyle, Partition,
+    MoreSignal, PageSize, Partition,
     Session, SessionStep, Strategy, ValueSource,
 };
 pub use crate::params::EndpointParams;
 pub use crate::request::{ApiRequest, FormField, FormFieldKind};
-pub use crate::response::ApiResponse;
+pub use crate::response::{ResponseShape, StreamEnd, StreamFraming, SuccessShape};
 pub use crate::schema::{Schema, SchemaObject};
-pub use crate::types::{Endpoint, RestApi, RestMethod};
+pub use crate::types::{Endpoint, ResolvedEndpointAuth, RestApi, RestMethod};
 pub use crate::websocket::{
-    AuthFlowHints, ConnectionLifecycle, ConnectionParam, CorrelationHints, FrameFormat,
-    HeartbeatHints, MessageDirection, MessageSchema, ParamType, RequestIdType, WebSocketApi,
-    WebSocketEndpoint, WebSocketEndpointHints, WebSocketRuntimeHints,
+    AuthFlowHints, ConnectionLifecycle, CorrelationHints, EndpointRole, FrameFormat,
+    HeartbeatHints, MessageDirection, MessageSchema, MessageSelector, RequestIdType,
+    WebSocketApi, WebSocketEndpoint, WebSocketEndpointHints, WebSocketRuntimeHints,
 };
+
+pub use crate::{DefinitionContext, DefinitionError, Registration, TypeDesc, Success, ErrorSet, EndpointBuilder, RestApiBuilder};
+pub use crate::{AddressRule, ErrorShape, GraphQlOperation, StatusMatch};

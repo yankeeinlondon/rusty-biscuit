@@ -9,6 +9,46 @@
       "key": "baseUrl",
       "value": "http://192.168.1.1:9529",
       "description": "Base URL for all requests"
+    },
+    {
+      "key": "query_key",
+      "value": "",
+      "description": "Value of the `key` query parameter"
+    },
+    {
+      "key": "query_text",
+      "value": "",
+      "description": "Value of the `text` query parameter"
+    },
+    {
+      "key": "query_time",
+      "value": "",
+      "description": "Value of the `time` query parameter"
+    },
+    {
+      "key": "query_tag",
+      "value": "",
+      "description": "Value of the `tag` query parameter"
+    },
+    {
+      "key": "query_volume",
+      "value": "",
+      "description": "Value of the `volume` query parameter"
+    },
+    {
+      "key": "query_isMute",
+      "value": "",
+      "description": "Value of the `isMute` query parameter"
+    },
+    {
+      "key": "query_index",
+      "value": "",
+      "description": "Value of the `index` query parameter"
+    },
+    {
+      "key": "query_openType",
+      "value": "",
+      "description": "Value of the `openType` query parameter"
     }
   ],
   "auth": {
@@ -34,7 +74,21 @@
               ]
             },
             "description": "Get current screen brightness level (community-discovered)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"currentValue\": 0\n}"
+            }
+          ]
         },
         {
           "name": "SystemSetScreenBrightness",
@@ -53,12 +107,27 @@
               "query": [
                 {
                   "key": "index",
+                  "value": "{{query_index}}",
                   "description": "Brightness level index"
                 }
               ]
             },
             "description": "Set screen brightness level (community-discovered)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "SystemGetKnobBrightness",
@@ -76,7 +145,21 @@
               ]
             },
             "description": "Get current knob LED brightness level (community-discovered)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"currentValue\": 0\n}"
+            }
+          ]
         },
         {
           "name": "SystemSetKnobBrightness",
@@ -95,12 +178,27 @@
               "query": [
                 {
                   "key": "index",
+                  "value": "{{query_index}}",
                   "description": "Brightness level index"
                 }
               ]
             },
             "description": "Set knob LED brightness level (community-discovered)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "SystemGetVuModeList",
@@ -118,7 +216,21 @@
               ]
             },
             "description": "List available VU meter display modes (community-discovered)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": [],\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "SystemSetVuMode",
@@ -137,12 +249,27 @@
               "query": [
                 {
                   "key": "index",
+                  "value": "{{query_index}}",
                   "description": "VU mode index from getVUModeList"
                 }
               ]
             },
             "description": "Set the VU meter display mode (community-discovered)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "SystemGetSpectrumModeList",
@@ -160,7 +287,21 @@
               ]
             },
             "description": "List available spectrum display modes (community-discovered)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": [],\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "SystemSetSpectrumMode",
@@ -179,12 +320,27 @@
               "query": [
                 {
                   "key": "index",
+                  "value": "{{query_index}}",
                   "description": "Spectrum mode index from getSpPlayModeList"
                 }
               ]
             },
             "description": "Set the spectrum display mode (community-discovered)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": 0\n}"
+            }
+          ]
         }
       ]
     },
@@ -206,7 +362,21 @@
               ]
             },
             "description": "Get device model, firmware, and network information"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"firmware\": \"string\",\n  \"ip\": \"string\",\n  \"model\": \"string\",\n  \"net_mac\": \"string\",\n  \"status\": 0,\n  \"wif_mac\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "RemoteSendKey",
@@ -225,12 +395,27 @@
               "query": [
                 {
                   "key": "key",
+                  "value": "{{query_key}}",
                   "description": "Remote key constant (e.g., Key.VolumeUp, Key.MediaPlay, Key.PowerOff)"
                 }
               ]
             },
             "description": "Send a remote control key command to the device"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "RemoteInputText",
@@ -249,12 +434,27 @@
               "query": [
                 {
                   "key": "text",
+                  "value": "{{query_text}}",
                   "description": "Text string to input"
                 }
               ]
             },
             "description": "Send text input to the device"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": 0\n}"
+            }
+          ]
         }
       ]
     },
@@ -277,7 +477,21 @@
               ]
             },
             "description": "Get current playback state, track info, and volume"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"state\": 0\n}"
+            }
+          ]
         },
         {
           "name": "MusicPlayOrPause",
@@ -295,7 +509,21 @@
               ]
             },
             "description": "Toggle play/pause on the current track"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "MusicPlayNext",
@@ -313,7 +541,21 @@
               ]
             },
             "description": "Skip to the next track"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "MusicPlayLast",
@@ -331,7 +573,21 @@
               ]
             },
             "description": "Go back to the previous track"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "MusicSeekTo",
@@ -350,12 +606,27 @@
               "query": [
                 {
                   "key": "time",
+                  "value": "{{query_time}}",
                   "description": "Target position in milliseconds"
                 }
               ]
             },
             "description": "Seek to a position in the current track"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "MusicGetInputOutputList",
@@ -373,7 +644,21 @@
               ]
             },
             "description": "List available audio inputs and outputs"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"inputData\": [],\n  \"outputData\": [],\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "MusicSetInput",
@@ -392,12 +677,27 @@
               "query": [
                 {
                   "key": "tag",
+                  "value": "{{query_tag}}",
                   "description": "Input tag from getInputAndOutputList"
                 }
               ]
             },
             "description": "Set the active audio input"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"inputData\": [],\n  \"outputData\": [],\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "MusicSetOutput",
@@ -416,12 +716,27 @@
               "query": [
                 {
                   "key": "tag",
+                  "value": "{{query_tag}}",
                   "description": "Output tag from getInputAndOutputList"
                 }
               ]
             },
             "description": "Set the active audio output"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"inputData\": [],\n  \"outputData\": [],\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "MusicSetVolume",
@@ -440,12 +755,27 @@
               "query": [
                 {
                   "key": "volume",
+                  "value": "{{query_volume}}",
                   "description": "Volume level (0 to maxVolume)"
                 }
               ]
             },
             "description": "Set the absolute volume level"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "MusicSetMute",
@@ -464,12 +794,27 @@
               "query": [
                 {
                   "key": "isMute",
+                  "value": "{{query_isMute}}",
                   "description": "Mute state: 0 = unmuted, 1 = muted"
                 }
               ]
             },
             "description": "Set or clear mute state"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "PowerGetOptions",
@@ -487,7 +832,21 @@
               ]
             },
             "description": "Get available power options (shutdown, reboot, etc.)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": [],\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "PowerSetOption",
@@ -506,12 +865,27 @@
               "query": [
                 {
                   "key": "tag",
+                  "value": "{{query_tag}}",
                   "description": "Power option tag (poweroff, reboot, screen, timeshutdown)"
                 }
               ]
             },
             "description": "Execute a power action (poweroff, reboot, screen, timeshutdown)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": 0\n}"
+            }
+          ]
         },
         {
           "name": "SystemChangeVuDisplay",
@@ -530,12 +904,27 @@
               "query": [
                 {
                   "key": "openType",
+                  "value": "{{query_openType}}",
                   "description": "Display open type"
                 }
               ]
             },
             "description": "Toggle VU display open/close (community-discovered)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": 0\n}"
+            }
+          ]
         }
       ]
     }

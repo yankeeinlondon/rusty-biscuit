@@ -1,8 +1,28 @@
 # OpenAPI crates for Schematic
 
+This page records the survey of Rust OpenAPI crates that shaped Schematic's
+OpenAPI support, and what Schematic uses today.
+
+## What Schematic uses
+
+- **`openapiv3`** (OpenAPI 3.0.x AST) is the only OpenAPI crate. Export
+  (`schematic_define::openapi::export`) builds an `openapiv3::OpenAPI` from a
+  `RestApi` and serializes it; import (`OpenApiImport`) parses a document into
+  the same AST. Both live behind the `schematic-define/openapi` feature, and
+  `schematic-gen` enables it. `skip_serializing_defaults` is not enabled.
+- **Models are Schematic's own.** The importer extracts a `ModelCatalog` from
+  `components.schemas` and the generator emits the Rust types;
+  `openapi-model-generator` and `progenitor` are not used.
+- **Component schemas come from `schemars`**, converted to OpenAPI 3.0.3 by
+  the exporter (see [Exporting OpenAPI](export-openapi.md#how-component-schemas-convert)).
+- **No AsyncAPI or Postman crate is used.** An AsyncAPI document is built as
+  a `serde_json` value and a Postman collection through `schematic-gen`'s own
+  serde types. `jsonschema` validates the Postman example values (see
+  [Postman example values](export-postman.md#example-values)).
+
 ## Schematic refresher (from repo READMEs)
 
-- schematic-define: data-driven REST/WebSocket API definition types (RestApi, Endpoint, AuthStrategy, ApiRequest/ApiResponse, Schema).
+- schematic-define: data-driven REST/WebSocket API definition types (RestApi, Endpoint, AuthStrategy, ApiRequest, SuccessShape, TypeRef, SchemaComponent).
 - schematic-definitions: concrete API definitions that use schematic-define primitives.
 - schematic-gen: generator CLI/library that transforms definitions into Rust client code; validates collisions and formats output.
 - schematic-schema: generated client crate consumed by external libs.
@@ -230,6 +250,10 @@ Functionality
 
 ## Recommendations for Schematic
 
+These are the survey's recommendations. Export followed recommendation 1;
+import followed recommendation 2 with Schematic's own model extraction rather
+than `openapi-model-generator` (see [What Schematic uses](#what-schematic-uses)).
+
 ### 1) Export OpenAPI during generation stage
 Best choice: openapiv3.
 
@@ -255,7 +279,7 @@ Why
 How it would fit
 
 - Parse spec to `openapiv3::OpenAPI`.
-- Convert paths/operations to RestApi + Endpoint, map parameters/body/response to ApiRequest and ApiResponse.
+- Convert paths/operations to RestApi + Endpoint, map parameters/body/responses to ApiRequest, success shapes, and error entries.
 - Generate schema types either via custom schema extraction (staying in Schematic) or via openapi-model-generator for DTOs, then reference those types in the generated Schema values.
 
 Fallback option

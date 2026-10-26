@@ -9,6 +9,11 @@
       "key": "baseUrl",
       "value": "http://localhost:11434",
       "description": "Base URL for OllamaNative"
+    },
+    {
+      "key": "baseUrl2",
+      "value": "http://localhost:11434",
+      "description": "Base URL for OllamaOpenAI"
     }
   ],
   "auth": {
@@ -34,15 +39,41 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"model\": \"string\",\n  \"prompt\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Generate text completion from a prompt (streaming NDJSON by default)"
-          }
+            "description": "Generate text completion from a prompt (streaming NDJSON by default)\n\nResponse content type: `application/x-ndjson`."
+          },
+          "response": [
+            {
+              "name": "200 OK (application/x-ndjson)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/x-ndjson"
+                }
+              ],
+              "body": "{\"error\":\"string\"}\n{\"done\":true,\"error\":\"string\"}\n"
+            },
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"created_at\": \"string\",\n  \"done\": false,\n  \"model\": \"string\",\n  \"response\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "Chat",
@@ -60,15 +91,41 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"messages\": [],\n  \"model\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Generate chat completion from messages (streaming NDJSON by default)"
-          }
+            "description": "Generate chat completion from messages (streaming NDJSON by default)\n\nResponse content type: `application/x-ndjson`."
+          },
+          "response": [
+            {
+              "name": "200 OK (application/x-ndjson)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/x-ndjson"
+                }
+              ],
+              "body": "{\"error\":\"string\"}\n{\"done\":true,\"error\":\"string\"}\n"
+            },
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"created_at\": \"string\",\n  \"done\": false,\n  \"message\": {\n    \"content\": \"string\",\n    \"role\": \"string\"\n  },\n  \"model\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "Embeddings",
@@ -86,7 +143,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"model\": \"string\",\n  \"prompt\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -94,7 +151,21 @@
               }
             },
             "description": "Generate embeddings for text"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"embedding\": []\n}"
+            }
+          ]
         },
         {
           "name": "ListModels",
@@ -111,7 +182,21 @@
               ]
             },
             "description": "List locally available models"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"models\": []\n}"
+            }
+          ]
         },
         {
           "name": "ShowModel",
@@ -129,7 +214,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"name\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -137,7 +222,21 @@
               }
             },
             "description": "Show detailed information about a model"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{}"
+            }
+          ]
         },
         {
           "name": "PullModel",
@@ -155,15 +254,41 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"name\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Pull a model from the Ollama registry (streaming progress by default)"
-          }
+            "description": "Pull a model from the Ollama registry (streaming progress by default)\n\nResponse content type: `application/x-ndjson`."
+          },
+          "response": [
+            {
+              "name": "200 OK (application/x-ndjson)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/x-ndjson"
+                }
+              ],
+              "body": "{\"error\":\"string\"}\n{\"error\":\"string\",\"status\":\"success\"}\n"
+            },
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "PushModel",
@@ -181,15 +306,41 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"name\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Push a model to the Ollama registry (streaming progress by default)"
-          }
+            "description": "Push a model to the Ollama registry (streaming progress by default)\n\nResponse content type: `application/x-ndjson`."
+          },
+          "response": [
+            {
+              "name": "200 OK (application/x-ndjson)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/x-ndjson"
+                }
+              ],
+              "body": "{\"error\":\"string\"}\n{\"error\":\"string\",\"status\":\"success\"}\n"
+            },
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "CopyModel",
@@ -207,7 +358,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"destination\": \"string\",\n  \"source\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -215,7 +366,14 @@
               }
             },
             "description": "Copy a model to a new name"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "DeleteModel",
@@ -233,7 +391,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"name\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -241,7 +399,14 @@
               }
             },
             "description": "Delete a model"
-          }
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204
+            }
+          ]
         },
         {
           "name": "CreateModel",
@@ -259,15 +424,41 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"name\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Create a model from a Modelfile (streaming progress by default)"
-          }
+            "description": "Create a model from a Modelfile (streaming progress by default)\n\nResponse content type: `application/x-ndjson`."
+          },
+          "response": [
+            {
+              "name": "200 OK (application/x-ndjson)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/x-ndjson"
+                }
+              ],
+              "body": "{\"error\":\"string\"}\n{\"error\":\"string\",\"status\":\"success\"}\n"
+            },
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "ListRunningModels",
@@ -284,7 +475,21 @@
               ]
             },
             "description": "List models currently loaded in memory"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"models\": []\n}"
+            }
+          ]
         }
       ]
     },
@@ -296,9 +501,9 @@
           "request": {
             "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/v1/chat/completions",
+              "raw": "{{baseUrl2}}/v1/chat/completions",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "v1",
@@ -308,7 +513,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"messages\": [],\n  \"model\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -316,7 +521,33 @@
               }
             },
             "description": "Create chat completion (SSE streaming when stream=true)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"choices\": [],\n  \"created\": 0,\n  \"id\": \"string\",\n  \"model\": \"string\",\n  \"object\": \"string\"\n}"
+            },
+            {
+              "name": "200 OK (text/event-stream)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/event-stream"
+                }
+              ],
+              "body": "data: {\"choices\":[],\"created\":0,\"id\":\"string\",\"model\":\"string\",\"object\":\"string\"}\n\ndata: [DONE]\n\n"
+            }
+          ]
         }
       ]
     },
@@ -328,9 +559,9 @@
           "request": {
             "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/v1/completions",
+              "raw": "{{baseUrl2}}/v1/completions",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "v1",
@@ -339,7 +570,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"model\": \"string\",\n  \"prompt\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -347,7 +578,33 @@
               }
             },
             "description": "Create text completion (SSE streaming when stream=true)"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"choices\": [],\n  \"created\": 0,\n  \"id\": \"string\",\n  \"model\": \"string\",\n  \"object\": \"string\"\n}"
+            },
+            {
+              "name": "200 OK (text/event-stream)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/event-stream"
+                }
+              ],
+              "body": "data: {\"choices\":[],\"created\":0,\"id\":\"string\",\"model\":\"string\",\"object\":\"string\"}\n\ndata: [DONE]\n\n"
+            }
+          ]
         }
       ]
     },
@@ -359,9 +616,9 @@
           "request": {
             "method": "POST",
             "url": {
-              "raw": "{{baseUrl}}/v1/embeddings",
+              "raw": "{{baseUrl2}}/v1/embeddings",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "v1",
@@ -370,7 +627,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"input\": \"string\",\n  \"model\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -378,7 +635,21 @@
               }
             },
             "description": "Generate embeddings for text"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": [],\n  \"model\": \"string\",\n  \"object\": \"string\"\n}"
+            }
+          ]
         }
       ]
     },
@@ -390,9 +661,9 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/v1/models",
+              "raw": "{{baseUrl2}}/v1/models",
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "v1",
@@ -400,7 +671,21 @@
               ]
             },
             "description": "List available models in OpenAI format"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": [],\n  \"object\": \"string\"\n}"
+            }
+          ]
         }
       ]
     }

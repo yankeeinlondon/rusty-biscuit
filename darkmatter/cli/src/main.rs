@@ -179,7 +179,15 @@ fn run() -> Result<()> {
     }
 
     // Run as implicit render using top-level args
-    run_render(cli.input.as_ref(), cli.output, cli.show, None, &cli, &request)?;
+    run_render(
+        cli.input.as_ref(),
+        cli.output,
+        cli.show,
+        None,
+        &cli.features,
+        &cli,
+        &request,
+    )?;
 
     Ok(())
 }

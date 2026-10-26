@@ -10,11 +10,8 @@ All components implement the [`Renderable`](../../lib/src/components/renderable.
 | [Compose](./compose.md) | Combines multiple renderable parts into a single output |
 | [Csv](./csv.md) | Renders CSV data into a Table for the terminal |
 | [FileSystem](./file_system.md) | File/directory tree rendering with icons and gitignore awareness |
-| [GitGraph](./git_graph.md) | Git branch topology as a Mermaid `gitGraph`, fitted to the terminal by trimming |
-| [GraphExpression](./graph_expression.md) | Graph diagrams via biscuit-visualized with terminal image display |
 | [InlineContent](./inline_content.md) | Inline concatenation of items without newlines |
 | [OrderedList / UnorderedList](./list.md) | Numbered and bullet-point lists with nested renderable support |
-| [MermaidDiagram](./mermaid_diagram.md) | Mermaid diagram rendering via biscuit-visualized |
 | [PadLeft](./pad_left.md) | Right-align content by padding with spaces on the left |
 | [PadRight](./pad_right.md) | Left-align content by padding with spaces on the right |
 | [Progress](./progress.md) | Horizontal progress bar with configurable width, characters, and colors |
@@ -28,3 +25,5 @@ All components implement the [`Renderable`](../../lib/src/components/renderable.
 | [TextBlock](./text_block.md) | Uniformly styled text block with color, weight, and underline support |
 | [Todo](./todo.md) | Task items with checkboxes (open, in-progress, completed, blocked, cancelled) |
 | [TwoColumn](./two_column.md) | Side-by-side two-column layout with cursor-based positioning |
+
+Diagram components are part of `biscuit-visualized` (its `terminal` feature) and draw through `TerminalImage`: [MermaidDiagram](../../../biscuit-visualized/docs/components/mermaid_diagram.md), [GraphExpression](../../../biscuit-visualized/docs/components/graph_expression.md), and [GitGraph](../../../biscuit-visualized/docs/components/git_graph.md).

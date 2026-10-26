@@ -175,15 +175,26 @@ fn header_document(fixture: &CliProcessFixture, file: &str, name: Option<&str>) 
     document
 }
 
-#[test]
-fn header_document_label_and_model_render_exactly_as_authored() {
-    let fixture = CliProcessFixture::named("header-label-model");
-    // The `Model` row shows a model only once a provider is resolved.
-    write_dry_run_provider_stub(fixture.bin_dir(), "claude");
-    let from_file = header_document(&fixture, UNDERSCORED_FILE, None);
-    let named = header_document(&fixture, "named.md", Some(MARKUP_NAME));
+mod header_document_label_and_model_render_exactly_as_authored {
+    use super::*;
 
-    for columns in ["200", "40"] {
+    #[test]
+    fn at_200_columns() {
+        assert_label_and_model_render_as_authored("200");
+    }
+
+    #[test]
+    fn at_40_columns() {
+        assert_label_and_model_render_as_authored("40");
+    }
+
+    fn assert_label_and_model_render_as_authored(columns: &str) {
+        let fixture = CliProcessFixture::named("header-label-model");
+        // The `Model` row shows a model only once a provider is resolved.
+        write_dry_run_provider_stub(fixture.bin_dir(), "claude");
+        let from_file = header_document(&fixture, UNDERSCORED_FILE, None);
+        let named = header_document(&fixture, "named.md", Some(MARKUP_NAME));
+
         for (document, label) in [(&from_file, UNDERSCORED_FILE), (&named, MARKUP_NAME)] {
             let (_, stderr) = dry_run_with(&fixture, document, columns, &["--claude"]);
             let words = |cell: Vec<String>| cell.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");

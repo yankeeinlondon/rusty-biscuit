@@ -23,7 +23,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<ModelInfo>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ModelInfo"
+                  }
                 }
               }
             }
@@ -32,8 +35,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<ModelInfo>"
+              "Array": {
+                "Named": "ModelInfo"
+              }
             }
           }
         }
@@ -57,10 +61,10 @@
           }
         },
         "x-schematic": {
+          "path_template": "/models/{+repo_id}",
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "ModelInfo"
+              "Named": "ModelInfo"
             }
           }
         }
@@ -88,17 +92,22 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<RepoFile>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RepoFile"
+                  }
                 }
               }
             }
           }
         },
         "x-schematic": {
+          "path_template": "/models/{+repo_id}/tree/{revision}",
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<RepoFile>"
+              "Array": {
+                "Named": "RepoFile"
+              }
             }
           }
         }
@@ -142,10 +151,10 @@
           }
         },
         "x-schematic": {
+          "path_template": "/models/{+repo_id}/blob/{revision}/{+path}",
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "FileMetadata"
+              "Named": "FileMetadata"
             }
           }
         }
@@ -191,17 +200,22 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<Commit>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Commit"
+                  }
                 }
               }
             }
           }
         },
         "x-schematic": {
+          "path_template": "/models/{+repo_id}/commits/{revision}",
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<Commit>"
+              "Array": {
+                "Named": "Commit"
+              }
             }
           }
         }
@@ -245,6 +259,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/models/{+repo_id}/resolve/{revision}/README.md",
           "response": "Text"
         }
       },
@@ -287,10 +302,10 @@
           }
         },
         "x-schematic": {
+          "path_template": "/models/{+repo_id}/discussions",
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "DiscussionList"
+              "Named": "DiscussionList"
             }
           }
         }
@@ -325,6 +340,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/models/{+repo_id}/resolve/{revision}/model_card.md",
           "response": "Text"
         }
       },
@@ -360,7 +376,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<DatasetInfo>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DatasetInfo"
+                  }
                 }
               }
             }
@@ -369,8 +388,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<DatasetInfo>"
+              "Array": {
+                "Named": "DatasetInfo"
+              }
             }
           }
         }
@@ -394,10 +414,10 @@
           }
         },
         "x-schematic": {
+          "path_template": "/datasets/{+repo_id}",
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "DatasetInfo"
+              "Named": "DatasetInfo"
             }
           }
         }
@@ -425,17 +445,22 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<RepoFile>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RepoFile"
+                  }
                 }
               }
             }
           }
         },
         "x-schematic": {
+          "path_template": "/datasets/{+repo_id}/tree/{revision}",
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<RepoFile>"
+              "Array": {
+                "Named": "RepoFile"
+              }
             }
           }
         }
@@ -479,10 +504,10 @@
           }
         },
         "x-schematic": {
+          "path_template": "/datasets/{+repo_id}/blob/{revision}/{+path}",
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "FileMetadata"
+              "Named": "FileMetadata"
             }
           }
         }
@@ -528,17 +553,22 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<Commit>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Commit"
+                  }
                 }
               }
             }
           }
         },
         "x-schematic": {
+          "path_template": "/datasets/{+repo_id}/commits/{revision}",
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<Commit>"
+              "Array": {
+                "Named": "Commit"
+              }
             }
           }
         }
@@ -582,6 +612,7 @@
           }
         },
         "x-schematic": {
+          "path_template": "/datasets/{+repo_id}/resolve/{revision}/README.md",
           "response": "Text"
         }
       },
@@ -617,7 +648,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<SpaceInfo>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpaceInfo"
+                  }
                 }
               }
             }
@@ -626,8 +660,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<SpaceInfo>"
+              "Array": {
+                "Named": "SpaceInfo"
+              }
             }
           }
         }
@@ -651,10 +686,10 @@
           }
         },
         "x-schematic": {
+          "path_template": "/spaces/{+repo_id}",
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "SpaceInfo"
+              "Named": "SpaceInfo"
             }
           }
         }
@@ -682,17 +717,22 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<RepoFile>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RepoFile"
+                  }
                 }
               }
             }
           }
         },
         "x-schematic": {
+          "path_template": "/spaces/{+repo_id}/tree/{revision}",
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<RepoFile>"
+              "Array": {
+                "Named": "RepoFile"
+              }
             }
           }
         }
@@ -736,10 +776,10 @@
           }
         },
         "x-schematic": {
+          "path_template": "/spaces/{+repo_id}/blob/{revision}/{+path}",
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "FileMetadata"
+              "Named": "FileMetadata"
             }
           }
         }
@@ -802,16 +842,9 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "module_path": null,
-              "type_name": "CreateRepoBody"
-            }
-          },
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "RepoUrl"
+              "Named": "RepoUrl"
             }
           }
         }
@@ -845,16 +878,9 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "module_path": null,
-              "type_name": "DeleteRepoBody"
-            }
-          },
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "StatusResponse"
+              "Named": "StatusResponse"
             }
           }
         }
@@ -888,16 +914,10 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "module_path": null,
-              "type_name": "UpdateRepoSettingsBody"
-            }
-          },
+          "path_template": "/repos/{repo_type}/{+repo_id}/settings",
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "StatusResponse"
+              "Named": "StatusResponse"
             }
           }
         }
@@ -951,16 +971,9 @@
           }
         },
         "x-schematic": {
-          "request": {
-            "Json": {
-              "module_path": null,
-              "type_name": "MoveRepoBody"
-            }
-          },
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "StatusResponse"
+              "Named": "StatusResponse"
             }
           }
         }
@@ -986,8 +999,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "UserInfo"
+              "Named": "UserInfo"
             }
           }
         }
@@ -1013,8 +1025,7 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "UserInfo"
+              "Named": "UserInfo"
             }
           }
         }
@@ -1042,7 +1053,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<RepoInfo>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RepoInfo"
+                  }
                 }
               }
             }
@@ -1051,8 +1065,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<RepoInfo>"
+              "Array": {
+                "Named": "RepoInfo"
+              }
             }
           }
         }
@@ -1080,7 +1095,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Vec<Collection>"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Collection"
+                  }
                 }
               }
             }
@@ -1089,8 +1107,9 @@
         "x-schematic": {
           "response": {
             "Json": {
-              "module_path": null,
-              "type_name": "Vec<Collection>"
+              "Array": {
+                "Named": "Collection"
+              }
             }
           }
         }
@@ -1114,43 +1133,81 @@
         "title": "CreateRepoBody",
         "type": "object",
         "properties": {
-          "hardware": {},
+          "hardware": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceHardware"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "name": {
             "type": "string"
           },
           "organization": {
+            "nullable": true,
             "type": "string"
           },
           "private": {
+            "default": false,
             "type": "boolean"
           },
-          "sdk": {},
+          "sdk": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceSdk"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "secrets": {
+            "nullable": true,
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/SpaceSecret"
-                }
-              ]
+              "$ref": "#/components/schemas/SpaceSecret"
             }
           },
           "sleepTimeSeconds": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "storage": {
+            "nullable": true,
             "type": "string"
           },
-          "type": {},
+          "type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepoType"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "variables": {
+            "nullable": true,
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/SpaceVariable"
-                }
-              ]
+              "$ref": "#/components/schemas/SpaceVariable"
             }
           }
         },
@@ -1159,22 +1216,55 @@
         ]
       },
       "RepoType": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "model",
+          "dataset",
+          "space"
+        ]
       },
       "SpaceHardware": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "cpu-basic",
+          "cpu-upgrade",
+          "t4-small",
+          "t4-medium",
+          "a10g-small",
+          "a10g-large",
+          "a10g-largex2",
+          "a10g-largex4",
+          "a100-large",
+          "zero-a10g",
+          "v5e-1x1",
+          "v5e-2x2",
+          "v5e-2x4",
+          "Other"
+        ]
       },
       "SpaceSdk": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "gradio",
+          "streamlit",
+          "docker",
+          "static"
+        ]
       },
       "SpaceSecret": {
         "type": "object",
         "properties": {
-          "description": {},
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
           "key": {
             "type": "string"
           },
-          "value": {}
+          "value": {
+            "nullable": true,
+            "type": "string"
+          }
         },
         "required": [
           "key"
@@ -1183,7 +1273,10 @@
       "SpaceVariable": {
         "type": "object",
         "properties": {
-          "description": {},
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
           "key": {
             "type": "string"
           },
@@ -1201,12 +1294,26 @@
         "type": "object",
         "properties": {
           "organization": {
+            "nullable": true,
             "type": "string"
           },
           "repoId": {
             "type": "string"
           },
-          "type": {}
+          "type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepoType"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          }
         },
         "required": [
           "repoId"
@@ -1222,7 +1329,20 @@
           "toRepo": {
             "type": "string"
           },
-          "type": {}
+          "type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepoType"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          }
         },
         "required": [
           "fromRepo",
@@ -1233,31 +1353,234 @@
         "title": "UpdateRepoSettingsBody",
         "type": "object",
         "properties": {
-          "gated": {},
+          "gated": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GatedStatus"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "private": {
+            "nullable": true,
             "type": "boolean"
           }
         }
       },
       "GatedStatus": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "false",
+          "true",
+          "auto",
+          "manual"
+        ]
       },
-      "Vec<ModelInfo>": {
-        "title": "Array_of_ModelInfo",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/ModelInfo"
+      "ModelInfo": {
+        "title": "ModelInfo",
+        "type": "object",
+        "properties": {
+          "author": {
+            "nullable": true,
+            "type": "string"
+          },
+          "cardData": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardData"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "config": {
+            "nullable": true,
+            "type": "object",
+            "additionalProperties": true
+          },
+          "createdAt": {
+            "nullable": true,
+            "type": "string"
+          },
+          "disabled": {
+            "default": false,
+            "type": "boolean"
+          },
+          "downloads": {
+            "default": 0,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "downloadsAllTime": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "gated": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GatedStatus"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "inference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InferenceStatus"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "lastModified": {
+            "nullable": true,
+            "type": "string"
+          },
+          "library_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "likes": {
+            "default": 0,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "mask_token": {
+            "nullable": true,
+            "type": "string"
+          },
+          "model-index": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelIndexEntry"
             }
-          ]
-        }
+          },
+          "modelId": {
+            "type": "string"
+          },
+          "pipeline_tag": {
+            "nullable": true,
+            "type": "string"
+          },
+          "private": {
+            "default": false,
+            "type": "boolean"
+          },
+          "safetensors": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SafetensorsInfo"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "sha": {
+            "nullable": true,
+            "type": "string"
+          },
+          "siblings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RepoFile"
+            }
+          },
+          "spaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "transformersInfo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TransformersInfo"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "trendingScore": {
+            "nullable": true,
+            "type": "number",
+            "format": "double"
+          },
+          "widgetData": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WidgetConfig"
+            }
+          }
+        },
+        "required": [
+          "modelId"
+        ]
       },
       "CardData": {
         "type": "object",
         "properties": {
-          "base_model": {},
-          "co2_eq_emissions": {},
+          "base_model": {
+            "nullable": true,
+            "type": "string"
+          },
+          "co2_eq_emissions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Co2Emissions"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "datasets": {
             "type": "array",
             "items": {
@@ -1270,43 +1593,96 @@
               "type": "string"
             }
           },
-          "library_name": {},
-          "license": {},
-          "license_link": {},
-          "license_name": {},
+          "library_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "license": {
+            "nullable": true,
+            "type": "string"
+          },
+          "license_link": {
+            "nullable": true,
+            "type": "string"
+          },
+          "license_name": {
+            "nullable": true,
+            "type": "string"
+          },
           "metrics": {
             "type": "array",
             "items": {
               "type": "string"
             }
           },
-          "model-index": {},
-          "pipeline_tag": {},
+          "model-index": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelIndexEntry"
+            }
+          },
+          "pipeline_tag": {
+            "nullable": true,
+            "type": "string"
+          },
           "tags": {
             "type": "array",
             "items": {
               "type": "string"
             }
           },
-          "widget": {}
-        }
+          "widget": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WidgetConfig"
+            }
+          }
+        },
+        "additionalProperties": true
       },
       "Co2Emissions": {
         "type": "object",
         "properties": {
-          "emissions": {},
-          "geographical_location": {},
-          "hardware_used": {},
-          "source": {},
-          "training_type": {}
+          "emissions": {
+            "nullable": true,
+            "type": "number",
+            "format": "double"
+          },
+          "geographical_location": {
+            "nullable": true,
+            "type": "string"
+          },
+          "hardware_used": {
+            "nullable": true,
+            "type": "string"
+          },
+          "source": {
+            "nullable": true,
+            "type": "string"
+          },
+          "training_type": {
+            "nullable": true,
+            "type": "string"
+          }
         }
       },
       "DatasetRef": {
         "type": "object",
         "properties": {
-          "config": {},
-          "name": {},
-          "split": {},
+          "config": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "split": {
+            "nullable": true,
+            "type": "string"
+          },
           "type": {
             "type": "string"
           }
@@ -1318,33 +1694,67 @@
       "EvaluationResult": {
         "type": "object",
         "properties": {
-          "dataset": {},
+          "dataset": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetRef"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "metrics": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/MetricResult"
-                }
-              ]
+              "$ref": "#/components/schemas/MetricResult"
             }
           },
-          "task": {}
+          "task": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskInfo"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          }
         }
       },
       "InferenceStatus": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "warm",
+          "cold",
+          "off",
+          "loading"
+        ]
       },
       "LfsInfo": {
         "type": "object",
         "properties": {
-          "pointerSize": {},
+          "pointerSize": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
           "sha256": {
             "type": "string"
           },
           "size": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
@@ -1355,12 +1765,18 @@
       "MetricResult": {
         "type": "object",
         "properties": {
-          "name": {},
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
           "type": {
             "type": "string"
           },
           "value": {},
-          "verified": {}
+          "verified": {
+            "nullable": true,
+            "type": "boolean"
+          }
         },
         "required": [
           "type",
@@ -1376,11 +1792,7 @@
           "results": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/EvaluationResult"
-                }
-              ]
+              "$ref": "#/components/schemas/EvaluationResult"
             }
           }
         },
@@ -1388,120 +1800,37 @@
           "name"
         ]
       },
-      "ModelInfo": {
-        "title": "ModelInfo",
-        "type": "object",
-        "properties": {
-          "author": {
-            "type": "string"
-          },
-          "cardData": {},
-          "config": {
-            "type": "object"
-          },
-          "createdAt": {
-            "type": "string"
-          },
-          "disabled": {
-            "type": "boolean"
-          },
-          "downloads": {
-            "type": "integer",
-            "format": "uint64"
-          },
-          "downloadsAllTime": {
-            "type": "integer",
-            "format": "uint64"
-          },
-          "gated": {},
-          "inference": {},
-          "lastModified": {
-            "type": "string"
-          },
-          "library_name": {
-            "type": "string"
-          },
-          "likes": {
-            "type": "integer",
-            "format": "uint64"
-          },
-          "mask_token": {
-            "type": "string"
-          },
-          "model-index": {
-            "type": "array",
-            "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/ModelIndexEntry"
-                }
-              ]
-            }
-          },
-          "modelId": {
-            "type": "string"
-          },
-          "pipeline_tag": {
-            "type": "string"
-          },
-          "private": {
-            "type": "boolean"
-          },
-          "safetensors": {},
-          "sha": {
-            "type": "string"
-          },
-          "siblings": {
-            "type": "array",
-            "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/RepoFile"
-                }
-              ]
-            }
-          },
-          "spaces": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "tags": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "transformersInfo": {},
-          "trendingScore": {
-            "type": "number",
-            "format": "double"
-          },
-          "widgetData": {
-            "type": "array",
-            "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/WidgetConfig"
-                }
-              ]
-            }
-          }
-        },
-        "required": [
-          "modelId"
-        ]
-      },
       "RepoFile": {
+        "title": "RepoFile",
         "type": "object",
         "properties": {
-          "blobId": {},
-          "lfs": {},
+          "blobId": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lfs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LfsInfo"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "rfilename": {
             "type": "string"
           },
-          "size": {}
+          "size": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
         },
         "required": [
           "rfilename"
@@ -1510,15 +1839,34 @@
       "SafetensorsInfo": {
         "type": "object",
         "properties": {
-          "parameters": {},
-          "sharded": {},
-          "total": {}
+          "parameters": {
+            "nullable": true,
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "sharded": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "total": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
         }
       },
       "TaskInfo": {
         "type": "object",
         "properties": {
-          "name": {},
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
           "type": {
             "type": "string"
           }
@@ -1530,45 +1878,60 @@
       "TransformersInfo": {
         "type": "object",
         "properties": {
-          "auto_map": {},
-          "custom_class": {},
-          "processor": {}
+          "auto_map": {
+            "nullable": true,
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "custom_class": {
+            "nullable": true,
+            "type": "string"
+          },
+          "processor": {
+            "nullable": true,
+            "type": "string"
+          }
         }
       },
       "WidgetConfig": {
         "type": "object",
         "properties": {
-          "example_title": {},
-          "src": {},
-          "text": {}
-        }
-      },
-      "Vec<RepoFile>": {
-        "title": "Array_of_RepoFile",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/RepoFile"
-            }
-          ]
-        }
+          "example_title": {
+            "nullable": true,
+            "type": "string"
+          },
+          "src": {
+            "nullable": true,
+            "type": "string"
+          },
+          "text": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
       },
       "FileMetadata": {
         "title": "FileMetadata",
         "type": "object",
         "properties": {
           "oid": {
+            "nullable": true,
             "type": "string"
           },
           "path": {
             "type": "string"
           },
           "size": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "type": {
+            "nullable": true,
             "type": "string"
           }
         },
@@ -1576,26 +1939,25 @@
           "path"
         ]
       },
-      "Vec<Commit>": {
-        "title": "Array_of_CommitInfo",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/CommitInfo"
-            }
-          ]
-        }
-      },
-      "CommitInfo": {
+      "Commit": {
+        "title": "CommitInfo",
         "type": "object",
         "properties": {
-          "date": {},
+          "date": {
+            "nullable": true,
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
-          "message": {},
-          "title": {}
+          "message": {
+            "nullable": true,
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "type": "string"
+          }
         },
         "required": [
           "id"
@@ -1606,17 +1968,15 @@
         "type": "object",
         "properties": {
           "count": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "discussions": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/Discussion"
-                }
-              ]
+              "$ref": "#/components/schemas/Discussion"
             }
           }
         },
@@ -1627,8 +1987,14 @@
       "Author": {
         "type": "object",
         "properties": {
-          "avatarUrl": {},
-          "email": {},
+          "avatarUrl": {
+            "nullable": true,
+            "type": "string"
+          },
+          "email": {
+            "nullable": true,
+            "type": "string"
+          },
           "name": {
             "type": "string"
           }
@@ -1640,9 +2006,26 @@
       "Discussion": {
         "type": "object",
         "properties": {
-          "author": {},
-          "createdAt": {},
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Author"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "createdAt": {
+            "nullable": true,
+            "type": "string"
+          },
           "isPullRequest": {
+            "default": false,
             "type": "boolean"
           },
           "labels": {
@@ -1653,18 +2036,21 @@
           },
           "num": {
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
-          "numComments": {},
+          "numComments": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
           "pinned": {
+            "default": false,
             "type": "boolean"
           },
           "status": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/DiscussionStatus"
-              }
-            ]
+            "$ref": "#/components/schemas/DiscussionStatus"
           },
           "title": {
             "type": "string"
@@ -1677,18 +2063,114 @@
         ]
       },
       "DiscussionStatus": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "open",
+          "closed",
+          "merged",
+          "draft"
+        ]
       },
-      "Vec<DatasetInfo>": {
-        "title": "Array_of_DatasetInfo",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/DatasetInfo"
+      "DatasetInfo": {
+        "title": "DatasetInfo",
+        "type": "object",
+        "properties": {
+          "author": {
+            "nullable": true,
+            "type": "string"
+          },
+          "cardData": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatasetCardData"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "citation": {
+            "nullable": true,
+            "type": "string"
+          },
+          "createdAt": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "disabled": {
+            "default": false,
+            "type": "boolean"
+          },
+          "downloads": {
+            "default": 0,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "gated": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GatedStatus"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "lastModified": {
+            "nullable": true,
+            "type": "string"
+          },
+          "likes": {
+            "default": 0,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "private": {
+            "default": false,
+            "type": "boolean"
+          },
+          "sha": {
+            "nullable": true,
+            "type": "string"
+          },
+          "siblings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RepoFile"
             }
-          ]
-        }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trendingScore": {
+            "nullable": true,
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "id"
+        ]
       },
       "DatasetCardData": {
         "type": "object",
@@ -1696,11 +2178,7 @@
           "configs": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/DatasetConfig"
-                }
-              ]
+              "$ref": "#/components/schemas/DatasetConfig"
             }
           },
           "language": {
@@ -1709,8 +2187,14 @@
               "type": "string"
             }
           },
-          "license": {},
-          "pretty_name": {},
+          "license": {
+            "nullable": true,
+            "type": "string"
+          },
+          "pretty_name": {
+            "nullable": true,
+            "type": "string"
+          },
           "size_categories": {
             "type": "array",
             "items": {
@@ -1735,90 +2219,24 @@
               "type": "string"
             }
           }
-        }
+        },
+        "additionalProperties": true
       },
       "DatasetConfig": {
         "type": "object",
         "properties": {
-          "config_name": {},
+          "config_name": {
+            "nullable": true,
+            "type": "string"
+          },
           "data_files": {},
           "splits": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/DatasetSplit"
-                }
-              ]
+              "$ref": "#/components/schemas/DatasetSplit"
             }
           }
         }
-      },
-      "DatasetInfo": {
-        "title": "DatasetInfo",
-        "type": "object",
-        "properties": {
-          "author": {
-            "type": "string"
-          },
-          "cardData": {},
-          "citation": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "disabled": {
-            "type": "boolean"
-          },
-          "downloads": {
-            "type": "integer",
-            "format": "uint64"
-          },
-          "gated": {},
-          "id": {
-            "type": "string"
-          },
-          "lastModified": {
-            "type": "string"
-          },
-          "likes": {
-            "type": "integer",
-            "format": "uint64"
-          },
-          "private": {
-            "type": "boolean"
-          },
-          "sha": {
-            "type": "string"
-          },
-          "siblings": {
-            "type": "array",
-            "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/RepoFile"
-                }
-              ]
-            }
-          },
-          "tags": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "trendingScore": {
-            "type": "number",
-            "format": "double"
-          }
-        },
-        "required": [
-          "id"
-        ]
       },
       "DatasetSplit": {
         "type": "object",
@@ -1826,77 +2244,55 @@
           "name": {
             "type": "string"
           },
-          "num_bytes": {},
-          "num_examples": {}
+          "num_bytes": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "num_examples": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
         },
         "required": [
           "name"
         ]
-      },
-      "Vec<SpaceInfo>": {
-        "title": "Array_of_SpaceInfo",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/SpaceInfo"
-            }
-          ]
-        }
-      },
-      "SpaceCardData": {
-        "type": "object",
-        "properties": {
-          "app_file": {},
-          "app_port": {},
-          "colorFrom": {},
-          "colorTo": {},
-          "datasets": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "emoji": {},
-          "license": {},
-          "models": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "pinned": {
-            "type": "boolean"
-          },
-          "sdk": {},
-          "sdk_version": {},
-          "short_description": {},
-          "suggested_hardware": {},
-          "suggested_storage": {},
-          "tags": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "title": {}
-        }
       },
       "SpaceInfo": {
         "title": "SpaceInfo",
         "type": "object",
         "properties": {
           "author": {
+            "nullable": true,
             "type": "string"
           },
-          "cardData": {},
+          "cardData": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceCardData"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "colorFrom": {
+            "nullable": true,
             "type": "string"
           },
           "colorTo": {
+            "nullable": true,
             "type": "string"
           },
           "createdAt": {
+            "nullable": true,
             "type": "string"
           },
           "datasets": {
@@ -1906,20 +2302,25 @@
             }
           },
           "disabled": {
+            "default": false,
             "type": "boolean"
           },
           "emoji": {
+            "nullable": true,
             "type": "string"
           },
           "id": {
             "type": "string"
           },
           "lastModified": {
+            "nullable": true,
             "type": "string"
           },
           "likes": {
+            "default": 0,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "models": {
             "type": "array",
@@ -1928,27 +2329,53 @@
             }
           },
           "pinned": {
+            "default": false,
             "type": "boolean"
           },
           "private": {
+            "default": false,
             "type": "boolean"
           },
-          "runtime": {},
-          "sdk": {},
+          "runtime": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceRuntime"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "sdk": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceSdk"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
           "sdk_version": {
+            "nullable": true,
             "type": "string"
           },
           "sha": {
+            "nullable": true,
             "type": "string"
           },
           "siblings": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/RepoFile"
-                }
-              ]
+              "$ref": "#/components/schemas/RepoFile"
             }
           },
           "tags": {
@@ -1958,6 +2385,7 @@
             }
           },
           "trendingScore": {
+            "nullable": true,
             "type": "number",
             "format": "double"
           }
@@ -1966,20 +2394,185 @@
           "id"
         ]
       },
+      "SpaceCardData": {
+        "type": "object",
+        "properties": {
+          "app_file": {
+            "nullable": true,
+            "type": "string"
+          },
+          "app_port": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0,
+            "maximum": 65535
+          },
+          "colorFrom": {
+            "nullable": true,
+            "type": "string"
+          },
+          "colorTo": {
+            "nullable": true,
+            "type": "string"
+          },
+          "datasets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "emoji": {
+            "nullable": true,
+            "type": "string"
+          },
+          "license": {
+            "nullable": true,
+            "type": "string"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pinned": {
+            "default": false,
+            "type": "boolean"
+          },
+          "sdk": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceSdk"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "sdk_version": {
+            "nullable": true,
+            "type": "string"
+          },
+          "short_description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "suggested_hardware": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceHardware"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "suggested_storage": {
+            "nullable": true,
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "title": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
       "SpaceRuntime": {
         "type": "object",
         "properties": {
-          "errorMessage": {},
-          "gcTimeout": {},
-          "hardware": {},
-          "replicas": {},
-          "requestedHardware": {},
-          "stage": {},
-          "storage": {}
+          "errorMessage": {
+            "nullable": true,
+            "type": "string"
+          },
+          "gcTimeout": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "hardware": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceHardware"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "replicas": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "requestedHardware": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceHardware"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpaceStage"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          },
+          "storage": {
+            "nullable": true,
+            "type": "string"
+          }
         }
       },
       "SpaceStage": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "NO_APP_FILE",
+          "CONFIG_ERROR",
+          "BUILDING",
+          "BUILD_ERROR",
+          "RUNNING",
+          "RUNTIME_ERROR",
+          "PAUSED",
+          "SLEEPING",
+          "DELETED"
+        ]
       },
       "RepoUrl": {
         "title": "RepoUrl",
@@ -1998,9 +2591,11 @@
         "type": "object",
         "properties": {
           "message": {
+            "nullable": true,
             "type": "string"
           },
           "ok": {
+            "nullable": true,
             "type": "boolean"
           }
         }
@@ -2010,42 +2605,58 @@
         "type": "object",
         "properties": {
           "avatarUrl": {
+            "nullable": true,
             "type": "string"
           },
           "fullname": {
+            "nullable": true,
             "type": "string"
           },
           "isPro": {
+            "default": false,
             "type": "boolean"
           },
           "name": {
             "type": "string"
           },
           "numDatasets": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "numFollowers": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "numFollowing": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "numLikes": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "numModels": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "numSpaces": {
+            "nullable": true,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           },
           "type": {
+            "nullable": true,
             "type": "string"
           }
         },
@@ -2053,72 +2664,87 @@
           "name"
         ]
       },
-      "Vec<RepoInfo>": {
-        "title": "Array_of_RepoInfo",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/RepoInfo"
-            }
-          ]
-        }
-      },
       "RepoInfo": {
+        "title": "RepoInfo",
         "type": "object",
         "properties": {
           "id": {
             "type": "string"
           },
-          "private": {},
-          "type": {}
+          "private": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepoType"
+              },
+              {
+                "nullable": true,
+                "type": "object",
+                "enum": [
+                  null
+                ]
+              }
+            ]
+          }
         },
         "required": [
           "id"
         ]
       },
-      "Vec<Collection>": {
-        "title": "Array_of_Collection",
-        "type": "array",
-        "items": {
-          "allOf": [
-            {
-              "$ref": "#/components/schemas/Collection"
-            }
-          ]
-        }
-      },
       "Collection": {
+        "title": "Collection",
         "type": "object",
         "properties": {
-          "createdAt": {},
-          "description": {},
+          "createdAt": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
           "items": {
             "type": "array",
             "items": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/CollectionItem"
-                }
-              ]
+              "$ref": "#/components/schemas/CollectionItem"
             }
           },
-          "lastUpdated": {},
-          "owner": {},
-          "position": {},
+          "lastUpdated": {
+            "nullable": true,
+            "type": "string"
+          },
+          "owner": {
+            "nullable": true,
+            "type": "string"
+          },
+          "position": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
           "private": {
+            "default": false,
             "type": "boolean"
           },
           "slug": {
             "type": "string"
           },
-          "theme": {},
+          "theme": {
+            "nullable": true,
+            "type": "string"
+          },
           "title": {
             "type": "string"
           },
           "upvotes": {
+            "default": 0,
             "type": "integer",
-            "format": "uint64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
@@ -2132,15 +2758,22 @@
           "id": {
             "type": "string"
           },
-          "note": {},
-          "position": {},
-          "title": {},
+          "note": {
+            "nullable": true,
+            "type": "string"
+          },
+          "position": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "title": {
+            "nullable": true,
+            "type": "string"
+          },
           "type": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RepoType"
-              }
-            ]
+            "$ref": "#/components/schemas/RepoType"
           }
         },
         "required": [
@@ -2168,6 +2801,11 @@
     "url": "https://huggingface.co/docs/hub/api"
   },
   "x-schematic": {
+    "env_auth": [
+      "HF_TOKEN",
+      "HUGGING_FACE_API_KEY",
+      "HF_API_KEY"
+    ],
     "env_mapping": {
       "api_key": null,
       "basic_pass": null,
@@ -2180,7 +2818,8 @@
         ]
       }
     },
-    "module_path": "huggingface"
+    "module_path": "huggingface",
+    "version": 1
   },
   "x-schematic-grouped-from": [
     "HuggingFaceHub"

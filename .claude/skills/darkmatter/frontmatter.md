@@ -25,6 +25,32 @@ if md.has_frontmatter() {
 }
 ```
 
+## Key Order and Hashing
+
+Key order is a contract: `darkmatter/lib/Cargo.toml` requests serde_json's
+`preserve_order`, so every `serde_json::Map` (and `FrontmatterMap`, an
+`IndexMap`) iterates in author order at every depth. Never rely on a map
+being sorted. A hash that must ignore key order renders through
+`biscuit_hash::canonical_json` / `xx_hash_json` (biscuit-hash `json` feature):
+the non-strict frontmatter hash (top-level keys sorted, each value canonical,
+entries joined with the literal two characters `\n`), the TOC normalized
+frontmatter hash, the schema validator cache key, and every compose cache key.
+Array order stays significant in all of them. Strict frontmatter hashes follow
+author order at every depth.
+
+Two traps keep that order intact:
+
+- **Remove with `shift_remove`.** Under `preserve_order`, `serde_json::Map::remove`
+  (and `IndexMap::remove`) is a *swap* remove: the last key jumps into the
+  removed key's slot. Any removal from frontmatter or effective state uses
+  `shift_remove`.
+- **Never round-trip through `HashMap`.** `EffectiveState::data()`,
+  `EffectiveStateBuilder::with_frontmatter`, `EffectiveState::new`, and the
+  frontmatter shell APIs (`ResolvedShellValue::resolve`,
+  `execute_resolved_shell_values`, `execute_shell_values_with`) all take or
+  return `serde_json::Map`. A `HashMap` is fine only for key lookup that never
+  reaches output (`presentation_values`, caches, memo tables).
+
 ## Merge Strategies
 
 Parsing one YAML frontmatter document rejects duplicate keys at every mapping
@@ -55,6 +81,18 @@ md.fm_set_defaults(json!({"draft": false}))?;
 | `PreferExternal` | Incoming values win on conflict |
 | `PreferDocument` | Existing document values win |
 
+Every merge keeps the **receiving document's** key order: its keys keep their
+positions (an overwritten key never moves), and incoming-only keys are
+appended in incoming order. `merge_with`/`set_defaults` are shallow, so an
+incoming object replaces the existing one whole with its own order. The
+compose pipeline's recursive merge,
+`effective_state::deep_merge(base, overlay, ConflictWinner)`, takes the
+receiving document as `base` and picks the value-winning side with
+`ConflictWinner`; never swap the arguments to get document precedence (that
+reorders the result). This applies to external state (document first),
+transclusion inheritance (child first, parent keys appended), and `set`
+overrides (child first).
+
 ## Typed Extraction
 
 ```rust
@@ -72,8 +110,12 @@ let meta: PostMeta = md.fm_parse()?;
 
 ## CLI Operations
 
-Use `md frontmatter get`, `set`, and `rm` for structured changes. These commands
-parse and serialize frontmatter rather than editing YAML as text. When a
+Use `md frontmatter get`, `set`, and `rm` for structured changes. `set` and
+`rm` compute the edited document from the parsed frontmatter, then splice only
+the changed top-level properties into the loaded source with
+`restore_properties_text` (`Markdown::source_text()` is the loaded text), so
+every other byte is kept. When that editor refuses the source (an indented
+root, an ambiguous edit), they fall back to re-serializing the whole document. When a
 document carries a managed `hash:` property, use the command's normal write
 path so Darkmatter can keep the stored hash consistent.
 
@@ -159,7 +201,18 @@ when any property other than the managed hash and a bumped `last_updated`
 parses to a different value than before (`ensure_unmanaged_values_kept`).
 Parsing alone is not enough: YAML permits reusing an anchor name, so removing
 the `hash` node's `&h` can re-point a later `*h` at an earlier `&h` and still
-parse. A decision with no new stored hash returns `None` without parsing.
+parse. A decision with no new stored hash returns `None` without the full
+gate; it runs only `refuse_indented_root`, which parses only when the first
+key line is indented.
+
+All three editors (`apply_hash_save_text`, `restore_properties_text`,
+`locate_frontmatter_leaves`) refuse a parsed root mapping whose first
+non-blank, non-comment line is indented, with `FrontmatterTextEdit` reason
+``frontmatter root mapping is indented by N spaces; … (run `md clean --save
+<file>` to fix)`` and the input untouched. Indented YAML is valid and read
+paths (`Markdown`, read-only hashing, `--diff`) accept it; the remedy is
+Biscuit File's `yaml.root-indentation` repair through cleanup. Claudine
+rehearses this gate at inline launch (`rehearse_inline_baseline`).
 
 ## Literal Tokens
 

@@ -1,88 +1,47 @@
-use schematic_define::{ApiRequest, ApiResponse, Endpoint, RestMethod};
+use super::super::*;
+use schematic_define::{DefinitionContext, DefinitionError};
+use schematic_define::{Endpoint, RestMethod};
 
 /// Messaging endpoints (subscriptions, publishing, topics, retained messages).
-pub fn messaging_endpoints() -> Vec<Endpoint> {
-    vec![
+pub fn messaging_endpoints(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
+    Ok(vec![
         // Subscriptions
-        Endpoint {
-            id: "ListSubscriptions".to_string(),
-            method: RestMethod::Get,
-            path: "/subscriptions".to_string(),
-            description: "List all subscriptions across the cluster".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListSubscriptionsResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
+        Endpoint::new("ListSubscriptions", RestMethod::Get, "/subscriptions")
+            .describes("List all subscriptions across the cluster")
+            .returns_json::<ListSubscriptionsResponse>(ctx)
+            .pagination(schematic_define::pagination::Collection::at("data").item_type("SubscriptionInfo").unpaginated())
+            .build()?,
         // Publishing
-        Endpoint {
-            id: "Publish".to_string(),
-            method: RestMethod::Post,
-            path: "/publish".to_string(),
-            description: "Publish an MQTT message to a topic".to_string(),
-            request: Some(ApiRequest::json_type("PublishBody")),
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "PublishBulk".to_string(),
-            method: RestMethod::Post,
-            path: "/publish/bulk".to_string(),
-            description: "Publish multiple MQTT messages in a single request".to_string(),
-            request: Some(ApiRequest::json_type("PublishBatchBody")),
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
+        Endpoint::new("Publish", RestMethod::Post, "/publish")
+            .describes("Publish an MQTT message to a topic")
+            .request_json::<PublishBody>(ctx)
+            .returns_empty()
+            .build()?,
+        Endpoint::new("PublishBulk", RestMethod::Post, "/publish/bulk")
+            .describes("Publish multiple MQTT messages in a single request")
+            .request_json::<PublishBatchBody>(ctx)
+            .returns_empty()
+            .build()?,
         // Topics
-        Endpoint {
-            id: "ListTopics".to_string(),
-            method: RestMethod::Get,
-            path: "/topics".to_string(),
-            description: "List active topics in the broker".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListTopicsResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
+        Endpoint::new("ListTopics", RestMethod::Get, "/topics")
+            .describes("List active topics in the broker")
+            .returns_json::<ListTopicsResponse>(ctx)
+            .pagination(schematic_define::pagination::Collection::at("data").item_type("TopicInfo").unpaginated())
+            .build()?,
         // Retained Messages
-        Endpoint {
-            id: "ListRetained".to_string(),
-            method: RestMethod::Get,
-            path: "/retainer/messages".to_string(),
-            description: "List retained messages with pagination".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListRetainedResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetRetained".to_string(),
-            method: RestMethod::Get,
-            path: "/retainer/messages/{topic}".to_string(),
-            description: "Get a specific retained message by topic".to_string(),
-            request: None,
-            response: ApiResponse::json_type("RetainedMessage"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DeleteRetained".to_string(),
-            method: RestMethod::Delete,
-            path: "/retainer/messages/{topic}".to_string(),
-            description: "Delete a retained message".to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-    ]
+        Endpoint::new("ListRetained", RestMethod::Get, "/retainer/messages")
+            .describes("List retained messages with pagination")
+            .returns_json::<ListRetainedResponse>(ctx)
+            .pagination(schematic_define::pagination::Collection::at("data").item_type("RetainedMessage").unpaginated())
+            .build()?,
+        Endpoint::new("GetRetained", RestMethod::Get, "/retainer/messages/{topic}")
+            .describes("Get a specific retained message by topic")
+            .returns_json::<RetainedMessage>(ctx)
+            .build()?,
+        Endpoint::new("DeleteRetained", RestMethod::Delete, "/retainer/messages/{topic}")
+            .describes("Delete a retained message")
+            .returns_empty()
+            .build()?,
+    ])
+
 }

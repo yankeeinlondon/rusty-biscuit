@@ -6,12 +6,12 @@
 use serde_json::json;
 use wiremock::{MockServer, ResponseTemplate};
 
-use schematic_runtime::pager::{ContinuationProblem, DEFAULT_PAGE_LIMIT, IncompleteReason, PagerError, PagerErrorKind};
+use schematic_runtime::pager::{ContinuationProblem, DEFAULT_PAGE_LIMIT, IncompleteReason, PagerError};
 use schematic_runtime::{ErrorKind, TransportError, TransportErrorKind};
 
 use crate::pager_support::{
-    BodyNextPrevious, CompositeField, InclusiveSince, IsLastOffset, LastIdHasMore, LinkCursor, NestedChildren, NestedMeta, NextField,
-    OneBasedOffsetTotal, PageLimitLinkTotal, PageLinkRel, ProjectedOffset, ProviderError, SentDefaultFullPage,
+    AdjustableLinkCursor, BodyNextPrevious, CompositeField, InclusiveSince, IsLastOffset, LastIdHasMore, LinkCursor, NestedChildren, NestedMeta, NextField,
+    OneBasedOffsetTotal, PageLimitLinkTotal, PageLinkRel, ProjectedOffset, ProviderError, SentDefaultAboveMax, SentDefaultFullPage,
     ServerDefaultFullPage, TokenAllExceptSkip, client, ids, json, names, numbered, on_query, otherwise, pairs,
     queries, received,
 };
@@ -355,6 +355,58 @@ async fn an_adjusted_size_applies_from_the_next_request_and_is_validated() {
 }
 
 #[tokio::test]
+async fn the_declared_bounds_themselves_are_sent() {
+    let server = MockServer::start().await;
+    otherwise(&server, json(json!({ "data": [], "has_more": false }))).await;
+    let client = client(&server);
+
+    for size in [1, 100] {
+        client.send(LastIdHasMore::get()).pager().page_size(size).fetch_page().await.expect("within the bounds");
+    }
+
+    assert_eq!(queries(&server).await, [pairs(&[("limit", "1")]), pairs(&[("limit", "100")])]);
+}
+
+#[tokio::test]
+async fn an_adopted_sent_default_outside_the_bounds_is_refused_unless_the_caller_overrides_it() {
+    let server = MockServer::start().await;
+    otherwise(&server, json(json!([]))).await;
+    let client = client(&server);
+
+    let error = client.send(SentDefaultAboveMax::get()).pager().fetch_page().await.expect_err("default above max");
+    assert_eq!(refusal(&error), "the page size is above the declared maximum, 10");
+    let incomplete = client.send(SentDefaultAboveMax::get()).pager().collect_all().await.expect_err("default above max");
+    assert_eq!(incomplete.reason, IncompleteReason::InvalidArgument);
+    assert_eq!(hits(&server).await, 0, "the refused default sends nothing");
+
+    client.send(SentDefaultAboveMax::get()).pager().page_size(10).fetch_page().await.expect("the caller's size");
+    assert_eq!(queries(&server).await, [pairs(&[("page", "1"), ("limit", "10")])]);
+}
+
+#[tokio::test]
+async fn a_followed_link_keeps_its_own_size_until_the_caller_changes_it_to_an_invalid_one() {
+    let server = MockServer::start().await;
+    let uri = server.uri();
+    let next = |cursor: &str| format!(r#"<{uri}/adjustable-link?limit=500&cursor={cursor}>; rel="next""#);
+    on_query(&server, "cursor", "c", json(numbered(2..=2)).insert_header("link", next("d"))).await;
+    otherwise(&server, json(numbered(1..=1)).insert_header("link", next("c"))).await;
+    let client = client(&server);
+
+    let mut pages = client.send(AdjustableLinkCursor::get()).pager().page_size(2).pages();
+    pages.next().await.expect("page 1").expect("a page");
+    pages.next().await.expect("the link's own size is not the caller's").expect("a page");
+    pages.set_page_size(11);
+    let error = pages.next().await.expect_err("the changed size is above the maximum");
+
+    assert_eq!(refusal(&error), "the page size is above the declared maximum, 10");
+    assert_eq!(
+        queries(&server).await,
+        [pairs(&[("limit", "2")]), pairs(&[("limit", "500"), ("cursor", "c")])],
+        "the provider's size rides the followed link; the refused change sends nothing"
+    );
+}
+
+#[tokio::test]
 async fn an_optional_size_is_omitted_when_unset() {
     let server = MockServer::start().await;
     otherwise(&server, json(numbered(1..=1))).await;
@@ -550,7 +602,7 @@ async fn a_failed_pager_stays_failed_without_another_request() {
     assert_eq!(api.declared(), Some(&ProviderError { message: "boom".into() }));
     for _ in 0..2 {
         let again = pages.next().await.expect_err("still failed");
-        assert_eq!(again, PagerError::AlreadyFailed { first: PagerErrorKind::Api });
+        assert_eq!(again, error);
         assert_eq!(again.incomplete_reason(), IncompleteReason::HttpError);
     }
     assert_eq!(hits(&server).await, 1);

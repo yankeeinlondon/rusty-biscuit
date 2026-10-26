@@ -16,6 +16,7 @@ use schematic_schema::bitbucket::Bitbucket;
 use schematic_schema::github::GitHub;
 use schematic_schema::openai::OpenAI;
 use schematic_schema::schematic_runtime::pager::{IncompleteReason, PagerError};
+use schematic_schema::schematic_runtime::{TransportError, TransportErrorKind};
 use serde_json::{Value, json};
 use wiremock::matchers::{method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
@@ -180,9 +181,20 @@ async fn github_page_size_outside_the_authored_bounds_is_refused_before_sending(
         .await;
     let client = github(&server.uri());
 
-    for refused in [0, 101] {
+    for (refused, reason) in [
+        (0, "the page size is below the declared minimum, 1"),
+        (101, "the page size is above the declared maximum, 100"),
+        (500, "the page size is above the declared maximum, 100"),
+    ] {
         let error = client.list_releases("octo", "widgets").page_size(refused).fetch_page().await.unwrap_err();
-        assert!(matches!(error, PagerError::Transport(_)), "size {refused}: {error:?}");
+        let PagerError::Transport(TransportError {
+            kind: TransportErrorKind::InvalidArgument(argument),
+            ..
+        }) = &error
+        else {
+            panic!("size {refused}: {error:?}");
+        };
+        assert_eq!(argument.reason(), reason, "size {refused}");
     }
     assert!(server.received_requests().await.unwrap().is_empty(), "a refused size sends nothing");
 

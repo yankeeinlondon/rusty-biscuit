@@ -43,6 +43,15 @@ glyph. WSL2 follows these Linux code paths; its archive-mode traps are in
   leaf-marker layers, normalized in `normalized_any` in
   `sniff/lib/tests/l1/lockfile_provenance.rs`).
 
+## Replacement fixtures can reuse an inode immediately
+
+Linux can reuse an inode as soon as a file or symlink is unlinked. A test
+that deletes an object and then creates its replacement can therefore give
+both the same device/inode identity. Allocate the replacement while the
+original still exists, then unlink the original and rename the replacement
+into place. Worktree's removal lifecycle fixtures use this order to test
+replacement refusal independently of the filesystem allocator.
+
 ## `LANG=C` on the `BUILD_LINUX` host: ASCII where a glyph was expected
 
 - Symptom: an ASCII `>` where the test expects `▶`, red only on that host.
@@ -79,11 +88,15 @@ glyph. WSL2 follows these Linux code paths; its archive-mode traps are in
   `just cross-check <package> --os linux --build-jobs 2`. The flag must
   follow the package name; before it the script exits 2 with
   `unknown flag --build-jobs`.
+- `--build-jobs 2` is not always enough: on 2026-10-18 `worktree-cli` (about
+  25 test binaries) was killed at 2 jobs and linked only at
+  `--build-jobs 1`, which then took a few minutes longer.
 
 ## inotify: watches follow inodes, new directories are not watched
 
-Measured 2026-10-11 on `BUILD_LINUX` (ZFS) and the WSL guest (ext4); the
-adapter that relies on this is `worktree/lib/src/remove/observation/inotify.rs`:
+Measured 2026-10-11 on `BUILD_LINUX` (ZFS) and the WSL guest (ext4) for
+`wt remove`'s former activity watcher (removed 2026-10-23; nothing in the
+repository watches with inotify now):
 
 - A watch descriptor follows its inode, so a renamed directory keeps
   reporting through the same watch. A wrapper that tracks watches by path
@@ -117,6 +130,23 @@ adapter that relies on this is `worktree/lib/src/remove/observation/inotify.rs`:
   major 8) exposes a missing decode.
 - Parse `/proc/<pid>/stat` after the last `)`: `comm` can contain spaces and
   parentheses. Field 22 (`starttime`) is the PID-reuse token.
+
+## cap-std directory handles are `O_PATH`: permission code green on macOS, red on Linux
+
+- On Linux, `cap_std::fs::Dir` holds a directory as an `O_PATH` descriptor.
+  `fchmod` on it fails with `EBADF`; change the mode through
+  `/proc/self/fd/<fd>` instead (`remove::delete::platform::chmod_handle`).
+- `Dir::open_dir` on a mode-`000` directory **succeeds** on Linux (no
+  permission is needed for `O_PATH`), so the `EACCES` arrives when the
+  directory is listed. On macOS the open itself fails. Handle the denial at
+  both points.
+- To change a child directory's mode without following a link, open it with
+  `O_PATH | O_NOFOLLOW | O_DIRECTORY`, check its device and inode, and change
+  the mode through that descriptor. Do not rely on glibc's
+  `fchmodat(…, AT_SYMLINK_NOFOLLOW)`, which needs glibc 2.32+ and `/proc`.
+- Found in `2026-10-22-confirmed-remove-always-deletes` by
+  `just cross-check worktree --os linux remove::` after every macOS test had
+  passed.
 
 ## `/bin/sh` is dash: `set -m` hangs or silently does nothing
 

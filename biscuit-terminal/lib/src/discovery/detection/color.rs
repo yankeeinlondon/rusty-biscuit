@@ -180,8 +180,14 @@ pub fn color_mode() -> ColorMode {
 
 /// Uncached color-mode detection backing [`color_mode`].
 fn detect_color_mode() -> ColorMode {
+    color_mode_for_background(crate::discovery::osc_queries::bg_color())
+}
+
+/// The color mode for a background color found some other way (for example
+/// without a live query), with the same fallbacks as [`color_mode`].
+pub(crate) fn color_mode_for_background(background: Option<crate::discovery::osc_queries::RgbValue>) -> ColorMode {
     // Try to get background color and determine from luminance
-    if let Some(bg) = crate::discovery::osc_queries::bg_color() {
+    if let Some(bg) = background {
         let luminance = bg.luminance();
         if luminance > 0.5 {
             return ColorMode::Light;

@@ -11,26 +11,48 @@ use crate::markdown::frontmatter::MergeStrategy;
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// Which side of a [`deep_merge`] supplies the value when both sides hold a
+/// non-object value for the same key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConflictWinner {
+    /// The base (receiving) side's value wins.
+    Base,
+    /// The overlay (incoming) side's value wins.
+    Overlay,
+}
+
 /// Deeply merges two JSON values.
 ///
-/// `overlay` wins for non-object conflicts. When both values are objects,
-/// keys are merged recursively.
-pub(crate) fn deep_merge(base: &Value, overlay: &Value) -> Value {
+/// `base` fixes key order at every depth: its keys keep their positions, and
+/// overlay-only keys are appended in the overlay's order. `winner` only picks
+/// which side's value survives a non-object conflict, so document precedence
+/// never requires swapping the arguments (which would reorder the result).
+/// When both values are objects, keys are merged recursively. A `null` on the
+/// winning side means "not set" and yields to the other side's value.
+pub(crate) fn deep_merge(base: &Value, overlay: &Value, winner: ConflictWinner) -> Value {
     match (base, overlay) {
         (Value::Object(base_obj), Value::Object(overlay_obj)) => {
             let mut merged = base_obj.clone();
             for (key, overlay_value) in overlay_obj {
                 let next = match merged.get(key) {
-                    Some(base_value) => deep_merge(base_value, overlay_value),
+                    Some(base_value) => deep_merge(base_value, overlay_value, winner),
                     None => overlay_value.clone(),
                 };
                 merged.insert(key.clone(), next);
             }
             Value::Object(merged)
         }
-        // Null overlay means "not set" — preserve the base value.
-        (_, Value::Null) => base.clone(),
-        _ => overlay.clone(),
+        _ => {
+            let (winning, losing) = match winner {
+                ConflictWinner::Base => (base, overlay),
+                ConflictWinner::Overlay => (overlay, base),
+            };
+            if winning.is_null() {
+                losing.clone()
+            } else {
+                winning.clone()
+            }
+        }
     }
 }
 
@@ -96,14 +118,14 @@ pub(crate) fn apply_set_overrides(
 
 /// Merges two `replace` maps with deep merge semantics.
 ///
-/// Values from `overlay` take precedence on conflict.
+/// Values from `overlay` take precedence on conflict; `base` fixes key order.
 pub(crate) fn merge_replace_maps(
     base: Option<&serde_json::Map<String, Value>>,
     overlay: Option<&serde_json::Map<String, Value>>,
 ) -> serde_json::Map<String, Value> {
     let base = base.cloned().unwrap_or_default();
     let overlay = overlay.cloned().unwrap_or_default();
-    match deep_merge(&Value::Object(base), &Value::Object(overlay)) {
+    match deep_merge(&Value::Object(base), &Value::Object(overlay), ConflictWinner::Overlay) {
         Value::Object(map) => map,
         _ => serde_json::Map::new(),
     }
@@ -142,8 +164,8 @@ pub(crate) fn coerce_named_object(path: &str, value: &Value, keys: &[String]) ->
 /// 4. Environment variables (accessible via `env.*` paths)
 #[derive(Debug, Clone)]
 pub struct EffectiveState {
-    /// Merged frontmatter + external state.
-    data: HashMap<String, Value>,
+    /// Merged frontmatter + external state, in receiving-document key order.
+    data: serde_json::Map<String, Value>,
 
     /// Runtime context for `ctx.*` lookups.
     context: ComposeContext,
@@ -174,21 +196,23 @@ impl EffectiveState {
     ///
     /// ## Merge Behavior
     ///
-    /// Uses `PreferExternal` strategy: external state values override
-    /// frontmatter values when keys conflict.
+    /// Frontmatter values win non-object conflicts, except that a frontmatter
+    /// `null` yields to the external value. Frontmatter keys keep their
+    /// authored positions; external-only keys are appended in external order.
     pub fn new(
-        frontmatter: &HashMap<String, Value>,
+        frontmatter: &serde_json::Map<String, Value>,
         external_state: Option<&Value>,
         context: ComposeContext,
     ) -> Self {
         let data = match external_state.and_then(Value::as_object) {
             Some(external_obj) => {
                 let merged = deep_merge(
+                    &Value::Object(frontmatter.clone()),
                     &Value::Object(external_obj.clone()),
-                    &Value::Object(frontmatter.clone().into_iter().collect()),
+                    ConflictWinner::Base,
                 );
                 match merged {
-                    Value::Object(obj) => obj.into_iter().collect(),
+                    Value::Object(obj) => obj,
                     _ => frontmatter.clone(),
                 }
             }
@@ -258,12 +282,12 @@ impl EffectiveState {
     /// The document's own value at an `fm` path: everything but `ctx` reads
     /// `data`, and `ctx` reads [`Self::document_ctx`].
     fn get_fm(&self, path: &str, fm_path: super::super::expression::fm_namespace::FmPath<'_>) -> Option<Value> {
-        use super::super::expression::fm_namespace::{FmPath, resolve_fm_namespace_in_map};
+        use super::super::expression::fm_namespace::{FmPath, resolve_fm_namespace_in_object};
         match fm_path {
             FmPath::Member(rest) => {
                 let mut segments = rest.split('.');
                 if segments.next() != Some("ctx") {
-                    return resolve_fm_namespace_in_map(path, &self.data);
+                    return resolve_fm_namespace_in_object(path, &self.data);
                 }
                 let mut current = self.document_ctx.as_ref()?;
                 for segment in segments {
@@ -272,15 +296,16 @@ impl EffectiveState {
                 Some(current.clone())
             }
             FmPath::Whole => {
-                let mut whole: serde_json::Map<String, Value> = self
+                // Swap in the document's own `ctx` where it stands, so the
+                // whole value keeps the document's key order.
+                let whole: serde_json::Map<String, Value> = self
                     .data
                     .iter()
-                    .filter(|(key, _)| key.as_str() != "ctx")
-                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .filter_map(|(key, value)| match key.as_str() {
+                        "ctx" => self.document_ctx.clone().map(|ctx| (key.clone(), ctx)),
+                        _ => Some((key.clone(), value.clone())),
+                    })
                     .collect();
-                if let Some(ctx) = &self.document_ctx {
-                    whole.insert("ctx".to_string(), ctx.clone());
-                }
                 Some(Value::Object(whole))
             }
         }
@@ -354,7 +379,7 @@ impl EffectiveState {
     }
 
     /// Returns the underlying data map.
-    pub fn data(&self) -> &HashMap<String, Value> {
+    pub fn data(&self) -> &serde_json::Map<String, Value> {
         &self.data
     }
 
@@ -601,7 +626,7 @@ impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
 /// Builder for creating effective state with specific merge strategies.
 #[derive(Debug, Clone)]
 pub struct EffectiveStateBuilder {
-    frontmatter: HashMap<String, Value>,
+    frontmatter: serde_json::Map<String, Value>,
     external_state: Option<Value>,
     merge_strategy: MergeStrategy,
     replace_parent_wins: bool,
@@ -616,7 +641,7 @@ impl EffectiveStateBuilder {
     /// Creates a new builder with empty frontmatter.
     pub fn new() -> Self {
         Self {
-            frontmatter: HashMap::new(),
+            frontmatter: serde_json::Map::new(),
             external_state: None,
             merge_strategy: MergeStrategy::PreferExternal,
             replace_parent_wins: false,
@@ -628,9 +653,9 @@ impl EffectiveStateBuilder {
         }
     }
 
-    /// Sets the frontmatter data.
+    /// Sets the frontmatter data. Its key order is the order of the built state.
     #[must_use]
-    pub fn with_frontmatter(mut self, frontmatter: HashMap<String, Value>) -> Self {
+    pub fn with_frontmatter(mut self, frontmatter: serde_json::Map<String, Value>) -> Self {
         self.frontmatter = frontmatter;
         self
     }
@@ -717,7 +742,7 @@ impl EffectiveStateBuilder {
         // callers that read runtime context pass the request's.
         let context = self.context.unwrap_or_else(ComposeContext::capture_minimal);
 
-        let frontmatter_value = Value::Object(self.frontmatter.clone().into_iter().collect());
+        let frontmatter_value = Value::Object(self.frontmatter.clone());
         let external_value = self
             .external_state
             .as_ref()
@@ -726,14 +751,16 @@ impl EffectiveStateBuilder {
             .map(Value::Object)
             .unwrap_or(Value::Object(serde_json::Map::new()));
 
-        let merged = match self.merge_strategy {
-            MergeStrategy::PreferExternal => deep_merge(&frontmatter_value, &external_value),
-            MergeStrategy::PreferDocument => deep_merge(&external_value, &frontmatter_value),
-            MergeStrategy::ErrorOnConflict => deep_merge(&frontmatter_value, &external_value),
+        // The document is always the base, so its keys keep their authored
+        // positions; the strategy only picks which side wins a conflict.
+        let winner = match self.merge_strategy {
+            MergeStrategy::PreferDocument => ConflictWinner::Base,
+            MergeStrategy::PreferExternal | MergeStrategy::ErrorOnConflict => ConflictWinner::Overlay,
         };
+        let merged = deep_merge(&frontmatter_value, &external_value, winner);
 
-        let mut data: HashMap<String, Value> = match merged {
-            Value::Object(obj) => obj.into_iter().collect(),
+        let mut data = match merged {
+            Value::Object(obj) => obj,
             _ => self.frontmatter.clone(),
         };
 
@@ -797,7 +824,7 @@ mod tests {
 
     #[test]
     fn test_effective_state_simple_lookup() {
-        let mut fm = HashMap::new();
+        let mut fm = serde_json::Map::new();
         fm.insert("title".to_string(), json!("Hello World"));
         fm.insert("count".to_string(), json!(42));
 
@@ -810,7 +837,7 @@ mod tests {
 
     #[test]
     fn test_effective_state_nested_lookup() {
-        let mut fm = HashMap::new();
+        let mut fm = serde_json::Map::new();
         fm.insert(
             "user".to_string(),
             json!({
@@ -830,7 +857,7 @@ mod tests {
 
     #[test]
     fn fm_namespace_resolves_against_frontmatter_only() {
-        let mut fm = HashMap::new();
+        let mut fm = serde_json::Map::new();
         fm.insert("build".to_string(), json!("frontmatter-build"));
         fm.insert("config".to_string(), json!({ "retries": 3 }));
         // A frontmatter property literally named `fm`.
@@ -858,7 +885,7 @@ mod tests {
 
     #[test]
     fn bare_fm_resolves_when_no_fm_property_exists() {
-        let mut fm = HashMap::new();
+        let mut fm = serde_json::Map::new();
         fm.insert("title".to_string(), json!("Hello"));
         let state = EffectiveState::new(&fm, None, test_context());
 
@@ -870,7 +897,7 @@ mod tests {
 
     #[test]
     fn test_effective_state_context_lookup() {
-        let fm = HashMap::new();
+        let fm = serde_json::Map::new();
         let state = EffectiveState::new(&fm, None, test_context());
 
         assert_eq!(state.get("ctx.today"), Some(json!("2024-06-15")));
@@ -887,7 +914,7 @@ mod tests {
         ctx.env_mut()
             .insert("USER".to_string(), "alice".to_string());
 
-        let fm = HashMap::new();
+        let fm = serde_json::Map::new();
         let state = EffectiveState::new(&fm, None, ctx);
 
         assert_eq!(state.get("env.HOME"), Some(json!("/home/user")));
@@ -897,7 +924,7 @@ mod tests {
 
     #[test]
     fn test_effective_state_frontmatter_overrides_external() {
-        let mut fm = HashMap::new();
+        let mut fm = serde_json::Map::new();
         fm.insert("title".to_string(), json!("Original"));
         fm.insert("author".to_string(), json!("Alice"));
 
@@ -918,7 +945,7 @@ mod tests {
 
     #[test]
     fn test_effective_state_get_string() {
-        let mut fm = HashMap::new();
+        let mut fm = serde_json::Map::new();
         fm.insert("string".to_string(), json!("hello"));
         fm.insert("number".to_string(), json!(42));
         fm.insert("float".to_string(), json!(3.15));
@@ -955,7 +982,7 @@ mod tests {
     /// document's own `ctx` key is still what `fm.ctx` and bare `fm` read.
     #[test]
     fn fm_reads_the_document_ctx_key_not_the_materialized_context() {
-        let mut fm = HashMap::new();
+        let mut fm = serde_json::Map::new();
         fm.insert("ctx".to_string(), json!("document ctx"));
         fm.insert("title".to_string(), json!("T"));
         let state = EffectiveStateBuilder::new()
@@ -969,7 +996,7 @@ mod tests {
         assert_eq!(state.get("fm"), Some(json!({"ctx": "document ctx", "title": "T"})));
         assert_eq!(state.get("ctx.today"), Some(json!("2024-06-15")));
 
-        let mut nested = HashMap::new();
+        let mut nested = serde_json::Map::new();
         nested.insert("ctx".to_string(), json!({"note": "n"}));
         let state = EffectiveStateBuilder::new()
             .with_frontmatter(nested)
@@ -986,7 +1013,7 @@ mod tests {
 
     #[test]
     fn test_builder_with_frontmatter() {
-        let mut fm = HashMap::new();
+        let mut fm = serde_json::Map::new();
         fm.insert("key".to_string(), json!("value"));
 
         let state = EffectiveStateBuilder::new()
@@ -1000,7 +1027,7 @@ mod tests {
 
     #[test]
     fn test_builder_prefer_document_strategy() {
-        let mut fm = HashMap::new();
+        let mut fm = serde_json::Map::new();
         fm.insert("key".to_string(), json!("original"));
 
         let external = json!({"key": "external"});
@@ -1019,7 +1046,7 @@ mod tests {
 
     #[test]
     fn test_builder_prefer_external_strategy() {
-        let mut fm = HashMap::new();
+        let mut fm = serde_json::Map::new();
         fm.insert("key".to_string(), json!("original"));
 
         let external = json!({"key": "external"});
@@ -1038,7 +1065,7 @@ mod tests {
 
     #[test]
     fn test_builder_replace_parent_wins_override() {
-        let mut fm = HashMap::new();
+        let mut fm = serde_json::Map::new();
         fm.insert(
             "replace".to_string(),
             json!({
@@ -1090,7 +1117,7 @@ mod tests {
             "b": 2
         });
 
-        let merged = deep_merge(&base, &overlay);
+        let merged = deep_merge(&base, &overlay, ConflictWinner::Overlay);
         assert_eq!(merged["a"], json!(1));
         assert_eq!(merged["b"], json!(2));
         assert_eq!(merged["nested"]["left"], json!("x"));
@@ -1126,7 +1153,7 @@ mod tests {
 
     #[test]
     fn test_ctx_today_resolves_via_data_lookup() {
-        let fm = HashMap::new();
+        let fm = serde_json::Map::new();
         let state = EffectiveStateBuilder::new()
             .with_frontmatter(fm)
             .with_context(test_context())
@@ -1338,7 +1365,7 @@ mod tests {
         assert_eq!(coerce_named_object("state.age", &value, &keys), None);
     }
 
-    fn state_with_name_coercion(fm: HashMap<String, Value>, keys: Vec<String>) -> EffectiveState {
+    fn state_with_name_coercion(fm: serde_json::Map<String, Value>, keys: Vec<String>) -> EffectiveState {
         EffectiveStateBuilder::new()
             .with_frontmatter(fm)
             .with_context(test_context())
@@ -1349,7 +1376,7 @@ mod tests {
 
     #[test]
     fn get_string_coerces_named_object_when_key_is_set() {
-        let mut fm = HashMap::new();
+        let mut fm = serde_json::Map::new();
         fm.insert("state".to_string(), json!({ "name": "alpha", "index": 1 }));
 
         let state = state_with_name_coercion(fm, vec!["state".to_string()]);
@@ -1369,7 +1396,7 @@ mod tests {
     #[test]
     fn get_string_without_coercion_keys_renders_json() {
         let value = json!({ "name": "alpha", "index": 1 });
-        let mut fm = HashMap::new();
+        let mut fm = serde_json::Map::new();
         fm.insert("state".to_string(), value.clone());
 
         // Empty keys → legacy behavior: the whole object as a JSON string
@@ -1395,5 +1422,158 @@ mod tests {
             effective.get("author"),
             Some(&json!({"name": null, "handle": "@alice"}))
         );
+    }
+
+    fn object_keys(value: &Value) -> Vec<&str> {
+        value.as_object().unwrap().keys().map(String::as_str).collect()
+    }
+
+    fn map_keys(map: &serde_json::Map<String, Value>) -> Vec<&str> {
+        map.keys().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn deep_merge_base_fixes_order_at_every_depth_whichever_side_wins() {
+        let base = json!({"z": 1, "nested": {"y": "base-y", "b": "base-b"}, "unset": null});
+        let overlay = json!({"nested": {"c": "over-c", "b": "over-b"}, "q": 2, "unset": 5, "z": 9});
+
+        for winner in [ConflictWinner::Base, ConflictWinner::Overlay] {
+            let merged = deep_merge(&base, &overlay, winner);
+            assert_eq!(object_keys(&merged), ["z", "nested", "unset", "q"], "{winner:?}");
+            assert_eq!(object_keys(&merged["nested"]), ["y", "b", "c"], "{winner:?}");
+            // A null on the winning side yields; a null on the losing side loses.
+            assert_eq!(merged["unset"], json!(5), "{winner:?}");
+        }
+
+        let base_wins = deep_merge(&base, &overlay, ConflictWinner::Base);
+        assert_eq!(base_wins["z"], json!(1));
+        assert_eq!(base_wins["nested"]["b"], json!("base-b"));
+        let overlay_wins = deep_merge(&base, &overlay, ConflictWinner::Overlay);
+        assert_eq!(overlay_wins["z"], json!(9));
+        assert_eq!(overlay_wins["nested"]["b"], json!("over-b"));
+    }
+
+    /// The precedence parameter replaced swapping the arguments; values must be
+    /// exactly what the swapped call produced (`Value` equality ignores order).
+    #[test]
+    fn deep_merge_base_winner_matches_swapped_overlay_values() {
+        let cases = [
+            (json!({"k": 1}), json!({"k": 2})),
+            (json!({"k": null}), json!({"k": 2})),
+            (json!({"k": 1}), json!({"k": null})),
+            (json!({"k": null}), json!({"k": null})),
+            (json!({"k": [1, 2]}), json!({"k": [3]})),
+            (json!({"k": {"a": 1}}), json!({"k": "scalar"})),
+            (json!({"k": "scalar"}), json!({"k": {"a": 1}})),
+            (json!({"k": {"a": null, "b": [1]}}), json!({"k": {"a": 1, "b": {"x": 1}}})),
+            (json!({"only_doc": null}), json!({"only_ext": null})),
+            (json!(null), json!({"k": 1})),
+            (json!({"k": 1}), json!(null)),
+        ];
+        for (document, external) in cases {
+            assert_eq!(
+                deep_merge(&document, &external, ConflictWinner::Base),
+                deep_merge(&external, &document, ConflictWinner::Overlay),
+                "document {document} / external {external}",
+            );
+        }
+    }
+
+    fn doc_and_external() -> (serde_json::Map<String, Value>, Value) {
+        let document = to_map(json!({"z": "doc-z", "shared": {"y": 1, "b": "doc"}, "a": "doc-a"}));
+        let external = json!({"b_ext": 1, "a": "ext-a", "shared": {"c": 3, "b": "ext"}, "m_ext": 2});
+        (document, external)
+    }
+
+    #[test]
+    fn builder_keeps_document_order_under_every_strategy() {
+        for strategy in [
+            MergeStrategy::PreferDocument,
+            MergeStrategy::PreferExternal,
+            MergeStrategy::ErrorOnConflict,
+        ] {
+            let (document, external) = doc_and_external();
+            let state = EffectiveStateBuilder::new()
+                .with_frontmatter(document)
+                .with_external_state(external)
+                .with_merge_strategy(strategy)
+                .with_context(test_context())
+                .build()
+                .unwrap();
+
+            assert_eq!(
+                map_keys(state.data()),
+                ["z", "shared", "a", "b_ext", "m_ext", "ctx"],
+                "{strategy:?}"
+            );
+            assert_eq!(object_keys(&state.data()["shared"]), ["y", "b", "c"], "{strategy:?}");
+            let (a, b) = match strategy {
+                MergeStrategy::PreferDocument => ("doc-a", "doc"),
+                _ => ("ext-a", "ext"),
+            };
+            assert_eq!(state.get("a"), Some(json!(a)), "{strategy:?}");
+            assert_eq!(state.get("shared.b"), Some(json!(b)), "{strategy:?}");
+        }
+    }
+
+    #[test]
+    fn effective_state_new_keeps_document_order_and_document_values() {
+        let (document, external) = doc_and_external();
+        let state = EffectiveState::new(&document, Some(&external), test_context());
+
+        assert_eq!(map_keys(state.data()), ["z", "shared", "a", "b_ext", "m_ext"]);
+        assert_eq!(object_keys(&state.data()["shared"]), ["y", "b", "c"]);
+        assert_eq!(state.get("a"), Some(json!("doc-a")));
+        assert_eq!(state.get("shared.b"), Some(json!("doc")));
+        assert_eq!(state.get("shared.c"), Some(json!(3)));
+    }
+
+    #[test]
+    fn bare_fm_renders_document_order_with_authored_ctx_in_place() {
+        let document = to_map(json!({"zeta": 1, "ctx": {"note": "n"}, "alpha": 2}));
+        let state = EffectiveStateBuilder::new()
+            .with_frontmatter(document)
+            .with_external_state(json!({"mid": 3}))
+            .with_context(test_context())
+            .build()
+            .unwrap();
+
+        let whole = state.get("fm").unwrap();
+        assert_eq!(object_keys(&whole), ["zeta", "ctx", "alpha", "mid"]);
+        assert_eq!(whole["ctx"], json!({"note": "n"}), "the document's own ctx, not the runtime one");
+        assert_eq!(
+            state.get_string("fm"),
+            r#"{"zeta":1,"ctx":{"note":"n"},"alpha":2,"mid":3}"#
+        );
+    }
+
+    #[test]
+    fn apply_set_overrides_keeps_child_order_and_appends_new_keys() {
+        let base = to_map(json!({"z": 1, "author": {"name": "Alice", "handle": "@alice"}, "a": 2}));
+        let set_object = to_map(json!({"author": {"email": "e", "name": "Bob"}, "n_new": 1}));
+        let set_properties = vec![
+            ("q_new".to_string(), json!(true)),
+            ("z".to_string(), Value::Null),
+        ];
+
+        let effective = apply_set_overrides(&base, Some(&set_object), &set_properties);
+
+        assert_eq!(map_keys(&effective), ["z", "author", "a", "n_new", "q_new"]);
+        assert_eq!(object_keys(&effective["author"]), ["name", "handle", "email"]);
+        assert_eq!(effective["author"]["name"], json!("Bob"));
+        assert_eq!(effective["z"], Value::Null, "a set null is a literal value");
+    }
+
+    #[test]
+    fn merge_replace_maps_keeps_base_order_and_overlay_values() {
+        let base = to_map(json!({"Z": "doc", "nested": {"y": 1, "b": "doc"}, "A": "doc"}));
+        let overlay = to_map(json!({"B": "parent", "A": "parent", "nested": {"c": 2, "b": "parent"}}));
+
+        let merged = merge_replace_maps(Some(&base), Some(&overlay));
+
+        assert_eq!(map_keys(&merged), ["Z", "nested", "A", "B"]);
+        assert_eq!(object_keys(&merged["nested"]), ["y", "b", "c"]);
+        assert_eq!(merged["A"], json!("parent"));
+        assert_eq!(merged["nested"]["b"], json!("parent"));
     }
 }

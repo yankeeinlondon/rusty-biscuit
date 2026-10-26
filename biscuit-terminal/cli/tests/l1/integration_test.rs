@@ -93,7 +93,7 @@ fn test_version_flag() {
 #[test]
 fn test_respects_no_color() {
     assert_cmd::Command::cargo_bin("bt").unwrap()
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .assert()
         .success()
         // Should NOT contain escape codes when NO_COLOR is set
@@ -414,6 +414,8 @@ fn test_completions_fish() {
 #[test]
 fn test_completions_invalid_shell() {
     assert_cmd::Command::cargo_bin("bt").unwrap()
+        .env_remove("CLICOLOR_FORCE")
+        .env_remove("FORCE_COLOR")
         .arg("--completions")
         .arg("invalid")
         .assert()
@@ -1180,7 +1182,7 @@ fn test_state_diagram_with_title() {
 
     assert_eq!(parsed.get("title").unwrap(), "Process States");
     let instructions = parsed.get("instructions").unwrap().as_str().unwrap();
-    assert!(instructions.starts_with("---\ntitle: Process States\n---\n"));
+    assert!(instructions.starts_with("---\ntitle: \"Process States\"\n---\n"));
     assert!(instructions.contains("stateDiagram-v2"));
 }
 
@@ -1270,7 +1272,7 @@ fn test_erd_with_title() {
 
     assert_eq!(parsed.get("title").unwrap(), "E-Commerce Schema");
     let instructions = parsed.get("instructions").unwrap().as_str().unwrap();
-    assert!(instructions.starts_with("---\ntitle: E-Commerce Schema\n---\n"));
+    assert!(instructions.starts_with("---\ntitle: \"E-Commerce Schema\"\n---\n"));
     assert!(instructions.contains("erDiagram"));
 }
 
@@ -1446,7 +1448,7 @@ fn test_graph_expression_meta_outputs_render_metadata_in_a_pty() {
         .arg("--meta")
         .arg("a -> b")
         .env("CI", "1")
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .env("TERM_PROGRAM", "Ghostty")
         .env("TERM", "xterm-ghostty");
 
@@ -1474,7 +1476,7 @@ fn test_prose_snapshot() {
     let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .arg("Hello <bold>world</bold>!")
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .output()
         .expect("Failed to execute command");
 
@@ -1490,7 +1492,7 @@ fn test_columns_snapshot() {
         .arg("Right side")
         .arg("--gap")
         .arg("5")
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .output()
         .expect("Failed to execute command");
 
@@ -1896,7 +1898,7 @@ fn test_prose_html_alignment_is_text_align_and_margins_stay_on_prose() {
 fn test_prose_terminal_vertical_margins_match_with_and_without_wrap() {
     for wrap_flag in [None, Some("--no-wrap")] {
         let mut cmd = assert_cmd::Command::cargo_bin("bt").unwrap();
-        cmd.env("NO_COLOR", "1")
+        cmd.env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
             .args(["prose", "hello", "--margin-top", "1", "--margin-bottom", "2"]);
         if let Some(flag) = wrap_flag {
             cmd.arg(flag);
@@ -1960,6 +1962,26 @@ fn test_quote_empty_errors_to_stderr() {
         "stderr should explain the missing input, got: {}",
         stderr
     );
+}
+
+/// A fenced block inside a quote goes through darkmatter's highlighter: its
+/// panel background is a 24-bit background SGR, which the plain fenced
+/// block never emits.
+#[test]
+fn test_quote_highlights_fenced_code() {
+    let output = assert_cmd::Command::cargo_bin("bt").unwrap()
+        .env("FORCE_COLOR", "1")
+        .env_remove("CODE_THEME")
+        .env_remove("THEME")
+        .arg("quote")
+        .arg("see:\n\n```rust\nfn main() {}\n```")
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "bt quote failed: {output:?}");
+    assert!(stdout.contains("\x1b[48;2;"), "fenced code not highlighted: {stdout:?}");
+    assert!(!stdout.contains("```"), "a plain fence was printed: {stdout:?}");
 }
 
 #[test]
@@ -2086,7 +2108,7 @@ fn test_quote_example_renders_default_quote() {
     let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("quote")
         .arg("--example")
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .output()
         .expect("Failed to execute command");
 
@@ -2229,7 +2251,7 @@ fn test_prose_styled_snapshot() {
     let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .arg("prose")
         .arg("<b>Error:</b> something went <red>wrong</red> in the <i>module</i>")
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .output()
         .expect("Failed to execute command");
 
@@ -2247,7 +2269,7 @@ fn test_quote_snapshot() {
         .arg("To be or not to be, that is the question.")
         .arg("--attribution")
         .arg("Shakespeare")
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .output()
         .expect("Failed to execute command");
 
@@ -2262,7 +2284,7 @@ fn test_list_snapshot() {
         .arg("First item")
         .arg("Second item with <b>bold</b>")
         .arg("Third item")
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .output()
         .expect("Failed to execute command");
 
@@ -2276,7 +2298,7 @@ fn test_padleft_snapshot() {
         .arg("padleft")
         .arg("30")
         .arg("hello")
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .output()
         .expect("Failed to execute command");
 
@@ -2290,7 +2312,7 @@ fn test_padright_snapshot() {
         .arg("padright")
         .arg("30")
         .arg("hello")
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .output()
         .expect("Failed to execute command");
 
@@ -2363,7 +2385,7 @@ fn test_actual_terminal_query_integration() {
     // hang waiting for replies that never arrive.
     let mut cmd = Command::new(bin_path);
     cmd.env("CI", "1");
-    cmd.env("NO_COLOR", "1");
+    cmd.env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE");
     cmd.env("TERM_PROGRAM", "Ghostty");
 
     let mut p = Session::spawn(cmd).expect("Failed to spawn bt in PTY");
@@ -2522,7 +2544,7 @@ fn test_compose_default_terminal_concatenates_positional_items() {
     // assert that ANSI-stripped output contains the concatenated string.
     let output = assert_cmd::Command::cargo_bin("bt").unwrap()
         .args(["compose", "foo", "bar"])
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .output()
         .expect("Failed to execute command");
     assert!(
@@ -3044,7 +3066,7 @@ fn test_list_ordered_html_with_alignment_wraps_in_div() {
 #[test]
 fn test_progress_terminal_default() {
     assert_cmd::Command::cargo_bin("bt").unwrap()
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .args(["progress", "60", "--label", "Loading"])
         .assert()
         .success()
@@ -3057,7 +3079,7 @@ fn test_progress_terminal_default() {
 #[test]
 fn test_progress_example_succeeds() {
     assert_cmd::Command::cargo_bin("bt").unwrap()
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .args(["progress", "--example"])
         .assert()
         .success()
@@ -3206,7 +3228,7 @@ fn test_progress_rejects_percentage_above_100() {
 #[test]
 fn test_progress_color_flags_parse_for_terminal() {
     assert_cmd::Command::cargo_bin("bt").unwrap()
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .args([
             "progress",
             "50",
@@ -4129,7 +4151,7 @@ fn test_table_header_ending_in_type_word_is_literal() {
 #[test]
 fn test_text_block_terminal_default_emits_text() {
     let output = assert_cmd::Command::cargo_bin("bt").unwrap()
-        .env("NO_COLOR", "1")
+        .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
         .args(["text-block", "Hello world"])
         .output()
         .expect("Failed to execute command");
@@ -4541,7 +4563,7 @@ fn test_no_color_keeps_the_inline_code_fence_when_color_is_forced() {
     for args in cases {
         let output = assert_cmd::Command::cargo_bin("bt")
             .unwrap()
-            .env("NO_COLOR", "1")
+            .env("NO_COLOR", "1").env_remove("FORCE_COLOR").env_remove("CLICOLOR_FORCE")
             .env("FORCE_COLOR", "1")
             .env_remove("CLICOLOR_FORCE")
             .args(args)

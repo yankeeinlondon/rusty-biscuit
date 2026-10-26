@@ -1,0 +1,108 @@
+{
+  "call": 1,
+  "commit_step": 57.7119140625,
+  "commits": [
+    {
+      "id": "+1",
+      "index": 0,
+      "lane": "main",
+      "parents": [],
+      "tags": [],
+      "x": 8.0
+    },
+    {
+      "id": "b6ce5e6",
+      "index": 1,
+      "lane": "main",
+      "parents": [
+        "+1"
+      ],
+      "tags": [],
+      "x": 73.7119140625
+    },
+    {
+      "id": "+1 ",
+      "index": 2,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "b6ce5e6"
+      ],
+      "tags": [],
+      "x": 139.423828125
+    },
+    {
+      "id": "ca754df",
+      "index": 3,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "+1 "
+      ],
+      "tags": [],
+      "x": 205.1357421875
+    },
+    {
+      "id": "+11",
+      "index": 4,
+      "lane": "fix/sniff",
+      "parents": [
+        "ca754df"
+      ],
+      "tags": [],
+      "x": 270.84765625
+    },
+    {
+      "id": "f730964",
+      "index": 5,
+      "lane": "fix/sniff",
+      "parents": [
+        "+11"
+      ],
+      "tags": [],
+      "x": 336.5595703125
+    },
+    {
+      "id": "41c5b2d",
+      "index": 6,
+      "lane": "main",
+      "parents": [
+        "b6ce5e6",
+        "ca754df"
+      ],
+      "tags": [
+        {
+          "text": "main",
+          "x1": 381.83642578125,
+          "x2": 416.20654296875,
+          "y1": -23.5,
+          "y2": -8.5
+        }
+      ],
+      "x": 402.271484375
+    },
+    {
+      "id": "427a2c5",
+      "index": 7,
+      "lane": "main",
+      "parents": [
+        "41c5b2d",
+        "f730964"
+      ],
+      "tags": [
+        {
+          "text": "origin/main",
+          "x1": 432.20654296875,
+          "x2": 497.26025390625,
+          "y1": -23.5,
+          "y2": -8.5
+        }
+      ],
+      "x": 467.9833984375
+    }
+  ],
+  "default_commit_step": 34.0,
+  "height": 232.49090576171875,
+  "mermaid": "gitGraph\n    commit id: \"+1\" type: HIGHLIGHT\n    commit id: \"b6ce5e6\"\n    branch fix/wt-ux\n    checkout fix/wt-ux\n    commit id: \"+1 \" type: HIGHLIGHT\n    commit id: \"ca754df\"\n    branch fix/sniff\n    checkout fix/sniff\n    commit id: \"+11\" type: HIGHLIGHT\n    commit id: \"f730964\"\n    checkout fix/wt-ux\n    checkout main\n    merge fix/wt-ux id: \"41c5b2d\" tag: \"main\"\n    merge fix/sniff id: \"427a2c5\" tag: \"origin/main\"",
+  "tag_gap": 16.0,
+  "test": "commands__git_graph__tests__gathered_graph_lays_out_observation_2",
+  "width": 648.4609375
+}

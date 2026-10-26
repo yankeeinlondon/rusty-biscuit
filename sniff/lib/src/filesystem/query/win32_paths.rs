@@ -56,8 +56,7 @@ impl Results {
             return;
         }
         self.succeeded += 1;
-        let mut matched_paths = context.index.paths(&identity).expect("indexed entry").to_vec();
-        matched_paths.sort();
+        let matched_paths = context.index.paths(&identity, &context.root.resolved).expect("indexed entry");
         for pid in pids {
             if self.total >= super::MAX_EVIDENCE_TOTAL {
                 self.omitted += 1;
@@ -83,8 +82,8 @@ impl Results {
     }
 }
 
-fn ordered_entries<'a>(context: &InspectionContext<'a>) -> Vec<&'a ProbeEntry> {
-    let mut entries: Vec<_> = context.index.entries.iter().collect();
+fn ordered_entries<'a>(context: &InspectionContext<'_>, entries: &'a [ProbeEntry]) -> Vec<&'a ProbeEntry> {
+    let mut entries: Vec<_> = entries.iter().collect();
     let mut ignores = Vec::new();
     for entry in &entries {
         if context.budget.expired() { break; }
@@ -113,8 +112,10 @@ fn ordered_entries<'a>(context: &InspectionContext<'a>) -> Vec<&'a ProbeEntry> {
     entries
 }
 
-pub(crate) fn scan(context: &InspectionContext<'_>, reader: &PathReader) -> (Vec<Observation>, Coverage) {
-    let entries = ordered_entries(context);
+/// Queries the holders of every `entries` path, which the caller joined once
+/// with [`TreeIndex::probe_entries`](super::tree::TreeIndex::probe_entries).
+pub(crate) fn scan(context: &InspectionContext<'_>, entries: &[ProbeEntry], reader: &PathReader) -> (Vec<Observation>, Coverage) {
+    let entries = ordered_entries(context, entries);
     let next = AtomicUsize::new(0);
     let results = Mutex::new(Results::default());
     let collector = performance::current_collector();
@@ -379,10 +380,11 @@ mod tests {
         let root = super::super::root::resolve(&root_path, &budget).unwrap();
         let tree = super::super::tree::collect(&root, true, &budget);
         let context = InspectionContext { root: &root, index: &tree.index, budget: &budget };
-        let entries = ordered_entries(&context);
+        let probes = tree.index.probe_entries(&root.resolved);
+        let entries = ordered_entries(&context, &probes);
         let names: Vec<_> = entries.iter().map(|e| e.path.file_name().unwrap().to_string_lossy()).collect();
         assert_eq!(names, vec!["tree", "src", ".gitignore", "file.txt", "ignored", "node_modules", "target"]);
-        assert_eq!(entries.len(), tree.index.entries.len());
+        assert_eq!(entries.len(), probes.len());
     }
 
 }

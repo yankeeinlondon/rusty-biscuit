@@ -158,7 +158,6 @@ fn gitea() -> Api {
             gitea_root("ListReleases", "Release"),
             gitea_root("ListOrgRepos", "RepositoryInfo"),
             gitea_tree("GetGitTree"),
-            gitea_tree("GetGitTreeRecursive"),
             Row::unpaged(
                 "GetTagReference",
                 Exception,

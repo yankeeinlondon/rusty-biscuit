@@ -196,10 +196,20 @@ impl<'a> RootRun<'a> {
 }
 
 /// Body steps compose the container's source but do not enter its lifecycle again.
-pub(super) fn mask_body_events(overrides: &mut claudine::composition::LayeredOverrides) {
+///
+/// Masks only the events `source` declares or `overrides` already carries: an
+/// absent stack runs nothing either way, and a present one, even empty, makes
+/// schema validation load that event's trigger layers.
+pub(super) fn mask_body_events(
+    overrides: &mut claudine::composition::LayeredOverrides,
+    source: &claudine::composition::ResolvedCompositionSource,
+) {
     for key in claudine::composition::LIFECYCLE_EVENT_KEYS {
         if *key == "loop" { continue; }
-        overrides.insert(darkmatter::markdown::compose::OverrideOrigin::Data, (*key).to_string(), serde_json::json!([]));
+        let present = source.markdown.frontmatter().as_map().contains_key(*key) || overrides.values().contains_key(*key);
+        if present {
+            overrides.insert(darkmatter::markdown::compose::OverrideOrigin::Data, (*key).to_string(), serde_json::json!([]));
+        }
     }
 }
 
@@ -257,5 +267,48 @@ pub(super) fn run_proxy(
             ActiveDocumentOutcome::Done { exit_code, .. } => return Ok(exit_code),
             ActiveDocumentOutcome::Handoff(next) => handoff = next,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mask_body_events;
+    use claudine::composition::{LayeredOverrides, ResolvedCompositionSource};
+    use darkmatter::markdown::{Frontmatter, Markdown};
+    use serde_json::json;
+
+    fn source(frontmatter: &[(&str, serde_json::Value)]) -> ResolvedCompositionSource {
+        let mut fm = Frontmatter::new();
+        for (key, value) in frontmatter {
+            fm.insert(key, value.clone()).unwrap();
+        }
+        let markdown = Markdown::with_frontmatter(fm, "Body.");
+        ResolvedCompositionSource {
+            original_ref: "seq.md".into(),
+            resolved_path: "/w/seq.md".into(),
+            original_text: markdown.as_string(),
+            markdown,
+        }
+    }
+
+    fn masked(overrides: &LayeredOverrides) -> Vec<String> {
+        overrides.values().iter().filter(|(_, value)| **value == json!([])).map(|(key, _)| key.clone()).collect()
+    }
+
+    /// An event the document neither declares nor is handed adds nothing: an
+    /// empty stack would still load that event's trigger layers.
+    #[test]
+    fn only_present_events_are_masked() {
+        let mut overrides = LayeredOverrides::default();
+        mask_body_events(&mut overrides, &source(&[("sequence", json!(["a"]))]));
+        assert!(overrides.values().is_empty(), "{:?}", overrides.values());
+
+        let declared = source(&[("sequence", json!(["a"])), ("success", json!([{ "stdout": "done" }])), ("loop", json!({}))]);
+        let mut overrides = LayeredOverrides::default();
+        overrides.insert(darkmatter::markdown::compose::OverrideOrigin::Data, "finalize".into(), json!([{ "stdout": "bye" }]));
+        mask_body_events(&mut overrides, &declared);
+        let mut keys = masked(&overrides);
+        keys.sort();
+        assert_eq!(keys, ["finalize", "success"], "declared and handed events are masked; `loop` never is");
     }
 }

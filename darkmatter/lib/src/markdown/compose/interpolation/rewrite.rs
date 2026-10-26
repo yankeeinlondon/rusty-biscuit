@@ -428,12 +428,11 @@ mod tests {
     use crate::markdown::compose::EffectiveStateBuilder;
     use crate::markdown::compose::ComposeContext;
     use serde_json::json;
-    use std::collections::HashMap;
 
     fn make_state(data: serde_json::Value) -> crate::markdown::compose::EffectiveState {
-        let fm: HashMap<String, serde_json::Value> = match data {
+        let fm: serde_json::Map<String, serde_json::Value> = match data {
             serde_json::Value::Object(obj) => obj.into_iter().collect(),
-            _ => HashMap::new(),
+            _ => serde_json::Map::new(),
         };
         EffectiveStateBuilder::new()
             .with_frontmatter(fm)
