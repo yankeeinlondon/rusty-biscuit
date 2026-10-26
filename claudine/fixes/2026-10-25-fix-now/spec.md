@@ -174,7 +174,8 @@ flowchart LR
 An editor alternates between revisions of one file only by undo. Reparsing
 that case is cheap. A latest-per-path map has no capacity to tune, and it
 cannot evict a live file's profile because some other file was edited. The
-map retains at most one entry for each visited catalog path, not each revision. Paths in roots that are never visited again can remain until process
+map retains at most one entry for each visited catalog path, not each
+revision. Paths in roots that are never visited again can remain until process
 exit; this change does not promise a fixed bound on the number of distinct
 paths. Reclamation applies when an entry is replaced or removed and no caller
 retains its owned data.
@@ -212,7 +213,15 @@ diagnostics pass.
 - Within one diagnostics pass, the `LifecycleHost` is discovered once and
   passed by reference from the provider diagnostics dispatcher to the
   frontmatter and DSL checks. Preserve provider ordering, diagnostic codes
-  and ranges, and each provider's existing panic isolation. Helpers that are
+  and ranges, and each provider's existing panic isolation.
+  Today each provider runs inside its own `catch_unwind` boundary
+  (`ProviderRegistry::collect`), and host discovery happens inside the
+  providers. Moving discovery into the dispatcher must not move it outside
+  that isolation. Run the shared discovery inside its own panic boundary. If
+  it panics, log it the way a provider panic is logged, and drop the
+  frontmatter and DSL providers' diagnostics for that pass, which is what a
+  discovery panic inside them produces today. Every other provider's
+  diagnostics are unaffected. Helpers that are
   invoked independently may discover their own host, but the combined pass
   must use the supplied host throughout. Separate editor requests still
   discover fresh, so repairing an artifact removes its warning on the next
@@ -322,7 +331,8 @@ stale.
   only authority on whether an import target is valid YAML.
 - An unparseable import target still fails with `SchemaError::SchemaDocument`
   whose message starts with `not valid YAML` and whose path identifies the
-  imported file. For example, importing a file containing `kind: schema` and `types: [` still produces that error.
+  imported file. For example, importing a file containing `kind: schema` and
+  `types: [` still produces that error.
 - A document that fails *numeric admission* now reports the classifier's
   admission message. Previously it reported serde's raw message. This is an
   intentional improvement, because the strict loader reports the same file
@@ -610,12 +620,15 @@ repository Test Toolkit and existing area fixtures.
    bytes rather than rereading different catalog bytes from disk.
 4. **Discovery stops and diagnostics share one host.** With a usable first
    profile and another candidate after it, a private read observer on the
-   lifecycle discovery path records zero reads of the later catalog contents and artifact. Missing warnings or
+   lifecycle discovery path records zero reads of the later catalog contents
+   and artifact. Missing warnings or
    an unreadable file alone are insufficient evidence. With no usable
    profile, all reasons appear in existing order. Include an earlier-root
    filename shadowing a later-root valid catalog. Through the normal combined
    DMLS diagnostics path, count one lifecycle discovery and verify both
-   frontmatter and DSL results. A second request after artifact repair clears
+   frontmatter and DSL results. A test-injected panic in the shared discovery
+   drops only the frontmatter and DSL diagnostics for that pass and is logged;
+   other providers' diagnostics still arrive. A second request after artifact repair clears
    the warning. Keep ordinary catalog diagnostics independent.
 5. **Both publications leave the async worker free.** On a current-thread
    runtime, the real publication path enters a test-controlled synchronous
