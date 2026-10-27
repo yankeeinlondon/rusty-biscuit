@@ -451,12 +451,13 @@ impl Fixture {
 
     /// Run one specific step's task with the given doubles.
     fn execute_step(&self, index: usize, wiring: &Wiring<'_>) -> TaskOutcome {
-        let live = std::sync::Mutex::new(self.frontmatter.clone());
+        let frontmatter = darkmatter::markdown::compose::SharedFrontmatter::from(self.frontmatter.clone());
+        let live = std::sync::Mutex::new(frontmatter.clone());
         let stack = StackExecutionContext {
             seq: None,
             signal: LifecycleSignal::Start,
             scope: None,
-            frontmatter: &self.frontmatter,
+            frontmatter: &frontmatter,
             live_frontmatter: Some(&live),
             runtime_state: wiring.runtime.map(Arc::as_ref),
             err: None,
@@ -6735,3 +6736,7 @@ mod container_regressions;
 #[cfg(feature = "work-counters")]
 #[path = "tests/pipeline_spike.rs"]
 mod pipeline_spike;
+
+#[cfg(feature = "work-counters")]
+#[path = "tests/leg_views.rs"]
+mod leg_views;

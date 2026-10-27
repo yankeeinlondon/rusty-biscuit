@@ -22,7 +22,7 @@ use super::super::error::{CompositionError, SequenceLoadCause};
 use super::super::json_util::json_type_name;
 use super::super::resolve::is_yaml_source;
 use super::super::types::ResolvedCompositionSource;
-use super::expr::{SourceExpressionLookup, render_interpolated};
+use super::expr::{DocumentFrontmatter, SourceExpressionLookup, render_interpolated};
 use super::model::{SequencePlan, SequenceSource};
 use super::normalize::normalize_plan;
 use super::reserved;
@@ -100,7 +100,7 @@ pub fn normalize_formal_plan(
     source: SequenceSource,
     invocation_path: &Path,
     document_path: &Path,
-    globals: &Map<String, Value>,
+    globals: &dyn DocumentFrontmatter,
     document_fail_fast: bool,
     file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<SequencePlan, CompositionError> {
@@ -154,7 +154,7 @@ fn expand_scalar_shorthand(items: Vec<Value>) -> Vec<Value> {
 fn apply_template(
     template: &Map<String, Value>,
     items: Vec<Value>,
-    globals: &Map<String, Value>,
+    globals: &dyn DocumentFrontmatter,
     invocation_path: &Path,
     file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Vec<Value>, CompositionError> {

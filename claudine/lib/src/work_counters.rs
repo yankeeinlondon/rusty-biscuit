@@ -24,8 +24,13 @@ pub enum Work {
     RuntimeSnapshot,
     /// A private `RuntimeState` built for one group leg.
     RuntimeStateBranch,
-    /// A copy of the live frontmatter cell made for one group leg.
+    /// JSON nodes ([`value_nodes`]) deep-copied into group legs' live
+    /// frontmatter cells: each cell copies the values the group-start view
+    /// owns, never its shared base.
     LiveFrontmatterCopy,
+    /// A private live-frontmatter cell made for one group leg, a view over
+    /// the group-start state.
+    LiveFrontmatterView,
     /// The whole reserved `hook` object built for one lookup.
     HookPayloadMaterialize,
     /// The whole `loop` global object built for one lookup.
@@ -38,19 +43,24 @@ pub enum Work {
     /// document is entered.
     EnvironmentMapCopy,
     /// JSON nodes ([`value_nodes`]) deep-copied into a preflight step's
-    /// early-binding frontmatter.
+    /// early-binding frontmatter: a preparation's seed once, then each step's
+    /// own overlay.
     PreflightStepFrontmatterNodes,
     /// JSON nodes ([`value_nodes`]) a preflight walk scans for reads of a
-    /// late root (`derived_deferred_keys`) over a step's frontmatter.
+    /// late root (`derived_deferred_keys`): a preparation's seed once, then
+    /// each step's overlay, or the whole step view when the overlay changes
+    /// what the seed derives.
     PreflightDeferredScanNodes,
-    /// JSON nodes ([`value_nodes`]) of the frontmatter an early-binding
-    /// evaluation state is built from.
+    /// JSON nodes ([`value_nodes`]) an early-binding evaluation state copies
+    /// from its frontmatter view: the values the view owns, not its shared
+    /// base.
     EarlyBindingStateNodes,
-    /// JSON nodes ([`value_nodes`]) of the step frontmatter copied to classify
-    /// one `with` provider hint.
+    /// JSON nodes ([`value_nodes`]) copied to classify one provider hint that
+    /// reads an expression: the hint and the keys it reads, directly or
+    /// through other keys.
     PredictionWithStateNodes,
-    /// JSON nodes ([`value_nodes`]) of the step frontmatter copied to resolve
-    /// one shell `set` value.
+    /// JSON nodes ([`value_nodes`]) of the step frontmatter materialized to
+    /// resolve one shell `set` value; only a ternary's branches read it.
     ShellValueStateNodes,
     /// Recorded prompt references compared while deduplicating a new one.
     PromptReferenceCompare,
@@ -62,6 +72,7 @@ impl Work {
         Work::RuntimeSnapshot,
         Work::RuntimeStateBranch,
         Work::LiveFrontmatterCopy,
+        Work::LiveFrontmatterView,
         Work::HookPayloadMaterialize,
         Work::LoopAmbientMaterialize,
         Work::PrewarmStateBuild,

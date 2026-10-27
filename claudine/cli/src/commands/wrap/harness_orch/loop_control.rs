@@ -1463,6 +1463,7 @@ fn empty_materialized_prompt(
         file_resolution_context,
         compose_context: None,
         document_epoch: None,
+        frontmatter_view: darkmatter::markdown::compose::SharedFrontmatter::default(),
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         lifecycle: None,
@@ -2396,7 +2397,7 @@ fn classify_attempt_phase(
                     .live_frontmatter
                     .lock()
                     .expect("live frontmatter mutex poisoned by a panicking lifecycle action")
-                    .clone(),
+                    .to_map(),
             );
             let completed = claudine::composition::complete_active_document(
                 claudine::composition::CompletionContext {

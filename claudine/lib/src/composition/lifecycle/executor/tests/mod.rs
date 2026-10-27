@@ -219,7 +219,7 @@ fn ctx<'a>(
         seq: None,
         signal,
         scope: None,
-        frontmatter,
+        frontmatter: leaked_view(frontmatter),
         live_frontmatter: None,
         runtime_state: None,
         err,
@@ -246,13 +246,19 @@ fn map(value: Value) -> Map<String, Value> {
     value.as_object().unwrap().clone()
 }
 
+/// `frontmatter` as the stack's shared view, for a context that outlives
+/// this call. Leaked: each test is its own short-lived process.
+fn leaked_view<'a>(frontmatter: &Map<String, Value>) -> &'a SharedFrontmatter {
+    Box::leak(Box::new(frontmatter.clone().into()))
+}
+
 /// Build a context wired to both the per-attempt `live` cell and the
 /// invocation-local `runtime` cell, modelling the harness loop's full wiring.
 #[allow(clippy::too_many_arguments)]
 fn ctx_with_runtime<'a>(
     signal: LifecycleSignal,
     base: &'a Map<String, Value>,
-    live: &'a std::sync::Mutex<Map<String, Value>>,
+    live: &'a std::sync::Mutex<darkmatter::markdown::compose::SharedFrontmatter>,
     runtime: &'a crate::composition::RuntimeState,
     engine: &'a EffectEngine,
     shell: &'a dyn ShellRunner,
@@ -274,7 +280,7 @@ fn ctx_with_runtime<'a>(
 fn ctx_with_live<'a>(
     signal: LifecycleSignal,
     base: &'a Map<String, Value>,
-    live: &'a std::sync::Mutex<Map<String, Value>>,
+    live: &'a std::sync::Mutex<darkmatter::markdown::compose::SharedFrontmatter>,
     engine: &'a EffectEngine,
     shell: &'a dyn ShellRunner,
     recorder: &'a Recorder,
@@ -285,7 +291,7 @@ fn ctx_with_live<'a>(
         seq: None,
         signal,
         scope: None,
-        frontmatter: base,
+        frontmatter: leaked_view(base),
         live_frontmatter: Some(live),
         runtime_state: None,
         err: None,

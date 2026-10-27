@@ -13,12 +13,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use indexmap::IndexMap;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::effects::EffectEngine;
 use crate::markdown::compose::expression::{BindingView, ResolutionContext, RuntimeBinding};
 use crate::markdown::compose::shell_expansion::{ShellExpansionError, ShellRuleSet};
-use crate::markdown::compose::{ComposeContext, ContextBuildError};
+use crate::markdown::compose::{ComposeContext, ContextBuildError, SharedFrontmatter};
 
 use super::super::context::{LifecycleCause, LifecycleErrorInfo, LifecycleEvaluationReason};
 use super::super::envelope::DiagnosticSnapshot;
@@ -86,7 +86,7 @@ pub trait LifecycleHost {
         &self,
         engine: &EffectEngine,
         updates: &IndexMap<String, Value>,
-        prior_base: &Map<String, Value>,
+        prior_base: &SharedFrontmatter,
     ) -> Result<IndexMap<String, Value>, Box<dyn StdError + Send + Sync>>;
 
     /// Whether the evaluation runs inside a loop iteration, where `break` has

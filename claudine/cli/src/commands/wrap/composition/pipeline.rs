@@ -1765,8 +1765,8 @@ fn provider_run_handoff(
     // a live `initialize`-declaring compose document ran the coordinator's
     // staged boot and enters through the external-guard path above.
     let mut guard = LifecycleRunGuard::new(lifecycle, &lifecycle_ctx, emitter);
-    let fm_map = request.prepared.effective_frontmatter.as_object();
-    let empty_frontmatter = serde_json::Map::new();
+    let frontmatter: darkmatter::markdown::compose::SharedFrontmatter =
+        request.prepared.effective_frontmatter.as_object().cloned().unwrap_or_default().into();
     let base_dir = request
         .prepared
         .resolved_path
@@ -1791,7 +1791,7 @@ fn provider_run_handoff(
         seq: None,
         signal: LifecycleSignal::Initialize,
         scope: None,
-        frontmatter: fm_map.unwrap_or(&empty_frontmatter),
+        frontmatter: &frontmatter,
         // Single pre-launch `initialize` event; the cross-event live cell is
         // owned by the harness loop, which re-materializes frontmatter before
         // its own events fire.
@@ -1900,7 +1900,7 @@ fn provider_run_handoff(
                         .input_layers
                         .file_resolution_context,
                     current: lifecycle_current.clone(),
-                    frontmatter: fm_map.unwrap_or(&empty_frontmatter),
+                    frontmatter: &frontmatter,
                     document_start,
                 },
             )?;
@@ -1936,7 +1936,7 @@ pub(super) struct InitializeCatchSurface<'a> {
     /// The invocation's refresh authority for the lazy `current` root; `None`
     /// when there is no invocation, so every read fails closed.
     pub current: Option<darkmatter::markdown::compose::CurrentAuthority>,
-    pub frontmatter: &'a serde_json::Map<String, serde_json::Value>,
+    pub frontmatter: &'a darkmatter::markdown::compose::SharedFrontmatter,
     pub document_start: Instant,
 }
 

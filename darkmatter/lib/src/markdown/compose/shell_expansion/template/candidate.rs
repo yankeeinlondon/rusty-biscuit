@@ -443,6 +443,17 @@ pub fn derived_deferred_keys<'a>(
     }
 }
 
+/// The first path segment of every variable `value`'s expressions read, with
+/// an `fm.` prefix removed: the keys [`derived_deferred_keys`] follows from
+/// `value`, in authored order and with repeats.
+///
+/// Static, as [`derived_deferred_keys`] is.
+pub fn value_read_roots(value: &Value) -> Vec<String> {
+    let mut roots = Vec::new();
+    value_roots(value, &mut roots);
+    roots.into_iter().map(|read| read.root).collect()
+}
+
 /// Whether `expr` reads any of `roots` as a global, not through `fm.`.
 pub(crate) fn reads_global_root(expr: &Expr, roots: &[&str]) -> bool {
     let mut reads = Vec::new();
@@ -534,5 +545,23 @@ fn read_roots(expr: &Expr, roots: &mut Vec<RootRead>) {
         Expr::FunctionCall { args, .. } => args.iter().for_each(|arg| read_roots(arg, roots)),
         Expr::ArrayLiteral(items) => items.iter().for_each(|item| read_roots(item, roots)),
         Expr::ObjectLiteral(entries) => entries.iter().for_each(|(_, value)| read_roots(value, roots)),
+    }
+}
+
+#[cfg(test)]
+mod read_root_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn read_roots_follow_every_expression_at_any_depth_and_strip_fm() {
+        let value = json!({
+            "a": "{{ first.x }} and {{ fm.second }}",
+            "b": ["plain", "{{ third + fm['fourth'] }}"],
+            "c": 3,
+        });
+
+        assert_eq!(value_read_roots(&value), ["first", "second", "third", "fourth"]);
+        assert!(value_read_roots(&json!("no expression")).is_empty());
     }
 }

@@ -1076,9 +1076,11 @@ places commands late (Claudine's later sequence tasks) adds
 placeholder is then `TemplateRequired` too. `DeferredShellRoots::late_roots_of`
 is the one root-read check (a late root matches only a bare read; `fm.<root>`
 is the document's property; a derived key matches either way), and
-`derived_deferred_keys` and `compose::authored_shell_template` are public so a
-host building its own candidates (Claudine's sequence `shell:` tasks and stack
-`set` values) shares them.
+`derived_deferred_keys`, `value_read_roots` (the keys one value reads, which
+`derived_deferred_keys` follows), and `compose::authored_shell_template` are
+public so a host building its own candidates (Claudine's sequence `shell:`
+tasks and stack `set` values) shares them; Claudine scans a preparation's seed
+once and each step's overlay alone.
 `MissingValue`/`TemplateGrammar` are `shell_input_violation()`s, fatal through
 transclusion notices and nested `||`. `ComposeOptions.pre_approved_commands`
 is `ShellPreApprovals` (exact bytes + shapes; a `HashSet<String>` converts to
@@ -1176,7 +1178,9 @@ and DMLS: at most one result suffix, no suffix twice, no trailing text. A
 suffix is never part of the approved bytes. `ResolvedShellValue` and
 `execute_resolved_shell_values` (`frontmatter_shell_expansion/assignment.rs`)
 serve a `$( … )` that runs outside a compose (Claudine's lifecycle `set`): bytes
-are fixed at `resolve`, and every execution gets a fresh cache. A value given
+are fixed at `resolve`, and every execution gets a fresh cache. `resolve` takes
+its state as a closure, called only for a ternary's branches, so a plain
+command never materializes the document. A value given
 `with_template` runs as its typed template instead (`prepare_template_value` →
 `site::prepare_site`, pre-approved by shape; `with_late_values` fills barrier
 values; `execute_shell_values_with` takes the host's `HoleEvaluator`), and

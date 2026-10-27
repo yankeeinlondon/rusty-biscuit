@@ -66,6 +66,31 @@ md.fm_set_defaults(json!({"draft": false}))?;
 | `PreferExternal` | Incoming values win on conflict |
 | `PreferDocument` | Existing document values win |
 
+## Shared Frontmatter Views
+
+`SharedFrontmatter` (`compose::context::shared_frontmatter`, re-exported from
+`markdown::compose`) is the document state evaluation reads and lifecycle
+events write: an `Arc`-shared base map under an owned overlay of written and
+removed top-level keys. `clone()` shares the base, so views derived from one
+seed never observe each other's writes and a small write never copies a large
+inline definition (a `sequence:` list). An explicit `null` is a present value;
+`get_mut` copies only the one value it mutates; `to_map`/`to_hash_map`
+deep-copy and belong only at a boundary that needs an owned document.
+
+- `EffectiveState::data()` returns the view. `EffectiveStateBuilder::with_shared_frontmatter`
+  keeps the base uncopied when there is no (or an empty) external state; only
+  `ctx` and the view's writes are owned. With external state the merge
+  materializes, exactly as `with_frontmatter` does.
+- The lifecycle executor's base state (`StackInputs::frontmatter`,
+  `MdStackContext::frontmatter`, Claudine's `StackExecutionContext::frontmatter`)
+  is a `&SharedFrontmatter`, and its live cell (`…::live_frontmatter`) a
+  `Mutex<SharedFrontmatter>`; each event's `working` state and each
+  expression's state share their base, so no event or guard copies the
+  document. `owned()` iterates the values a view owns, which is what a clone
+  copies (Claudine's work counters read it).
+- Iteration order: base keys in base order (a written value in its place),
+  then new keys in first-write order.
+
 ## Typed Extraction
 
 ```rust

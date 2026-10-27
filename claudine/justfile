@@ -120,9 +120,9 @@ _ensure-md:
 test *args="": _ensure-md
     #!/usr/bin/env bash
     set -euo pipefail
-    packages="claudine-catalog-types; claudine; claudine-contract; claudine-cli --features test-fixtures; claudine-gen"
+    packages="claudine-catalog-types; claudine --features work-counters; claudine-contract; claudine-cli --features test-fixtures; claudine-gen"
     if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
-        just _test_all "claudine-catalog-types; claudine; claudine-contract; claudine-cli --features daemon-tests,terminal-tests,test-fixtures; claudine-gen --features terminal-tests" {{ args }}
+        just _test_all "claudine-catalog-types; claudine --features work-counters; claudine-contract; claudine-cli --features daemon-tests,terminal-tests,test-fixtures; claudine-gen --features terminal-tests" {{ args }}
     else
         just _test_local_all "${packages}" {{ args }}
     fi

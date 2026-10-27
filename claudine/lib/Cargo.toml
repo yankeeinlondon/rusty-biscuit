@@ -162,6 +162,9 @@ ubuntu-latest = ["libasound2-dev"]
 disallowed_methods = "allow"
 
 [package.metadata.ci.tests]
+# The sequence preflight and group-leg complexity regressions count work
+# through `work-counters`; without it they compile out.
+features = ["work-counters"]
 # The context construction and path lookup guards include darkmatter-cli's
 # shared engines by `#[path]` and spell those files in their tests. The
 # lifecycle lift-ready guard spells Darkmatter's lifecycle parser slice.

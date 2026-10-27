@@ -51,7 +51,7 @@ impl RuntimeFixture {
         loader.walk_plan(plan)?;
         let mut steps = std::mem::take(&mut loader.graph.steps);
         for (index, step) in steps.iter_mut().enumerate() {
-            loader.step_frontmatter = Arc::new(loader.step_frontmatter(plan, index));
+            loader.enter_step(plan, index);
             if let Some(task) = &mut step.task {
                 self.restore(task, &mut loader, false)?;
             }
@@ -67,7 +67,7 @@ impl RuntimeFixture {
             task.teardown = raw.get("teardown").cloned();
         }
         let state = EffectiveStateBuilder::new()
-            .with_frontmatter((*loader.step_frontmatter).clone())
+            .with_shared_frontmatter(loader.step_frontmatter.clone())
             .with_context(loader.context.clone()).with_allow_ctx_override(true).build().unwrap();
         let scope = SiteScope {
             origin: &task.origin_path.clone(), label: &task.label.clone(),

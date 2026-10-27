@@ -283,11 +283,12 @@ pub(crate) fn execute_sequence(
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
     let context = invocation.capture_launch_context(&requirements);
     let engine = darkmatter::effects::EffectEngine::builder().mutation_root(source_context.base_dir()).build();
-    let live = Mutex::new(frontmatter.clone());
+    let frontmatter_view = darkmatter::markdown::compose::SharedFrontmatter::from(frontmatter.clone());
+    let live = Mutex::new(frontmatter_view.clone());
     let lifecycle_context = LifecycleRuntimeContext { settings: &settings, messaging: &messaging, term: &term,
         source_path: &source.resolved_path, repo_root: source_context.repository_root(), launch_area: Some(file_resolution_context.request_cwd()), context: Some(&context) };
     let stack = StackExecutionContext { seq: Some(&seq), signal: LifecycleSignal::Initialize, scope: None,
-        frontmatter: &frontmatter, live_frontmatter: Some(&live), runtime_state: Some(&runtime), err: None,
+        frontmatter: &frontmatter_view, live_frontmatter: Some(&live), runtime_state: Some(&runtime), err: None,
         timing: None, current: Some(invocation.current_authority().memoized()), group: None, loop_values: None, base_dir: Some(source_context.base_dir()),
         ctx_base_dir: Some(file_resolution_context.request_cwd()), prepared_context: Some(&context), file_resolution_context: &file_resolution_context,
         effect_engine: &engine, shell_runner: invocation.shell_runner(), emitter: &emitter, term: &term,

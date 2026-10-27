@@ -11,7 +11,7 @@ fn run_event(
     config: &LifecycleConfig,
     signal: LifecycleSignal,
     base: &Map<String, Value>,
-    live: &std::sync::Mutex<Map<String, Value>>,
+    live: &std::sync::Mutex<darkmatter::markdown::compose::SharedFrontmatter>,
     runtime: &RuntimeState,
     engine: &EffectEngine,
 ) -> (LifecycleEventOutcome, Vec<Emitted>) {
@@ -78,7 +78,7 @@ fn set_can_read_an_absent_destination_as_null() {
     for base in [map(json!({})), map(json!({"message_to_agent": null})),
         map(json!({"message_to_agent": "continue phase 3"}))] {
         let expected = base.get("message_to_agent").cloned().unwrap_or(Value::Null);
-        let live = std::sync::Mutex::new(base.clone());
+        let live = std::sync::Mutex::new(base.clone().into());
         let runtime = RuntimeState::new();
         let (_dir, engine) = temp_engine();
         let (outcome, events) = run_event(
@@ -105,7 +105,7 @@ fn consecutive_set_actions_observe_each_others_updates() {
         ],
     }));
     let base = map(json!({"phase": "plan"}));
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
 
@@ -135,7 +135,7 @@ fn mapping_set_swaps_values_in_either_destination_order() {
         vec![("right", json!("{{left}}")), ("left", json!("{{right}}"))],
     ] {
         let base = map(json!({"left": "A", "right": "B"}));
-        let live = std::sync::Mutex::new(base.clone());
+        let live = std::sync::Mutex::new(base.clone().into());
         let runtime = RuntimeState::new();
         let (_dir, engine) = temp_engine();
         let shell = MockShell::new(0);
@@ -161,7 +161,7 @@ fn mapping_set_swaps_values_in_either_destination_order() {
         let mutations = runtime.snapshot().mutations;
         assert_eq!(mutations.get("left"), Some(&json!("B")));
         assert_eq!(mutations.get("right"), Some(&json!("A")));
-        assert_eq!(*live.lock().unwrap(), map(json!({"left": "B", "right": "A"})));
+        assert_eq!(live.lock().unwrap().to_map(), map(json!({"left": "B", "right": "A"})));
     }
 }
 
@@ -177,7 +177,7 @@ fn failed_expression_publishes_no_part_of_the_mapping_with_or_without_runtime() 
     let recorder = Recorder::default();
     let harness = Harness::default();
 
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let runtime = RuntimeState::new();
     let context = ctx_with_runtime(
         LifecycleSignal::Success,
@@ -194,9 +194,9 @@ fn failed_expression_publishes_no_part_of_the_mapping_with_or_without_runtime() 
         .dispatch_task_side_effect(&action, "tasks[0].side_effect.set")
         .is_err());
     assert!(runtime.snapshot().mutations.is_empty());
-    assert_eq!(*live.lock().unwrap(), base);
+    assert_eq!(live.lock().unwrap().to_map(), base);
 
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let context = ctx_with_live(
         LifecycleSignal::Success,
         &base,
@@ -210,7 +210,7 @@ fn failed_expression_publishes_no_part_of_the_mapping_with_or_without_runtime() 
     assert!(context
         .dispatch_task_side_effect(&action, "tasks[0].side_effect.set")
         .is_err());
-    assert_eq!(*live.lock().unwrap(), base);
+    assert_eq!(live.lock().unwrap().to_map(), base);
 }
 
 #[test]
@@ -221,7 +221,7 @@ fn event_set_failure_projects_its_source_rooted_nested_path_without_committing()
     let source_text = "---\nsuccess:\n    - set:\n          stable: changed\n          metadata:\n              files:\n                  - \"{{unknown_root()}}\"\n---\nbody\n";
     let config = config_from_markdown(source_text);
     let base = map(json!({"stable": "kept"}));
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
 
@@ -239,7 +239,7 @@ fn event_set_failure_projects_its_source_rooted_nested_path_without_committing()
     assert_eq!(info.property.as_deref(), Some(expected));
     assert_eq!(info.variant, "set");
     assert!(runtime.snapshot().mutations.is_empty());
-    assert_eq!(*live.lock().unwrap(), base);
+    assert_eq!(live.lock().unwrap().to_map(), base);
 
     let snapshot = info.snapshot.as_ref().expect("set failures are typed");
     assert_eq!(snapshot.code, "composition.lifecycle_invalid");
@@ -278,7 +278,7 @@ fn event_stack_items_keep_their_signal_rooted_spelling() {
     }));
     let action_config = config(json!({ "success": [{ "set": { "stable": "{{ unknown_value() }}" } }] }));
     let base = map(json!({"stable": "kept"}));
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
 
@@ -325,7 +325,7 @@ fn late_invalid_destination_publishes_no_part_of_the_task_side_effect() {
             false,
         );
         let base = map(json!({"stable": "kept"}));
-        let live = std::sync::Mutex::new(base.clone());
+        let live = std::sync::Mutex::new(base.clone().into());
         let runtime = RuntimeState::new();
         let (_dir, engine) = temp_engine();
         let shell = MockShell::new(0);
@@ -347,9 +347,9 @@ fn late_invalid_destination_publishes_no_part_of_the_task_side_effect() {
             .dispatch_task_side_effect(&action, "tasks[0].side_effect.set")
             .is_err());
         assert!(runtime.snapshot().mutations.is_empty(), "{invalid} published a runtime prefix");
-        assert_eq!(*live.lock().unwrap(), base, "{invalid} leaked through outer write-back");
+        assert_eq!(live.lock().unwrap().to_map(), base, "{invalid} leaked through outer write-back");
 
-        let live = std::sync::Mutex::new(base.clone());
+        let live = std::sync::Mutex::new(base.clone().into());
         let context = ctx_with_live(
             LifecycleSignal::Success,
             &base,
@@ -363,7 +363,7 @@ fn late_invalid_destination_publishes_no_part_of_the_task_side_effect() {
         assert!(context
             .dispatch_task_side_effect(&action, "tasks[0].side_effect.set")
             .is_err());
-        assert_eq!(*live.lock().unwrap(), base, "{invalid} changed no-runtime working state");
+        assert_eq!(live.lock().unwrap().to_map(), base, "{invalid} changed no-runtime working state");
     }
 }
 
@@ -378,7 +378,7 @@ fn a_batch_refusal_stops_the_stack_without_exposing_a_partial_write() {
         ],
     }));
     let base = map(json!({"stable": "kept"}));
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
 
@@ -394,7 +394,7 @@ fn a_batch_refusal_stops_the_stack_without_exposing_a_partial_write() {
     assert_ne!(outcome, LifecycleEventOutcome::default(), "the refusal stops the stack");
     assert!(events.is_empty(), "nothing after the refused `set` runs: {events:?}");
     assert!(runtime.snapshot().mutations.is_empty());
-    assert_eq!(*live.lock().unwrap(), base);
+    assert_eq!(live.lock().unwrap().to_map(), base);
 }
 
 /// A bundle's sibling `no_error` covers its other verbs but never its `set`:
@@ -411,7 +411,7 @@ fn bundle_no_error_cannot_suppress_its_set_failure() {
         ],
     }));
     let base = map(json!({"stable": "kept"}));
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
 
@@ -433,7 +433,7 @@ fn bundle_no_error_cannot_suppress_its_set_failure() {
 #[test]
 fn mapping_result_reports_all_priors_and_preserves_explicit_runtime_null() {
     let base = map(json!({"left": "A", "nullable": "document fallback"}));
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
     runtime.set(&engine, "nullable", Value::Null, &base).unwrap();
@@ -478,7 +478,7 @@ fn mapping_result_reports_all_priors_and_preserves_explicit_runtime_null() {
 fn a_one_property_mapping_writes_the_runtime_layer() {
     let config = config(json!({ "success": [{ "set": { "phase": "ship" } }, { "message": "phase={{phase}}" }] }));
     let base = map(json!({"phase": "plan"}));
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
 
@@ -504,7 +504,7 @@ fn a_whole_value_span_keeps_its_type() {
         "success": [{ "set": { "ready": "{{ true }}", "retries": "{{ 2 + 1 }}", "items": "{{ tags }}" } }],
     }));
     let base = map(json!({"tags": ["a", "b"]}));
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
 
@@ -533,7 +533,7 @@ fn a_mutation_in_start_is_visible_to_a_later_event() {
         "success": { "message": "phase={{phase}}" },
     }));
     let base = map(json!({"phase": "pending"}));
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
 
@@ -564,7 +564,7 @@ fn a_mutation_in_start_is_visible_to_a_later_event() {
 fn set_writes_no_file() {
     let config = config(json!({ "success": [{ "set": { "phase": "build" } }] }));
     let base = map(json!({"phase": "plan"}));
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let runtime = RuntimeState::new();
     let (dir, engine) = temp_engine();
     let source = dir.path().join("t.md");
@@ -602,7 +602,7 @@ fn set_refuses_every_reserved_root_key() {
             "outputs": ["kept"],
             "sequence_id": "sequence-1"
         }));
-        let live = std::sync::Mutex::new(base.clone());
+        let live = std::sync::Mutex::new(base.clone().into());
         let runtime = RuntimeState::new();
         let (_dir, engine) = temp_engine();
 
@@ -624,7 +624,7 @@ fn set_refuses_every_reserved_root_key() {
             error.msg
         );
         assert!(runtime.snapshot().mutations.is_empty());
-        assert_eq!(*live.lock().unwrap(), base, "{key} changed an authored reserved view");
+        assert_eq!(live.lock().unwrap().to_map(), base, "{key} changed an authored reserved view");
     }
 }
 
@@ -633,7 +633,7 @@ fn set_refuses_every_reserved_root_key() {
 fn set_refuses_a_dotted_key() {
     let config = config(json!({ "success": [{ "set": { "a.b": "x" } }] }));
     let base = map(json!({}));
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
 
@@ -704,7 +704,7 @@ fn last_outputs_reads_the_committed_accumulator() {
     runtime.append_output("second run");
 
     let base = map(json!({}));
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let (_dir, engine) = temp_engine();
 
     let (_, events) = run_event(

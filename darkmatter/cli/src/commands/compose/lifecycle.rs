@@ -330,8 +330,8 @@ struct ComposeHost<'a> {
     /// Delivered with the first report or failure of the composition pass,
     /// or at the run's end when it never composes.
     pending_triggers: PendingTriggerWarnings,
-    frontmatter: Map<String, Value>,
-    live: Mutex<Map<String, Value>>,
+    frontmatter: darkmatter::markdown::compose::SharedFrontmatter,
+    live: Mutex<darkmatter::markdown::compose::SharedFrontmatter>,
     state: MdRuntimeState,
     approved: ShellPreApprovals,
     user_blacklist: ShellRuleSet,
@@ -362,6 +362,7 @@ impl<'a> ComposeHost<'a> {
             .filter(|parent| !parent.as_os_str().is_empty())
             .map_or_else(|| compose.request.resolution_context().cwd().to_path_buf(), Path::to_path_buf);
         let user_blacklist = md_host::user_blacklist(&compose.request);
+        let frontmatter = darkmatter::markdown::compose::SharedFrontmatter::from(bootstrap);
         Self {
             md: compose.md,
             request: compose.request,
@@ -373,8 +374,8 @@ impl<'a> ComposeHost<'a> {
             verbose: compose.verbose,
             call_warnings: compose.call_warnings,
             pending_triggers: compose.pending_triggers,
-            live: Mutex::new(bootstrap.clone()),
-            frontmatter: bootstrap,
+            live: Mutex::new(frontmatter.clone()),
+            frontmatter,
             state: MdRuntimeState::default(),
             approved: ShellPreApprovals::new(),
             user_blacklist,
@@ -429,7 +430,7 @@ impl<'a> ComposeHost<'a> {
             }
         }
 
-        let effective = Value::Object(self.live.lock().expect("live frontmatter lock").clone());
+        let effective = Value::Object(self.live.lock().expect("live frontmatter lock").to_map());
         md_host::stamp_lifecycle_shells(&mut self.config, &effective, self.md, &self.request, &self.source_path)
             .map_err(|error| ("shell", Report::new(error)))?;
 
@@ -507,7 +508,7 @@ impl<'a> ComposeHost<'a> {
         self.frontmatter =
             composed.frontmatter().as_map().iter().map(|(key, value)| (key.clone(), value.clone())).collect();
         let mut live = self.live.lock().expect("live frontmatter lock");
-        for (key, value) in &self.frontmatter {
+        for (key, value) in self.frontmatter.iter() {
             live.insert(key.clone(), value.clone());
         }
         drop(live);

@@ -240,18 +240,12 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
     err: Option<&'a LifecycleErrorInfo>,
     timing: Option<&'a LifecycleTiming>,
 ) -> StackExecutionContext<'a> {
-    static EMPTY_FRONTMATTER: std::sync::OnceLock<serde_json::Map<String, serde_json::Value>> =
-        std::sync::OnceLock::new();
-    let fm_map = materialized
-        .frontmatter
-        .as_object()
-        .unwrap_or_else(|| EMPTY_FRONTMATTER.get_or_init(serde_json::Map::new));
     let base_dir = source_path.parent().or(repo_root);
     StackExecutionContext {
         seq: None,
         signal,
         scope: None,
-        frontmatter: fm_map,
+        frontmatter: &materialized.frontmatter_view,
         // The per-attempt live cell carried by `materialized` is shared across
         // every lifecycle event in this iteration, so a `start.stack`
         // frontmatter mutation is visible to a later `success`/`finalize`

@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use darkmatter::markdown::MarkdownError;
-use darkmatter::markdown::compose::EffectiveState;
+use darkmatter::markdown::compose::{EffectiveState, SharedFrontmatter};
 use darkmatter::markdown::compose::expression::Expr;
 use darkmatter::markdown::compose::subtree::SubtreeCompose;
 
@@ -490,7 +490,9 @@ struct ValidatedTask {
 }
 
 impl TaskExecution<'_> {
-    pub(super) fn prewarm_container(&self, lifecycle: &crate::composition::LifecycleConfig, frontmatter: &Map<String, Value>) {
+    /// Submit `lifecycle`'s pre-warm phrases. `frontmatter` is materialized
+    /// only when a phrase needs the event state.
+    pub(super) fn prewarm_container(&self, lifecycle: &crate::composition::LifecycleConfig, frontmatter: &SharedFrontmatter) {
         let Some(document) = self.document else { return };
         let handle = document.prewarm().with_injected_keys(
             reserved::ROOT_OVERLAY_KEYS.iter().map(|key| (*key).to_string())
@@ -498,7 +500,7 @@ impl TaskExecution<'_> {
         );
         crate::composition::lifecycle::prewarm::collect_and_submit(&handle, self.stack.settings, lifecycle, || {
             crate::composition::lifecycle::prewarm::PrewarmInputs::captured(
-                &Value::Object(frontmatter.clone()),
+                &Value::Object(frontmatter.to_map()),
                 self.stack.prepared_context.unwrap_or_else(|| self.state.context()).clone(),
             )
         });
@@ -539,10 +541,8 @@ impl TaskExecution<'_> {
             self.dry_run_note(&format!("`{name}` runs when `{condition}` (not evaluated in a dry run)"));
             return Ok(true);
         }
-        let frontmatter: Map<String, Value> = self.state.data().iter()
-            .map(|(key, value)| (key.clone(), value.clone())).collect();
         let seq = self.sequence_binding();
-        let context = StackExecutionContext { frontmatter: &frontmatter, seq: Some(&seq), ..self.stack.with_signal(self.stack.signal) };
+        let context = StackExecutionContext { frontmatter: self.state.data(), seq: Some(&seq), ..self.stack.with_signal(self.stack.signal) };
         evaluate_task_guard(self.task, &context)
     }
 
@@ -903,11 +903,11 @@ impl TaskExecution<'_> {
     /// The cap template's located error, or a malformed override.
     pub(super) fn open_loop(
         &self, preflight: Option<&super::preflight::PreflightLoop>, kind: crate::composition::looping::LoopResultKind,
-        state: &Map<String, Value>, runtime: &RuntimeState,
+        state: &SharedFrontmatter, runtime: &RuntimeState,
     ) -> Result<Option<crate::composition::looping::LoopFrame>, CompositionError> {
         let Some(preflight) = preflight else { return Ok(None) };
         let mut config = preflight.config.clone();
-        let mut values = state.clone();
+        let mut values = state.to_map();
         values.extend(runtime.snapshot().mutations);
         let ambient = crate::composition::LoopAmbient::new(1, true, false, kind.empty(), 0);
         let lookup = crate::composition::LoopExpressionLookup::new(

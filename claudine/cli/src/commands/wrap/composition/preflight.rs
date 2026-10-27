@@ -95,7 +95,7 @@ pub(super) fn emit_preflight_blocked_and_finalize(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     loop_values: Option<&claudine::composition::LoopAmbient>,
     current: Option<darkmatter::markdown::compose::CurrentAuthority>,
-    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    frontmatter: &darkmatter::markdown::compose::SharedFrontmatter,
     document_start: std::time::Instant,
     err_info: LifecycleErrorInfo,
 ) -> PreflightBlockedOutcome {

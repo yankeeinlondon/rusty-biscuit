@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use darkmatter::markdown::compose::{EffectiveState, EffectiveStateBuilder};
+use darkmatter::markdown::compose::{EffectiveState, EffectiveStateBuilder, SharedFrontmatter};
 use serde_json::{Map, Value};
 
 use super::super::super::error::CompositionError;
@@ -158,7 +158,7 @@ impl TaskExecution<'_> {
             stack.err = error.as_ref();
             if !shell_enabled { stack.shell_runner = &DisabledShellRunner; }
             if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start) {
-                execution.prewarm_container(runner.guard_mut().config(), &live.lock().expect(SLOT_POISONED));
+                execution.prewarm_container(runner.guard_mut().config(), &live.lock().expect(SLOT_POISONED).clone());
             }
             let event = if self.prompt.is_dry_run() {
                 let outcome = Default::default();
@@ -461,16 +461,21 @@ impl TaskExecution<'_> {
             group.tasks.iter().map(|_| Mutex::new(None)).collect();
         // The live document cell is per-*attempt* and therefore shared by
         // construction; a member needs its own, seeded from the group-start
-        // view, for the same reason it needs its own runtime buffer. The copies
-        // are dropped with the group: a member's `set_frontmatter` already
+        // view, for the same reason it needs its own runtime buffer. Each cell
+        // shares that view's base and owns only its own writes, which are
+        // dropped with the group: a member's `set_frontmatter` already
         // reached disk, and the next *step* re-reads the file — a sibling never
         // does (spec → *Concurrency*).
-        let live_cells: Vec<Mutex<Map<String, Value>>> = scope_stack
+        let live_cells: Vec<Mutex<SharedFrontmatter>> = scope_stack
             .live_frontmatter_snapshot()
             .into_iter()
-            .flat_map(|seed| group.tasks.iter().map(move |_| Mutex::new(seed.clone())))
+            .flat_map(|seed| {
+                // A cell copies only the values the group-start view owns.
+                crate::note_work!(LiveFrontmatterCopy, group.tasks.len() as u64 * crate::work_counters::value_nodes(seed.owned()));
+                group.tasks.iter().map(move |_| Mutex::new(seed.clone()))
+            })
             .collect();
-        crate::note_work!(LiveFrontmatterCopy, live_cells.len());
+        crate::note_work!(LiveFrontmatterView, live_cells.len());
 
         // Absent cap means "launch all"; declaration-order admission falls out of
         // a single shared cursor, so a freed slot always takes the next task.
@@ -806,7 +811,7 @@ impl TaskExecution<'_> {
             }
         }
         EffectiveStateBuilder::new()
-            .with_frontmatter(data)
+            .with_shared_frontmatter(data)
             .with_context(self.state.context().clone())
             .with_allow_ctx_override(true)
             .build()

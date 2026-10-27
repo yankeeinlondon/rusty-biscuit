@@ -66,7 +66,7 @@ use crate::markdown::compose::shell_expansion::template::{
 use crate::markdown::compose::subtree::{SubtreeCompose, layered_session};
 use crate::markdown::compose::{
     ComposeContext, ContextBuildError, CurrentAuthority, EffectiveState, EffectiveStateBuilder,
-    ResolvedShellValue, ShellCommandOrigin, ShellExpansionError,
+    ResolvedShellValue, SharedFrontmatter, ShellCommandOrigin, ShellExpansionError,
 };
 
 use super::actions::{
@@ -105,7 +105,7 @@ pub struct StackInputs<'a> {
     /// The event being processed.
     pub signal: LifecycleSignal,
     /// Composed frontmatter — the base namespace for expression evaluation.
-    pub frontmatter: &'a Map<String, Value>,
+    pub frontmatter: &'a SharedFrontmatter,
     /// Shared cross-event live document frontmatter for the current attempt.
     ///
     /// When `Some`, lifecycle frontmatter side effects (`set_frontmatter` and
@@ -114,7 +114,7 @@ pub struct StackInputs<'a> {
     /// effective document state at the moment the event fires" contract
     /// across events. When `None`, `frontmatter` is the only base state and
     /// stack mutations are visible intra-stack only.
-    pub live_frontmatter: Option<&'a Mutex<Map<String, Value>>>,
+    pub live_frontmatter: Option<&'a Mutex<SharedFrontmatter>>,
     /// The invocation's refresh authority for Darkmatter's lazy `current` root.
     ///
     /// `None` fails closed: every `current.<key>` renders `null` and records a
@@ -239,7 +239,7 @@ impl<'a> StackExecutor<'a> {
     ///
     /// The evaluation failure. A guard that raises is never read as false.
     pub fn evaluate_guard(&self, expr: &Expr) -> Result<bool, LifecycleCause> {
-        self.eval_expr(expr, self.inputs.frontmatter)
+        self.eval_expr(expr, &self.inputs.frontmatter.clone())
             .map(|value| is_truthy(&value))
             .map_err(LifecycleCause::new)
     }
@@ -263,7 +263,7 @@ impl<'a> StackExecutor<'a> {
     /// Returns the error snapshot for an unsuppressed dispatch failure, an
     /// expression-layer raise, or a non-side-effect action.
     pub fn dispatch_task_side_effect(&self, action: &LifecycleAction, property: &str) -> Result<Value, LifecycleErrorInfo> {
-        let mut working: Map<String, Value> = match self.inputs.live_frontmatter {
+        let mut working = match self.inputs.live_frontmatter {
             Some(cell) => cell.lock().expect(LIVE_POISONED).clone(),
             None => self.inputs.frontmatter.clone(),
         };
@@ -280,7 +280,7 @@ impl<'a> StackExecutor<'a> {
         &self,
         action: &LifecycleAction,
         property: &str,
-        working: &mut Map<String, Value>,
+        working: &mut SharedFrontmatter,
     ) -> Result<Value, LifecycleErrorInfo> {
         let dispatched = match &action.kind {
             LifecycleActionKind::RuntimeSet(set) => self
@@ -398,11 +398,10 @@ impl<'a> StackExecutor<'a> {
     /// `ctx.*`/`env.*` come from [`Self::early_binding_context`]; the event's
     /// globals come separately from the host's bindings; `current.*` is the
     /// reserved root this state's refresh authority serves.
-    fn build_state(&self, fm: &Map<String, Value>, scan_hint: &str) -> EffectiveState {
-        let frontmatter: HashMap<String, Value> = fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    fn build_state(&self, fm: &SharedFrontmatter, scan_hint: &str) -> EffectiveState {
         let context = self.early_binding_context(scan_hint);
         EffectiveStateBuilder::new()
-            .with_frontmatter(frontmatter)
+            .with_shared_frontmatter(fm.clone())
             .with_name_coercion_keys(self.inputs.host.name_coercion_keys())
             .with_context(context)
             // Every event builds its own state, so every event starts fresh
@@ -415,7 +414,7 @@ impl<'a> StackExecutor<'a> {
             .build()
             .unwrap_or_else(|_| {
                 EffectiveState::new(
-                    &fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                    &fm.to_hash_map(),
                     None,
                     self.early_binding_context(""),
                 )
@@ -428,7 +427,7 @@ impl<'a> StackExecutor<'a> {
     /// ## Errors
     ///
     /// The evaluation failure, or a resolution context that failed to build.
-    pub fn eval_expr(&self, expr: &Expr, fm: &Map<String, Value>) -> Result<Value, LifecycleExprError> {
+    pub fn eval_expr(&self, expr: &Expr, fm: &SharedFrontmatter) -> Result<Value, LifecycleExprError> {
         let state = self.build_state(fm, &expr.to_string());
         let (view, globals) = self.inputs.host.bindings();
         evaluate_expr_in(expr, &state, view, globals, Some(self.resolution_context()?))
@@ -449,7 +448,7 @@ impl<'a> StackExecutor<'a> {
     /// ## Errors
     ///
     /// The compose failure, or a resolution context that failed to build.
-    pub fn resolve_string_value(&self, s: &str, fm: &Map<String, Value>) -> Result<Value, LifecycleExprError> {
+    pub fn resolve_string_value(&self, s: &str, fm: &SharedFrontmatter) -> Result<Value, LifecycleExprError> {
         let state = self.build_state(fm, s);
         let (view, globals) = self.inputs.host.bindings();
         interpolate_text_in(s, &state, view, globals, Some(self.resolution_context()?))
@@ -462,7 +461,7 @@ impl<'a> StackExecutor<'a> {
     /// as `{{ frontmatter('log.md', 'note') }}` — yields data, returned as is:
     /// text it produced is never scanned again, so an agent-written `{{ … }}`
     /// or `$( … )` arrives exactly as written.
-    fn evaluate_operand(&self, expr: &Expr, fm: &Map<String, Value>) -> Result<Value, LifecycleExprError> {
+    fn evaluate_operand(&self, expr: &Expr, fm: &SharedFrontmatter) -> Result<Value, LifecycleExprError> {
         match expr {
             Expr::StringLiteral(text) if is_template_operand(expr) => self.resolve_string_value(text, fm),
             _ => self.eval_expr(expr, fm),
@@ -487,8 +486,8 @@ impl<'a> StackExecutor<'a> {
 
     /// Process the typed stack top to bottom.
     ///
-    /// Holds an evolving in-memory `working` frontmatter, seeded from the shared
-    /// cross-event live cell when present (so this event sees frontmatter
+    /// Holds an evolving in-memory `working` frontmatter, a view seeded from the
+    /// shared cross-event live cell when present (so this event sees frontmatter
     /// mutations made by *earlier* events in the same attempt) and otherwise
     /// from the composed document state. A frontmatter-mutating side effect that
     /// targets the document mirrors its change onto `working`, so a later action
@@ -502,7 +501,7 @@ impl<'a> StackExecutor<'a> {
         if nodes.is_empty() {
             return LifecycleEventOutcome::default();
         }
-        let mut working: Map<String, Value> = match self.inputs.live_frontmatter {
+        let mut working = match self.inputs.live_frontmatter {
             Some(cell) => cell.lock().expect(LIVE_POISONED).clone(),
             None => self.inputs.frontmatter.clone(),
         };
@@ -525,7 +524,7 @@ impl<'a> StackExecutor<'a> {
     /// A guard is evaluated once, when its item is reached, against the live
     /// state; only the selected body runs. A guard that raises is an
     /// evaluation error and never selects `else`.
-    fn execute_nodes(&self, nodes: &[LifecycleNode], working: &mut Map<String, Value>) -> Option<LifecycleEventOutcome> {
+    fn execute_nodes(&self, nodes: &[LifecycleNode], working: &mut SharedFrontmatter) -> Option<LifecycleEventOutcome> {
         for node in nodes {
             if self.inputs.host.stops_on_interrupt() && self.inputs.host.interrupted() {
                 return Some(LifecycleEventOutcome::default());
@@ -574,7 +573,7 @@ impl<'a> StackExecutor<'a> {
     /// is falsy and skips the item. A malformed expression, an unknown
     /// function, or a read of a global this scope declares unavailable returns
     /// `Err`, so the event fails closed before any side effect dispatches.
-    fn when_matches(&self, when: Option<&Expr>, fm: &Map<String, Value>) -> Result<bool, LifecycleErrorInfo> {
+    fn when_matches(&self, when: Option<&Expr>, fm: &SharedFrontmatter) -> Result<bool, LifecycleErrorInfo> {
         let Some(expr) = when else {
             return Ok(true);
         };
@@ -594,7 +593,7 @@ impl<'a> StackExecutor<'a> {
         action: &LifecycleAction,
         location: ActionLocation,
         property: &str,
-        working: &mut Map<String, Value>,
+        working: &mut SharedFrontmatter,
     ) -> ActionStep {
         match self.execute_action_inner(action, location, property, working) {
             Ok(None) => ActionStep::Continue,
@@ -646,7 +645,7 @@ impl<'a> StackExecutor<'a> {
         action: &LifecycleAction,
         location: ActionLocation,
         property: &str,
-        working: &mut Map<String, Value>,
+        working: &mut SharedFrontmatter,
     ) -> Result<Option<StackControl>, ActionFailure> {
         match &action.kind {
             // `prep` returns: the event continues with the next item.
@@ -715,7 +714,7 @@ impl<'a> StackExecutor<'a> {
     ///
     /// An absent document property renders through ordinary `null` semantics.
     /// A genuine evaluation error fails before dispatch.
-    fn render_message(&self, expr: &Expr, fm: &Map<String, Value>) -> Result<String, LifecycleExprError> {
+    fn render_message(&self, expr: &Expr, fm: &SharedFrontmatter) -> Result<String, LifecycleExprError> {
         self.evaluate_operand(expr, fm).map(|value| scalar_string(&value))
     }
 
@@ -732,7 +731,7 @@ impl<'a> StackExecutor<'a> {
     ///
     /// A site approved by its shape runs its template
     /// ([`Self::run_shell_template`]); one approved in neither mode is refused.
-    fn run_shell_action(&self, shell: &ShellAction, property: &str, fm: &Map<String, Value>) -> Result<(), ActionFailure> {
+    fn run_shell_action(&self, shell: &ShellAction, property: &str, fm: &SharedFrontmatter) -> Result<(), ActionFailure> {
         if self.inputs.signal == LifecycleSignal::Initialize {
             return Err(ActionFailure::Evaluation(
                 self.error_or_action("shell", &ShellRunError::BeforePreflight),
@@ -790,7 +789,7 @@ impl<'a> StackExecutor<'a> {
         site: &LifecycleShellTemplate,
         policy_root: Option<&Path>,
         property: &str,
-        fm: &Map<String, Value>,
+        fm: &SharedFrontmatter,
     ) -> Result<(), ActionFailure> {
         self.ensure_shell_permitted("shell")?;
         let template = site.template();
@@ -891,7 +890,7 @@ impl<'a> StackExecutor<'a> {
     /// this event's globals, exactly as every other action expression reads.
     fn with_hole_evaluator<R>(
         &self,
-        fm: &Map<String, Value>,
+        fm: &SharedFrontmatter,
         scan_hint: &str,
         f: impl FnOnce(&dyn HoleEvaluator) -> R,
     ) -> Result<R, LifecycleExprError> {
@@ -906,7 +905,7 @@ impl<'a> StackExecutor<'a> {
     ///
     /// A pre-flight-resolved literal is the approved byte string and runs as it
     /// stands; everything else renders like a message body.
-    fn render_shell_text(&self, shell: &ShellAction, expr: &Expr, fm: &Map<String, Value>) -> Result<String, LifecycleExprError> {
+    fn render_shell_text(&self, shell: &ShellAction, expr: &Expr, fm: &SharedFrontmatter) -> Result<String, LifecycleExprError> {
         match expr {
             Expr::StringLiteral(text) if shell.pre_resolved => Ok(text.clone()),
             _ => self.render_message(expr, fm),
@@ -932,7 +931,7 @@ impl<'a> StackExecutor<'a> {
     /// engine receives the bound values (a number given for a `string`
     /// parameter arrives as its text), and the bound overload, not the
     /// argument count, picks the `ensure_file` form.
-    fn dispatch_side_effect(&self, verb: &str, args: &[Expr], working: &mut Map<String, Value>) -> Result<Value, ActionFailure> {
+    fn dispatch_side_effect(&self, verb: &str, args: &[Expr], working: &mut SharedFrontmatter) -> Result<Value, ActionFailure> {
         // Argument evaluation/interpolation and binding are the expression
         // layer: a raise here is an evaluation error.
         let evaluation_err = |error: LifecycleExprError| ActionFailure::Evaluation(self.expr_error(verb, error));
@@ -1027,11 +1026,13 @@ impl<'a> StackExecutor<'a> {
         &self,
         set: &RuntimeSet,
         property: &str,
-        working: &mut Map<String, Value>,
+        working: &mut SharedFrontmatter,
     ) -> Result<IndexMap<String, Value>, ActionFailure> {
         let mut snapshot = working.clone();
         for (key, _) in set.iter() {
-            snapshot.entry(key.clone()).or_insert(Value::Null);
+            if !snapshot.contains_key(key) {
+                snapshot.insert(key.clone(), Value::Null);
+            }
         }
         let mut resolved_values = HashMap::with_capacity(set.len());
         for (key, value) in set.iter() {
@@ -1101,7 +1102,7 @@ impl<'a> StackExecutor<'a> {
         &self,
         set: &RuntimeSet,
         property: &str,
-        snapshot: &Map<String, Value>,
+        snapshot: &SharedFrontmatter,
     ) -> Result<Vec<(String, Value)>, ActionFailure> {
         let mut values: Vec<std::borrow::Cow<'_, ResolvedShellValue>> = Vec::new();
         let mut authored = String::new();
@@ -1232,7 +1233,7 @@ impl<'a> StackExecutor<'a> {
     /// view consistent so a later action in the same stack resolves `{{ … }}`
     /// against the mutated value (just-in-time resolution). Mutations targeting
     /// any other file are not mirrored — they do not change this document.
-    fn mirror_frontmatter_mutation(&self, verb: &str, values: &[Value], working: &mut Map<String, Value>) {
+    fn mirror_frontmatter_mutation(&self, verb: &str, values: &[Value], working: &mut SharedFrontmatter) {
         let Some(Value::String(target)) = values.first() else {
             return;
         };
@@ -1267,7 +1268,7 @@ impl<'a> StackExecutor<'a> {
             }
             "append_frontmatter" | "prepend_frontmatter" => {
                 if let (Some(p), Some(val)) = (prop(), values.get(2)) {
-                    let entry = working.entry(p.to_string()).or_insert_with(|| Value::Array(Vec::new()));
+                    let entry = working.get_or_insert_with(p, || Value::Array(Vec::new()));
                     if let Value::Array(arr) = entry {
                         if verb == "append_frontmatter" {
                             arr.push(val.clone());
@@ -1309,7 +1310,7 @@ impl<'a> StackExecutor<'a> {
     /// spells, so a context function keeps its caller-file provenance. A lazy
     /// function (`and`, `or`) still evaluates its operands one at a time and
     /// stops at the short-circuit, templates included.
-    fn invoke_expression_function(&self, function: &str, args: &[Expr], fm: &Map<String, Value>) -> Result<Value, LifecycleExprError> {
+    fn invoke_expression_function(&self, function: &str, args: &[Expr], fm: &SharedFrontmatter) -> Result<Value, LifecycleExprError> {
         let value = if args.iter().any(is_template_operand) {
             self.call_with_operand_values(function, args, fm)?
         } else {
@@ -1329,7 +1330,7 @@ impl<'a> StackExecutor<'a> {
 
     /// Call `function` with each operand evaluated by
     /// [`Self::evaluate_operand`], through the runtime registry and binder.
-    fn call_with_operand_values(&self, function: &str, args: &[Expr], fm: &Map<String, Value>) -> Result<Value, LifecycleExprError> {
+    fn call_with_operand_values(&self, function: &str, args: &[Expr], fm: &SharedFrontmatter) -> Result<Value, LifecycleExprError> {
         let call_error = |error| LifecycleExprError::Evaluate(Box::new(ExpressionError::Call(Box::new(error))));
         if let Some((registration, short_circuit)) = functions::lazy_function(function) {
             registration.check_arity(args.len()).map_err(call_error)?;
@@ -1364,7 +1365,7 @@ impl<'a> StackExecutor<'a> {
         &self,
         control: &LifecycleControlAction,
         location: ActionLocation,
-        fm: &Map<String, Value>,
+        fm: &SharedFrontmatter,
     ) -> Result<StackControl, LifecycleErrorInfo> {
         use LifecycleControlAction as C;
         let verb = control.verb();
@@ -1457,7 +1458,7 @@ impl<'a> StackExecutor<'a> {
         target: &Expr,
         with: &WithOverlay,
         location: &ActionLocation,
-        fm: &Map<String, Value>,
+        fm: &SharedFrontmatter,
     ) -> Result<(), ActionFailure> {
         let target = self
             .render_message(target, fm)
@@ -1508,7 +1509,7 @@ impl<'a> StackExecutor<'a> {
         with: &WithOverlay,
         target: &str,
         location: &ActionLocation,
-        fm: &Map<String, Value>,
+        fm: &SharedFrontmatter,
     ) -> Result<IndexMap<String, Value>, LifecycleErrorInfo> {
         // Capture the snapshot-less fallback context ONCE for the whole overlay,
         // then walk every leaf against it. Recursive `resolve_with_value`
@@ -1539,7 +1540,7 @@ impl<'a> StackExecutor<'a> {
         with: &WithOverlay,
         target: &str,
         location: &ActionLocation,
-        fm: &Map<String, Value>,
+        fm: &SharedFrontmatter,
     ) -> Result<IndexMap<String, Value>, LifecycleErrorInfo> {
         let mut overlay = IndexMap::with_capacity(with.len());
         for (key, value) in with.iter() {
@@ -1568,7 +1569,7 @@ impl<'a> StackExecutor<'a> {
     /// `.metadata.area`, `[2]`) alongside the reason, so the caller can root a
     /// diagnostic at the exact nested property without the value ever being
     /// echoed.
-    fn resolve_with_value(&self, value: &WithValue, fm: &Map<String, Value>) -> Result<Value, (String, LifecycleExprError)> {
+    fn resolve_with_value(&self, value: &WithValue, fm: &SharedFrontmatter) -> Result<Value, (String, LifecycleExprError)> {
         match value {
             WithValue::Null => Ok(Value::Null),
             // Only a `set` mapping holds one, and `set` runs it separately.
@@ -1612,12 +1613,12 @@ impl<'a> StackExecutor<'a> {
     /// An absent document property resolves to `null`. The resolved value is
     /// data: a `{{ … }}` inside it — at any depth of a container — reaches a
     /// `set:` or a `proxy.with:` target as text, never as a template.
-    fn resolve_typed_value(&self, expr: &Expr, fm: &Map<String, Value>) -> Result<Value, LifecycleExprError> {
+    fn resolve_typed_value(&self, expr: &Expr, fm: &SharedFrontmatter) -> Result<Value, LifecycleExprError> {
         self.evaluate_operand(expr, fm)
     }
 
     /// Evaluate an optional expression to a display string.
-    fn eval_opt_string(&self, expr: Option<&Expr>, fm: &Map<String, Value>) -> Result<Option<String>, LifecycleExprError> {
+    fn eval_opt_string(&self, expr: Option<&Expr>, fm: &SharedFrontmatter) -> Result<Option<String>, LifecycleExprError> {
         match expr {
             Some(expr) => Ok(Some(self.render_message(expr, fm)?)),
             None => Ok(None),
@@ -1625,7 +1626,7 @@ impl<'a> StackExecutor<'a> {
     }
 
     /// Evaluate an optional expression to a non-negative integer count.
-    fn eval_opt_u32(&self, expr: Option<&Expr>, fm: &Map<String, Value>) -> Result<Option<u32>, LifecycleExprError> {
+    fn eval_opt_u32(&self, expr: Option<&Expr>, fm: &SharedFrontmatter) -> Result<Option<u32>, LifecycleExprError> {
         let Some(expr) = expr else {
             return Ok(None);
         };

@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::markdown::compose::shell_expansion::template::{
     FilledChain, HoleEvaluator, ShellPreApprovals, TemplateShape, TemplateTargetError,
@@ -132,7 +132,7 @@ pub struct ShellValueRequest<'a> {
     pub values: &'a [&'a ResolvedShellValue],
     /// The pre-write state for conditions, value branches, and template-mode
     /// placeholders. Resolved-byte commands stay fixed at preflight.
-    pub state: &'a Map<String, Value>,
+    pub state: &'a crate::markdown::compose::SharedFrontmatter,
     /// The composition source, for diagnostics and file references.
     pub source_path: &'a Path,
     /// The early-binding `ctx.*`/`env.*` snapshot.

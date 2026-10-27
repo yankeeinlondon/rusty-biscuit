@@ -27,7 +27,7 @@ mod containers;
 mod rename;
 
 pub use containers::{GroupBinding, GroupLegResult, LegOutcome, SequenceBinding};
-pub use rename::{reject_removed_sequence_reads, RETIRED_SEQUENCE_NAMES};
+pub use rename::{reject_removed_lifecycle_reads, reject_removed_sequence_reads, RETIRED_SEQUENCE_NAMES};
 
 use std::collections::HashMap;
 use std::path::Path;

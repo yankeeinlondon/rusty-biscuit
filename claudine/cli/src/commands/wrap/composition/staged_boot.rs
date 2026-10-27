@@ -206,7 +206,7 @@ pub(crate) struct StagedDocument<'a> {
 impl StagedDocument<'_> {
     fn catch_surface<'s>(
         &'s self,
-        frontmatter: &'s serde_json::Map<String, serde_json::Value>,
+        frontmatter: &'s darkmatter::markdown::compose::SharedFrontmatter,
     ) -> InitializeCatchSurface<'s> {
         InitializeCatchSurface {
             effect_engine: self.effect_engine,
@@ -262,7 +262,8 @@ pub(crate) fn route_staged_initialize(
         .effective_frontmatter
         .as_object()
         .unwrap_or(&empty);
-    let surface = document.catch_surface(frontmatter);
+    let frontmatter_view = darkmatter::markdown::compose::SharedFrontmatter::from(frontmatter.clone());
+    let surface = document.catch_surface(&frontmatter_view);
     let timing = claudine::composition::lifecycle_context::LifecycleTiming::from_instants(
         document.document_start,
         None,
@@ -272,7 +273,7 @@ pub(crate) fn route_staged_initialize(
         seq: None,
         signal: LifecycleSignal::Initialize,
         scope: None,
-        frontmatter,
+        frontmatter: &frontmatter_view,
         live_frontmatter: None,
         runtime_state: None,
         err: None,
@@ -334,6 +335,7 @@ pub(crate) fn cancel_staged_before_start(
         .effective_frontmatter
         .as_object()
         .unwrap_or(&empty);
+    let frontmatter_view = darkmatter::markdown::compose::SharedFrontmatter::from(frontmatter.clone());
     let timing = claudine::composition::lifecycle_context::LifecycleTiming::from_instants(
         document.document_start,
         None,
@@ -343,7 +345,7 @@ pub(crate) fn cancel_staged_before_start(
         seq: None,
         signal: LifecycleSignal::Initialize,
         scope: None,
-        frontmatter,
+        frontmatter: &frontmatter_view,
         live_frontmatter: None,
         runtime_state: None,
         err: None,
@@ -440,7 +442,8 @@ pub(crate) fn route_stabilized_failure(
         .as_object()
         .unwrap_or(&empty);
     let info = LifecycleErrorInfo::from_composition_error(&error);
-    match document.catch_surface(frontmatter).route_blocked(guard, info) {
+    let frontmatter_view = darkmatter::markdown::compose::SharedFrontmatter::from(frontmatter.clone());
+    match document.catch_surface(&frontmatter_view).route_blocked(guard, info) {
         PreflightBlockedOutcome::EvaluationError(evaluation) => evaluation,
         PreflightBlockedOutcome::Control(_) => {
             let stderr_is_tty =

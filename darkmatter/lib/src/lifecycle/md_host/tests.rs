@@ -424,8 +424,8 @@ fn evaluate_event(config: &LifecycleConfig, signal: LifecycleSignal, interrupted
     let dir = tempfile::tempdir().unwrap();
     let request = crate::markdown::compose::test_request(crate::markdown::compose::ComposeOptions::new());
     let lines = Lines::default();
-    let frontmatter = Map::new();
-    let live = Mutex::new(Map::new());
+    let frontmatter = SharedFrontmatter::default();
+    let live = Mutex::new(SharedFrontmatter::default());
     let state = MdRuntimeState::default();
     let approved = ShellPreApprovals::new();
     let blacklist = ShellRuleSet::default();

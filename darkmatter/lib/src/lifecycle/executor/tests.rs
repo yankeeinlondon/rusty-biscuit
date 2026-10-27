@@ -123,7 +123,7 @@ impl LifecycleHost for FakeHost {
         &self,
         _: &EffectEngine,
         updates: &IndexMap<String, Value>,
-        prior_base: &Map<String, Value>,
+        prior_base: &SharedFrontmatter,
     ) -> Result<IndexMap<String, Value>, Box<dyn StdError + Send + Sync>> {
         let mut committed = self.committed.borrow_mut();
         let prior = updates
@@ -195,7 +195,7 @@ impl Fixture {
         }
     }
 
-    fn inputs<'a>(&'a self, signal: LifecycleSignal, frontmatter: &'a Map<String, Value>) -> StackInputs<'a> {
+    fn inputs<'a>(&'a self, signal: LifecycleSignal, frontmatter: &'a SharedFrontmatter) -> StackInputs<'a> {
         StackInputs {
             signal,
             frontmatter,
@@ -214,7 +214,7 @@ impl Fixture {
 
     fn run(&self, signal: LifecycleSignal, frontmatter: Value, document: Value) -> LifecycleEventOutcome {
         let config = parse(document);
-        let fm = frontmatter.as_object().cloned().unwrap_or_default();
+        let fm: SharedFrontmatter = frontmatter.as_object().cloned().unwrap_or_default().into();
         StackExecutor::with_services(self.inputs(signal, &fm), &self.effects, &NoCodes).execute_event(&config)
     }
 }
@@ -279,7 +279,7 @@ fn error_carries_its_evaluated_reason() {
 #[test]
 fn a_shell_action_at_initialize_is_refused_before_the_runner_sees_it() {
     let fixture = Fixture::new();
-    let fm = Map::new();
+    let fm = SharedFrontmatter::default();
     let config = parse(json!({ "start": [{ "shell": "echo hi" }] }));
 
     let outcome = StackExecutor::with_services(fixture.inputs(LifecycleSignal::Initialize, &fm), &fixture.effects, &NoCodes)
@@ -294,7 +294,7 @@ fn a_shell_action_at_initialize_is_refused_before_the_runner_sees_it() {
 #[test]
 fn a_disabled_runner_refuses_a_shell_action_after_start() {
     let fixture = Fixture::new();
-    let fm = Map::new();
+    let fm = SharedFrontmatter::default();
     let inputs = StackInputs {
         shell_runner: &DisabledShellRunner,
         ..fixture.inputs(LifecycleSignal::Success, &fm)
@@ -320,7 +320,7 @@ fn break_outside_a_loop_is_classified_by_the_host() {
 #[test]
 fn a_missing_service_is_a_typed_error() {
     let fixture = Fixture::new();
-    let fm = Map::new();
+    let fm = SharedFrontmatter::default();
 
     let no_effects = StackExecutor::new(fixture.inputs(LifecycleSignal::Start, &fm), LifecycleServices::default());
     let no_catalog = StackExecutor::new(
@@ -338,7 +338,7 @@ fn a_missing_service_is_a_typed_error() {
 /// `length`'s result for one action operand, evaluated against `frontmatter`.
 fn action_length(frontmatter: Value, operand: Expr) -> Value {
     let fixture = Fixture::new();
-    let fm = frontmatter.as_object().cloned().unwrap_or_default();
+    let fm: SharedFrontmatter = frontmatter.as_object().cloned().unwrap_or_default().into();
     StackExecutor::with_services(fixture.inputs(LifecycleSignal::Success, &fm), &fixture.effects, &NoCodes)
         .invoke_expression_function("length", &[operand], &fm)
         .expect("length evaluates")
@@ -360,4 +360,31 @@ fn an_expression_function_receives_a_whole_value_operand_as_typed_data() {
     // Data is never scanned again: the value's own braces are counted.
     let note = crate::markdown::compose::expression::parse("fm.note").unwrap();
     assert_eq!(action_length(json!({ "note": "{{ 1 }}" }), note), json!(7));
+}
+
+#[test]
+fn private_live_cells_over_one_seed_share_its_definitions_and_keep_writes_apart() {
+    let fixture = Fixture::new();
+    let steps: Vec<Value> = (0..50).map(|index| json!({ "id": format!("s{index}"), "shell": "echo" })).collect();
+    let fm = json!({ "title": "T", "sequence": steps }).as_object().cloned().unwrap();
+    let seed = SharedFrontmatter::from(fm.clone());
+    let left = Mutex::new(seed.clone());
+    let right = Mutex::new(seed.clone());
+    let config = parse(json!({ "start": [
+        { "set": { "phase": "left" } },
+        { "info": "phase={{ phase }} steps={{ length(sequence) }}" },
+    ] }));
+
+    let inputs = StackInputs { live_frontmatter: Some(&left), ..fixture.inputs(LifecycleSignal::Start, &seed) };
+    let outcome = StackExecutor::with_services(inputs, &fixture.effects, &NoCodes).execute_event(&config);
+
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(fixture.effects.lines(), ["info phase=left steps=50"]);
+    let left = left.into_inner().unwrap();
+    assert_eq!(left.get("phase"), Some(&json!("left")));
+    assert!(left.shares_base_with(&seed), "the write must not copy the shared definitions");
+    assert_eq!(left.owned_len(), 1);
+    let right = right.into_inner().unwrap();
+    assert_eq!(right.get("phase"), None);
+    assert_eq!(right, seed);
 }

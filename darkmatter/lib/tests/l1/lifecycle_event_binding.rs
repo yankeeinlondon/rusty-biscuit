@@ -16,8 +16,8 @@ use darkmatter::lifecycle::run::ShellRefusal;
 use darkmatter::lifecycle::{LifecycleEffects, LifecycleSignal, LifecycleTiming};
 use darkmatter::markdown::compose::shell_expansion::ShellRuleSet;
 use darkmatter::markdown::compose::shell_expansion::template::ShellPreApprovals;
-use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeRequest};
-use serde_json::{Map, Value, json};
+use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeRequest, SharedFrontmatter};
+use serde_json::{Value, json};
 use tempfile::TempDir;
 
 struct Silent;
@@ -65,7 +65,7 @@ impl Root {
         let options = ComposeOptions::new_with_context(ComposeContext::capture_minimal()).with_source_file(&source);
         let request = ComposeRequest::with_context(options, biscuit_file::FileResolutionContext::new(self.dir.path()))
             .expect("request");
-        let frontmatter: Map<String, Value> = frontmatter.as_object().cloned().unwrap_or_default();
+        let frontmatter: SharedFrontmatter = frontmatter.as_object().cloned().unwrap_or_default().into();
         let live = Mutex::new(frontmatter.clone());
         let state = MdRuntimeState::default();
         let approved = ShellPreApprovals::new();

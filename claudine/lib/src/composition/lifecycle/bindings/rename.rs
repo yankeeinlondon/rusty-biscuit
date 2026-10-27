@@ -57,6 +57,39 @@ fn reject(source: &Path, path: String, found: Option<(String, String)>) -> Resul
     Ok(())
 }
 
+/// Reject retired roots in `lifecycle`'s events alone: the part of
+/// [`reject_removed_sequence_reads`] that reads `frontmatter` only for which
+/// names it declares, so a caller that has already checked the document's
+/// frontmatter does not scan it again.
+///
+/// # Errors
+/// Returns `RemovedGrammar` with the authored surface and replacement.
+pub fn reject_removed_lifecycle_reads(
+    source: &Path,
+    frontmatter: &Value,
+    supplied: Option<&Value>,
+    lifecycle: &LifecycleConfig,
+) -> Result<(), CompositionError> {
+    let declared = |key: &str| frontmatter.get(key).is_some()
+        || supplied.is_some_and(|values| values.get(key).is_some());
+    let text_read = |text: &str| ExpressionFinder::find_all_plain(text).iter()
+        .find_map(|span| parse(span.expression.trim()).ok().and_then(|expr| read(&expr, &declared)));
+    for signal in super::super::LifecycleSignal::ALL {
+        let mut found = None;
+        darkmatter::lifecycle::walk_stack(lifecycle.stack(signal), &mut |path, surface| {
+            if found.is_none() {
+                let retired = match surface.expr {
+                    Expr::StringLiteral(text) if !surface.predicate => text_read(text),
+                    expr => read(expr, &declared),
+                };
+                found = retired.map(|retired| (path.to_string(), retired));
+            }
+        });
+        if let Some((path, found)) = found { reject(source, path, Some(found))?; }
+    }
+    Ok(())
+}
+
 /// Reject retired roots on all authored expression surfaces before effects.
 /// `supplied` is the reading document's caller/property overlay, not generated
 /// sequence state. Presence, rather than truthiness, preserves authored data.
@@ -97,19 +130,7 @@ pub fn reject_removed_sequence_reads(
         }
     }
     if let Some(lifecycle) = lifecycle {
-        for signal in super::super::LifecycleSignal::ALL {
-            let mut found = None;
-            darkmatter::lifecycle::walk_stack(lifecycle.stack(signal), &mut |path, surface| {
-                if found.is_none() {
-                    let retired = match surface.expr {
-                        Expr::StringLiteral(text) if !surface.predicate => text_read(text),
-                        expr => read(expr, &declared),
-                    };
-                    found = retired.map(|retired| (path.to_string(), retired));
-                }
-            });
-            if let Some((path, found)) = found { reject(source, path, Some(found))?; }
-        }
+        reject_removed_lifecycle_reads(source, document.frontmatter, supplied, lifecycle)?;
     }
     if document.body.contains("::") {
         let context = biscuit_terminal::errors::SourceContext::new(

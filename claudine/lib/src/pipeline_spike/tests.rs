@@ -81,7 +81,7 @@ mod prediction {
                 document.insert("agent".into(), Value::String(hint.into()));
             }
             let empty = Map::new();
-            let step = HashMap::new();
+            let step = darkmatter::markdown::compose::SharedFrontmatter::default();
             let failed = HashMap::new();
             let layers = HintLayers {
                 document: &document,

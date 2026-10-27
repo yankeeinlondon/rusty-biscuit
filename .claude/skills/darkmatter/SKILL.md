@@ -54,7 +54,7 @@ definitions away from their references or replace them with placeholders.
 | DMLS architecture, protocol behavior, and rollout history | [dmls.md](dmls.md) |
 | Render tree, style lowering, disclosure blocks, code blocks | [rendering.md](rendering.md) |
 | Terminal rendering options | [terminal.md](terminal.md) |
-| Frontmatter model, literal tokens, in-place leaf edits | [frontmatter.md](frontmatter.md) |
+| Frontmatter model, shared views, literal tokens, in-place leaf edits | [frontmatter.md](frontmatter.md) |
 | Error/status block conventions | [errors.md](errors.md) |
 | `md clean`/DMLS formatting rules and frontmatter repair | [cleanup.md](cleanup.md) |
 | Document comparison | [comparison.md](comparison.md) |

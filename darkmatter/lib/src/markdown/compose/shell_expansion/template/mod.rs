@@ -30,7 +30,7 @@ mod tests;
 
 pub use approval::{ApprovalKey, OfferedChoices, ShellPreApprovals, SuggestedRules, TemplateApprovalView};
 pub use canonical::TemplateRuleError;
-pub use candidate::{CommandSite, DeferredShellRoots, ModeRequirement, ShellCandidate, derived_deferred_keys};
+pub use candidate::{CommandSite, DeferredShellRoots, ModeRequirement, ShellCandidate, derived_deferred_keys, value_read_roots};
 pub use fill::{
     DocumentShellValues, HoleError, HoleEvaluator, LateValueError, LateValues, LookupEvaluator, RejectReason, SiteValues,
     fill_template, resolve_late_values,

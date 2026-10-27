@@ -20,7 +20,7 @@ fn run(
 ) -> (LifecycleEventOutcome, Vec<Emitted>, Map<String, Value>, RuntimeState) {
     let config = parse_lifecycle_config(&lifecycle, Path::new("t.md")).unwrap();
     let base = map(frontmatter);
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
     let shell = MockShell::new(0);
@@ -38,7 +38,7 @@ fn run(
         Path::new("t.md"),
     );
     let outcome = context.execute_event(&config);
-    let document = live.into_inner().unwrap();
+    let document = live.into_inner().unwrap().to_map();
     (outcome, recorder.events(), document, runtime)
 }
 

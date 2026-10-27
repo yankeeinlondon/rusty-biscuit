@@ -154,7 +154,7 @@ impl PreflightTask {
 /// approved as resolved bytes; every other task's commands with placeholders
 /// are approved only as templates, because earlier tasks may change the values
 /// they read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TaskPosition {
     First,
     Later,

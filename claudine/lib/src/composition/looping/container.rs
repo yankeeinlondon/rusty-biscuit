@@ -9,7 +9,8 @@
 //! the caller reports them to the frame before the gate.
 
 use indexmap::IndexMap;
-use serde_json::{Map, Value};
+use darkmatter::markdown::compose::SharedFrontmatter;
+use serde_json::Value;
 
 use super::super::error::CompositionError;
 use super::super::lifecycle::LifecycleRunGuard;
@@ -63,8 +64,10 @@ pub fn finish_container_pass(
     if let Some(broken) = frame.pending_break() {
         return Ok(ContainerPassEnd::Broken(broken));
     }
+    // The loop's expressions and actions read an owned map, once per pass.
+    let frontmatter = gate.frontmatter.to_map();
     let lookup = LoopExpressionLookup::new(
-        gate.frontmatter,
+        &frontmatter,
         ambient,
         gate.file_resolution_context,
         gate.source_path,
@@ -76,14 +79,14 @@ pub fn finish_container_pass(
         LoopDecision::Complete => Ok(ContainerPassEnd::Complete),
         LoopDecision::Exhausted(error) => Err(error),
         LoopDecision::Continue => {
-            let staged = frame.stage_actions(gate.frontmatter, &lookup)?;
+            let staged = frame.stage_actions(&frontmatter, &lookup)?;
             let changed: IndexMap<String, Value> = staged
                 .into_iter()
-                .filter(|(key, value)| gate.frontmatter.get(key) != Some(value))
+                .filter(|(key, value)| frontmatter.get(key) != Some(value))
                 .collect();
             if !changed.is_empty() {
                 runtime
-                    .set_batch(gate.effect_engine, &changed, gate.frontmatter)
+                    .set_batch(gate.effect_engine, &changed, &frontmatter)
                     .map_err(|source| CompositionError::LoopActionWriteRefused {
                         source_path: gate.source_path.to_path_buf(),
                         property: frame.action_property(),
@@ -127,7 +130,7 @@ impl PassCheckpoint {
 }
 
 /// The current state of a container: `base` under the runtime mutations.
-pub fn container_state(base: &Map<String, Value>, runtime: &RuntimeState) -> Map<String, Value> {
+pub fn container_state(base: &SharedFrontmatter, runtime: &RuntimeState) -> SharedFrontmatter {
     let mut state = base.clone();
     state.extend(runtime.snapshot().mutations);
     state

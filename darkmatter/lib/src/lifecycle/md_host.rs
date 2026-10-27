@@ -50,6 +50,7 @@ use crate::markdown::compose::expression::{
     ScopeId, UnavailabilityReason, UnavailableBinding, is_reserved_namespace, prepare_value, static_variable_reads,
     validate_prepared,
 };
+use crate::markdown::compose::SharedFrontmatter;
 use crate::markdown::compose::preflight::ExtraShellSources;
 use crate::markdown::compose::shell_expansion::executor::{ShellStatus, execute_directive_outcome};
 use crate::markdown::compose::shell_expansion::store::{load_ruleset, resolve_policy_paths};
@@ -427,7 +428,7 @@ impl LifecycleHost for MdStackHost<'_> {
         &self,
         _engine: &EffectEngine,
         updates: &IndexMap<String, Value>,
-        prior_base: &Map<String, Value>,
+        prior_base: &SharedFrontmatter,
     ) -> Result<IndexMap<String, Value>, Box<dyn StdError + Send + Sync>> {
         if let Some(key) = updates.keys().find(|key| is_reserved_namespace(key.split('.').next().unwrap_or(key))) {
             return Err(format!("`set` cannot write `{key}`, which is a reserved root").into());
@@ -666,9 +667,9 @@ pub struct MdStackContext<'a> {
     /// The root document.
     pub source_path: &'a Path,
     /// The document's effective frontmatter, the base of every expression.
-    pub frontmatter: &'a Map<String, Value>,
+    pub frontmatter: &'a SharedFrontmatter,
     /// The frontmatter as earlier events left it.
-    pub live_frontmatter: &'a Mutex<Map<String, Value>>,
+    pub live_frontmatter: &'a Mutex<SharedFrontmatter>,
     /// Where `set` commits.
     pub state: &'a MdRuntimeState,
     /// The approval set preflight produced; empty before it.

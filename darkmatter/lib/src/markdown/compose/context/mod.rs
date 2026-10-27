@@ -18,6 +18,7 @@ pub(crate) mod report;
 pub(crate) mod request;
 mod repository_scope;
 pub(crate) mod runtime;
+pub(crate) mod shared_frontmatter;
 
 pub use authority::{ContextAuthority, ContextExtension};
 pub use catalog::{context_variable_descriptors, ContextValueType, ContextVariableDescriptor};

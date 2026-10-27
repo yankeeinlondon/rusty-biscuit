@@ -5,12 +5,12 @@ use std::path::Path;
 
 use darkmatter::markdown::compose::expression::{
     EvaluationLookup, ExpressionError, ResolutionContext, ResolvedBinding, evaluate,
-    fm_namespace_path, is_reserved_namespace, is_truthy, parse_condition,
-    resolve_fm_namespace_in_object,
+    FmPath, fm_namespace_path, is_reserved_namespace, is_truthy, parse_condition,
 };
 use serde_json::{Map, Value};
 
 use super::super::error::{CompositionError, LoopExpressionCause};
+use super::super::sequence::expr::DocumentFrontmatter;
 use super::super::lifecycle::bindings::{removed_loop_grammar, removed_loop_read};
 use super::super::types::{AmbientVariable, LoopCondition};
 use super::frame::LoopBreakSlot;
@@ -128,7 +128,7 @@ impl LoopAmbient {
 /// references are resolved before loop evaluation.
 #[derive(Debug, Clone, Copy)]
 pub struct LoopExpressionLookup<'a> {
-    frontmatter: &'a Map<String, Value>,
+    frontmatter: &'a dyn DocumentFrontmatter,
     runtime_state: Option<&'a crate::composition::RuntimeState>,
     ambient: &'a LoopAmbient,
     file_ref_fallback_dir: Option<&'a Path>,
@@ -141,7 +141,7 @@ impl<'a> LoopExpressionLookup<'a> {
     /// Create a lookup over the current loop state of the document at
     /// `source_path`, resolving its references through `file_resolution_context`.
     pub fn new(
-        frontmatter: &'a Map<String, Value>,
+        frontmatter: &'a dyn DocumentFrontmatter,
         ambient: &'a LoopAmbient,
         file_resolution_context: &'a biscuit_file::FileResolutionContext,
         source_path: &'a Path,
@@ -188,8 +188,21 @@ impl<'a> LoopExpressionLookup<'a> {
 
 impl EvaluationLookup for LoopExpressionLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
-        if fm_namespace_path(path).is_some() {
-            return resolve_fm_namespace_in_object(path, self.frontmatter);
+        if let Some(fm_path) = fm_namespace_path(path) {
+            return match fm_path {
+                FmPath::Whole => Some(Value::Object(self.frontmatter.to_object())),
+                FmPath::Member(rest) => {
+                    let mut segments = rest.split('.');
+                    let mut current = self.frontmatter.top_level(segments.next()?)?;
+                    for segment in segments {
+                        match current {
+                            Value::Object(map) => current = map.get(segment)?,
+                            _ => return None,
+                        }
+                    }
+                    Some(current.clone())
+                }
+            };
         }
 
         if path == "seq" || path.starts_with("seq.") {
@@ -342,18 +355,18 @@ fn resolve_boolean_literal(path: &str) -> Option<Value> {
     }
 }
 
-fn resolve_frontmatter(frontmatter: &Map<String, Value>, path: &str) -> Option<Value> {
+fn resolve_frontmatter(frontmatter: &dyn DocumentFrontmatter, path: &str) -> Option<Value> {
     if path.trim().is_empty() {
         return None;
     }
 
-    if let Some(value) = frontmatter.get(path) {
+    if let Some(value) = frontmatter.top_level(path) {
         return Some(value.clone());
     }
 
     let mut parts = path.split('.');
     let head = parts.next()?;
-    let mut current = frontmatter.get(head)?.clone();
+    let mut current = frontmatter.top_level(head)?.clone();
     for part in parts {
         current = match current {
             Value::Object(map) => map.get(part).cloned()?,

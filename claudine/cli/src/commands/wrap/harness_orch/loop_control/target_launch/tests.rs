@@ -253,6 +253,7 @@ fn document_with_tags(
     mcp_body_tags: Vec<String>,
 ) -> MaterializedHarnessPrompt {
     MaterializedHarnessPrompt {
+        frontmatter_view: frontmatter.as_object().cloned().unwrap_or_default().into(),
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&frontmatter),
         frontmatter,
         prompt: prompt.to_string(),

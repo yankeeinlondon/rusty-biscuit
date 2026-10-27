@@ -112,10 +112,12 @@ impl ResolvedShellValue {
     ///
     /// `resolved` is `authored` with its `{{ … }}` spans already interpolated
     /// by the caller; it supplies a plain command's bytes. A ternary's command
-    /// branches are interpolated here from their authored text against
-    /// `state`, so interpolation cannot move a branch boundary. Structure is
-    /// always taken from `authored`, so interpolation also cannot change an
-    /// executable or add a chained command.
+    /// branches are interpolated here from their authored text against the
+    /// map `state` returns, so interpolation cannot move a branch boundary.
+    /// `state` is called only for a ternary, so a plain command never
+    /// materializes the document. Structure is always taken from `authored`,
+    /// so interpolation also cannot change an executable or add a chained
+    /// command.
     ///
     /// ## Errors
     ///
@@ -124,7 +126,7 @@ impl ResolvedShellValue {
         key: &str,
         authored: &str,
         resolved: &str,
-        state: HashMap<String, Value>,
+        state: impl FnOnce() -> HashMap<String, Value>,
         context: &ComposeContext,
         resolution: ResolutionContext,
     ) -> Result<Self, ShellExpansionError> {
@@ -139,7 +141,7 @@ impl ResolvedShellValue {
             ..
         } = &directive.ast
         {
-            let seed = FrontmatterSeedState::new(state, context.clone())
+            let seed = FrontmatterSeedState::new(state(), context.clone())
                 .with_current_authority(resolution.current.clone())
                 .with_resolution_context(Some(resolution));
             then_pipeline = branch_pipeline(then_branch, BranchPosition::Then, key, &seed, &ctx)?;

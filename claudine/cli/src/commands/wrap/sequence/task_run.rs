@@ -116,13 +116,14 @@ pub(super) fn run_step_task(
         repo: None,
     };
     let term = crate::log::terminal();
-    let live = std::sync::Mutex::new(frontmatter.clone());
+    let frontmatter_view = darkmatter::markdown::compose::SharedFrontmatter::from(frontmatter.clone());
+    let live = std::sync::Mutex::new(frontmatter_view.clone());
 
     let stack = StackExecutionContext {
         seq: None,
         signal: claudine::composition::LifecycleSignal::Start,
         scope: None,
-        frontmatter: &frontmatter,
+        frontmatter: &frontmatter_view,
         live_frontmatter: Some(&live),
         runtime_state: Some(runtime_state),
         err: None,
@@ -246,7 +247,8 @@ pub(super) fn root_step_guard(
         );
         return Ok(true);
     }
-    let frontmatter = claudine::composition::sequence::task::step_guard_frontmatter(authored, overrides.values());
+    let frontmatter: darkmatter::markdown::compose::SharedFrontmatter =
+        claudine::composition::sequence::task::step_guard_frontmatter(authored, overrides.values()).into();
     let source_context = run
         .prep_context
         .invocation

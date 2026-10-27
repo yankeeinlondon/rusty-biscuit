@@ -213,7 +213,7 @@ pub(super) fn run_composition_body(
                         .invocation_context
                         .as_ref()
                         .map(claudine::invocation_context::InvocationContext::current_authority),
-                    frontmatter,
+                    &darkmatter::markdown::compose::SharedFrontmatter::from(frontmatter.clone()),
                     document_start,
                     claudine::composition::LifecycleErrorInfo::from_error_or_action(
                         "harness_plan",
@@ -286,7 +286,7 @@ pub(super) fn run_composition_body(
                     .invocation_context
                     .as_ref()
                     .map(claudine::invocation_context::InvocationContext::current_authority),
-                frontmatter,
+                &darkmatter::markdown::compose::SharedFrontmatter::from(frontmatter.clone()),
                 document_start,
                 claudine::composition::LifecycleErrorInfo::from_error_or_action(
                     "shell_approval",

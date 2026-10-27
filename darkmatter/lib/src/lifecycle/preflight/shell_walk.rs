@@ -279,7 +279,7 @@ impl Walk<'_> {
             key,
             &shell.authored,
             &resolved,
-            self.frontmatter.clone(),
+            || self.frontmatter.clone(),
             context,
             self.resolution_ctx.clone(),
         ) {

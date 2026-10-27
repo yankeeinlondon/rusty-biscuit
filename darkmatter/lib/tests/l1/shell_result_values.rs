@@ -588,7 +588,7 @@ mod resolved_values {
             "v",
             authored,
             resolved,
-            state(at),
+            || state(at),
             &ComposeContext::capture_for_content(repo.path(), ""),
             ResolutionContext::new(biscuit_file::FileResolutionContext::new(repo.path())),
         )

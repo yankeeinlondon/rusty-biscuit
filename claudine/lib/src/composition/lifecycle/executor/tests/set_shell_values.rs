@@ -141,7 +141,7 @@ fn run(
     base: &Map<String, Value>,
     shell: &dyn ShellRunner,
 ) -> Run {
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
     let runtime = RuntimeState::new();
     let (_dir, engine) = temp_engine();
     let recorder = Recorder::default();

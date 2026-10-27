@@ -175,6 +175,7 @@ pub use shell_expansion::ShellCommandOrigin;
 pub use shell_expansion::ShellExpansionError;
 pub use shell_expansion::ShellTimeoutBehavior;
 pub use context::effective_state::{EffectiveState, EffectiveStateBuilder};
+pub use context::shared_frontmatter::SharedFrontmatter;
 pub(crate) use context::effective_state::ResolvingLookup;
 pub use context::options::{
     CallerInputRecord, CallerInputRecords, ComposeOptions, ComposeSource, caller_input_records_for_overrides,

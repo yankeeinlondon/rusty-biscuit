@@ -39,7 +39,7 @@ use darkmatter::markdown::Markdown;
 use super::super::lifecycle::bindings::{
     LifecycleScope, approval_diagnostics, unavailable_root,
 };
-use darkmatter::markdown::compose::{ComposeContext, EffectiveState};
+use darkmatter::markdown::compose::{ComposeContext, EffectiveState, SharedFrontmatter};
 use serde_json::{Map, Value};
 
 use super::super::authored_order::AuthoredOrder;
@@ -524,8 +524,8 @@ pub(crate) fn prepare_nested_sequence(
         "nested `sequence:` executable changed before preparation".into(),
     ))?;
     let mut loader = Loader::new(&source, context, resolution.clone());
-    loader.step_frontmatter = Arc::new(state.data().clone());
-    crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(loader.step_frontmatter.iter()));
+    loader.step_frontmatter = state.data().clone();
+    crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(loader.step_frontmatter.owned()));
     loader.caller_setters = supplied;
     loader.ancestry.push((canonical(&task.origin_path), None));
     let mut sequence = loader.load_sequence(
@@ -557,8 +557,8 @@ pub(crate) fn prepare_nested_group(
         "group executable changed before preparation".into(),
     ))?;
     let mut loader = Loader::new(&source, context, resolution.clone());
-    loader.step_frontmatter = Arc::new(state.data().clone());
-    crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(loader.step_frontmatter.iter()));
+    loader.step_frontmatter = state.data().clone();
+    crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(loader.step_frontmatter.owned()));
     loader.ancestry.push((canonical(&task.origin_path), None));
     let mut group = loader.load_group(
         value, &task.origin_path, &task.label, &property_child(&task.diagnostic.task_property, "group"),
@@ -590,11 +590,27 @@ struct Loader<'a> {
     invocation: Option<&'a InvocationContext>,
     source_contexts: HashMap<PathBuf, SourceContext>,
     /// The frontmatter the current step's early-binding state was built
-    /// from, kept on each approval so a task can re-resolve it.
-    step_frontmatter: Arc<HashMap<String, Value>>,
+    /// from, kept on each approval so a task can re-resolve it. A root step's
+    /// view shares [`Self::step_seed`] under the step's own overlay.
+    step_frontmatter: SharedFrontmatter,
     /// The keys of [`Self::step_frontmatter`] whose value reads a late root,
     /// directly or through another such key.
     step_derived: HashSet<String>,
+    /// The root steps' common frontmatter, decoded once per walk: the
+    /// invoking document's frontmatter under the caller's values. Each step's
+    /// view clones it, which shares its values, `sequence:` included.
+    step_seed: SharedFrontmatter,
+    /// The keys of [`Self::step_seed`] whose value reads a late root, scanned
+    /// once per walk.
+    seed_derived: HashSet<String>,
+    /// Owner documents whose frontmatter a group has already checked for
+    /// retired sequence names. The check reads only the document and the
+    /// fixed caller values, so it cannot fail a second time.
+    checked_group_owners: HashSet<PathBuf>,
+    /// Where each recorded prompt reference sits in
+    /// `graph.prompt_references`, by its document, position, and group
+    /// membership: a new reference is compared only with those it could equal.
+    prompt_reference_index: HashMap<(PathBuf, TaskPosition, bool), Vec<usize>>,
     /// The sequence source's simplified schema, which types the placeholders
     /// of tasks it authors. Loaded on first use.
     source_schema: Option<Option<darkmatter::markdown::schemas::EffectiveSchema>>,
@@ -637,8 +653,12 @@ impl<'a> Loader<'a> {
             file_resolution_context,
             invocation: None,
             source_contexts: HashMap::new(),
-            step_frontmatter: Arc::default(),
+            step_frontmatter: SharedFrontmatter::default(),
             step_derived: HashSet::new(),
+            step_seed: SharedFrontmatter::default(),
+            seed_derived: HashSet::new(),
+            checked_group_owners: HashSet::new(),
+            prompt_reference_index: HashMap::new(),
             source_schema: None,
             caller_setters: Map::new(),
             written_keys: HashSet::new(),
@@ -663,8 +683,12 @@ impl<'a> Loader<'a> {
             file_resolution_context: source_context.file_resolution_context().clone(),
             invocation: Some(invocation),
             source_contexts: HashMap::from([(source_path, source_context)]),
-            step_frontmatter: Arc::default(),
+            step_frontmatter: SharedFrontmatter::default(),
             step_derived: HashSet::new(),
+            step_seed: SharedFrontmatter::default(),
+            seed_derived: HashSet::new(),
+            checked_group_owners: HashSet::new(),
+            prompt_reference_index: HashMap::new(),
             source_schema: None,
             caller_setters: Map::new(),
             written_keys: HashSet::new(),
@@ -691,7 +715,7 @@ impl<'a> Loader<'a> {
         // references the sequence source itself closes a cycle rather than
         // recursing forever.
         self.ancestry.push((self.source_path.clone(), None));
-        self.step_frontmatter = Arc::new(authored.as_object().into_iter().flat_map(|map| map.iter()).map(|(key,value)| (key.clone(),value.clone())).collect());
+        self.step_frontmatter = authored.as_object().cloned().unwrap_or_default().into();
         crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
         crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
         self.step_derived = derived_deferred_keys(self.step_frontmatter.iter(), &sequence_deferred_roots(), &HashSet::new());
@@ -700,17 +724,11 @@ impl<'a> Loader<'a> {
         self.prepare_container_events(&mut lifecycle, &source_path, "root sequence", &state,
             Placement { position: TaskPosition::First, in_group: false })?;
         self.graph.root_lifecycle = Some(lifecycle);
+        self.seed_steps();
         for (index, step) in plan.steps.iter().enumerate() {
             let label = format!("step {} (`{}`)", index + 1, step.state.id);
             let property = format!("tasks[{index}]");
-            self.step_frontmatter = Arc::new(self.step_frontmatter(plan, index));
-            crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
-            crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
-            self.step_derived = derived_deferred_keys(
-                self.step_frontmatter.iter(),
-                &sequence_deferred_roots(),
-                &HashSet::new(),
-            );
+            self.enter_step(plan, index);
             let state = reapproval::early_binding_state(&self.step_frontmatter, self.context.clone())?;
             // The root sequence is first, so its first step is; a nested
             // sequence would apply the same rule to its own children.
@@ -743,16 +761,10 @@ impl<'a> Loader<'a> {
         Ok(())
     }
 
-    /// The early-binding frontmatter for one step: the invoking document's
-    /// frontmatter, then the caller's values, under this step's reserved
-    /// overlay.
-    ///
-    /// This is exactly the state a shell command sees at its turn, minus the
-    /// runtime mutation layer — which is why a later task's command is
-    /// approved only as a template, read again when it runs.
-    fn step_frontmatter(&self, plan: &SequencePlan, index: usize) -> HashMap<String, Value> {
-        let overlay = super::build_step_overlay(plan, index);
-        let mut frontmatter: HashMap<String, Value> = self
+    /// Decode the root steps' common frontmatter ([`Self::step_seed`]) and
+    /// scan it for late reads, once for the whole walk.
+    fn seed_steps(&mut self) {
+        let mut seed: Map<String, Value> = self
             .source
             .markdown
             .frontmatter()
@@ -761,11 +773,30 @@ impl<'a> Loader<'a> {
             // Composition reads a stored literal token as its text.
             .map(|(k, v)| (k.clone(), crate::composition::closure::stored_text(v)))
             .collect();
-        frontmatter.extend(self.caller_setters.iter().map(|(k, v)| (k.clone(), v.clone())));
-        if let Value::Object(overrides) = overlay.as_set_overrides(None) {
-            frontmatter.extend(overrides);
-        }
-        frontmatter
+        seed.extend(self.caller_setters.iter().map(|(k, v)| (k.clone(), v.clone())));
+        crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(seed.iter()));
+        crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(seed.iter()));
+        self.seed_derived = derived_deferred_keys(seed.iter(), &sequence_deferred_roots(), &HashSet::new());
+        self.step_seed = seed.into();
+    }
+
+    /// Make root step `index` current: its early-binding frontmatter
+    /// ([`Self::step_frontmatter`]) and late keys ([`Self::step_derived`]).
+    ///
+    /// The frontmatter is the invoking document's, then the caller's values,
+    /// under this step's reserved overlay: exactly the state a shell command
+    /// sees at its turn, minus the runtime mutation layer — which is why a
+    /// later task's command is approved only as a template, read again when
+    /// it runs. It shares [`Self::step_seed`] and owns only the overlay.
+    fn enter_step(&mut self, plan: &SequencePlan, index: usize) {
+        let Value::Object(overlay) = super::build_step_overlay(plan, index).as_set_overrides(None) else {
+            unreachable!("a step overlay is a mapping");
+        };
+        crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(overlay.iter()));
+        let mut frontmatter = self.step_seed.clone();
+        frontmatter.extend(overlay.iter().map(|(key, value)| (key.clone(), value.clone())));
+        self.step_derived = overlay_derived(&self.step_seed, &self.seed_derived, &overlay, &frontmatter);
+        self.step_frontmatter = frontmatter;
     }
 
     /// Expand a step's declared executable into a task node.
@@ -971,9 +1002,8 @@ impl<'a> Loader<'a> {
                 let context = self.source_context_for(origin);
                 let resolution = context.as_ref().map(SourceContext::file_resolution_context)
                     .unwrap_or(&self.file_resolution_context);
-                let globals = self.step_frontmatter.iter().map(|(k,v)| (k.clone(),v.clone())).collect();
                 let plan = source_resolution::load_referenced_sequence(
-                    &reference, &path, origin, &globals, true, resolution,
+                    &reference, &path, origin, &self.step_frontmatter, true, resolution,
                 )?;
                 // A reference to a whole sequence document brings the
                 // document's events and its authored properties; an offset or
@@ -1018,7 +1048,7 @@ impl<'a> Loader<'a> {
             crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(values.iter()));
             crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(values.iter()));
             let derived = derived_deferred_keys(values.iter(), &sequence_deferred_roots(), &HashSet::new());
-            (std::mem::replace(&mut self.step_frontmatter, Arc::new(values)),
+            (std::mem::replace(&mut self.step_frontmatter, values.into()),
              std::mem::replace(&mut self.step_derived, derived))
         });
         let result = self.load_sequence_children(
@@ -1218,13 +1248,29 @@ impl<'a> Loader<'a> {
                 Box::new(PreflightLoop { config: block.config, location: loop_location })
             });
         self.prepare_container_events(&mut lifecycle, origin, label, state, Placement { position, in_group: true })?;
-        let owner = self.documents.get(origin).map(|(value, _)| value.clone())
-            .unwrap_or_else(|| crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter()));
-        crate::composition::lifecycle::bindings::reject_removed_sequence_reads(
-            origin, crate::composition::lifecycle::bindings::AuthoredDocument {
-                frontmatter: &owner, body: "", body_line_offset: 0,
-            }, Some(&Value::Object(self.caller_setters.clone())), Some(&lifecycle),
-        )?;
+        let source_owner;
+        let owner = match self.documents.get(origin) {
+            Some((value, _)) => value,
+            None => {
+                source_owner = crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter());
+                &source_owner
+            }
+        };
+        let supplied = Value::Object(self.caller_setters.clone());
+        let document = crate::composition::lifecycle::bindings::AuthoredDocument {
+            frontmatter: owner, body: "", body_line_offset: 0,
+        };
+        // The owner's frontmatter is scanned once per walk; every group still
+        // checks its own events.
+        if self.checked_group_owners.insert(canonical(origin)) {
+            crate::composition::lifecycle::bindings::reject_removed_sequence_reads(
+                origin, document, Some(&supplied), Some(&lifecycle),
+            )?;
+        } else {
+            crate::composition::lifecycle::bindings::reject_removed_lifecycle_reads(
+                origin, owner, Some(&supplied), &lifecycle,
+            )?;
+        }
 
         let max_parallel = match map.get("max_parallel") {
             None | Some(Value::Null) => None,
@@ -1848,7 +1894,7 @@ impl<'a> Loader<'a> {
             approved: bytes.clone(),
             origin: scope.origin.to_path_buf(),
             label: scope.label.to_string(),
-            frontmatter: Arc::clone(&self.step_frontmatter),
+            frontmatter: self.step_frontmatter.clone(),
             state_context: scope.state.context().clone(),
             runtime_context: runtime_context.clone(),
             file_resolution_context: file_resolution_context.clone(),
@@ -1892,12 +1938,14 @@ impl<'a> Loader<'a> {
         )?;
         // The authored value supplies the structure; the resolved one only its
         // bytes, so interpolation cannot change an executable or add a command.
-        crate::note_work!(ShellValueStateNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
         let value = darkmatter::markdown::compose::ResolvedShellValue::resolve(
             key,
             raw,
             resolved,
-            (*self.step_frontmatter).clone(),
+            || {
+                crate::note_work!(ShellValueStateNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
+                self.step_frontmatter.to_hash_map()
+            },
             &self.context,
             resolution,
         )
@@ -2070,8 +2118,12 @@ impl<'a> Loader<'a> {
             with: evaluated.clone(),
             deferred_with: deferred.clone(),
         };
-        crate::note_work!(PromptReferenceCompare, self.graph.prompt_references.len());
-        if !self.graph.prompt_references.contains(&reference) {
+        let bucket = self.prompt_reference_index
+            .entry((reference.path.clone(), reference.position, reference.in_group))
+            .or_default();
+        crate::note_work!(PromptReferenceCompare, bucket.len());
+        if !bucket.iter().any(|index| self.graph.prompt_references[*index] == reference) {
+            bucket.push(self.graph.prompt_references.len());
             self.graph.prompt_references.push(reference);
         }
         PreparedWith { evaluated, deferred, failed }
@@ -2101,7 +2153,7 @@ impl<'a> Loader<'a> {
             .map(|context| context.file_resolution_context().clone())
             .unwrap_or_else(|| self.file_resolution_context.clone());
         let context = self.context.clone();
-        let step_frontmatter = Arc::clone(&self.step_frontmatter);
+        let step_frontmatter = self.step_frontmatter.clone();
         let layers = providers::HintLayers {
             document: &frontmatter,
             document_path: document,
@@ -2116,7 +2168,10 @@ impl<'a> Loader<'a> {
             sequence_path: &self.source.resolved_path,
         };
         let mut evaluate = |value: &Value, values: &HashMap<String, Value>| {
-            let state = reapproval::early_binding_state(values, context.clone())?;
+            // A copy of the prompt document's state, which does not grow with
+            // the sequence.
+            crate::note_work!(EarlyBindingStateNodes, crate::work_counters::value_nodes(values.iter()));
+            let state = reapproval::early_binding_state(&values.clone().into(), context.clone())?;
             Ok(reapproval::compose_approval_value(value, document, &state, &context, &file_resolution_context)?
                 .map_err(|error| crate::composition::lifecycle_context::LifecycleCause::new(Box::new(error).into())))
         };
@@ -2355,6 +2410,29 @@ fn guard_proves_whole_value(value: &Value, types: &TypeScope<'_>) -> bool {
 
 /// Mark each placeholder of `template` that reads a late root, directly or
 /// through a step value derived from one.
+/// The late keys of a step view: `seed`'s, which `seed_derived` holds, under
+/// `overlay`.
+///
+/// Only the overlay is scanned when it cannot change what the seed derives:
+/// it shadows no seed key, and none of its own keys reads a late value. A
+/// seed key can then only read an overlay key that is not late, so the seed's
+/// keys are what a scan of the whole view would find. Otherwise the whole view
+/// is scanned, so transitive reads stay exact.
+fn overlay_derived(
+    seed: &SharedFrontmatter,
+    seed_derived: &HashSet<String>,
+    overlay: &Map<String, Value>,
+    view: &SharedFrontmatter,
+) -> HashSet<String> {
+    crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(overlay.iter()));
+    let derived = derived_deferred_keys(overlay.iter(), &sequence_deferred_roots(), seed_derived);
+    if derived.len() == seed_derived.len() && !overlay.keys().any(|key| seed.contains_key(key)) {
+        return derived;
+    }
+    crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(view.iter()));
+    derived_deferred_keys(view.iter(), &sequence_deferred_roots(), &HashSet::new())
+}
+
 fn mark_late_holes(template: &mut CommandTemplate, roots: &DeferredShellRoots, derived: &HashSet<String>) {
     use darkmatter::markdown::compose::shell_expansion::template::ArgPart;
     for segment in &mut template.segments {
@@ -2596,3 +2674,7 @@ mod tests;
 
 #[cfg(test)]
 pub(crate) mod runtime_fixture;
+
+#[cfg(test)]
+#[path = "tests/scaling.rs"]
+mod scaling_tests;

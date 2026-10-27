@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use darkmatter::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
+use darkmatter::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder, SharedFrontmatter};
 use serde_json::Value;
 
 use super::super::super::error::CompositionError;
@@ -37,8 +37,10 @@ struct ApprovalBasis {
     authored: String,
     origin: PathBuf,
     label: String,
-    /// The step frontmatter the early-binding state was built from.
-    frontmatter: Arc<HashMap<String, Value>>,
+    /// The step frontmatter the early-binding state was built from: a view
+    /// that shares the preparation's seed, so each approval owns only its
+    /// step's overlay.
+    frontmatter: SharedFrontmatter,
     /// The context the early-binding state carried.
     state_context: ComposeContext,
     /// The context the expression resolution read.
@@ -98,13 +100,8 @@ impl PreflightApproval {
             .file_resolution_context
             .clone()
             .with_env(environment.vars().clone());
-        let frontmatter = if runtime_writes.is_empty() {
-            Arc::clone(&basis.frontmatter)
-        } else {
-            let mut current = (*basis.frontmatter).clone();
-            current.extend(runtime_writes.iter().map(|(key, value)| (key.clone(), value.clone())));
-            Arc::new(current)
-        };
+        let mut frontmatter = basis.frontmatter.clone();
+        frontmatter.extend(runtime_writes.iter().map(|(key, value)| (key.clone(), value.clone())));
         let state = early_binding_state(&frontmatter, state_context)?;
         let resolved = compose_shell_text(
             &basis.authored,
@@ -127,7 +124,7 @@ impl PreflightApproval {
                 basis.runtime_context.env(),
                 environment.vars(),
                 runtime_writes.iter()
-                    .filter(|(key, value)| basis.frontmatter.get(*key) != Some(*value))
+                    .filter(|(key, value)| basis.frontmatter.get(key) != Some(*value))
                     .map(|(key, _)| key.as_str()),
             ),
         })
@@ -141,7 +138,7 @@ pub(super) struct ApprovalRecordOwned {
     pub(super) approved: String,
     pub(super) origin: PathBuf,
     pub(super) label: String,
-    pub(super) frontmatter: Arc<HashMap<String, Value>>,
+    pub(super) frontmatter: SharedFrontmatter,
     pub(super) state_context: ComposeContext,
     pub(super) runtime_context: ComposeContext,
     pub(super) file_resolution_context: biscuit_file::FileResolutionContext,
@@ -166,13 +163,16 @@ impl ApprovalRecordOwned {
 }
 
 /// The early-binding state a step's shell commands resolve against.
+///
+/// The state shares `frontmatter`'s base; it copies only the values the view
+/// owns, which is what the `EarlyBindingStateNodes` work counter counts.
 pub(super) fn early_binding_state(
-    frontmatter: &HashMap<String, Value>,
+    frontmatter: &SharedFrontmatter,
     context: ComposeContext,
 ) -> Result<EffectiveState, CompositionError> {
-    crate::note_work!(EarlyBindingStateNodes, crate::work_counters::value_nodes(frontmatter.iter()));
+    crate::note_work!(EarlyBindingStateNodes, crate::work_counters::value_nodes(frontmatter.owned()));
     EffectiveStateBuilder::new()
-        .with_frontmatter(frontmatter.clone())
+        .with_shared_frontmatter(frontmatter.clone())
         .with_context(context)
         .with_allow_ctx_override(true)
         .build()

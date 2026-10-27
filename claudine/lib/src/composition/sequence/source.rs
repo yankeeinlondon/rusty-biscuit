@@ -15,12 +15,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use biscuit_file::{FileReference, FileResolutionContext};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use super::super::authored_order::AuthoredOrder;
 use super::super::error::{CompositionError, SequenceLoadCause};
 use super::data::{self, SourceFormat};
-use super::expr::SourceExpressionLookup;
+use super::expr::{DocumentFrontmatter, SourceExpressionLookup};
 use super::formal;
 use super::grammar::{SequenceReference, SourceOperator};
 use super::model::{SequencePlan, SequenceSource};
@@ -72,7 +72,7 @@ pub fn load_referenced_sequence(
     reference: &SequenceReference,
     path: &Path,
     invocation_path: &Path,
-    frontmatter: &Map<String, Value>,
+    frontmatter: &dyn DocumentFrontmatter,
     document_fail_fast: bool,
     file_resolution_context: &FileResolutionContext,
 ) -> Result<SequencePlan, CompositionError> {
@@ -204,7 +204,7 @@ fn select_items(
 fn apply_source_operator(
     items: Vec<Value>,
     operator: &SourceOperator,
-    frontmatter: &Map<String, Value>,
+    frontmatter: &dyn DocumentFrontmatter,
     invocation_path: &Path,
     file_resolution_context: &FileResolutionContext,
 ) -> Result<Vec<Value>, CompositionError> {

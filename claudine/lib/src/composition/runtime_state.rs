@@ -186,7 +186,7 @@ impl RuntimeState {
         &self,
         engine: &EffectEngine,
         updates: &IndexMap<String, Value>,
-        prior_base: &Map<String, Value>,
+        prior_base: &dyn crate::composition::sequence::expr::DocumentFrontmatter,
     ) -> Result<IndexMap<String, Value>, RuntimeMutationError> {
         let mut validated = FrontmatterMap::new();
         for (key, value) in updates {
@@ -204,7 +204,7 @@ impl RuntimeState {
                 key.clone(),
                 next.get(key)
                     .cloned()
-                    .or_else(|| prior_base.get(key).cloned())
+                    .or_else(|| prior_base.top_level(key).cloned())
                     .unwrap_or(Value::Null),
             );
             next.insert(key.clone(), value.clone());

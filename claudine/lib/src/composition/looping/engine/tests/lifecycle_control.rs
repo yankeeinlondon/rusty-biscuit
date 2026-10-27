@@ -661,9 +661,10 @@ fn run_loop_lifecycle_emitting_terminal(
             // emission). The owned `timing` outlives the borrowed context
             // within this closure body.
             let timing = capture_loop_lifecycle_timing(loop_start);
+            let frontmatter = darkmatter::markdown::compose::SharedFrontmatter::from(ctx.frontmatter.clone());
             let success_ctx = build_loop_stack_context(
                 LifecycleSignal::Success,
-                &ctx.frontmatter,
+                &frontmatter,
                 &lifecycle_ctx,
                 &effect_engine,
                 &shell_runner,

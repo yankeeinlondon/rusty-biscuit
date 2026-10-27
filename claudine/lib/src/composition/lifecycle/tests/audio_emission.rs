@@ -191,7 +191,7 @@ fn execute_with(
         .mutation_root(engine_root.path())
         .auto_rehash(false)
         .build();
-    let fm = serde_json::Map::new();
+    let fm = darkmatter::markdown::compose::SharedFrontmatter::default();
     let context = executor::StackExecutionContext {
         seq: None,
         signal,

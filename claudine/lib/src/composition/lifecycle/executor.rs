@@ -23,7 +23,7 @@ use darkmatter::lifecycle::run_guard::{GuardedEvent, GuardedEventStack};
 use darkmatter::markdown::compose::expression::{BindingView, ResolutionContext, RuntimeBinding};
 use darkmatter::markdown::compose::shell_expansion::template::FilledChain;
 use darkmatter::markdown::compose::shell_expansion::{ShellChildEnvironment, ShellRuleSet};
-use darkmatter::markdown::compose::{ComposeContext, ContextBuildError, CurrentAuthority};
+use darkmatter::markdown::compose::{ComposeContext, ContextBuildError, CurrentAuthority, SharedFrontmatter};
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 
@@ -176,7 +176,7 @@ pub struct StackExecutionContext<'a> {
     /// a document event.
     pub scope: Option<LifecycleScope>,
     /// Composed frontmatter — the base namespace for expression evaluation.
-    pub frontmatter: &'a Map<String, Value>,
+    pub frontmatter: &'a SharedFrontmatter,
     /// Shared cross-event live document frontmatter for the current attempt.
     ///
     /// When `Some`, lifecycle frontmatter side effects (`set_frontmatter` and
@@ -186,7 +186,7 @@ pub struct StackExecutionContext<'a> {
     /// fires" contract across events. When `None`, behavior is exactly as for a
     /// single-event caller: `frontmatter` is the only base state and stack
     /// mutations are visible intra-stack only.
-    pub live_frontmatter: Option<&'a std::sync::Mutex<Map<String, Value>>>,
+    pub live_frontmatter: Option<&'a std::sync::Mutex<SharedFrontmatter>>,
     /// The invocation-local runtime state cell.
     ///
     /// `live_frontmatter` is per-*attempt*; this cell spans the whole
@@ -428,7 +428,7 @@ impl StackExecutionContext<'_> {
     pub fn with_private_cells<'a>(
         &'a self,
         runtime_state: &'a super::super::runtime_state::RuntimeState,
-        live_frontmatter: Option<&'a std::sync::Mutex<Map<String, Value>>>,
+        live_frontmatter: Option<&'a std::sync::Mutex<SharedFrontmatter>>,
     ) -> StackExecutionContext<'a> {
         StackExecutionContext {
             runtime_state: Some(runtime_state),
@@ -437,11 +437,12 @@ impl StackExecutionContext<'_> {
         }
     }
 
-    /// Copy the live document cell's current contents, when one is wired.
+    /// A view of the live document cell's current contents, when one is
+    /// wired: it shares the cell's base and owns only the cell's writes.
     ///
     /// The seed for a private cell handed back through
     /// [`Self::with_private_cells`].
-    pub fn live_frontmatter_snapshot(&self) -> Option<Map<String, Value>> {
+    pub fn live_frontmatter_snapshot(&self) -> Option<SharedFrontmatter> {
         self.live_frontmatter
             .map(|cell| cell.lock().expect(LIVE_POISONED).clone())
     }
@@ -490,12 +491,12 @@ impl StackExecutionContext<'_> {
         expr: &darkmatter::markdown::compose::expression::Expr,
         fm: &Map<String, Value>,
     ) -> Result<Value, LifecycleExprError> {
-        self.run(|executor| executor.eval_expr(expr, fm))
+        self.run(|executor| executor.eval_expr(expr, &fm.clone().into()))
     }
 
     #[cfg(test)]
     fn resolve_string_value(&self, s: &str, fm: &Map<String, Value>) -> Result<Value, LifecycleExprError> {
-        self.run(|executor| executor.resolve_string_value(s, fm))
+        self.run(|executor| executor.resolve_string_value(s, &fm.clone().into()))
     }
 }
 
@@ -555,8 +556,13 @@ impl LifecycleHost for StackExecutionContext<'_> {
         &self,
         engine: &EffectEngine,
         updates: &IndexMap<String, Value>,
-        prior_base: &Map<String, Value>,
+        prior_base: &SharedFrontmatter,
     ) -> Result<IndexMap<String, Value>, Box<dyn std::error::Error + Send + Sync>> {
+        // Only the written keys' prior values are read, so only they are copied.
+        let prior_base: Map<String, Value> = updates
+            .keys()
+            .filter_map(|key| prior_base.get(key).map(|value| (key.clone(), value.clone())))
+            .collect();
         let fallback;
         let state = match self.runtime_state {
             Some(state) => state,
@@ -565,7 +571,7 @@ impl LifecycleHost for StackExecutionContext<'_> {
                 &fallback
             }
         };
-        state.set_batch(engine, updates, prior_base).map_err(Into::into)
+        state.set_batch(engine, updates, &prior_base).map_err(Into::into)
     }
 
     fn in_loop(&self) -> bool {

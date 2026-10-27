@@ -117,11 +117,12 @@ where
     // Emit initialize once before any iteration runs. It is inside the loop:
     // it reads pass 1's values.
     let init_timing = capture_loop_lifecycle_timing(loop_start);
-    let initialize_live = std::sync::Mutex::new(initialize_frontmatter.clone());
+    let initialize_view = darkmatter::markdown::compose::SharedFrontmatter::from(initialize_frontmatter.clone());
+    let initialize_live = std::sync::Mutex::new(initialize_view.clone());
     let entry_ambient = frame.ambient();
     let mut init_ctx = build_loop_stack_context(
         LifecycleSignal::Initialize,
-        initialize_frontmatter,
+        &initialize_view,
         lifecycle_ctx,
         effect_engine,
         shell_runner,
@@ -398,6 +399,7 @@ where
         // state alone.
         let mut state = output.frontmatter.take().unwrap_or_default();
         state.extend(frontmatter.clone());
+        let state = darkmatter::markdown::compose::SharedFrontmatter::from(state);
         let ambient = frame.ambient();
         let timing = capture_loop_lifecycle_timing(loop_start);
         let mut gate_ctx = build_loop_stack_context(
@@ -631,7 +633,7 @@ pub(crate) fn run_loop_gate(
 #[allow(clippy::too_many_arguments)]
 fn build_loop_stack_context<'a>(
     signal: LifecycleSignal,
-    frontmatter: &'a Map<String, Value>,
+    frontmatter: &'a darkmatter::markdown::compose::SharedFrontmatter,
     lifecycle_ctx: &'a LifecycleRuntimeContext<'a>,
     effect_engine: &'a darkmatter::effects::EffectEngine,
     shell_runner: &'a dyn ShellRunner,
