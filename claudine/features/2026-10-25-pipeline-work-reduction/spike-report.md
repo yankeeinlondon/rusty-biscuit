@@ -15,6 +15,9 @@ happens next.
 
 ## Read this first
 
+- **Current status is in [Current outcome (2026-10-27)](#current-outcome-2026-10-27).**
+  Everything above that section is the spike's original record, kept as
+  measured; where a figure or verdict differs, the dated section governs.
 - **Counts and bytes are reliable; times are not yet.** Work counters and
   allocation totals do not depend on host load. They were re-run
   independently and matched exactly:
@@ -224,6 +227,78 @@ Reproduce (from the repository root, then from `claudine/`):
 The C1 and A4 cell probes now time the cell the group builds (a clone of the
 group-start view) instead of a clone of the document's whole frontmatter map,
 which the executor no longer makes.
+
+## Current outcome (2026-10-27)
+
+Refreshed by phase 1 of the implementation plan on revision `d7ea96a1f`.
+Both dependency chains are merged:
+`2026-10-26-sequence-quadratic-frontmatter`, and
+`2026-10-25-shared-acyclic-definitions` with its prerequisites. Same macOS
+host, toolchain (`rustc 1.98.1`), `bench` profile, fixtures, and sizes as
+above. The commands, load averages, and every raw row are in the
+implementation log.
+
+### Saved timing baseline
+
+`pipeline-work-pre` is saved for both timing targets (system allocator, no
+counters):
+
+- `just _bench darkmatter --bench pipeline_work -- --save-baseline pipeline-work-pre`
+- `just _bench claudine --bench pipeline_work -- --save-baseline pipeline-work-pre`
+
+**Limitation:** other worktrees kept the host busy. The pass started after
+30 minutes of waiting, at a 1-minute load average of 7.7 (5-minute 8.2) and
+ended at 12.3 (Claudine's last cases). That is under the bench preflight's
+limit (half the 16 cores) but not the "about 2" asked for in Next steps.
+Criterion's intervals were narrow (about ±1% of the median on every anchor
+case), so the pass was not repeated. Phase 5's comparison must note the
+host's load again.
+
+| Anchor case | Criterion median (interval) | Bytes allocated (counting bench) |
+| ----------- | --------------------------- | -------------------------------: |
+| A1 corpus validate, 1,000 docs, warm | 23.755 ms (23.535–23.909) | 88,826,897 |
+| A1 + runtime baseline, warm / cold | 27.808 ms / 47.181 ms | 93,888,707 / 180,609,812 |
+| A2 `implement_plan`, warm / cold | 2.3622 ms / 65.746 ms | 4,667,124 / 331,148,774 |
+| A3 `a3x1` edit loop, warm / cold | instrumented only: 19.2 / 73.0 ms (counting allocator, loaded) | 52,848,942 / 345,580,121 |
+| A3 `a3x10`, warm / cold | instrumented only: 42.1 / 95.1 ms | 98,051,049 / 390,782,228 |
+| A4 sequence preflight (50 steps, 200 legs) | 35.349 ms (35.132–35.599) | 91,614,330 (group step adds 624,837,390) |
+| A5 event dispatch (100 events) | 130.90 ms (129.78–132.01) | 1,550,137,044 |
+| A6 shell preparation (100 steps × 10 holes) | 8.2117 ms (8.1460–8.2866) | 26,709,585 |
+
+A3's hovers are 66,277 B (verb) and 69,943 B (expression). These are the
+post-sharing reference figures; X1's prepared-matcher cache did not regress.
+
+### Conditional items
+
+| ID | Metric (2026-10-27) | Clause | Outcome |
+| -- | ------------------- | ------ | ------- |
+| C6 | about 15 KB and 3.3 µs per phrase **at any frontmatter size**. Classification now builds its state over the shared frontmatter view, so 20 phrases over 200 KB allocate 301,844 B (was 15.2 MB); 200 phrases allocate 3.0 MB. Peak 13 KB. Estimated A4 share: 49 phrases × 15 KB = 0.74 MB = 0.1% | none: the largest real prompt has 6 phrases (`prompts/_pr/push.md`), so 10 MB would take about 660 phrases, beyond 10× the real count; peak does not grow | **measured, no change** |
+| D3 | 2 trigger discoveries per launch pre-validation. At 10 schema files: one discovery is 961,891 B and 363.5 µs (Criterion), the pre-validation 1,940,903 B and 736.3 µs. Estimated A4 share: 49 × 961,891 B = 47.1 MB of (716.5 MB + 49 pre-validations, 95.1 MB) = **5.8% of bytes**. This is an estimate: A4 launches no provider, so it runs no pre-validation | 1 (estimated; was 5.0%, rising because the sequence fix shrank A4) | **qualifies** → `2026-10-27-shared-launch-trigger-discovery` |
+| D8 | 10 parses per placeholder per step in A6, now linear (100 per step at 10 and 100 steps). A one-off backtrace tally assigned them to ten sites, one parse each. Five are passes inside one shell-site preparation (grammar typing, approval scan, target identity, type projection, late-hole marking), and four of those are removable: 4,000 parses × 132.18 ns (Criterion single parse) = 0.529 ms = **6.4% of A6's 8.2117 ms**; bytes 4,000 × 215 B = 0.86 MB = 3.2% | 1 (time; count × unit cost). Counting only the 2 repeats inside Darkmatter's `CandidateScope::build` gives 3.2% | **qualifies** → `2026-10-27-shell-site-placeholder-parse-once` |
+
+The two qualifying items are separate dated active specs. This feature does
+not build either optimization.
+
+### Every other item
+
+- **Implement (unchanged):** C1, C2, C3, C4, C7, D1, D2, D4, D12, D13, P1.
+  Their refreshed shares do not reopen selection. Current direct metrics:
+  - C1/A4: `RuntimeStateBranch` 200, 608 KB each in A4;
+  - C2/C4: 1.48 MB / 1.47 MB per scalar read at 1 MB;
+  - C3: `RuntimeSnapshot` 615 in A4's group step;
+  - C7: `PredictionStateBuild` 2 per task, 424.6 MB at 1,000 tasks;
+  - D1: 6,000 `RewriteArmCompile` for 1,000 × 3 items;
+  - D2: the second preparation is 44.2% of `md schema validate`'s bytes;
+  - D4: 16.9% of A1 validation's bytes;
+  - D12: 300 paths reparse 300 tables;
+  - D13: 101 `AlphanumericCheckCompile` for 100 suggested imports.
+- **Measured, no change:** C5, C8, D5, D6, D7, D9, D10, D11, X3, X4. Their
+  counts reproduce exactly.
+- **Delivered elsewhere:** X1, by
+  `2026-10-26-dmls-frontmatter-typing-allocation`.
+- **Candidate design:** X2, written in this feature's phase 2.
+- **Finding 3** (DMLS resident memory) is still not re-checked. This feature
+  does not schedule it.
 
 ## Next steps
 

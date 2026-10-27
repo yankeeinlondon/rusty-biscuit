@@ -2,10 +2,26 @@
 kind: plan
 created: 2026-10-26
 total_phases: 5
-phase: 1
+phase: 2
 agent: codex/gpt-6.1-sol
 yolo: true
 human_review: false
+source_files_during_phase_1:
+- claudine/lib/tests/l1/host_catalog.rs
+- darkmatter/cli/src/commands/render.rs
+- darkmatter/lib/benches/pipeline_work_support/mod.rs
+- darkmatter/lib/benches/schema_validation.rs
+docs_updated_during_phase_1:
+- claudine/features/2026-10-25-pipeline-work-reduction/spike-report.md
+docs_created_during_phase_1:
+- claudine/features/2026-10-27-shared-launch-trigger-discovery/spec.md
+- claudine/features/2026-10-27-shell-site-placeholder-parse-once/spec.md
+skills_files_updated_during_phase_1:
+- .claude/skills/rust-testing/performance-testing.md
+packages:
+- claudine
+- darkmatter
+- darkmatter-cli
 ---
 
 # Pipeline work reduction implementation plan
@@ -186,7 +202,7 @@ Do not run `cargo fmt`.
 
 ### Wave 1 — Dependency and harness verification
 
-- [ ] **Verify prerequisites**
+- [x] **Verify prerequisites**
   - Confirm both dependency chains are present in the starting checkout and
     record the revision and dirty files in `implementation-log.md` beside this
     plan. Confirm X1 is already delivered by
@@ -208,7 +224,7 @@ measurement limitations are documented before refreshing evidence.
 
 ### Wave 2 — One baseline refresh
 
-- [ ] **Refresh evidence**
+- [x] **Refresh evidence**
   - Re-run existing allocation/counting scenarios affected by dependency merges
     in `pipeline_work_alloc` (both libraries) and DMLS `pipeline_work_a3`;
     retain cold/warm distinctions. Reset peak immediately before each isolated
@@ -223,7 +239,7 @@ measurement limitations are documented before refreshing evidence.
     without adding workloads or repeating the full spike. Retain existing
     unreachable-anchor and estimated-share limitations.
 
-- [ ] **Close conditional items**
+- [x] **Close conditional items**
   - Runs sequentially after **Refresh evidence**, within this wave. Apply
     Decision 4 to C6/D3/D8 and record metric, clause, realistic-size evidence,
     and terminal outcome for each in the report.
