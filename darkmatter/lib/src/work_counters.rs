@@ -31,11 +31,13 @@ pub enum Work {
     /// An eager-file union arm compiled by the rewrite (also counted as a
     /// [`Work::ValidatorCompile`]).
     RewriteArmCompile,
-    /// An `alphanumeric` default/suggest check compiled during lowering (also
-    /// counted as a [`Work::ValidatorCompile`]).
+    /// An `alphanumeric` default/suggest check compiled during lowering: a
+    /// miss in the shared structural cache (also counted as a
+    /// [`Work::ValidatorCompile`]).
     AlphanumericCheckCompile,
-    /// A source [`PositionMap`](crate::markdown::schemas::PositionMap)
-    /// prepared for one validation.
+    /// A source [`PositionMap`](crate::markdown::schemas::PositionMap) built
+    /// from a document, at most once per validation report and only for a
+    /// report that holds a problem.
     PositionMapBuild,
     /// A `LifecycleSourceMap` built from frontmatter.
     LifecycleSourceMapBuild,

@@ -39,7 +39,7 @@ use super::{
 };
 
 pub use super::positions::{PositionMap, build_position_map};
-use super::positions::PositionTarget;
+use super::positions::ProblemPositions;
 
 /// Environment variable for overriding the validator-cache bound.
 pub const CACHE_SIZE_ENV: &str = "DARKMATTER_SCHEMA_CACHE_SIZE";
@@ -280,6 +280,21 @@ impl ValidatorCache {
         digest
     }
 
+    /// [`Self::validator_for`], also reporting whether this call compiled
+    /// the validator (a cache miss) rather than reusing a cached one.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::validator_for`].
+    pub(crate) fn validator_for_reporting_compile(
+        &self,
+        schema: &Value,
+        base_dir: Option<&Path>,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Result<(Arc<Validator>, bool), SchemaError> {
+        self.lookup_or_compile(schema, schema_digest(schema), base_dir, context)
+    }
+
     fn validator_for_hashed(
         &self,
         schema: &Value,
@@ -287,16 +302,27 @@ impl ValidatorCache {
         base_dir: Option<&Path>,
         context: &biscuit_file::FileResolutionContext,
     ) -> Result<Arc<Validator>, SchemaError> {
+        self.lookup_or_compile(schema, digest, base_dir, context).map(|(validator, _)| validator)
+    }
+
+    /// The validator and whether it was compiled by this call.
+    fn lookup_or_compile(
+        &self,
+        schema: &Value,
+        digest: SchemaDigest,
+        base_dir: Option<&Path>,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> Result<(Arc<Validator>, bool), SchemaError> {
         // A schema with no file value to judge validates identically in every
         // context, so one structural validator serves every document.
         if !digest.judges_files {
-            return self.structural_validator_hashed(schema, digest.hash);
+            return self.structural_lookup_or_compile(schema, digest.hash);
         }
         let judged_in = JudgedIn::Context(Box::new(context.clone()), self.caller_origins.clone());
         let key = canonical_hash(digest.hash, base_dir, self.file_ref_fallback_dir.as_deref(), &judged_in);
         // Fast path: hit.
         if let Some(hit) = self.lookup(&key, &judged_in) {
-            return Ok(hit);
+            return Ok((hit, false));
         }
         // Miss: build outside the lock to keep contention low.
         let validator = Arc::new(build_validator_with(
@@ -309,7 +335,7 @@ impl ValidatorCache {
             },
         )?);
         self.insert(key, validator.clone(), judged_in);
-        Ok(validator)
+        Ok((validator, true))
     }
 
     /// Returns a cached structural validator for `schema`: file values that
@@ -327,13 +353,18 @@ impl ValidatorCache {
     /// [`Self::structural_validator_for`] for a schema whose content hash is
     /// known.
     pub(crate) fn structural_validator_hashed(&self, schema: &Value, content: u64) -> Result<Arc<Validator>, SchemaError> {
+        self.structural_lookup_or_compile(schema, content).map(|(validator, _)| validator)
+    }
+
+    /// The structural validator and whether it was compiled by this call.
+    fn structural_lookup_or_compile(&self, schema: &Value, content: u64) -> Result<(Arc<Validator>, bool), SchemaError> {
         let key = canonical_hash(content, None, None, &JudgedIn::Syntax);
         if let Some(hit) = self.lookup(&key, &JudgedIn::Syntax) {
-            return Ok(hit);
+            return Ok((hit, false));
         }
         let validator = Arc::new(build_structural_validator(schema)?);
         self.insert(key, validator.clone(), JudgedIn::Syntax);
-        Ok(validator)
+        Ok((validator, true))
     }
 
     /// The structural validator for a schema whose content hash is
@@ -569,20 +600,23 @@ pub fn collect_problems(
     instance: &Value,
     positions: &PositionMap,
 ) -> Vec<ValidationProblem> {
-    collect_problems_with_anchors(validator, instance, positions, FileRefAnchors::Syntax)
+    let mut problems = collect_problems_with_anchors(validator, instance, FileRefAnchors::Syntax);
+    ProblemPositions::Built(positions).locate_all(&mut problems);
+    problems
 }
 
 /// Like [`collect_problems`] but carries the request-scoped document anchor and
-/// diagnostic launch metadata used by the validator.
+/// diagnostic launch metadata used by the validator. Problems carry no
+/// line/column: the caller locates its settled report
+/// ([`ProblemPositions::locate_all`]).
 pub(super) fn collect_problems_with_anchors(
     validator: &Validator,
     instance: &Value,
-    positions: &PositionMap,
     anchors: FileRefAnchors<'_>,
 ) -> Vec<ValidationProblem> {
     validator
         .iter_errors(instance)
-        .flat_map(|err| build_problems(&err, positions, None, anchors))
+        .flat_map(|err| build_problems(&err, None, anchors))
         .collect()
 }
 
@@ -598,20 +632,18 @@ pub fn collect_root_union_problems(
     instance: &Value,
     positions: &PositionMap,
 ) -> Vec<ValidationProblem> {
-    collect_root_union_problems_with_anchors(
-        arm_validators,
-        instance,
-        positions,
-        FileRefAnchors::Syntax,
-    )
+    let mut problems =
+        collect_root_union_problems_with_anchors(arm_validators, instance, FileRefAnchors::Syntax);
+    ProblemPositions::Built(positions).locate_all(&mut problems);
+    problems
 }
 
 /// Like [`collect_root_union_problems`] but carries the request-scoped document
-/// anchor and diagnostic launch metadata used by the validators.
+/// anchor and diagnostic launch metadata used by the validators. Problems
+/// carry no line/column, as [`collect_problems_with_anchors`]'s do.
 pub(super) fn collect_root_union_problems_with_anchors(
     arm_validators: &[Arc<Validator>],
     instance: &Value,
-    positions: &PositionMap,
     anchors: FileRefAnchors<'_>,
 ) -> Vec<ValidationProblem> {
     if arm_validators.is_empty() {
@@ -621,7 +653,7 @@ pub(super) fn collect_root_union_problems_with_anchors(
     for (idx, validator) in arm_validators.iter().enumerate() {
         let problems: Vec<ValidationProblem> = validator
             .iter_errors(instance)
-            .flat_map(|err| build_problems(&err, positions, Some(idx), anchors))
+            .flat_map(|err| build_problems(&err, Some(idx), anchors))
             .collect();
         if problems.is_empty() {
             // Instance satisfies this arm — overall validation passes.
@@ -667,7 +699,6 @@ fn is_match_rule_out(problem: &ValidationProblem) -> bool {
 /// `anyOf` problem is kept.
 fn build_problems(
     err: &jsonschema::ValidationError<'_>,
-    positions: &PositionMap,
     arm_index: Option<usize>,
     anchors: FileRefAnchors<'_>,
 ) -> Vec<ValidationProblem> {
@@ -681,7 +712,7 @@ fn build_problems(
                 let path = nested.instance_path().as_str();
                 path.len() > parent.len() && path.starts_with(parent)
             })
-            .flat_map(|nested| build_problems(nested, positions, arm_index, anchors))
+            .flat_map(|nested| build_problems(nested, arm_index, anchors))
             .collect();
         if !deeper.is_empty() {
             // Distinct arms can fail identically against the same value (e.g.
@@ -699,7 +730,7 @@ fn build_problems(
                 nested.instance_path().as_str() == parent
                     && (is_file_format_error(nested) || is_match_keyword_error(nested))
             })
-            .flat_map(|nested| build_problems(nested, positions, arm_index, anchors))
+            .flat_map(|nested| build_problems(nested, arm_index, anchors))
             .collect();
         if !same_path_file_errors.is_empty() {
             let mut seen: HashSet<(String, String)> = HashSet::new();
@@ -726,7 +757,7 @@ fn build_problems(
                 .filter(|nested| {
                     nested.instance_path().as_str() == parent && !is_null_type_sentinel(nested)
                 })
-                .flat_map(|nested| build_problems(nested, positions, arm_index, anchors))
+                .flat_map(|nested| build_problems(nested, arm_index, anchors))
                 .collect();
             if !typed.is_empty() {
                 let mut seen: HashSet<(String, String)> = HashSet::new();
@@ -735,7 +766,7 @@ fn build_problems(
             }
         }
     }
-    let problem = build_problem(err, positions, arm_index, anchors);
+    let problem = build_problem(err, arm_index, anchors);
     match anchors {
         FileRefAnchors::Resolved { excused: Some(excused), .. } if excused(&problem) => Vec::new(),
         _ => vec![problem],
@@ -804,7 +835,6 @@ fn is_null_type_sentinel(err: &jsonschema::ValidationError<'_>) -> bool {
 
 fn build_problem(
     err: &jsonschema::ValidationError<'_>,
-    positions: &PositionMap,
     arm_index: Option<usize>,
     anchors: FileRefAnchors<'_>,
 ) -> ValidationProblem {
@@ -824,17 +854,6 @@ fn build_problem(
         ),
     };
     let instance_path = JsonPointer::parse(&path);
-    // An unknown key's pointer names the parent mapping, and a missing key has
-    // no node of its own, so the category picks the authored token to report.
-    let target = match (err.kind(), offending_property.as_deref()) {
-        (ValidationErrorKind::Required { .. }, _) => PositionTarget::Mapping,
-        (_, Some(key)) => PositionTarget::Key(key),
-        _ => PositionTarget::Value,
-    };
-    let (line, column) = positions
-        .locate(instance_path.segments(), target)
-        .map(|(l, c)| (Some(l), Some(c)))
-        .unwrap_or((None, None));
     let schema_path = {
         let raw = err.schema_path().as_str();
         (!raw.is_empty()).then(|| JsonPointer::parse(raw))
@@ -844,8 +863,8 @@ fn build_problem(
         message,
         kind,
         property,
-        line,
-        column,
+        line: None,
+        column: None,
         arm_index,
         description: None,
         code,
@@ -1359,13 +1378,12 @@ pub fn wrap_arm_as_root_schema(arm: &Value, root: &Value) -> Value {
 pub(super) fn collect_arm_problems_with_anchors(
     validator: &Validator,
     instance: &Value,
-    positions: &PositionMap,
     anchors: FileRefAnchors<'_>,
     arm_index: usize,
 ) -> Vec<ValidationProblem> {
     validator
         .iter_errors(instance)
-        .flat_map(|err| build_problems(&err, positions, Some(arm_index), anchors))
+        .flat_map(|err| build_problems(&err, Some(arm_index), anchors))
         .collect()
 }
 
@@ -1386,8 +1404,8 @@ pub(super) fn collect_arm_problems_with_anchors(
 ///
 /// The synthetic schema mirrors the path (`properties` for a key,
 /// `prefixItems` for an index) and validates the whole instance, so problem
-/// paths keep the `/key/0/...` form the normal report and the `positions` map
-/// already use. Outer locations are narrowed before the unions inside their
+/// paths keep the `/key/0/...` form the normal report uses and are located
+/// like it. Outer locations are narrowed before the unions inside their
 /// selected arm.
 ///
 /// `schema` is the root: references (a recursive union at each level of a
@@ -1398,7 +1416,6 @@ pub(super) fn collect_arm_problems_with_anchors(
 pub(super) fn narrow_discriminated_union_problems(
     schema: &Value,
     instance: &Value,
-    positions: &PositionMap,
     anchors: FileRefAnchors<'_>,
     mut problems: Vec<ValidationProblem>,
 ) -> Vec<ValidationProblem> {
@@ -1439,7 +1456,7 @@ pub(super) fn narrow_discriminated_union_problems(
         };
         let narrowed: Vec<ValidationProblem> = validator
             .iter_errors(instance)
-            .flat_map(|err| build_problems(&err, positions, None, anchors))
+            .flat_map(|err| build_problems(&err, None, anchors))
             .collect();
         problems.retain(|problem| !path_is_under(&problem.path, &prefix));
         problems.extend(narrowed);
@@ -2285,7 +2302,6 @@ mod tests {
         collect_problems_with_anchors(
             validator,
             instance,
-            &PositionMap::new(),
             FileRefAnchors::Resolved { base_dir: None, fallback: None, context, excused: None },
         )
     }
@@ -2557,7 +2573,6 @@ mod tests {
         let problems = collect_root_union_problems_with_anchors(
             &[v0, v1],
             &instance,
-            &PositionMap::new(),
             FileRefAnchors::Resolved { base_dir: None, fallback: None, context: &context, excused: None },
         );
         assert_eq!(
@@ -3148,7 +3163,6 @@ mod tests {
         let narrowed = narrow_discriminated_union_problems(
             &schema,
             &instance,
-            &PositionMap::new(),
             FileRefAnchors::Syntax,
             problems,
         );

@@ -1556,8 +1556,8 @@ fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, Sc
 // Each namespace's unexpanded table is shared through an `Arc`: the engine
 // cache, every later import of that file, and every `@this` hold the same
 // immutable allocation. Use-site modifiers apply to independent definition
-// copies. Engine caches end with the expansion; parsed file revisions and
-// shipped tables can outlive it in the bounded process memos below.
+// copies. Engine caches end with the expansion; each file's latest parsed
+// revision and the shipped tables can outlive it in the process memos below.
 
 /// Hard cap on named-type import expansion depth. Mirrors the inline-object
 /// depth cap so import chains cannot bypass the recursion guard indefinitely.
@@ -2717,6 +2717,18 @@ fn canonical_path(path: &Path) -> PathBuf {
 /// imports are only defined among a file's named types, so a raw JSON Schema
 /// has none to offer.
 fn load_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
+    let loaded = read_named_types(path);
+    if loaded.is_err() {
+        // The path's latest revision failed: drop its entry so the memo only
+        // ever holds a table the file parsed to when last read.
+        FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").remove(path);
+    }
+    loaded
+}
+
+/// Reads and hashes `path`, reusing its memo entry when the hash matches and
+/// otherwise parsing and replacing the entry.
+fn read_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
     let bytes = fs::read(path).map_err(|source| SchemaError::Io {
         path: path.to_path_buf(),
         source,
@@ -2725,34 +2737,39 @@ fn load_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
     let text = std::str::from_utf8(&bytes).map_err(|_| SchemaError::AmbiguousReferenced {
         path: path.to_path_buf(),
     })?;
-    let key = (path.to_path_buf(), biscuit_hash::xx_hash_bytes(&bytes));
-    if let Some(cached) = FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").get(&key) {
-        return Ok(Arc::clone(cached));
+    let hash = biscuit_hash::xx_hash_bytes(&bytes);
+    if let Some(entry) = FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").get(path)
+        && entry.hash == hash
+    {
+        return Ok(Arc::clone(&entry.table));
     }
     crate::note_work!(NamedTypeTableParse);
-    let named_types = Arc::new(named_types_from_text(text, path)?);
-    let mut memo = FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned");
-    if memo.len() >= FILE_NAMED_TYPES_CAPACITY {
-        memo.clear();
-    }
-    memo.insert(key, Arc::clone(&named_types));
-    Ok(named_types)
+    let table = Arc::new(named_types_from_text(text, path)?);
+    FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").insert(
+        path.to_path_buf(),
+        FileTable {
+            hash,
+            table: Arc::clone(&table),
+        },
+    );
+    Ok(table)
 }
 
-/// How many parsed schema files [`FILE_NAMED_TYPES`] holds before it starts
-/// over.
-const FILE_NAMED_TYPES_CAPACITY: usize = 256;
-
-/// The parsed named types of each schema file an import read, keyed by the
-/// path it was read from and a hash of the bytes read, so every payload and
-/// document importing one file revision parses it once. The file is read on
-/// every use: an edit or deletion is seen at once, and a failed read or parse
-/// is never served from here.
-static FILE_NAMED_TYPES: std::sync::LazyLock<std::sync::Mutex<HashMap<FileRevision, Arc<NamedTypes>>>> =
+/// The latest successfully parsed revision of each schema file an import
+/// read, keyed by the path it was read from, so every payload and document
+/// importing an unchanged file parses it once. The file is still read and
+/// hashed on every use: an edit replaces the entry, and a failed read or
+/// parse removes it and is never served from here. Entries are never evicted,
+/// so memory grows with the distinct paths a process imports; a request
+/// holding a superseded table keeps it alive through its own `Arc`.
+static FILE_NAMED_TYPES: std::sync::LazyLock<std::sync::Mutex<HashMap<PathBuf, FileTable>>> =
     std::sync::LazyLock::new(Default::default);
 
-/// A file path and the hash of the bytes read from it.
-type FileRevision = (PathBuf, u64);
+/// One path's latest successful parse and the hash of the bytes it parsed.
+struct FileTable {
+    hash: u64,
+    table: Arc<NamedTypes>,
+}
 
 /// The named types a schema document's text declares; `path` identifies the
 /// document in errors.
@@ -6493,5 +6510,62 @@ mod embedded_recursion {
         let defs = resolved.json_schema["$defs"].as_object().expect("$defs");
         assert_eq!(defs.keys().collect::<Vec<_>>(), ["item", "a", "b"]);
         assert_eq!(resolved.json_schema["properties"]["tree"]["anyOf"][1], serde_json::json!({"$ref": "#/$defs/item"}));
+    }
+}
+#[cfg(test)]
+mod named_type_file_memo {
+    use super::*;
+
+    fn memo_holds(path: &Path) -> bool {
+        FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").contains_key(path)
+    }
+
+    fn named_type(table: &NamedTypes) -> SimplifiedType {
+        match &table["name"] {
+            PropertyDef::Single(atom) => match &atom.ty {
+                TypeExpr::Primitive(primitive) => *primitive,
+                other => panic!("expected a primitive, got {other:?}"),
+            },
+            other => panic!("expected a single definition, got {other:?}"),
+        }
+    }
+
+    /// A table a request already holds survives the edit that replaces its
+    /// memo entry; an unchanged reread shares the latest table.
+    #[test]
+    fn a_held_table_keeps_its_revision_after_the_entry_is_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("types.yaml");
+        std::fs::write(&path, "kind: schema\ntypes:\n  name: string\n").unwrap();
+        let held = load_named_types(&path).unwrap();
+
+        std::fs::write(&path, "kind: schema\ntypes:\n  name: number\n").unwrap();
+        let latest = load_named_types(&path).unwrap();
+
+        assert_eq!(named_type(&held), SimplifiedType::String);
+        assert_eq!(named_type(&latest), SimplifiedType::Number);
+        assert!(Arc::ptr_eq(&latest, &load_named_types(&path).unwrap()));
+        assert!(!Arc::ptr_eq(&held, &latest));
+    }
+
+    /// A failed read or parse drops the path's entry, so nothing can serve
+    /// the earlier revision.
+    #[test]
+    fn a_failed_read_or_parse_drops_the_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("types.yaml");
+        std::fs::write(&path, "kind: schema\ntypes:\n  name: string\n").unwrap();
+        load_named_types(&path).unwrap();
+        assert!(memo_holds(&path));
+
+        std::fs::write(&path, "kind: schema\ntypes: [\n").unwrap();
+        assert!(matches!(load_named_types(&path), Err(SchemaError::SchemaDocument { .. })));
+        assert!(!memo_holds(&path));
+
+        std::fs::write(&path, "kind: schema\ntypes:\n  name: string\n").unwrap();
+        load_named_types(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert!(matches!(load_named_types(&path), Err(SchemaError::Io { .. })));
+        assert!(!memo_holds(&path));
     }
 }

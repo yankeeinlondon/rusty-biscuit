@@ -96,6 +96,17 @@ a day the destination month lacks moves back to that month's last day: January
 31 plus `1mo` is February 28 in a non-leap year. Only dates are supported;
 timestamps are not.
 
+Rule spelling is strict. Spaces (U+0020 only) may surround an argument, and
+nothing else is loose:
+
+| Spelling | Valid |
+| --- | --- |
+| `ValidFor(3mo)`, `ValidFor( 3mo , @last_updated )`, `ValidFor(3mo,2026-09-28)` | Yes |
+| `ValidFor (3mo)`, `ValidFor(3 mo)`, a tab inside the parentheses, or a space before or after the whole rule | No |
+| `ValidFor(03mo)`, `ValidFor(+3mo)`, `ValidFor(1.5mo)`, `ValidFor(mo)` | No: the count is a whole number written without a sign or leading zero |
+| `ValidFor(3MO)`, `ValidFor(3w)`, `ValidFor(3days)` | No: units are exactly `d`, `wk`, `mo`, and `yr`, in lowercase |
+| `ValidFor(3mo, @a.b)`, `ValidFor(3mo, @1x)`, `ValidFor(3mo, last_updated)` | No: a reference is `@` and one top-level property name |
+
 Policies live under the `content_policy` key by default (snake_case, like the
 repository's other frontmatter keys); a caller can choose a different key.
 Some early research notes used a `Duration(3mo)` rule, some of them under an
@@ -988,8 +999,9 @@ They pass the schema's patterns or optional-property rules:
 
 | Value | Why the declaration parser rejects it |
 | --- | --- |
-| `ValidUntil(2027-02-30)` | The schema checks a date's shape, not whether the day exists |
-| `ValidFor(99999999999999999999d)` | The duration overflows |
+| `ValidUntil(2027-02-30)`, `ValidFor(3mo, 2026-13-01)` | The schema checks a date's shape, not whether the day exists |
+| `ValidFor(99999999999999999999d)` | The count does not fit a 32-bit unsigned integer |
+| `ValidFor(4294967295yr, 2026-01-01)` | The inline baseline plus the duration falls outside the supported calendar range |
 | `FileChanged(vault:notes.md, @fp)`, `FileChanged(https://example.com/a.md, @fp)` | The schema cannot see a `vault:` or URL prefix, or a drive letter |
 | `FileChanged(docs/{{HOME}}.md, @fp)` | The schema sees `{{` only at the start of a path |
 | `[Evergreen, "ValidFor(3mo)"]` | `Evergreen` must be the only entry; the schema judges each entry on its own |
@@ -1000,6 +1012,20 @@ Some unusual paths are accepted by both: `FileChanged(notes/a(b.md, @fp)`,
 the schema nor the parser checks whether the file exists or stays inside the
 boundary: `FileChanged(does/not/exist.md, @fp)` passes both, and only
 evaluation reports it.
+
+The other direction never happens: every spelling the parser accepts passes
+the schema. The schema's rule patterns are lexical only. They repeat the
+parser's spelling (rule names, units, `@name` references, `YYYY-MM-DD` date
+shape, and where spaces may go) but none of its semantic checks, and the
+differences in the table above are intentional. The patterns are written by
+hand, so a change to the parser's spelling, such as a new unit or rule form,
+updates `content-policy/schemas/content-policy.yaml` in the same change.
+`darkmatter/lib/tests/l1/content_policy_duration_parity.rs` holds one roster
+of every rule form and every unit, each in its default-baseline,
+property-baseline, and inline-date spelling, with whitespace variants,
+references, and malformed spellings. It checks the parser, each pattern
+compiled alone, and the schema as Darkmatter's base frontmatter schema
+applies it, so a pattern that falls behind the parser fails there.
 
 Schema checks are passive. They never read the watched file, compare a
 fingerprint, renew a baseline, or stamp `last_updated`, and they leave the

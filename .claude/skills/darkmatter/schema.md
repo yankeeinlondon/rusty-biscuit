@@ -126,8 +126,18 @@ instance path, optional schema path, offending property, source position, and
 file-reference diagnostics. `ValidationOptions` controls pending values and
 excluded keys without executing anything.
 
-Problem positions (`schemas/positions.rs`, one `PositionMap` per validation
-source snapshot, shared by every problem and root-union arm):
+Problem positions (`schemas/positions.rs`, at most one `PositionMap` per
+validation report, shared by every problem and root-union arm):
+
+- Problems are built unlocated and located once the report is settled
+  (`ProblemPositions::locate_all` at the end of `validate_instance`; the
+  target is derived from the problem's code and offending property).
+  `validate_prepared` passes `ProblemPositions::deferred(source)`, so
+  `positions_for` runs only for a report that holds a problem: valid,
+  baseline-only, no-schema, and failed-preparation validations build none
+  (`Work::PositionMapBuild`). Public `&PositionMap` entry points wrap the
+  caller's map as `ProblemPositions::Built`. DMLS and Claudine pass the empty
+  map and range from their own ASTs, so they never build one.
 
 - `line` counts the complete file (opening `---` is line 1); `column` is a
   1-based UTF-8 byte column; LF and CRLF agree.

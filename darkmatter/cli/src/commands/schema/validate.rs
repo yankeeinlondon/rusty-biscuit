@@ -213,8 +213,7 @@ enum Baseline {
 /// its discovery skipped as invalid.
 ///
 /// The timings accumulate every schema step of the request: trigger
-/// discovery, the pre-assignment resolution, the final validation, and the
-/// schema-presence lookup. They are `None` when the file failed before
+/// discovery, the pre-assignment resolution, and the final validation. They are `None` when the file failed before
 /// discovery. The findings are kept whatever the outcome, so a later schema
 /// or validation failure still reports them.
 struct CheckedFile {
@@ -284,21 +283,20 @@ fn validate_one(
     let schema_label = schema_label_from(&md);
     // Resolve again after assignments: assignments may change which trigger
     // arms match, so the pre-assignment schema is only valid for coercion.
-    // The presence lookup re-resolves the schema validation just resolved, so
-    // it shares the validation's recording.
-    let (outcome, validation) = ValidationTimings::record(|| {
-        let report = api.validate(&md)?;
-        let no_schema = api.effective_for(&md)?.is_none();
-        Ok::<_, SchemaError>(FileOutcome::Validated {
+    // The schema-presence wording comes from this same preparation.
+    let (validated, validation) = ValidationTimings::record(|| api.validate_summarized(&md));
+    timings.absorb(validation);
+    let outcome = match validated {
+        Ok((report, summary)) => FileOutcome::Validated {
             report_valid: report.valid,
             problems: report.problems,
             advisories: report.advisories,
             schema_label,
-            no_schema,
-        })
-    });
-    timings.absorb(validation);
-    checked(outcome.unwrap_or_else(|err| FileOutcome::SchemaError(Box::new(err))), timings)
+            no_schema: !summary.has_schema,
+        },
+        Err(err) => FileOutcome::SchemaError(Box::new(err)),
+    };
+    checked(outcome, timings)
 }
 
 /// Prints one document's validation stage timings to stderr.
