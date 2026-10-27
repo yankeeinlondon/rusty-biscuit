@@ -7,7 +7,9 @@
 //! matches its file (the file disappeared, gained content, or became
 //! loadable) fails, so the list cannot rot. Inline `$schema` blocks in
 //! shipped Markdown are parsed passively too, and those carrying named-type
-//! references are resolved.
+//! references are resolved. The source-aware parsers of
+//! `2026-10-25-schema-diagnostic-provenance` locate no failure in a valid
+//! standalone artifact and return the source-free value for an inline one.
 //!
 //! The same walk accounts for the core types of `2026-10-16-core-schema-types`:
 //! [`CORE_TYPE_USERS`] names every artifact declaring `unknown`/`any`, `null`,
@@ -29,8 +31,10 @@ use std::time::SystemTime;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::{
     Constraint, MatchExpr, PathSubject, PropertyAtom, PropertyDef, SchemaDeclaration, SchemaError,
-    SchemaShape, SimplifiedType, StandaloneSchemaDocument, TypeExpr, parse_property_definition,
-    parse_schema_declaration, parse_standalone_schema_document, parse_trigger_envelope_from_str,
+    SchemaShape, SimplifiedType, StandaloneSchemaDocument, TypeExpr,
+    locate_standalone_definition_failure, parse_property_definition, parse_schema_declaration,
+    parse_schema_declaration_with_source, parse_standalone_schema_document,
+    parse_trigger_envelope_from_str,
     resolve::{ResolvedSchema, resolve_schema_with_roots, resolve_yaml_schema},
 };
 use serde_yaml_ng::Value as YamlValue;
@@ -631,6 +635,19 @@ fn shipped_schema_artifacts_parse_passively() {
             "{label}: the passive parse must not depend on files near the artifact",
         );
         let bodies = parse_bodies(&document);
+        let located = locate_standalone_definition_failure(&artifact.source);
+        match (&artifact.class, located) {
+            (Class::Draft { error }, Some(failure)) => assert!(
+                failure.error.to_string().contains(error),
+                "{label}: expected a located failure containing `{error}`, got {failure}",
+            ),
+            (Class::Draft { .. }, None) => {}
+            (_, Some(failure)) => panic!(
+                "{label}: a shipped definition is located as invalid at {:?}: {failure}",
+                failure.path,
+            ),
+            (_, None) => {}
+        }
         match artifact.class {
             Class::Loadable => {
                 assert!(
@@ -877,6 +894,39 @@ struct InlineSchema {
     label: String,
     path: PathBuf,
     declaration: YamlValue,
+    /// The authored `$schema` value, laid out for the source-aware parser;
+    /// `None` when the key is not written as a plain column-0 `$schema:`.
+    authored: Option<String>,
+}
+
+/// The authored text of the column-0 `$schema:` entry's value in
+/// `frontmatter`, in the form the source-aware parser requires: a value on
+/// the key's line keeps its column (the key is blanked to spaces), a block
+/// value starts at its first line, and the value runs to the next column-0
+/// entry.
+fn authored_schema_value(frontmatter: &str) -> Option<String> {
+    let mut lines = frontmatter.split_inclusive('\n');
+    let first = lines.find(|line| line.starts_with("$schema:"))?;
+    let rest = &first["$schema:".len()..];
+    let mut authored = if rest.trim().is_empty() {
+        String::new()
+    } else {
+        format!("{}{rest}", " ".repeat("$schema:".len()))
+    };
+    for line in lines {
+        let continues = line.trim().is_empty()
+            || line.starts_with([' ', '\t'])
+            || line.starts_with("- ")
+            || line.trim_end() == "-";
+        if !continues {
+            break;
+        }
+        authored.push_str(line);
+    }
+    let trimmed = authored.trim_end().len();
+    authored.truncate(trimmed);
+    authored.push('\n');
+    Some(authored)
 }
 
 /// The `$schema` value of every Markdown file below `dirs` whose frontmatter
@@ -891,13 +941,13 @@ fn inline_schemas(root: &Path, dirs: &[PathBuf]) -> Vec<InlineSchema> {
             if !text.contains("$schema") {
                 continue;
             }
-            let Some(frontmatter) = text
+            let Some(frontmatter_text) = text
                 .strip_prefix("---\n")
                 .and_then(|rest| rest.find("\n---").map(|end| &rest[..end]))
             else {
                 continue;
             };
-            let Ok(frontmatter) = serde_yaml_ng::from_str::<YamlValue>(frontmatter) else {
+            let Ok(frontmatter) = serde_yaml_ng::from_str::<YamlValue>(frontmatter_text) else {
                 continue;
             };
             let Some(declaration) = yaml_key(&frontmatter, "$schema") else {
@@ -906,6 +956,7 @@ fn inline_schemas(root: &Path, dirs: &[PathBuf]) -> Vec<InlineSchema> {
             found.push(InlineSchema {
                 label: relative(&path, root),
                 declaration: declaration.clone(),
+                authored: authored_schema_value(frontmatter_text),
                 path,
             });
         }
@@ -920,8 +971,9 @@ fn has_named_reference(declaration: &SchemaDeclaration) -> bool {
 
 /// Every inline `$schema` in shipped documentation, and in the darkmatter,
 /// claudine, and messenger planning trees (where every inline named-type
-/// reference lives), parses passively. The internal `prompts/` folders and
-/// fixture directories are outside the scope.
+/// reference lives), parses passively, and the source-aware declaration parser
+/// returns the same declaration or the same error. The internal `prompts/`
+/// folders and fixture directories are outside the scope.
 #[test]
 fn shipped_markdown_inline_schemas_parse_passively() {
     let root = repo_root();
@@ -949,14 +1001,59 @@ fn shipped_markdown_inline_schemas_parse_passively() {
         "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p12_pattern_parens.md",
         "expected `,` or `)` in argument list",
     )];
+    // A multi-line quoted scalar is outside the source-aware parser's strict
+    // presentation grammar, so it parses but cannot be projected.
+    let unprojectable = [
+        "messenger/features/2026-09-17-research-metadata-pipeline/spikes/schema-pilots/probes/p14_multiline_inline.md",
+    ];
     let schemas = inline_schemas(&root, &dirs);
     let before = fingerprint(schemas.iter().map(|schema| schema.path.as_path()));
     let counters = effect_counters();
 
     let mut named = Vec::new();
     let mut failed = Vec::new();
+    let mut source_aware = 0usize;
+    let mut unprojected = Vec::new();
     for schema in &schemas {
-        match parse_schema_declaration(&schema.declaration) {
+        let parsed = parse_schema_declaration(&schema.declaration);
+        // The source-aware parser keeps the source-free value, and on failure
+        // its semantic error.
+        if let Some(authored) = &schema.authored {
+            source_aware += 1;
+            match (
+                &parsed,
+                parse_schema_declaration_with_source(&schema.declaration, authored, 0),
+            ) {
+                (Ok(declaration), Ok(aware)) => assert_eq!(
+                    &aware.value, declaration,
+                    "{}: the source-aware parse changed the declaration",
+                    schema.label
+                ),
+                (Err(error), Err(failure)) => assert_eq!(
+                    failure.error.to_string(),
+                    error.to_string(),
+                    "{}: the source-aware parse changed the error",
+                    schema.label
+                ),
+                (Ok(_), Err(failure)) if unprojectable.contains(&schema.label.as_str()) => {
+                    assert!(
+                        failure.path.segments().is_empty()
+                            && failure.authored_span.is_none()
+                            && failure.value_span.is_none()
+                            && failure.to_string().contains("could not project"),
+                        "{}: expected an unlocated projection error, got {failure:?}",
+                        schema.label
+                    );
+                    unprojected.push(schema.label.as_str());
+                }
+                (parsed, aware) => panic!(
+                    "{}: the source-free parse gave {parsed:?} but the source-aware parse gave {:?}",
+                    schema.label,
+                    aware.map(|aware| aware.value),
+                ),
+            }
+        }
+        match parsed {
             Ok(declaration) => {
                 if has_named_reference(&declaration) {
                     named.push(schema.label.as_str());
@@ -1008,6 +1105,14 @@ fn shipped_markdown_inline_schemas_parse_passively() {
         schemas.len() >= 500,
         "the inline-schema corpus shrank to {}",
         schemas.len()
+    );
+    assert_eq!(
+        unprojected, unprojectable,
+        "an unprojectable inline schema now projects; remove it"
+    );
+    assert!(
+        source_aware >= 500,
+        "only {source_aware} inline schemas were parsed source-aware"
     );
 }
 

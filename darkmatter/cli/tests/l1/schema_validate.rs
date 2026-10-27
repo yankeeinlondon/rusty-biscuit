@@ -1588,3 +1588,101 @@ fn schema_validate_shipped_claudine_schema_rejects_values_inside_a_reused_loop_e
     assert_eq!(found[1].1, "0 is not valid under any of the schemas listed in the 'anyOf' keyword", "{report}");
     assert!(report.to_string().contains("the most iterations to run | a cap such as {{ cap }}"), "{report}");
 }
+
+/// Like [`shipped_claudine_document`], with one edit applied to the copy of
+/// the bundle file `file`: its first `from` becomes `to`.
+fn edited_claudine_document(
+    process: &CliProcessFixture,
+    values: &str,
+    (file, from, to): (&str, &str, &str),
+) -> PathBuf {
+    let doc = shipped_claudine_document(process, values);
+    let path = process.cwd().join("schemas").join(file);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains(from), "{file} no longer holds {from:?}");
+    std::fs::write(&path, text.replacen(from, to, 1)).unwrap();
+    doc
+}
+
+/// Runs plain `md schema validate` on `doc` and returns its exit code and
+/// stdout as prose: ANSI styling and the report gutter are removed and
+/// whitespace runs collapsed, so a fragment the renderer wrapped still
+/// matches. Asserts the run left nothing beside its inputs.
+fn validate_rendered(process: &CliProcessFixture, doc: &Path) -> (Option<i32>, String) {
+    let output = process
+        .command()
+        .args(["schema", "validate"])
+        .arg(doc)
+        .output()
+        .unwrap();
+    let mut entries: Vec<String> = std::fs::read_dir(process.cwd())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    entries.sort();
+    assert_eq!(entries, [".git", "doc.md", "schemas"], "validation wrote an output");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut plain = String::new();
+    let mut chars = stdout.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            chars.by_ref().find(|ch| ch.is_ascii_alphabetic());
+        } else if ch != '┃' {
+            plain.push(ch);
+        }
+    }
+    (
+        output.status.code(),
+        plain.split_whitespace().collect::<Vec<_>>().join(" "),
+    )
+}
+
+#[test]
+fn schema_validate_grammar_error_in_one_shipped_definition_names_its_location() {
+    let process = CliProcessFixture::new();
+    let doc = edited_claudine_document(
+        &process,
+        "$schema:\n  loop: loop@./schemas/lifecycle.yaml\nloop:\n  max: 3\n",
+        (
+            "lifecycle.yaml",
+            "\"number(integer; min(1)) -> the most iterations to run\"",
+            "\"number(integer; min(one)) -> the most iterations to run\"",
+        ),
+    );
+
+    let (code, rendered) = validate_rendered(&process, &doc);
+
+    assert_eq!(code, Some(2), "{rendered}");
+    for fragment in [
+        "has a schema definition error",
+        "lifecycle.yaml as a standalone SimplifiedSchema",
+        "for property `max`: `min` requires a numeric argument, got `one`",
+    ] {
+        assert!(rendered.contains(fragment), "missing {fragment:?} in {rendered}");
+    }
+    assert!(!rendered.contains("is valid"), "{rendered}");
+}
+
+#[test]
+fn schema_validate_bound_conflict_across_an_import_of_a_shipped_file_shows_both_values() {
+    let process = CliProcessFixture::new();
+    let doc = edited_claudine_document(
+        &process,
+        "$schema:\n  tag: slug(max(5))@./schemas/lifecycle.yaml\ntag: abc\n",
+        ("lifecycle.yaml", "types:\n", "types:\n    slug: string(min(10))\n"),
+    );
+
+    let (code, rendered) = validate_rendered(&process, &doc);
+
+    assert_eq!(code, Some(2), "{rendered}");
+    for fragment in [
+        "has a schema definition error",
+        "tag reuses slug with contradictory bounds",
+        "`min(10)` at slug in",
+        "lifecycle.yaml`",
+        "`max(5)` at tag in the inline `$schema`",
+    ] {
+        assert!(rendered.contains(fragment), "missing {fragment:?} in {rendered}");
+    }
+    assert!(!rendered.contains("is valid"), "{rendered}");
+}
