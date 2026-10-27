@@ -109,7 +109,7 @@ pub fn parse_options(authored: Option<&Frontmatter>) -> LifecycleParseOptions<'_
         // `effect` is unprovided, so no effect name is ever checked.
         is_known_effect: &|_| false,
         authored,
-        unknown_verbs: UnknownVerbPolicy::IgnoreUnprovided(UNPROVIDED_VERBS),
+        unknown_verbs: UnknownVerbPolicy::IgnoreUnprovided(UNPROVIDED_VERBS.into()),
         registry: registry(),
     }
 }

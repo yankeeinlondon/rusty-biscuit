@@ -221,7 +221,15 @@ impl DefinitionTable {
                 .entries
                 .iter()
                 .map(|(key, definition)| {
-                    (key.clone(), Definition { body: project(&definition.body), ..definition.clone() })
+                    // Field by field, not `..definition.clone()`: that would
+                    // clone the body being replaced, and a new field must be
+                    // handled here explicitly.
+                    let projected = Definition {
+                        body: project(&definition.body),
+                        origin: definition.origin.clone(),
+                        json_key: definition.json_key.clone(),
+                    };
+                    (key.clone(), projected)
                 })
                 .collect(),
             by_json_key: self.by_json_key.clone(),

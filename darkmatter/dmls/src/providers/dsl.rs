@@ -356,11 +356,24 @@ fn host_catalog_diagnostics(
 /// frontmatter, when no other catalog's could: the document's lifecycle
 /// stacks are then analyzed as the `md` host's, so a host-only event, verb,
 /// or rename is not seen. The message is the artifact's reason.
-fn lifecycle_host_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
+/// Without a supplied `host`, the document's is discovered.
+fn lifecycle_host_diagnostics(
+    ctx: &DocumentContext,
+    host: Option<&crate::overlay::event_views::LifecycleHost>,
+    out: &mut Vec<Diagnostic>,
+) {
     if ctx.overlay.is_none() {
         return;
     }
-    for reason in crate::overlay::event_views::LifecycleHost::for_document(ctx).incomplete() {
+    let discovered;
+    let host = match host {
+        Some(host) => host,
+        None => {
+            discovered = crate::overlay::event_views::LifecycleHost::for_document(ctx);
+            &discovered
+        }
+    };
+    for reason in host.incomplete() {
         out.push(diagnostic(
             Range::default(),
             DiagnosticSeverity::WARNING,
@@ -753,15 +766,26 @@ pub fn folding_ranges(ctx: &DocumentContext) -> Vec<FoldingRange> {
 
 // ── Diagnostics ─────────────────────────────────────────────────────────────
 
-/// All Layer-3 DSL diagnostics for the document.
+/// All Layer-3 DSL diagnostics for the document, discovering its lifecycle
+/// host for the incomplete-analysis check.
 pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
+    diagnostics_under(ctx, None)
+}
+
+/// [`diagnostics`] with the incomplete-analysis check under `host`, which is
+/// not rediscovered.
+pub fn diagnostics_with_host(ctx: &DocumentContext, host: &crate::overlay::event_views::LifecycleHost) -> Vec<Diagnostic> {
+    diagnostics_under(ctx, Some(host))
+}
+
+fn diagnostics_under(ctx: &DocumentContext, host: Option<&crate::overlay::event_views::LifecycleHost>) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let (functions, failed_functions) = host_function_results(ctx);
     let _host_functions: Vec<_> = functions.iter().rev().map(|functions| functions.enter()).collect();
     let (catalogs, failed_catalogs) = host_catalog_results(ctx);
     host_catalog_diagnostics(&failed_catalogs, &mut out);
     host_function_catalog_diagnostics(&failed_functions, &mut out);
-    lifecycle_host_diagnostics(ctx, &mut out);
+    lifecycle_host_diagnostics(ctx, host, &mut out);
     unknown_directive_diagnostics(ctx, &mut out);
     malformed_option_diagnostics(ctx, &mut out);
     block_pairing_diagnostics(ctx, &mut out);

@@ -178,6 +178,7 @@ mod schemas_core_type_grammar;
 mod schemas_detect_table;
 mod schemas_grammar_proptest;
 mod schemas_literal_expression;
+mod schemas_named_import_errors;
 mod schemas_named_type_merge;
 mod schemas_required_count_matrix;
 mod schemas_union_fixture_controls;

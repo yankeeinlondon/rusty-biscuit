@@ -32,9 +32,11 @@ effects-instrumentation = []
 # Test-only instrumentation. Exposes the work counters that complexity
 # regressions and measurement benches in this and downstream crates (DMLS,
 # Claudine) read across the crate boundary, where `cfg(test)` does not reach:
-# the thread-local alias-search counter and the process-wide
-# `work_counters` module. Off by default; without it the counters and their
-# accessors are not compiled.
+# the thread-local alias-search counter, the process-wide `work_counters`
+# module, and `markdown::schemas::catalog::discovery_probe` (thread-local
+# observation of lifecycle discovery's reads and builds, and injected read
+# errors). Off by default; without it the counters and their accessors are
+# not compiled.
 work-counters = []
 # Test-only seam. Exposes `markdown::cleanup::test_hooks`, which corrupts the
 # body-cleanup candidate before the fidelity check so consumer suites (the CLI,

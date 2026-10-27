@@ -190,7 +190,7 @@ pub fn lifecycle_declared_types<'a>(
     schema: Option<&'a crate::markdown::schemas::EffectiveSchema>,
     registry: &'a EventRegistry,
 ) -> DeclaredTypes<'a> {
-    let declared = DeclaredTypes::for_schema(schema).with_host_globals(registry.host_globals());
+    let declared = DeclaredTypes::for_schema(schema).with_registered_host_globals(registry.host_globals());
     match registry.global_catalog() {
         Some(catalog) => declared.with_global_catalog(catalog),
         None => declared,

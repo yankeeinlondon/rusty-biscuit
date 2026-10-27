@@ -2612,14 +2612,6 @@ type FileRevision = (PathBuf, u64);
 /// The named types a schema document's text declares; `path` identifies the
 /// document in errors.
 fn named_types_from_text(text: &str, path: &Path) -> Result<IndexMap<String, PropertyDef>, SchemaError> {
-    // The classifier declines unparseable YAML; an import target must be
-    // a schema, so name the syntax error instead of "ambiguous".
-    if let Err(error) = serde_yaml_ng::from_str::<YamlValue>(text) {
-        return Err(SchemaError::SchemaDocument {
-            path: path.to_path_buf(),
-            message: format!("not valid YAML: {error}"),
-        });
-    }
     let Some(document) = parse_standalone_schema_document(text, path)? else {
         return Err(SchemaError::AmbiguousReferenced {
             path: path.to_path_buf(),

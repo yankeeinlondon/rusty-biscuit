@@ -57,6 +57,26 @@ schema file, a configuration, trigger, or context change, and dropped on
 close. See [Frontmatter typing and its reuse](./hover.md#frontmatter-typing-and-its-reuse)
 for the full list, an example, and the lifecycle.
 
+## The lifecycle host is found once per pass
+
+The frontmatter checks of lifecycle stacks and the
+`dm.lifecycle.incomplete_analysis` warning both need the document's lifecycle
+host. In one diagnostics pass of a document with frontmatter, DMLS finds that
+host once and both checks use it. The search visits the host catalogs in the
+document's schema roots in order and stops at the first one with a usable
+[lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md); catalogs
+after it are not read. When none is usable, every catalog's reason is still
+reported.
+
+If finding the host fails unexpectedly (an internal panic), the error is
+logged as a panic of the frontmatter and DSL providers and their diagnostics
+are left out of that pass; every other provider's diagnostics are still
+published.
+
+Nothing is remembered between requests. Each pass searches again, so
+regenerating a missing or stale artifact clears its warning on the next
+diagnostics request. Hover and completion search on their own.
+
 ## Pipeline
 
 ```

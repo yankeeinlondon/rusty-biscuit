@@ -178,7 +178,6 @@ fn claudine_profile() -> std::sync::Arc<HostLifecycleProfile> {
     let repository = ClaudineRepository::new();
     std::fs::write(repository.root.join("schemas/globals.lifecycle.json"), CLAUDINE_LIFECYCLE_ARTIFACT).expect("write artifact");
     host_lifecycle_profiles(&repository.context())
-        .into_iter()
         .find_map(|discovery| discovery.profile.ok())
         .expect("the frozen bundle's lifecycle artifact is fresh")
 }

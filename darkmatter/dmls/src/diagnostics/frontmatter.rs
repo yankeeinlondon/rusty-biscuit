@@ -32,6 +32,7 @@ use crate::context::resolution_failure_data;
 use crate::diagnostics::codes::{code, source};
 use crate::diagnostics::named_types;
 use crate::diagnostics::nested_span;
+use crate::overlay::event_views::LifecycleHost;
 use crate::overlay::{
     FrontmatterAst, SchemaAuthoringState, SchemaBundle, SchemaOutcome, SuggestionState,
 };
@@ -41,8 +42,19 @@ use crate::providers::frontmatter::ExpressionValue;
 use crate::source_map::SourceMap;
 use crate::workspace::file_path_to_uri;
 
-/// All frontmatter/schema diagnostics for the current document.
+/// All frontmatter/schema diagnostics for the current document, discovering
+/// its lifecycle host when a lifecycle check needs it.
 pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
+    diagnostics_under(ctx, None)
+}
+
+/// [`diagnostics`] with every lifecycle check under `host`, which is not
+/// rediscovered.
+pub fn diagnostics_with_host(ctx: &DocumentContext, host: &LifecycleHost) -> Vec<Diagnostic> {
+    diagnostics_under(ctx, Some(host))
+}
+
+fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec<Diagnostic> {
     let Some(overlay) = ctx.overlay else {
         return Vec::new();
     };
@@ -90,11 +102,18 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
                 style_diagnostics(ctx, ast, &mut out);
                 // One lifecycle host and one library walk serve every
                 // expression inside a stack, schema-typed or not.
-                let lifecycle = crate::overlay::event_views::LifecycleHost::for_document(ctx);
-                let guarded = GuardedStackCalls::for_document(ctx, &lifecycle);
-                expression_diagnostics(ctx, ast, &report, &expression_values, &lifecycle, &guarded, &mut out);
-                stack_expression_diagnostics(ctx, ast, &expression_values, &lifecycle, &guarded, &mut out);
-                interpolation_call_diagnostics(ctx, ast, &lifecycle, &mut out);
+                let discovered;
+                let lifecycle = match host {
+                    Some(host) => host,
+                    None => {
+                        discovered = LifecycleHost::for_document(ctx);
+                        &discovered
+                    }
+                };
+                let guarded = GuardedStackCalls::for_document(ctx, lifecycle);
+                expression_diagnostics(ctx, ast, &report, &expression_values, lifecycle, &guarded, &mut out);
+                stack_expression_diagnostics(ctx, ast, &expression_values, lifecycle, &guarded, &mut out);
+                interpolation_call_diagnostics(ctx, ast, lifecycle, &mut out);
             }
         }
         SchemaOutcome::Ready(None) => {}

@@ -28,7 +28,7 @@ use darkmatter::lifecycle::error::LifecycleError;
 use darkmatter::markdown::compose::expression::{
     Availability, BindingView, ParseError, SpannedExpr, is_reserved_namespace,
 };
-use darkmatter::markdown::schemas::catalog::GlobalCatalog;
+use darkmatter::markdown::schemas::catalog::{GlobalCatalog, HostLifecycleDiscovery};
 use darkmatter::markdown::span::SourceSpan;
 
 use crate::overlay::expressions::{self, ScalarProjection};
@@ -53,12 +53,21 @@ impl LifecycleHost {
     /// order. Without one, the `md` host, plus each catalog's reason its
     /// artifact could not be trusted ([`Self::incomplete`]); without a
     /// resolution context, the `md` host alone.
+    ///
+    /// Discovery is lazy: no catalog or artifact after the first usable
+    /// profile is read.
     pub fn for_document(ctx: &crate::providers::DocumentContext) -> Self {
         let Ok(context) = ctx.file_context() else {
             return Self::md();
         };
+        Self::first_usable(darkmatter::markdown::schemas::catalog::host_lifecycle_profiles(context))
+    }
+
+    /// The first usable profile `discoveries` yields, taking nothing after
+    /// it; without one, the `md` host with every reason in order.
+    fn first_usable(discoveries: impl IntoIterator<Item = HostLifecycleDiscovery>) -> Self {
         let mut incomplete = Vec::new();
-        for discovery in darkmatter::markdown::schemas::catalog::host_lifecycle_profiles(context) {
+        for discovery in discoveries {
             match discovery.profile {
                 Ok(profile) => {
                     return Self { registry: profile.registry().clone(), profile: Some(profile), incomplete: Vec::new() };
@@ -476,5 +485,63 @@ mod tests {
         assert_eq!(crate::work_counters::work_counts().since(before).stack_walks, 0);
         let _ = stack_expressions(&LifecycleHost::md(), text, &ast, |_| false);
         assert_eq!(crate::work_counters::work_counts().since(before).stack_walks, 1);
+    }
+
+    /// A host catalog in `dir` named `name`, with an artifact when `fresh`.
+    fn host_catalog(dir: &Path, name: &str, fresh: bool) -> std::path::PathBuf {
+        use darkmatter::lifecycle::host_profile::{lifecycle_artifact, lifecycle_artifact_path};
+        use darkmatter::lifecycle::{LifecycleParseOptions, UnknownVerbPolicy};
+
+        let text = format!("kind: schema\ndescription: {name}\n$schema:\n    run:\n        count: number\n");
+        let path = dir.join(name);
+        std::fs::write(&path, &text).expect("catalog");
+        if fresh {
+            let options = LifecycleParseOptions {
+                is_known_effect: &|_| false,
+                authored: None,
+                unknown_verbs: UnknownVerbPolicy::Reject,
+                registry: &EventRegistry::new("test"),
+            };
+            std::fs::write(lifecycle_artifact_path(&path), lifecycle_artifact(&options, &[], &text)).expect("artifact");
+        }
+        path
+    }
+
+    /// The host is the first usable profile, and nothing of a later
+    /// candidate is read; with none usable, every reason is kept in order.
+    #[test]
+    fn the_host_is_the_first_usable_profile_and_nothing_after_it_is_read() {
+        use darkmatter::lifecycle::host_profile::lifecycle_artifact_path;
+        use darkmatter::markdown::schemas::catalog::discovery_probe::DiscoveryProbe;
+        use darkmatter::markdown::schemas::catalog::host_lifecycle_profiles;
+
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let root = biscuit_file::canonicalize_simplified(dir.path()).expect("canonical temp dir");
+        let schemas = root.join("schemas");
+        std::fs::create_dir_all(root.join(".git")).expect("repository marker");
+        std::fs::create_dir_all(&schemas).expect("schema root");
+        let context =
+            biscuit_file::FileResolutionContext::from_snapshot(&root, None, Default::default()).with_repository_root(&root);
+        let unusable = host_catalog(&schemas, "a.yaml", false);
+        let winner = host_catalog(&schemas, "b.yaml", true);
+        let later = host_catalog(&schemas, "c.yaml", true);
+        let probe = DiscoveryProbe::install();
+
+        let host = LifecycleHost::first_usable(host_lifecycle_profiles(&context));
+        assert_eq!(host.registry().host(), "test");
+        assert!(host.incomplete().is_empty());
+        let reads = probe.take_reads();
+        assert!(reads.contains(&unusable) && reads.contains(&winner), "{reads:?}");
+        assert!(!reads.contains(&later) && !reads.contains(&lifecycle_artifact_path(&later)), "{reads:?}");
+
+        std::fs::remove_file(lifecycle_artifact_path(&winner)).expect("remove artifact");
+        std::fs::remove_file(lifecycle_artifact_path(&later)).expect("remove artifact");
+        let host = LifecycleHost::first_usable(host_lifecycle_profiles(&context));
+        assert_eq!(host.registry().host(), "md");
+        let artifacts: Vec<_> = [&unusable, &winner, &later]
+            .into_iter()
+            .map(|catalog| format!("the lifecycle artifact `{}` is absent", lifecycle_artifact_path(catalog).display()))
+            .collect();
+        assert_eq!(host.incomplete(), artifacts);
     }
 }

@@ -134,7 +134,7 @@ fn every_global_has_generated_and_loaded_parity() {
     .expect("the disk catalog loads");
     let embedded = GlobalCatalog::darkmatter();
     for requirement in DARKMATTER_GLOBALS {
-        assert_eq!(loaded.global(requirement.name), embedded.global(requirement.name), "{}", requirement.name);
+        assert_eq!(loaded.global(&requirement.name), embedded.global(&requirement.name), "{}", requirement.name);
     }
     assert_eq!(&loaded, embedded);
 }
@@ -542,7 +542,7 @@ fn a_current_shape_differing_from_ctx_is_a_mismatch() {
     texts.0[0] = replace_once(&texts.0[0], CURRENT_LINE, &block);
     let error = texts.load().expect_err("current differs from ctx");
     assert_eq!(error.field, "$schema.current");
-    assert!(matches!(error.reason, CatalogErrorReason::Mismatch("ctx")), "{error}");
+    assert!(matches!(&error.reason, CatalogErrorReason::Mismatch(target) if target == "ctx"), "{error}");
 }
 
 #[test]
