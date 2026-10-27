@@ -123,6 +123,23 @@ are needed.
    - **Downsides:** This proves ownership and cache bounds rather than an RSS
      reduction; allocator behavior is outside the acceptance claim.
 
+8. **Facts from `2026-10-25-fix-now`** (recorded after that fix was implemented)
+   - **Decision:** `host_function_set`, `ArtifactKey`, and the function cache are
+     unchanged by that fix, so Decision 4 stands. For Decision 5, the same file
+     now has `catalog::discovery_probe` (`cfg(any(test, feature =
+     "work-counters"))`, thread-local): a read log, a build counter, and injected
+     read errors for lifecycle discovery. Extend it, or follow its pattern, for
+     any host-function observation rather than adding a second seam. The
+     lifecycle profile cache is a separate `profile_cache()`; do not merge the two.
+   - **Alternatives considered:** A separate test-only seam for host functions;
+     merging both caches into one map.
+   - **Why:** One observation mechanism per discovery file keeps test seams
+     consistent; the two caches have different failure policies (see the spec's
+     "Relationship to the lifecycle profile cache").
+   - **Downsides:** `discovery_probe` currently instruments only lifecycle reads;
+     the artifact read in `host_function_set` still goes through `ArtifactKey::read`
+     and would need routing through the probe to be observed.
+
 ### Execution rules
 
 Waves have globally unique numbers and run in order. Tasks within a wave may
