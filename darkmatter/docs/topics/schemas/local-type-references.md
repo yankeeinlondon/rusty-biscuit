@@ -241,6 +241,47 @@ rule, the error a rejected cycle reports, and how recursion reaches
 validation, phases, conversion, and editors are described in
 [Recursive Named Types](./definition.md#recursive-named-types).
 
+## Shared Named Types
+
+A local type does not have to be recursive to be stored once. When a
+structured type (an object, a dictionary, a tuple, or a list or union that
+holds one) is referenced from two or more places in the same schema, the
+generated JSON Schema keeps one copy of its body and each use refers to it:
+
+```yaml
+$schema:
+    person: "{ name: string(required), email: email }"
+    author: person              # one use
+    reviewers: person[]         # a second use: `person` is stored once
+    slug: string(min(3))
+    handle: slug(max(20))       # primitive aliases are always copied
+```
+
+Nothing about the rules on this page changes. Each use still inherits the
+type's constraints and description, adds its own, and decides its own
+presence, exactly as a copy would. A use whose additions a reference cannot
+express, such as `suggest(...)`, is copied on its own while the other uses
+stay references.
+
+Which places count follows the same identity rules as recursive types:
+
+- **A type is its schema plus its name.** `person` here and
+  `person@./people.yaml` are two types, each with its own count. Two
+  spellings of one file, such as `person@./people.yaml` and
+  `person@people.yaml`, are one type, and their uses add up.
+- **Each schema layer counts on its own.** A document's `$schema`, each
+  matching trigger payload, and the baseline are resolved separately, so a
+  type each of them uses once is not shared, even when all of them apply to
+  one document.
+- **Merging keeps each layer's types apart.** When layers that store
+  definitions are combined, an equal body under the same key is kept once,
+  and a different body with the same key is renamed together with the
+  references its layer wrote. A shared definition merges exactly like a
+  recursive one.
+
+The full eligibility, counting, and fallback rules are in
+[Shared Named Types](./definition.md#shared-named-types).
+
 ## Serialization
 
 When Darkmatter serializes a type expression, a local reference is written

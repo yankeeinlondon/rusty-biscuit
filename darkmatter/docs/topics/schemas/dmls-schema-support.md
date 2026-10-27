@@ -263,7 +263,7 @@ All items are **eager and self-contained**: every item carries an explicit `text
 
 Hovering a named-type reference (`person`, `person@this`, or `person@./people.yaml`) shows the definition it selects, with local references inside it spelled bare. When the referenced file is not valid YAML or its envelope is malformed, the hover shows that file's error instead, so a broken import never reads as a file that defines nothing.
 
-Hovering a schema-declared frontmatter property renders its full declaration — type (including `Name@reference` for imports and `[]` array suffixes, and for a recursive type its name followed by its definition; see [Recursive types](#recursive-types)), a `literal(...)` pinned value, `Required`, eager timing, enum values, default, and the `->` prose description. The formatting rule is bounded by what LSP hover Markdown can express (color is a theme decision, never ours): **inline-code box = the subject, bold = its type, italic = its enum/default values, plain prose = the description**.
+Hovering a schema-declared frontmatter property renders its full declaration — type (including `Name@reference` for imports and `[]` array suffixes, and for a type stored once, recursive or [shared](./definition.md#shared-named-types), its name followed by its definition; see [Recursive types](#recursive-types)), a `literal(...)` pinned value, `Required`, eager timing, enum values, default, and the `->` prose description. The formatting rule is bounded by what LSP hover Markdown can express (color is a theme decision, never ours): **inline-code box = the subject, bold = its type, italic = its enum/default values, plain prose = the description**.
 
 Hover also understands schema *authoring*:
 
@@ -318,7 +318,12 @@ tree:
   ```
 
   A leaf below the recursion (`value` at level 3) hovers exactly as it does
-  at the top: its type, presence, and description.
+  at the top: its type, presence, and description. A
+  [shared](./definition.md#shared-named-types) acyclic type, stored once
+  because two or more places use it, hovers in the same named form. A stored
+  union, recursive or shared, instead lists its alternatives exactly as the
+  inlined union does (see
+  [Union-typed properties and list items](../../../dmls/docs/hover.md#union-typed-properties-and-list-items)).
 - **Navigation crosses files.** Go-to-definition on a reference in a cycle
   that spans two files (`next: link[]@./links.yaml` in `nodes.yaml`, and
   `target: node@./nodes.yaml` back in `links.yaml`) lands on the defining
@@ -345,7 +350,9 @@ flowchart LR
 ```
 
 A recursive type declared by a configured extension baseline, a matched
-trigger payload, or the document's own `$schema` is descended the same way.
+trigger payload, or the document's own `$schema` is descended the same way,
+and so is a shared type: diagnostics, completion, hover, and go-to-definition
+work at each of its uses, opening only the definitions on the cursor's path.
 
 ### Navigation
 

@@ -134,6 +134,16 @@ Type: **item[](required)**
 A property below the recursion (`value` four levels down) hovers exactly as
 it does at the top level.
 
+The same named form describes a property typed by a
+[shared named type](../../docs/topics/schemas/definition.md#shared-named-types),
+an acyclic object, dictionary, tuple, or list that the schema stores once
+because two or more places use it: `` `entry` is defined as: … ``. A stored
+**union**, recursive or shared, is the exception. It hovers exactly as the
+inlined union would, listing its alternatives as described under
+[Union-typed properties and list items](#union-typed-properties-and-list-items),
+so the item line ("matches alternative N of M") numbers the same list
+whether the union was stored or copied.
+
 ## Formatting rule: interpolation `ctx.*` hover
 
 Inside a `{{ … }}` body interpolation, a cursor on an explicitly `ctx.`-qualified variable renders the shared catalog-backed block followed by an interpolation-only note. The variable counts as the root through member access and index access too (for example `ctx.packages[0].first`), because the lexer keeps a dotted `ctx.packages` as a single token.

@@ -284,9 +284,17 @@ for the complete precedence rules.
 
 A type belongs to the source that declares it. A `node` in this trigger and a
 `node` in the document's own `$schema` remain different types. Recursive
-definitions are stored once in JSON Schema's `$defs`, with references from
-their uses. When layers bring different definitions with the same generated
-key, Darkmatter renames the joining key and its references together. Literal
+definitions, and [shared](./definition.md#shared-named-types) structured types
+that one payload uses in two or more places, are stored once in JSON Schema's
+`$defs`, with references from their uses. Each payload is resolved on its
+own, so its uses are counted on their own too: a type that this trigger and
+the document's `$schema` each use once is copied into both, not shared.
+
+When layers bring definitions with the same generated key, an equal body is
+kept once, so a trigger and a document that store the same imported type end
+up with one copy. A different body under that key is renamed in the joining
+layer (`node` becomes `node-2`) together with the references that layer
+wrote. Shared and recursive definitions merge by the same rules. Literal
 data containing `$ref` or `$defs`, such as a `default`, is not rewritten.
 
 A raw JSON Schema trigger payload must remain a simple object schema. It may

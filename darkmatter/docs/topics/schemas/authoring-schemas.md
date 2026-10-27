@@ -292,7 +292,7 @@ $schema:
 
 Just like a normal schema definition a schema trigger will be _active_ when it's located in one of the directories mentioned in the last section. However, in this case _active_ means that the matching is active. When there is a match then the schema will be merged into the base schema.
 
-A trigger's schema can use named types, including [recursive ones](#recursive-types), like any other schema. Its recursive definitions are merged beside the document's own; a type named `item` in both stays two separate types.
+A trigger's schema can use named types, including [recursive ones](#recursive-types), like any other schema. Its stored definitions (recursive types, and [shared](./definition.md#shared-named-types) structured ones) are merged beside the document's own; a type named `item` in both stays two separate types.
 
 #### Passive Activation Expressions
 

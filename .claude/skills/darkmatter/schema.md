@@ -198,10 +198,19 @@ keyed by repo-relative virtual paths. Embedded imports resolve
 lexically with `/` (no `~ & ^ $ % @`, URLs, globs, or climbing above the
 root), never touch the disk or network, add no dependency edge (DMLS never
 watches them), and identify as `SchemaSourceId::Embedded`. One
-`BASELINE: OnceLock` lowers it once per process. Resolving the catalog from
-disk gives the same typed schema and JSON. Installed binaries therefore need
-no schema files. `with_baseline_from_file` (and `BASELINE_SCHEMA`) pointing
-at a global catalog uses its `fm`.
+`BASELINE: OnceLock` lowers it once per process, with its shared definitions
+(`GlobalCatalog::baseline()` returns the shape and its `DefinitionTable`;
+lower with `to_json_schema_with_definitions`). Resolving the catalog from disk
+gives the same JSON. Installed binaries therefore need no schema files.
+`with_baseline_from_file` (and `BASELINE_SCHEMA`) pointing at a global catalog
+uses its `fm` with its table. Readers of the typed baseline carry the table
+(`ComposeOptions::baseline_definitions`, `darkmatter_shared_baseline()`); the
+public `darkmatter_base_schema()` and the editor's layered property shape
+(`frontmatter_shape::layered_property_shape`) read the definition-free
+projection, resolved once with `Sharing::Off` rather than rebuilt from the
+references. `merge_baseline` moves only the lower layer's definitions that a
+copied property reaches (`scope::retain_reached_definitions`), so a Claudine
+trigger overriding `loop` leaves no dead baseline `$defs`.
 
 `md schema validate` selection (`cli/src/commands/schema/validate.rs::load_api`),
 first match wins:
@@ -381,11 +390,13 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   union-arm and alias checks prove that inlining would give the same result.
   Otherwise that one use inlines; errors are never retried as inlining. Only
   definitions that a surviving reference reaches are published. Catalog
-  declarations (`fm`, `darkmatter_base_schema()`) resolve with sharing off.
-  A type whose expansion holds `file(match(...))` outside a reference is
-  never shared (`is_shareable` → `holds_file_match`): a root-union arm
-  enforces `match` inside any definition it reaches, so storing it would
-  turn an acyclic suggestion into a rejection. Structural identity in
+  declarations share too (`GlobalDeclaration::definitions`); only the
+  definition-free projection `darkmatter_base_schema()` (`Sharing::Off`,
+  `catalog::darkmatter_inline_baseline`) inlines every acyclic use.
+  A `file(match(...))` in a body does not affect selection: the root-union
+  lowering keeps a shared acyclic body suggestion-only (next bullet), and
+  `file_match::file_alternatives` reads a reference to an acyclic definition
+  as its inlined body (`DefinitionTable::is_cyclic`). Structural identity in
   `simplified/subtype.rs` opens references through the table, so a shared
   use and its inlined copy compare equal. A schema with a cycle or a shared type expands twice
   (`resolve/recursive.rs`: pass 1 learns each definition's `UseSummary`);
@@ -397,21 +408,29 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   `Ref` (see the reference-aware entry points under "Named union
   references" and "Conversion engine"); none treats it as opaque. User docs:
   `topics/schemas/definition.md` "Recursive Named Types" (child-value rule,
-  definition vs use site, errors, reach) is the one description; other pages
-  link there.
+  definition vs use site, errors, reach) and "Shared Named Types"
+  (eligibility, counting, per-use fallback, output) are the one description;
+  other pages link there. A stored union hovers in DMLS as its alternatives
+  (see `dmls.md`).
 - **Root-union `match()` through references** (`simplified/convert.rs`).
-  A root-union arm enforces `match` in exactly two places, and an acyclic
-  schema lowers byte-identically to its pre-recursion output (spec
-  requirement): (1) a property that is directly `file`/`file[]`
+  A root-union arm enforces `match` in exactly two places, so an acyclic
+  glob, inlined or shared, stays suggestion-only as it was before recursion:
+  (1) a property that is directly `file`/`file[]`
   (`attach_direct_file_match`, via `file_match_groups`); (2) inside an arm
   copy of a match-reaching recursive definition. Lowering carries
-  `Lowering { defs, matching }`; in `Matching::Enforce` every `TypeExpr::Ref`
-  anywhere in the arm points at the arm copy `<key>@match:<property>`
-  (`MatchCopies`), never the shared body, and `file_fragment` emits
-  `x-darkmatter-match` only while lowering a copy (`in_copy`). Any other
-  arm-level file (union alternative, acyclic name bound to a union, inline
-  object, dictionary value, tuple slot, list of a union) stays
-  suggestion-only. The four `resolve.rs` arm sites call
+  `Lowering { defs, matching }`; in `Matching::Enforce` a reference lowers
+  as its inlined value would at that place (`MatchCopies`, keyed by
+  definition, property, and mode): a reference to a cyclic definition, or
+  any reference inside an enforcing copy, points at the enforcing copy
+  `<key>@match:<property>`; a reference to a shared acyclic definition
+  outside a copy points at its shared body, or at a redirecting copy
+  `<key>@arm:<property>` (own files suggest, references redirected) when
+  the body reaches a match-reaching cyclic definition. Cyclicity is read
+  off the table (`DefinitionTable::is_cyclic`). `file_fragment` emits
+  `x-darkmatter-match` only while lowering an enforcing copy (`in_copy`).
+  Any other arm-level file (union alternative, acyclic name bound to a
+  union, inline object, dictionary value, tuple slot, list of a union)
+  stays suggestion-only. The four `resolve.rs` arm sites call
   `attach_root_union_match(arm, shape, defs, root_defs)` (direct attach, then
   graft the ref redirects and join the copies); `union_to_root_schema` lowers
   in that mode and attaches the direct keyword. A copy names its property in
