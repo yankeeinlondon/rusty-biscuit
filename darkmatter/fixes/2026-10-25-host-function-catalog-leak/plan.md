@@ -7,6 +7,12 @@ phase: 1
 agent: "codex/gpt-6.1-sol"
 yolo: true
 human_review: false
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+    - darkmatter
 ---
 
 # Host function catalog ownership plan
@@ -152,14 +158,14 @@ Stay in this worktree; do not commit, run `cargo fmt`, or move the fix into
 
 ### Wave 1 — Contract inventory
 
-- [ ] **Map consumers**
+- [x] **Map consumers**
   - Trace descriptor field reads, `Copy` assumptions, `Described` implementations,
     stored `Example` types, and direct `.example` reads across Darkmatter,
     DMLS, generators, tests, and Claudine. Use targeted text search; account for
     all actual implementations rather than relying on the spec's count.
   - Record affected files and existing test names in the implementation log.
     Identify each static API and each owner-borrowed API before editing.
-- [ ] **Pin preserved output**
+- [x] **Pin preserved output**
   - After consumer inventory, identify existing catalog metadata, example,
     plain `md schema about`, DMLS completion/hover/call-diagnostic, and Claudine
     registration/artifact expectations. Preserve their current expected values.
