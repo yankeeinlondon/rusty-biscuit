@@ -23,9 +23,11 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-    next_spec: string -> the `{date}-{name}` of the spec expected to follow this one; absent when none is planned
 human_review: false
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-10-27
+review_iterations: 0
 related:
     - 2026-10-25-pipeline-work-reduction
 ---
@@ -34,11 +36,11 @@ related:
 
 ## Why this exists
 
-Sequence preflight prepares every `shell:` command before any task starts
-(`claudine/lib/src/composition/sequence/preflight/mod.rs`,
-`SequencePreflight::prepare_site`). It analyzes each `{{ … }}` placeholder of
-the command in five separate passes, and each pass parses the placeholder's
-expression from text again:
+Sequence preflight discovers possible commands before any task starts.
+In the Claudine package,
+[`SequencePreflight::prepare_site`](../../lib/src/composition/sequence/preflight/mod.rs)
+prepares one authored command at a time for approval. On the measured input,
+five analysis passes each parse the same `{{ … }}` placeholder text:
 
 | Pass | Where the parse happens |
 | ---- | ----------------------- |
@@ -49,10 +51,10 @@ expression from text again:
 | late-hole marking | `mark_late_holes` → `DeferredShellRoots::late_roots_of` (Darkmatter `template/candidate.rs`) |
 
 The expression text is the same in all five passes and none of them changes
-it, so four of the five parses repeat work. This is item D8 of
-`2026-10-25-pipeline-work-reduction`. That feature's rule says an item that
-meets one of the measurement clauses gets its own dated spec, and D8 met
-clause 1 when it was re-measured on 2026-10-27.
+it, so four of the five parses repeat work. This is the placeholder-parsing item in the work table of
+`2026-10-25-pipeline-work-reduction`. That feature requires a separate dated
+spec when an item meets its measurement rule. The estimated time share below
+meets its 5% share rule.
 
 ## Measured evidence (2026-10-27, macOS development host)
 
@@ -94,27 +96,117 @@ Revision `d7ea96a1f`, with `2026-10-26-sequence-quadratic-frontmatter` and
   (about 1 MB and 1 ms at ten times the largest real sequence), and the
   peak does not grow.
 
+The five-pass count describes this benchmark's valid, present, early-value
+placeholders. It is not a count for every command: failed template grammar
+uses a fallback scan, and late or missing placeholders can also trigger
+presence-guard analysis. Those paths belong to the same preparation boundary.
+
 ## Behavior to build
 
-Within one shell-site preparation, each distinct placeholder expression is
-parsed once, and every analysis pass of that site reads the retained syntax.
+Within one shell-site preparation, parse each placeholder **occurrence** once
+for static analysis, and let every analysis pass read that retained syntax.
+For example, `echo {{ name }} {{ name }}` has two occurrences with separate
+source locations. Sharing syntax by expression text is unnecessary here.
 
-- The retained syntax lives only as long as the site's preparation. Nothing
-  is kept across sites, steps, preflights, retries, or launches.
-- Evaluation stays fresh. Interpolation, presence checks, and every runtime
-  fill still evaluate against current values, and file functions run on
-  every evaluation.
-- Errors keep their timing and content. A placeholder that fails to parse
-  is reported by the same pass, with the same error, at the same point in
-  preflight as today. A grammar error in the authored command
-  (`TemplateGrammarError`) still withdraws the same approvals.
-- The frontmatter late-root scans, the removed-read check, and evaluation
-  are outside this change. They read the document's frontmatter values, not
-  one site's placeholders.
-- Darkmatter's public template entry points (`parse_authored`,
-  `CommandTemplate::project_types`, `DeferredShellRoots::late_roots_of`)
-  keep their behavior. A variant that accepts already-parsed syntax may be
-  added beside them.
+- Scope includes every command that Claudine's
+  [`SequencePreflight::prepare_site`](../../lib/src/composition/sequence/preflight/mod.rs)
+  prepares: task `shell:` commands, collected setup/teardown shell commands
+  (including `on_error`), and the inner command of whole-value `set` shell
+  values. It does not migrate separate prompt or container discovery paths
+  that do not call this method.
+- Retained syntax lives only until that call returns. No syntax cache is
+  added across sites, steps, preflights, retries, or launches. Stored approval
+  templates keep their current representation and lifetime.
+- Static analysis remains passive: parsing, approval checks, type projection,
+  target-identity checks, late-root discovery, and presence-guard lookup do
+  not evaluate expressions, read files, or invoke lazy providers.
+- Evaluation remains unchanged. Each existing interpolation, presence
+  evaluation, and runtime fill still reads the state appropriate to that
+  operation, and file functions run whenever that evaluation reaches them.
+  A command approved as resolved bytes still executes those fixed bytes;
+  a command approved as a template still fills against runtime values.
+- Frontmatter late-root scans, the removed-read check, and evaluation-time
+  parsing are outside this optimization. Some of those paths also encounter
+  the command text; their work is excluded because they are separate
+  operations, not because they never read placeholders.
+- Existing public text entry points retain their behavior. Add parsed-input
+  counterparts only where needed to share the existing implementation;
+  callers outside this preparation path need not migrate.
+
+## Design decisions
+
+### Keep syntax separate from the approval template
+
+In Darkmatter, use one preparation-local collection of occurrences produced
+by the existing interpolation scanner. Each occurrence carries its trimmed
+text, its whole-placeholder byte range, its expression offset within the
+command, and either parsed syntax or the original parse failure. Retain a
+spanned syntax tree so approval diagnostics keep their source locations. The
+existing Darkmatter
+[`SpannedExpr::erase`](../../../darkmatter/lib/src/markdown/compose/expression/ast.rs)
+can derive the unspanned form needed by type and root analysis without parsing
+again; derive it at most once per occurrence if those consumers need it.
+
+Darkmatter's
+[`PreparedValue`](../../../darkmatter/lib/src/markdown/compose/expression/prepared.rs)
+already separates passive syntax preparation from validation. Reuse its
+scanner, parsing, and diagnostic machinery where applicable. Its current
+all-or-error constructor cannot by itself retain valid occurrences beside a
+malformed one; provide the smallest shared internal helper needed for the
+site collection rather than changing that public constructor's contract or
+introducing another expression parser.
+
+> **Reader's note:** Retaining syntax only inside a successful command
+> template would miss commands that fail template grammar but can still be
+> approved as resolved bytes. Keeping the collection separate preserves that
+> existing approval route and lets fallback analysis reuse the same syntax.
+
+### Feed every static consumer from that collection
+
+Darkmatter owns scanning, expression parsing, template grammar, type
+projection, and late-root analysis. Claudine keeps its host-specific approval
+scope and target-identity policy. Connect the collection to these consumers:
+
+| Consumer | Required behavior with retained syntax |
+| --- | --- |
+| Darkmatter [authored grammar](../../../darkmatter/lib/src/markdown/compose/shell_expansion/template/grammar.rs) | Use the same scanner spans and initial untyped projection without parsing text again; preserve quoting, literal tokens, and unsupported-grammar errors. |
+| Claudine [approval diagnostics](../../lib/src/composition/lifecycle/bindings.rs) | Validate retained spanned expressions through Darkmatter's existing validator, including unknown functions and unavailable globals in dead branches; preserve diagnostic ordering and relocation into the command. |
+| Claudine [target-identity policy](../../lib/src/composition/sequence/preflight/shape.rs) | Use the same static-access traversal; preserve dotted/static-bracket equivalence and refusal of computed or numeric indexing that could select agent/model identity. |
+| Darkmatter [type projection](../../../darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs) | Project against the current site's schema and guard, retaining validators and refinements; share the projection implementation with the text entry point. |
+| Darkmatter [late-root discovery](../../../darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs) | Use current declared and derived roots, preserving their order and duplicates policy, including when template grammar failed. |
+| Darkmatter [presence-guard lookup](../../../darkmatter/lib/src/lifecycle/shell_template.rs), used by Claudine | Use retained syntax for late and missing placeholders; a guard proves presence only for the expression it currently proves. |
+
+Do not attach schema-derived types, guard facts, resolved values, or approval
+verdicts to reusable syntax. These remain specific to the current site.
+For `set` shell values, preserve the distinction between the raw wrapper used
+by diagnostics and the extracted authored command used by template spans.
+Map occurrence offsets between these views without reparsing, including any
+trimming and accepted suffix syntax.
+
+### Retain failures without reporting them early
+
+Collecting a parse failure does not make it a new preflight error. Preserve
+the existing decisions in order:
+
+1. A malformed whole-value `set` wrapper still fails at extraction.
+2. If any placeholder fails to parse, the approval-diagnostics pass still
+   contributes no diagnostics, as its current all-or-error preparation does.
+   Target-identity analysis still examines the other, valid occurrences.
+3. Initial type projection still falls back for an expression that does not
+   parse. Failed template grammar still permits fallback late-root analysis
+   over valid occurrences; it must not hide a late value from the mode choice.
+4. The existing choice between resolved bytes and required template mode
+   decides whether and when to report a grammar failure. An authored
+   program-word hole still removes template approval while permitting exact
+   approval where it does today.
+5. Resolution and missing-value handling still report their own typed errors
+   at the existing point. Do not replace them with a preparation error merely
+   because its syntax was collected earlier.
+
+In particular, a command containing both an invalid expression and an
+unavailable read must keep today's winning error. Preserve error variants,
+messages, source chains, source locations, and approval withdrawals, not just
+whether preflight fails.
 
 ## Contracts that must not change
 
@@ -127,19 +219,62 @@ parsed once, and every analysis pass of that site reads the retained syntax.
 
 ## Acceptance
 
-1. An L1 work-count regression with `claudine`'s `work-counters` feature:
-   preflight of the A6 shape (S shell steps of H placeholders) records
-   exactly `S × H × 6` `ExpressionParse` (today `S × H × 10`). The shell
-   site's share falls from 5 parses per placeholder to 1, and the other five
-   sites are unchanged.
-2. Behavior tests through sequence preflight cover: a malformed placeholder
-   (same error, same pass); an authored program-word hole (approval
-   withdrawn as today); late, deferred, and guarded holes (unchanged timing
-   and roots); a missing value with and without a presence guard; and a file
-   function in a placeholder still running at evaluation.
-3. The A6 rows of `pipeline_work_alloc` and the Criterion
-   `A6_shell_preparation` case are re-run, and the implementation log
-   records them beside the 2026-10-27 figures above.
-4. `just test` and `just lint` pass in `claudine/` and `darkmatter/`.
-5. The pre-flight checks topic page states that a site's placeholders are
-   parsed once per preparation.
+1. Extend Claudine's existing L1 work-count tests with `work-counters` enabled.
+   For the measured shape (S steps, each `echo step-N` followed by H distinct,
+   valid, present placeholders, with matching string schema and values),
+   preflight records exactly `S × H × 6` `ExpressionParse`, down from
+   `S × H × 10`. Each site's five analysis parses fall to one; the other five
+   operations stay unchanged. Count parser invocations at the existing
+   counter, rather than bypassing it through a different parser entry point.
+   This formula applies to this fixture, not malformed or guarded commands.
+2. At the cheapest in-process boundary, verify one static parse per
+   occurrence for repeated text, late and guarded holes, and a command that
+   fails template grammar. Include a command with no placeholders and literal
+   interpolation syntax to prove scanner behavior is unchanged. Extend
+   existing tests rather than creating a second test framework.
+3. Behavior coverage through sequence preflight preserves:
+   - malformed expressions alone and beside unavailable/target-identity
+     reads, including which error wins and its typed source/location;
+   - an authored program-word hole on a first task that permits exact
+     approval, and on a later task that requires template approval;
+   - late and guard-proven placeholders, including derived frontmatter
+     roots, unchanged timing, validators, refinements, and reported roots;
+   - missing values with and without a presence guard, plus present empty
+     strings, zero, and false;
+   - target-identity refusal for dotted, static-bracket, and computed access,
+     and unavailable reads or unknown functions inside dead branches;
+   - a representative collected stack command and whole-value `set` shell
+     command, including preserved diagnostic offsets.
+   Reuse existing cases where they already prove these contracts. Keep one
+   representative normal CLI invocation using the area's isolated
+   `CliProcessFixture`; no real provider, terminal, or shell approval prompt
+   is needed.
+4. A hermetic evaluation test changes a fixture file between evaluations of
+   a file-reading placeholder and observes the changed result. A separate
+   assertion preserves resolved-byte execution versus fresh template fills.
+   This proves syntax sharing did not become value or verdict caching.
+5. Re-run only the existing A6 allocation row and
+   `A6_shell_preparation` Criterion case as a quick sample on one host.
+   Record counts, bytes, and timing beside the figures above in the
+   implementation log, with revision and build configuration. The earlier
+   6.4% is an estimate, not a required measured speedup; account for retained
+   syntax and conversion allocations in the actual result. These figures
+   already justify implementation, so no further qualification spike,
+   additional hosts, workload expansion, or statistical threshold is required.
+6. `just test` and `just lint` pass in `claudine/` and `darkmatter/`, using
+   their existing nextest recipes. Required counter tests must actually run
+   with `work-counters` enabled. Do not run `cargo fmt` without an explicit
+   author instruction.
+7. Update Claudine's [pre-flight checks](../../docs/topics/pre-flight-checks.md)
+   and the relevant Darkmatter template API docs/comments when implementation
+   lands. Describe parsing once **for static analysis during one sequence
+   shell-site preparation**, with evaluation and approval-mode behavior
+   unchanged. Update applicable skills if new shared API usage needs guidance;
+   do not link current documentation back to this dated spec.
+
+## Open Questions
+
+None. The scope is preparation-local syntax reuse with unchanged observable
+behavior. The exact names of parsed-input helpers are implementation choices;
+changing approval rules, error precedence, or evaluation timing would require
+a separate design decision.
