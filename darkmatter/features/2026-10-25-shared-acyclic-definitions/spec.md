@@ -29,7 +29,7 @@ human_review: false
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-26
-review_iterations: 0
+review_iterations: 2
 needs_rulings: false
 related:
     - 2026-10-25-pipeline-improvements
@@ -37,6 +37,9 @@ related:
     - 2026-10-30-claudine-recursive-schemas
     - 2026-10-21-claudine-schemas
     - 2026-10-26-dmls-frontmatter-typing-allocation
+implemented: true
+implemented_by: "claude/opus"
+completed: true
 ---
 
 # Share repeated structured named types as definitions

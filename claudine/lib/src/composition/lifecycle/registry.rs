@@ -103,7 +103,7 @@ mod tests {
         let registry = claudine_registry();
         assert_eq!(registry.authored_event_keys(), PREVIOUS_EVENT_KEYS);
         assert_eq!(
-            registry.host_globals().iter().copied().collect::<BTreeSet<_>>(),
+            registry.host_globals().iter().map(AsRef::as_ref).collect::<BTreeSet<&str>>(),
             BTreeSet::from(PREVIOUS_HOST_GLOBALS)
         );
         assert_eq!(registry.host_globals().len(), PREVIOUS_HOST_GLOBALS.len());

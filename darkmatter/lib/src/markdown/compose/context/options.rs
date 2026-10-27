@@ -425,6 +425,11 @@ pub struct ComposeOptions {
     /// the same property, the document wins.
     pub(crate) baseline_schema: Option<crate::markdown::schemas::SimplifiedSchema>,
 
+    /// The stored definitions `baseline_schema`'s references point into:
+    /// the shipped baseline's shared types, or empty for a caller-supplied
+    /// baseline.
+    pub(crate) baseline_definitions: std::sync::Arc<crate::markdown::schemas::DefinitionTable>,
+
     /// Whether `baseline_schema` is the authored Darkmatter baseline (set via
     /// [`ComposeOptions::with_darkmatter_baseline_schema`]). When true, schema
     /// validation shares the process-cached compiled JSON Schema instead of
@@ -969,6 +974,7 @@ impl ComposeOptions {
             portable_env: std::collections::BTreeSet::new(),
             absolute_fallback_warning: true,
             baseline_schema: None,
+            baseline_definitions: std::sync::Arc::default(),
             baseline_is_darkmatter_default: false,
             trigger_schemas: false,
             remote_read_config: RemoteReadConfig::default(),
@@ -1792,18 +1798,34 @@ impl ComposeOptions {
         schema: crate::markdown::schemas::SimplifiedSchema,
     ) -> Self {
         self.baseline_schema = Some(schema);
+        self.baseline_definitions = std::sync::Arc::default();
         // A caller-supplied baseline is not the cached Darkmatter default, even
         // if it happens to be structurally equal; clear the fast-path marker.
         self.baseline_is_darkmatter_default = false;
         self
     }
 
+    /// [`Self::with_baseline_schema`] for a schema whose stored named types
+    /// are references into `definitions`.
+    #[must_use]
+    pub(crate) fn with_baseline_schema_and_definitions(
+        self,
+        schema: crate::markdown::schemas::SimplifiedSchema,
+        definitions: std::sync::Arc<crate::markdown::schemas::DefinitionTable>,
+    ) -> Self {
+        let mut opts = self.with_baseline_schema(schema);
+        opts.baseline_definitions = definitions;
+        opts
+    }
+
     /// Attaches the Darkmatter baseline frontmatter schema as the baseline.
     ///
-    /// This is a convenience wrapper around
-    /// [`with_baseline_schema`](Self::with_baseline_schema) that uses the
-    /// compiled-in [`darkmatter_base_schema`](crate::markdown::schemas::darkmatter_base_schema),
-    /// whose imports resolve without reading the disk. When both
+    /// This attaches the compiled-in baseline
+    /// ([`darkmatter_base_schema`](crate::markdown::schemas::darkmatter_base_schema)),
+    /// whose imports resolve without reading the disk, in the form that
+    /// stores its shared types once, as
+    /// [`darkmatter_base_json_schema`](crate::markdown::schemas::darkmatter_base_json_schema)
+    /// lowers it. When both
     /// the baseline and the document `$schema` declare the same property, the
     /// document side wins.
     ///
@@ -1816,7 +1838,8 @@ impl ComposeOptions {
     /// ```
     #[must_use]
     pub fn with_darkmatter_baseline_schema(self) -> Self {
-        let mut opts = self.with_baseline_schema(crate::markdown::schemas::darkmatter_base_schema());
+        let (schema, definitions) = crate::markdown::schemas::darkmatter_shared_baseline();
+        let mut opts = self.with_baseline_schema_and_definitions(schema.clone(), std::sync::Arc::clone(definitions));
         // Mark the fast path: schema validation reuses the process-cached
         // compiled JSON Schema instead of re-converting per compose (F9).
         opts.baseline_is_darkmatter_default = true;
@@ -2638,25 +2661,28 @@ static DEFAULT_BASELINE_CANONICAL_JSON: std::sync::OnceLock<String> = std::sync:
 ///
 /// `is_darkmatter_default` selects a process-cached encoding derived from the
 /// process-cached compiled baseline (`schemas::darkmatter_base_json_schema_ref`)
-/// rather than re-running `to_json_schema`, which dominates this whole
+/// rather than re-running the conversion, which dominates this whole
 /// classification (~534 µs, vs ~74 µs to canonicalize and ~2 µs for every other
 /// option field combined). Compose already populates that cache for the default
 /// baseline via `schema_validation`'s F9 fast path, so the marked arm adds no
 /// conversion at all.
 ///
 /// The marker is only ever set by `with_darkmatter_baseline_schema`, which
-/// assigns `schemas::darkmatter_base_schema()` in the same call;
+/// assigns the shipped baseline and its shared definitions
+/// (`schemas::darkmatter_shared_baseline()`) in the same call;
 /// `with_baseline_schema` clears it unconditionally. So the marker implies the
 /// schema *is* the default, and the cached bytes are exactly what converting it
-/// would produce — hence the same fingerprint.
+/// with `definitions` would produce — hence the same fingerprint.
 ///
 /// ## Notes
 ///
-/// A caller-supplied schema that happens to equal the default takes the uncached
-/// arm and still fingerprints identically; the marker is a fast path, never a
-/// semantic distinction.
+/// A caller-supplied schema and table equal to the default take the uncached
+/// arm and still fingerprint identically; the marker is a fast path, never a
+/// semantic distinction. The definition-free `schemas::darkmatter_base_schema()`
+/// lowers to different bytes, so it fingerprints as a different baseline.
 fn baseline_canonical_json(
     schema: &crate::markdown::schemas::SimplifiedSchema,
+    definitions: &crate::markdown::schemas::DefinitionTable,
     is_darkmatter_default: bool,
 ) -> std::borrow::Cow<'static, str> {
     use super::super::cache::hashing::canonical_json_sorted;
@@ -2667,7 +2693,7 @@ fn baseline_canonical_json(
         }));
     }
 
-    let json = crate::markdown::schemas::to_json_schema(schema)
+    let json = crate::markdown::schemas::to_json_schema_with_definitions(schema, definitions)
         .unwrap_or_else(|_| serde_json::json!({"baseline_schema_error": true}));
     std::borrow::Cow::Owned(canonical_json_sorted(&json))
 }
@@ -2842,6 +2868,7 @@ impl ComposeOptions {
             one_off_replace,
             interpolate_code_blocks,
             baseline_schema,
+            baseline_definitions,
             baseline_is_darkmatter_default,
             trigger_schemas,
             remote_read_config,
@@ -2885,7 +2912,7 @@ impl ComposeOptions {
         // here and lend it to both encoders rather than paying it per domain.
         let baseline_canonical: Option<std::borrow::Cow<'static, str>> = baseline_schema
             .as_ref()
-            .map(|schema| baseline_canonical_json(schema, *baseline_is_darkmatter_default));
+            .map(|schema| baseline_canonical_json(schema, baseline_definitions, *baseline_is_darkmatter_default));
 
         // ── Graph identity: conservative, covers every value-representable
         //    field (stateful fields are handled by weak instance handles).
@@ -3801,9 +3828,10 @@ mod tests {
         let options = ComposeOptions::new().with_darkmatter_baseline_schema();
         let baseline = options
             .baseline_schema
+            .as_ref()
             .expect("baseline schema must be set");
         let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
-            .with_baseline(baseline)
+            .with_baseline_and_definitions(baseline, &options.baseline_definitions)
             .expect("baseline must convert");
 
         // Unknown keys are allowed by the baseline.
@@ -4538,12 +4566,13 @@ mod tests {
     /// The cached-default fast path must be a pure speedup: an identical schema
     /// supplied by hand (marker cleared, uncached arm) must fingerprint exactly
     /// as the marked default does. If `with_darkmatter_baseline_schema` ever
-    /// stops assigning `darkmatter_base_schema()`, the marker would start lying
-    /// about which schema is encoded and this fails.
+    /// stops assigning the shipped baseline and its shared definitions, the
+    /// marker would start lying about which schema is encoded and this fails.
     #[test]
     fn default_baseline_fast_path_fingerprints_as_the_uncached_schema() {
+        let (schema, definitions) = crate::markdown::schemas::darkmatter_shared_baseline();
         let marked = fixed_opts().with_darkmatter_baseline_schema();
-        let by_hand = fixed_opts().with_baseline_schema(crate::markdown::schemas::darkmatter_base_schema());
+        let by_hand = fixed_opts().with_baseline_schema_and_definitions(schema.clone(), Arc::clone(definitions));
 
         assert!(marked.baseline_is_darkmatter_default);
         assert!(!by_hand.baseline_is_darkmatter_default);
@@ -4556,8 +4585,8 @@ mod tests {
             "cached default encoding must equal the freshly converted one"
         );
         assert_eq!(
-            baseline_canonical_json(&crate::markdown::schemas::darkmatter_base_schema(), true),
-            baseline_canonical_json(&crate::markdown::schemas::darkmatter_base_schema(), false),
+            baseline_canonical_json(schema, definitions, true),
+            baseline_canonical_json(schema, definitions, false),
             "cached and uncached arms must produce identical canonical bytes"
         );
     }

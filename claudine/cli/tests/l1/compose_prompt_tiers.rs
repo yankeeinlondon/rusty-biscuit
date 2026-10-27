@@ -161,9 +161,16 @@ fn plain_launch_directory_under_home_wins_for_both_forms() {
     }
 }
 
-fn assert_home_local_tier(repository: bool, local_prompts: bool, reference: &str, metadata_schema: &str) {
+fn assert_home_local_tier(
+    repository: bool,
+    local_prompts: bool,
+    reference: &str,
+    metadata_schema: &str,
+    document_library: &str,
+) {
     let (fixture, launch) = stage_at("prompt-tiers-launch-is-home", &[], repository);
     write(&fixture.home().join("schemas/claudine.yaml"), metadata_schema);
+    write(&fixture.home().join("schemas/document.yaml"), document_library);
     assert_eq!(launch, fixture.home());
     write(&launch.join("probe.md"), "Tier=[local-root]\n");
     let expected = if local_prompts {
@@ -187,6 +194,7 @@ macro_rules! home_local_tier_tests {
                     $prompts,
                     $reference,
                     include_str!("../../../schemas/inline-compose.yaml"),
+                    include_str!("../../../schemas/document.yaml"),
                 );
             }
         )*
@@ -258,11 +266,17 @@ fn nested_magic_reference_in_a_user_prompt_resolves_from_the_launch_tree() {
     }
 }
 
-fn assert_nested_reference_in_another_repository(form: &str, winner: &str, metadata_schema: &str) {
+fn assert_nested_reference_in_another_repository(
+    form: &str,
+    winner: &str,
+    metadata_schema: &str,
+    document_library: &str,
+) {
     // Ruling 2 across repositories: `@` follows the launch tree; `&` and `^`
     // keep the source document's repository; `./` and bare stay beside it.
     let (fixture, launch) = stage("prompt-tiers-nested-other-repo", true);
     write(&fixture.home().join("schemas/claudine.yaml"), metadata_schema);
+    write(&fixture.home().join("schemas/document.yaml"), document_library);
     let other = fixture.cwd().join("other");
     std::fs::create_dir_all(&other).unwrap();
     assert!(init_git_repo(&other), "git init failed at {}", other.display());
@@ -288,6 +302,7 @@ macro_rules! nested_other_repository_tests {
                     $form,
                     $winner,
                     include_str!("../../../schemas/inline-compose.yaml"),
+                    include_str!("../../../schemas/document.yaml"),
                 );
             }
         )*

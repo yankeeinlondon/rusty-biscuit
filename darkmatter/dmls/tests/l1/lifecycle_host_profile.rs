@@ -353,7 +353,7 @@ fn shipped_profile() -> HostLifecycleProfile {
         &[GlobalRequirement::shape("seq"), GlobalRequirement::shape("loop"), GlobalRequirement::shape("group")],
     )
     .expect("the shipped catalog loads");
-    HostLifecycleProfile::from_artifact(Box::leak(Box::new(catalog)), Path::new(path), GLOBALS, FactsArtifact::Text(ARTIFACT))
+    HostLifecycleProfile::from_artifact(std::sync::Arc::new(catalog), Path::new(path), GLOBALS, FactsArtifact::Text(ARTIFACT))
         .expect("the committed artifact reads")
 }
 

@@ -18,8 +18,8 @@ use darkmatter::markdown::schemas::catalog::{
     CatalogError, CatalogErrorReason, DARKMATTER_CATALOG_PATH, DARKMATTER_GLOBALS, GlobalCatalog,
 };
 use darkmatter::markdown::schemas::{
-    Constraint, DarkmatterSchemas, PropertyDef, SchemaError, SchemaOriginKind, SimplifiedType, TypeExpr,
-    darkmatter_base_json_schema, darkmatter_base_schema, to_json_schema,
+    Constraint, DarkmatterSchemas, PropertyDef, SchemaError, SchemaOriginKind, SimplifiedSchema, SimplifiedType,
+    TypeExpr, darkmatter_base_json_schema, darkmatter_base_schema, to_json_schema, to_json_schema_with_definitions,
 };
 
 use crate::request_support::context_at;
@@ -134,16 +134,23 @@ fn every_global_has_generated_and_loaded_parity() {
     .expect("the disk catalog loads");
     let embedded = GlobalCatalog::darkmatter();
     for requirement in DARKMATTER_GLOBALS {
-        assert_eq!(loaded.global(requirement.name), embedded.global(requirement.name), "{}", requirement.name);
+        assert_eq!(loaded.global(&requirement.name), embedded.global(&requirement.name), "{}", requirement.name);
     }
     assert_eq!(&loaded, embedded);
 }
 
 #[test]
 fn the_runtime_baseline_is_the_catalogs_fm_definition() {
-    let baseline = GlobalCatalog::darkmatter().baseline().expect("fm");
-    assert_eq!(baseline, darkmatter_base_schema());
-    assert_eq!(to_json_schema(&baseline).expect("lowers"), darkmatter_base_json_schema());
+    let (baseline, definitions) = GlobalCatalog::darkmatter().baseline().expect("fm");
+    assert_eq!(to_json_schema_with_definitions(&baseline, &definitions).expect("lowers"), darkmatter_base_json_schema());
+    // The definition-free form declares the same members, every acyclic use
+    // expanded.
+    let (SimplifiedSchema::Single(shared), SimplifiedSchema::Single(inline)) = (&baseline, &darkmatter_base_schema())
+    else {
+        panic!("the baseline is an object shape");
+    };
+    assert!(shared.properties.keys().eq(inline.properties.keys()));
+    assert!(to_json_schema(&darkmatter_base_schema()).is_ok());
 }
 
 #[test]
@@ -394,7 +401,7 @@ fn check_cell(column: &str, row: &str, file: File, edit: impl Fn(&Texts, &str) -
     match (expect, &outcome) {
         (Expect::Loads, Ok(catalog)) => {
             // Public results: the baseline and every global match the runtime.
-            assert_eq!(catalog.baseline(), Some(darkmatter_base_schema()));
+            assert_eq!(catalog.baseline(), GlobalCatalog::darkmatter().baseline());
             assert_eq!(catalog, GlobalCatalog::darkmatter());
         }
         (Expect::Missing(field), Err(error)) => {
@@ -542,7 +549,7 @@ fn a_current_shape_differing_from_ctx_is_a_mismatch() {
     texts.0[0] = replace_once(&texts.0[0], CURRENT_LINE, &block);
     let error = texts.load().expect_err("current differs from ctx");
     assert_eq!(error.field, "$schema.current");
-    assert!(matches!(error.reason, CatalogErrorReason::Mismatch("ctx")), "{error}");
+    assert!(matches!(&error.reason, CatalogErrorReason::Mismatch(target) if target == "ctx"), "{error}");
 }
 
 #[test]

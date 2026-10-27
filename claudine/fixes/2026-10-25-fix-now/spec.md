@@ -42,6 +42,8 @@ related:
     - 2026-10-27-darkmatter-lifecycle-ownership
     - 2026-10-28-schema-enhancements
     - 2026-10-29-recursive-schema-types
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Pipeline review: fix now

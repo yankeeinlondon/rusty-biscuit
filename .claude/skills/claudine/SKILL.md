@@ -418,15 +418,18 @@ The lifecycle families (`stack`/`item`/`conditional`, `initialize-*`,
 reached from `sequence:` items and `group` `tasks:` legs) are recursive
 named types, which the resolver stores once in `$defs`: every container
 event is typed with its family (`initialize` shell-free, `cancelled` `stop`
-only) and `loop` with the shared `loop` type, at every depth. The resolver
-still inlines every non-recursive named type at each reference, so a new
-reference to `bundle`/`expression`/`loop` costs its full size; never unroll
-a family by hand again (the typed unroll measured 11 MB). The schema encodes
-no conditional-depth limit: depth 6 is schema-valid and parser-invalid.
-`claudine_schemas_embedded.rs::embedded_trigger_payloads_resolve_within_two_megabytes`
-pins the payload (about 1.39 MB `claudine.yaml`, 1.61 MB `sequence.yaml`,
-1.83 MB for both; little headroom, so a new `entry` reference needs a resolver
-change to share acyclic types)
+only) and `loop` with the shared `loop` type, at every depth. A structured
+named type with two or more authored uses (`expression`, `loop`, the
+categories, the verb short forms) is also stored once and referenced; a
+type with one authored site is still expanded wherever that site expands,
+and a union named as a union arm (`entry` inside `item`) is always copied
+so the arm list stays flat, which copies the bundles (one authored site
+each, inside `entry`) into both `stack` and `item`. Never unroll a family by hand
+again (the typed unroll measured 11 MB). The schema encodes no
+conditional-depth limit: depth 6 is schema-valid and parser-invalid.
+`claudine_schemas_embedded.rs::embedded_trigger_payloads_resolve_within_one_megabyte`
+pins the payload under a fixed 1,000,000-byte limit (measured 572 kB
+`claudine.yaml`, 569 kB `sequence.yaml`, 768 kB for both, plus 25% headroom)
 and asserts the families by `DefKey`, never by `$defs` key; criterion-10
 container cells are `lib/tests/l1/container_schema_recursion.rs` over the
 `tests/fixtures/sequence-schema/containers-depth4-*.md` controls (see

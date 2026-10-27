@@ -93,8 +93,8 @@ pub fn to_json_schema(schema: &SimplifiedSchema) -> Result<Value, SchemaError> {
     to_json_schema_with_definitions(schema, &DefinitionTable::default())
 }
 
-/// Converts a resolved [`SimplifiedSchema`] whose cyclic named types are
-/// [`TypeExpr::Ref`]s into `definitions`.
+/// Converts a resolved [`SimplifiedSchema`] whose stored named types (cyclic
+/// or shared) are [`TypeExpr::Ref`]s into `definitions`.
 ///
 /// Each use lowers to a local `{"$ref": "#/$defs/<key>"}` carrying the use
 /// site's own constraints and annotations as siblings, and every definition
@@ -366,13 +366,12 @@ struct Lowering<'a> {
 enum Matching<'a> {
     /// A single schema: `match(...)` only shapes completion.
     Suggest,
-    /// A root-union arm: every reference to a definition that reaches a
-    /// `match(...)` points to the arm's enforcing copy, and every
-    /// `file(match(...))` inside such a copy emits
-    /// [`DARKMATTER_MATCH_KEYWORD`]. Elsewhere in the arm `match(...)` stays
-    /// suggestion-only, as in an acyclic schema before recursion existed;
-    /// [`attach_direct_file_match`] adds the keyword to a property that is
-    /// directly a `file`.
+    /// A root-union arm: a reference that the arm's copies redirect (see
+    /// [`MatchCopies`]) points to its copy, and every `file(match(...))`
+    /// inside an enforcing copy emits [`DARKMATTER_MATCH_KEYWORD`].
+    /// Elsewhere in the arm `match(...)` stays suggestion-only, as in an
+    /// acyclic schema before recursion existed; [`attach_direct_file_match`]
+    /// adds the keyword to a property that is directly a `file`.
     Enforce {
         copies: &'a MatchCopies,
         /// The arm's top-level property being lowered; `None` at the arm
@@ -410,11 +409,11 @@ impl<'a> Lowering<'a> {
         }
     }
 
-    /// The `$defs` key a use of `key` points to: the arm's enforcing copy
-    /// when the definition reaches a `match(...)`, the shared one otherwise.
+    /// The `$defs` key a use of `key` points to: the arm's copy when the
+    /// arm redirects the use, the shared definition otherwise.
     fn pointer_key(&self, key: &DefKey) -> Option<&'a str> {
         match self.matching {
-            Matching::Enforce { copies, property, .. } => copies.copy_key(key, property),
+            Matching::Enforce { copies, property, in_copy } => copies.copy_key(key, property, in_copy),
             Matching::Suggest => None,
         }
     }
@@ -428,83 +427,112 @@ impl std::ops::Deref for Lowering<'_> {
     }
 }
 
-/// The enforcing copies a root union's arms need: one per definition that
-/// reaches a `match(...)` and per top-level property that reaches it.
+/// The copies a root union's arms need, per definition and per top-level
+/// property that reaches it.
+///
+/// A use of a definition lowers as its inlined value would at the same
+/// place, and the copies make that so:
+///
+/// - an **enforcing copy** (`<key>@match:<property>`) of a definition that
+///   reaches a `match(...)`, for a use of a cyclic definition anywhere in the
+///   arm, and for a use of any definition inside an enforcing copy (an
+///   inlined value there was part of the enforced body). Every
+///   `file(match(...))` in it emits the keyword, so the glob applies at every
+///   depth of a recursive value;
+/// - a **redirecting copy** (`<key>@arm:<property>`) of a shared acyclic
+///   definition used in the arm outside any copy, whose body reaches a
+///   cyclic definition that needs an enforcing copy. Its own files only
+///   suggest, as the inlined value's did; only its references are
+///   redirected. Without such a reference the use points to the shared
+///   body itself.
 ///
 /// The shared definition keeps its suggestion-only body, so a use of it
 /// outside the arms (a merged trigger payload, a single schema importing the
-/// same file) gains no constraint. A copy's references to definitions that
-/// reach a `match(...)` point to their copies, so the glob applies at every
-/// depth of a recursive value. Copies are per property because a caller may
-/// supply one top-level property, and the keyword is judged in the context
-/// that property came from.
-///
-/// A copy's key is `<key>@match:<property>` (`<key>@match` below a root
-/// pattern key). Type names cannot contain `@`, so a copy key never equals a
-/// definition's own key.
+/// same file) gains no constraint. Copies are per property because a caller
+/// may supply one top-level property, and the keyword is judged in the
+/// context that property came from. Below a root pattern key the key drops
+/// `:<property>`. Type names cannot contain `@`, so a copy key never equals
+/// a definition's own key.
 #[derive(Default)]
 pub(crate) struct MatchCopies {
-    keys: IndexMap<(DefKey, Option<String>), String>,
+    /// Keyed by definition, property, and whether the copy enforces.
+    keys: IndexMap<(DefKey, Option<String>, bool), String>,
+    /// The table's cyclic definitions, read once the first reference is met.
+    cyclic: Option<std::collections::HashSet<DefKey>>,
 }
 
 impl MatchCopies {
     /// Adds the copies `shape`, one root-union arm, reaches.
     fn collect_arm(&mut self, shape: &SchemaShape, defs: &DefinitionTable) {
         for (name, def) in &shape.properties {
-            self.collect_def(def, Some(name), defs);
+            self.collect_def(def, Some(name), false, defs);
         }
         for pattern in &shape.pattern_keys {
-            self.collect_def(&pattern.def, None, defs);
+            self.collect_def(&pattern.def, None, false, defs);
         }
     }
 
-    fn collect_def(&mut self, def: &PropertyDef, property: Option<&str>, defs: &DefinitionTable) {
+    fn collect_def(&mut self, def: &PropertyDef, property: Option<&str>, in_copy: bool, defs: &DefinitionTable) {
         match def {
-            PropertyDef::Single(atom) => self.collect_atom(atom, property, defs),
-            PropertyDef::Union(arms) => arms.iter().for_each(|arm| self.collect_atom(arm, property, defs)),
+            PropertyDef::Single(atom) => self.collect_atom(atom, property, in_copy, defs),
+            PropertyDef::Union(arms) => arms.iter().for_each(|arm| self.collect_atom(arm, property, in_copy, defs)),
         }
     }
 
-    fn collect_atom(&mut self, atom: &PropertyAtom, property: Option<&str>, defs: &DefinitionTable) {
+    fn collect_atom(&mut self, atom: &PropertyAtom, property: Option<&str>, in_copy: bool, defs: &DefinitionTable) {
         match &atom.ty {
             TypeExpr::Ref(key) => {
                 // A missing definition fails where the use is lowered.
                 let Some(definition) = defs.get(key) else {
                     return;
                 };
-                let entry = (key.clone(), property.map(str::to_string));
-                if self.keys.contains_key(&entry)
-                    || !atom_reaches_match(atom, defs, &mut std::collections::HashSet::new())
-                {
+                let cyclic = self
+                    .cyclic
+                    .get_or_insert_with(|| defs.iter().map(|(key, _)| key).filter(|key| defs.is_cyclic(key)).cloned().collect());
+                let enforcing = in_copy || cyclic.contains(key);
+                let entry = (key.clone(), property.map(str::to_string), enforcing);
+                if self.keys.contains_key(&entry) {
                     return;
                 }
+                let needed = if enforcing {
+                    atom_reaches_match(atom, defs, &mut std::collections::HashSet::new())
+                } else {
+                    reaches_enforced_reference(&definition.body, defs, cyclic, &mut std::collections::HashSet::new())
+                };
+                if !needed {
+                    return;
+                }
+                let kind = if enforcing { "match" } else { "arm" };
                 let copy_key = match property {
-                    Some(property) => format!("{}@match:{property}", definition.json_key),
-                    None => format!("{}@match", definition.json_key),
+                    Some(property) => format!("{}@{kind}:{property}", definition.json_key),
+                    None => format!("{}@{kind}", definition.json_key),
                 };
                 self.keys.insert(entry, copy_key);
-                self.collect_def(&definition.body, property, defs);
+                self.collect_def(&definition.body, property, enforcing, defs);
             }
             TypeExpr::InlineObject(shape) => {
                 for def in shape.properties.values().chain(shape.pattern_keys.iter().map(|pattern| &pattern.def)) {
-                    self.collect_def(def, property, defs);
+                    self.collect_def(def, property, in_copy, defs);
                 }
             }
-            TypeExpr::Union(arms) => arms.iter().for_each(|arm| self.collect_atom(arm, property, defs)),
+            TypeExpr::Union(arms) => arms.iter().for_each(|arm| self.collect_atom(arm, property, in_copy, defs)),
             TypeExpr::Tuple(tuple) => {
                 for element in &tuple.elements {
-                    self.collect_def(&element.def, property, defs);
+                    self.collect_def(&element.def, property, in_copy, defs);
                 }
                 if let Some(spread) = &tuple.spread {
-                    self.collect_atom(spread, property, defs);
+                    self.collect_atom(spread, property, in_copy, defs);
                 }
             }
             TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => {}
         }
     }
 
-    fn copy_key(&self, key: &DefKey, property: Option<&str>) -> Option<&str> {
-        self.keys.get(&(key.clone(), property.map(str::to_string))).map(String::as_str)
+    /// The copy a use of `key` points to, lowered inside an enforcing copy
+    /// when `in_copy`.
+    fn copy_key(&self, key: &DefKey, property: Option<&str>, in_copy: bool) -> Option<&str> {
+        let enforcing = in_copy || self.cyclic.as_ref()?.contains(key);
+        self.keys.get(&(key.clone(), property.map(str::to_string), enforcing)).map(String::as_str)
     }
 
     fn is_empty(&self) -> bool {
@@ -538,6 +566,48 @@ fn atom_reaches_match(atom: &PropertyAtom, defs: &DefinitionTable, seen: &mut st
     }
 }
 
+/// Whether `def`, the body of a shared acyclic definition, references a
+/// cyclic definition that reaches a `match(...)`, directly or through other
+/// acyclic definitions; each definition is entered once.
+fn reaches_enforced_reference(
+    def: &PropertyDef,
+    defs: &DefinitionTable,
+    cyclic: &std::collections::HashSet<DefKey>,
+    seen: &mut std::collections::HashSet<DefKey>,
+) -> bool {
+    fn atom_reaches(
+        atom: &PropertyAtom,
+        defs: &DefinitionTable,
+        cyclic: &std::collections::HashSet<DefKey>,
+        seen: &mut std::collections::HashSet<DefKey>,
+    ) -> bool {
+        match &atom.ty {
+            TypeExpr::Ref(key) if cyclic.contains(key) => {
+                atom_reaches_match(atom, defs, &mut std::collections::HashSet::new())
+            }
+            TypeExpr::Ref(key) => {
+                seen.insert(key.clone())
+                    && defs.get(key).is_some_and(|definition| reaches_enforced_reference(&definition.body, defs, cyclic, seen))
+            }
+            TypeExpr::InlineObject(shape) => shape
+                .properties
+                .values()
+                .chain(shape.pattern_keys.iter().map(|pattern| &pattern.def))
+                .any(|def| reaches_enforced_reference(def, defs, cyclic, seen)),
+            TypeExpr::Union(arms) => arms.iter().any(|arm| atom_reaches(arm, defs, cyclic, seen)),
+            TypeExpr::Tuple(tuple) => {
+                tuple.elements.iter().any(|element| reaches_enforced_reference(&element.def, defs, cyclic, seen))
+                    || tuple.spread.as_deref().is_some_and(|spread| atom_reaches(spread, defs, cyclic, seen))
+            }
+            TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => false,
+        }
+    }
+    match def {
+        PropertyDef::Single(atom) => atom_reaches(atom, defs, cyclic, seen),
+        PropertyDef::Union(arms) => arms.iter().any(|arm| atom_reaches(arm, defs, cyclic, seen)),
+    }
+}
+
 /// Every non-empty `match(...)` group of a file atom, in authored order.
 fn match_groups(constraints: &[Constraint]) -> Vec<&[String]> {
     constraints
@@ -549,7 +619,7 @@ fn match_groups(constraints: &[Constraint]) -> Vec<&[String]> {
         .collect()
 }
 
-/// One enforcing copy, lowered.
+/// One copy, lowered.
 struct LoweredCopy {
     key: String,
     /// The `$defs` key of the definition it copies.
@@ -559,11 +629,11 @@ struct LoweredCopy {
 
 fn lower_match_copies(copies: &MatchCopies, defs: &DefinitionTable) -> Result<Vec<LoweredCopy>, SchemaError> {
     let mut lowered = Vec::with_capacity(copies.keys.len());
-    for ((key, property), copy_key) in &copies.keys {
+    for ((key, property, enforcing), copy_key) in &copies.keys {
         let definition = defs.get(key).ok_or_else(|| missing_definition(copy_key, key))?;
         let lowering = Lowering {
             defs,
-            matching: Matching::Enforce { copies, property: property.as_deref(), in_copy: true },
+            matching: Matching::Enforce { copies, property: property.as_deref(), in_copy: *enforcing },
         };
         lowered.push(LoweredCopy {
             key: copy_key.clone(),
@@ -583,16 +653,17 @@ fn lower_match_copies(copies: &MatchCopies, defs: &DefinitionTable) -> Result<Ve
 ///
 /// - a property that is directly a `file` (or `file[]`) gets the keyword on
 ///   its file fragment ([`attach_direct_file_match`]);
-/// - a reference, anywhere in the arm, to a definition that reaches a
-///   `match(...)` is redirected to the arm's enforcing copy, which joins
-///   `root_defs` beside the shared definition and enforces every
-///   `file(match(...))` inside it. The redirects come from lowering the arm
-///   once more in enforcing mode and grafting the difference on.
+/// - a reference to a cyclic definition that reaches a `match(...)`, at any
+///   depth of the arm, is redirected to the arm's enforcing copy, which
+///   joins `root_defs` beside the shared definition and enforces every
+///   `file(match(...))` inside it (see [`MatchCopies`]). The redirects come
+///   from lowering the arm once more in enforcing mode and grafting the
+///   difference on.
 ///
 /// Any other file in the arm (a property-union alternative, a nested inline
-/// object, a dictionary value, a tuple slot, a list of a union) keeps its
-/// suggestion-only lowering, byte-identical to the schema's output before
-/// recursive types existed. A single schema never calls this, so there
+/// object, a dictionary value, a tuple slot, a list of a union, or the body
+/// of a shared acyclic definition) keeps its suggestion-only lowering, as
+/// the schema's output before recursive types existed did. A single schema never calls this, so there
 /// `match` only suggests.
 ///
 /// ## Errors

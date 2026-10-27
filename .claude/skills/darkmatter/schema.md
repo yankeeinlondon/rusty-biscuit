@@ -198,10 +198,19 @@ keyed by repo-relative virtual paths. Embedded imports resolve
 lexically with `/` (no `~ & ^ $ % @`, URLs, globs, or climbing above the
 root), never touch the disk or network, add no dependency edge (DMLS never
 watches them), and identify as `SchemaSourceId::Embedded`. One
-`BASELINE: OnceLock` lowers it once per process. Resolving the catalog from
-disk gives the same typed schema and JSON. Installed binaries therefore need
-no schema files. `with_baseline_from_file` (and `BASELINE_SCHEMA`) pointing
-at a global catalog uses its `fm`.
+`BASELINE: OnceLock` lowers it once per process, with its shared definitions
+(`GlobalCatalog::baseline()` returns the shape and its `DefinitionTable`;
+lower with `to_json_schema_with_definitions`). Resolving the catalog from disk
+gives the same JSON. Installed binaries therefore need no schema files.
+`with_baseline_from_file` (and `BASELINE_SCHEMA`) pointing at a global catalog
+uses its `fm` with its table. Readers of the typed baseline carry the table
+(`ComposeOptions::baseline_definitions`, `darkmatter_shared_baseline()`); the
+public `darkmatter_base_schema()` and the editor's layered property shape
+(`frontmatter_shape::layered_property_shape`) read the definition-free
+projection, resolved once with `Sharing::Off` rather than rebuilt from the
+references. `merge_baseline` moves only the lower layer's definitions that a
+copied property reaches (`scope::retain_reached_definitions`), so a Claudine
+trigger overriding `loop` leaves no dead baseline `$defs`.
 
 `md schema validate` selection (`cli/src/commands/schema/validate.rs::load_api`),
 first match wins:
@@ -253,10 +262,11 @@ judged as text. A template is recognized only by
 every caller setting template problems aside for later rendering judges as
 written: `EffectiveSchema::validate_with_options` (DMLS, `PendingPolicy::Defer`)
 keeps that problem, as `md schema validate` and Claudine's launch
-pre-validation do. The resolver stores only cycle
-members in `$defs` and inlines every other named type at each reference, so
-a host must write its stack families recursively (Claudine's are), never
-unrolled: Claudine's typed three-level unroll resolved to 11 MB.
+pre-validation do. The resolver stores cycle members, and any structured
+acyclic type with two or more authored uses, in `$defs`; it inlines
+everything else at each reference. A host should still write its stack
+families recursively (Claudine's are), never unrolled: Claudine's typed
+three-level unroll resolved to 11 MB before sharing.
 The passive operand check is `lifecycle::validate_operands` (runtime
 registration, `select_overload_with`), and schema validation runs it: every
 generated arm but `null` and `template-operand` carries `operands(<verb>-short|-long)`
@@ -334,8 +344,12 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
 - `apply_import_postfix` (`resolve.rs`) merges use-site constraints: stricter
   bound wins per kind (string length, number, item count, keys), lower > upper
   is `SchemaError::ConstraintConflict` (`Bounds`/`Scheme`/`Default`, each
-  origin a `SchemaConstraintOrigin` with source, path, keyword, occurrence,
-  span), flags dedupe, every `pattern` and `match` group is kept, schemes
+  entry a `SchemaConstraintParticipant`: the `origin`
+  (`SchemaConstraintOrigin` with source, path, keyword, occurrence, span) and
+  the `constraint` value that took part — the strict surviving bound, the
+  inherited scheme list snapshotted before the failing intersection, each
+  default, or each canonical option set, `Options([])` for bare
+  `alphanumeric`), flags dedupe, every `pattern` and `match` group is kept, schemes
   intersect, defaults compare after number normalization, one `suggest` per
   property (checked after union flattening), examples keep their defining
   file. Bounds are read against the resolved target (`label(max(80))` is a
@@ -365,30 +379,58 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   description merged with the postfix), and the presence-free body goes into
   the `DefinitionTable` (`ResolvedSchema.definitions`,
   `EffectiveSchema::definitions()`, `NamedTypeExpansion.definitions`).
-  A schema with a cycle expands twice (`resolve/recursive.rs`: pass 1 learns
-  each definition's `UseSummary`); an acyclic one takes the old single pass,
-  pinned byte-for-byte by `lib/tests/l1/recursive_schema_golden.rs`. Lower
+  Discovery also selects **shared** acyclic targets (`Discovery { cyclic,
+  shared }`): a structured type (object, dictionary, tuple, list of
+  structured items, union with a structured arm; aliases followed) with two
+  or more distinct authored value sites, keyed `(namespace, full path,
+  DefKey)`. Root and body revisits count once, callable-only reach does not
+  count, and layers never pool counts. A shared body expands at its first
+  use under that use's import stack, so the 32-level limit is unchanged. Each
+  use keeps a `Ref` only if `recursive.rs::use_is_representable` and the
+  union-arm and alias checks prove that inlining would give the same result.
+  Otherwise that one use inlines; errors are never retried as inlining. Only
+  definitions that a surviving reference reaches are published. Catalog
+  declarations share too (`GlobalDeclaration::definitions`); only the
+  definition-free projection `darkmatter_base_schema()` (`Sharing::Off`,
+  `catalog::darkmatter_inline_baseline`) inlines every acyclic use.
+  A `file(match(...))` in a body does not affect selection: the root-union
+  lowering keeps a shared acyclic body suggestion-only (next bullet), and
+  `file_match::file_alternatives` reads a reference to an acyclic definition
+  as its inlined body (`DefinitionTable::is_cyclic`). Structural identity in
+  `simplified/subtype.rs` opens references through the table, so a shared
+  use and its inlined copy compare equal. A schema with a cycle or a shared type expands twice
+  (`resolve/recursive.rs`: pass 1 learns each definition's `UseSummary`);
+  otherwise it takes the single pass. `lib/tests/l1/recursive_schema_golden.rs`
+  pins the output. Lower
   with `to_json_schema_with_definitions` (`$ref` with use-site siblings, one
   root `$defs` body per reachable definition, in allocation order); plain
   `to_json_schema` errors on a `Ref`. Every typed and JSON walker follows a
   `Ref` (see the reference-aware entry points under "Named union
   references" and "Conversion engine"); none treats it as opaque. User docs:
   `topics/schemas/definition.md` "Recursive Named Types" (child-value rule,
-  definition vs use site, errors, reach) is the one description; other pages
-  link there.
+  definition vs use site, errors, reach) and "Shared Named Types"
+  (eligibility, counting, per-use fallback, output) are the one description;
+  other pages link there. A stored union hovers in DMLS as its alternatives
+  (see `dmls.md`).
 - **Root-union `match()` through references** (`simplified/convert.rs`).
-  A root-union arm enforces `match` in exactly two places, and an acyclic
-  schema lowers byte-identically to its pre-recursion output (spec
-  requirement): (1) a property that is directly `file`/`file[]`
+  A root-union arm enforces `match` in exactly two places, so an acyclic
+  glob, inlined or shared, stays suggestion-only as it was before recursion:
+  (1) a property that is directly `file`/`file[]`
   (`attach_direct_file_match`, via `file_match_groups`); (2) inside an arm
   copy of a match-reaching recursive definition. Lowering carries
-  `Lowering { defs, matching }`; in `Matching::Enforce` every `TypeExpr::Ref`
-  anywhere in the arm points at the arm copy `<key>@match:<property>`
-  (`MatchCopies`), never the shared body, and `file_fragment` emits
-  `x-darkmatter-match` only while lowering a copy (`in_copy`). Any other
-  arm-level file (union alternative, acyclic name bound to a union, inline
-  object, dictionary value, tuple slot, list of a union) stays
-  suggestion-only. The four `resolve.rs` arm sites call
+  `Lowering { defs, matching }`; in `Matching::Enforce` a reference lowers
+  as its inlined value would at that place (`MatchCopies`, keyed by
+  definition, property, and mode): a reference to a cyclic definition, or
+  any reference inside an enforcing copy, points at the enforcing copy
+  `<key>@match:<property>`; a reference to a shared acyclic definition
+  outside a copy points at its shared body, or at a redirecting copy
+  `<key>@arm:<property>` (own files suggest, references redirected) when
+  the body reaches a match-reaching cyclic definition. Cyclicity is read
+  off the table (`DefinitionTable::is_cyclic`). `file_fragment` emits
+  `x-darkmatter-match` only while lowering an enforcing copy (`in_copy`).
+  Any other arm-level file (union alternative, acyclic name bound to a
+  union, inline object, dictionary value, tuple slot, list of a union)
+  stays suggestion-only. The four `resolve.rs` arm sites call
   `attach_root_union_match(arm, shape, defs, root_defs)` (direct attach, then
   graft the ref redirects and join the copies); `union_to_root_schema` lowers
   in that mode and attaches the direct keyword. A copy names its property in
@@ -712,9 +754,9 @@ completion, hover, and `dm.expression.*` diagnostics.
 
 Source spans come from one locator in `simplified/source.rs` with two
 grammars. Strict (schema documents) and tolerant (frontmatter) share
-indentless sequences and plain scalars continued onto more-indented lines;
-only tolerant follows tags, block scalars, quoted continuations, and empty
-values. Strict fails unless every non-comment line belongs to the value, and
+indentless sequences, plain scalars continued onto more-indented lines, and
+literal/folded block scalars; only tolerant follows tags, quoted
+continuations, and empty values. Strict fails unless every non-comment line belongs to the value, and
 checks each decoded scalar against `serde_yaml_ng` before projecting. A
 source-aware slice must start at a line boundary (indentation included) or be
 dedented, because indentation decides where a continuation ends; DMLS widens
@@ -722,6 +764,63 @@ mid-line value spans with `overlay::frontmatter::line_aligned_span`. Never add
 a third locator. The authored boundary is documented in
 `darkmatter/docs/topics/schemas/definition.md` (Source-Aware Presentation
 Boundary).
+
+Definition failures are located, never guessed (user-facing reference:
+`darkmatter/docs/topics/schemas/definition.md` § Source-Aware Parsing and
+Located Failures, and `dmls/docs/diagnostics.md` § Ranging). The shared parser
+(`simplified/mod.rs`, crate-private `DefinitionFailure`) records the
+`SchemaSourcePath` of the node it rejected: property keys literally, sequence
+members and root-union arms by index, `$constraints` entries by key, and
+cross-arm checks at the arm that introduced the violation
+(`second_suggestion_span` and `duplicate_overload_arm` return the arm index).
+`parse_property_definition_with_source` and
+`parse_schema_declaration_with_source` return `LocatedDefinitionFailure`
+(`path`, boxed `error`, `authored_span`, `value_span`, document bytes with
+`source_offset` applied once); `locate_standalone_definition_failure(source)`
+does the same for a standalone document, prefixing `types`/`$schema`, sharing
+`standalone::recognize_standalone` with the classifier, and returning `None`
+for outer envelope and declaration-shape failures (any failure path without a
+property segment). Projection follows the path through the strict located
+tree in lockstep with the parsed YAML and projects a grammar span only through
+a scalar whose decoded text equals the rejected string; a mismatch,
+unsupported presentation, or alias leaves the range `None` but always keeps
+the error. A projection-only failure after a successful parse is the
+projection error at the root path. Source-free parsers discard the path.
+
+`decode_plain_scalar_node` (`yaml_scalar.rs`) is `decode_scalar_node`
+restricted to plain scalars (same-line tags/anchors skipped; quoted, block,
+flow, alias, comment, empty, and later-line-property values are `None`, and
+so is a value whose start is a line break: content on later lines is another
+node); use it, not a prefix blacklist, to recognize a continuable plain
+holder. `locate_type_definition_cursor_in_scalar` /
+`locate_schema_declaration_cursor_in_scalar` (`cursor.rs`) read a completion
+cursor through that decoded map, so anchors and tags stay outside the edited
+token; a cursor is accepted inside the scalar, at its end, or after trailing
+spaces/tabs on its last line, and nowhere else.
+
+DMLS consumes located failures, never guesses (`dmls/src/diagnostics/frontmatter.rs`):
+standalone definitions use `locate_standalone_definition_failure`; inline
+`$schema` prepare errors and `schema`/`type-definition` meta-typed values use
+the source-aware parsers on the value re-parsed in place (first line padded
+with spaces, `source_offset` = line start). Range order: `authored_span`,
+`value_span`, the deepest frontmatter entry along the path's leading property
+keys, then the old fallback. Meta-type union acceptance stays with the
+source-free parsers; the source-aware call only locates the reported error
+(matched by message), and a `schema` failure with no property segment keeps
+the whole value. A referenced file's failure is never projected into the
+buffer. Conflict related information is `` `<excerpt>` is declared here ``
+(`` … is the effective constraint from this declaration `` for every scheme
+participant); an empty `Options` participant with no constraint span relates
+its origin's `Definition` span.
+
+Conflict messages render each participant with
+`Constraint::diagnostic_excerpt()` (`serialize.rs`): `to_schema_text(None)`
+with controls escaped (`\n`, `\t`, `\u{1b}`), then cut to 160 Unicode
+scalars including `…`. `Display` and `StatusBlock` both use it inside a code
+span; DMLS related information must use it too. Options render as canonical
+`alphanumeric(...)`/bare `alphanumeric`; string defaults that read as a
+number, `true`, `false`, or `null` are quoted; compound defaults render as
+compact JSON (diagnostic only, not grammar).
 
 ## Testing
 

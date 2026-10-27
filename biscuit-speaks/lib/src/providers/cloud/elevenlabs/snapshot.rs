@@ -18,12 +18,14 @@
 //! from, an API key.
 
 use std::marker::PhantomData;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::de::value::MapAccessDeserializer;
 use serde::de::{MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use tracing::debug;
+
+use crate::audio_cache::CacheError;
 
 /// How long a record is trusted after it was written.
 pub(crate) const TRUST_SECONDS: u64 = 24 * 60 * 60;
@@ -91,13 +93,19 @@ fn snapshot_path(inputs: &SelectionInputs, account_context: &str) -> Option<Path
     Some(directory.join(format!(".biscuit-speaks-elevenlabs-voice-{hash:016x}.json")))
 }
 
-/// Publish `snapshot` atomically, replacing any earlier record for the same
-/// selection and account.
-pub(crate) fn write(snapshot: &Snapshot) -> Result<(), String> {
+/// Publish `snapshot` through `publish`, replacing any earlier record for the
+/// same selection and account.
+///
+/// Synchronous file I/O: async callers run it on the blocking pool.
+/// `publish` is `audio_cache::write_atomic` outside tests.
+pub(crate) fn write(
+    snapshot: &Snapshot,
+    publish: impl Fn(&Path, &[u8]) -> Result<(), CacheError>,
+) -> Result<(), String> {
     let path = snapshot_path(&snapshot.inputs, &snapshot.account_context)
         .ok_or("no capability cache location")?;
     let json = serde_json::to_vec(snapshot).map_err(|error| error.to_string())?;
-    crate::audio_cache::write_atomic(&path, &json).map_err(|error| error.to_string())
+    publish(&path, &json).map_err(|error| error.to_string())
 }
 
 /// The trusted record for `inputs` and `account_context` at `now`, if any.

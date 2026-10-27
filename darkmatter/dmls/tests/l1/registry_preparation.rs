@@ -182,6 +182,8 @@ fn a_held_preparation_leaves_edits_cancellation_and_other_requests_running() {
     // 502's elapsed time includes the held preparation, so on a loaded host it
     // crosses `SLOW_THRESHOLD` and completes as a `slow request` instead.
     let completion = |id: &str| -> String {
+        // A request over the timing threshold logs `slow request` instead,
+        // which a loaded host can push either of these over.
         let lines: Vec<String> = logs
             .lines()
             .into_iter()

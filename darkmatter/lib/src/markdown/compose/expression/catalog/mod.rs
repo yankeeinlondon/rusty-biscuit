@@ -58,19 +58,19 @@ const EXAMPLE_FILES: &[(&str, &str)] = &[
 ];
 
 /// One entry of the catalog's `categories:` list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogCategory {
-    pub name: &'static str,
-    pub description: Option<&'static str>,
+    pub name: Box<str>,
+    pub description: Option<Box<str>>,
 }
 
 /// One parameter of a function overload.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionParameterDescriptor {
-    pub name: &'static str,
+    pub name: Box<str>,
     /// The declared type in canonical grammar spelling, without descriptions
     /// (`number | null`, `number(integer; min(1))`).
-    pub type_text: &'static str,
+    pub type_text: Box<str>,
     pub optional: bool,
     pub rest: bool,
 }
@@ -81,48 +81,50 @@ pub enum FunctionExample {
     /// `example(CALL => RESULT)`; `result` is the authored literal text or
     /// `error`.
     Call {
-        call: &'static str,
+        call: Box<str>,
         expected: ExampleOutcome,
-        result: &'static str,
-        display_only: Option<&'static str>,
+        result: Box<str>,
+        display_only: Option<Box<str>>,
     },
     /// `example(./function-examples/x.yaml)`, read from the embedded file.
     /// `returns` is the file's `returns` text, or its JSON spelling when it is
     /// not a string.
     File {
-        path: &'static str,
-        invocation: &'static str,
-        returns: &'static str,
-        description: Option<&'static str>,
+        path: Box<str>,
+        invocation: Box<str>,
+        returns: Box<str>,
+        description: Option<Box<str>>,
     },
 }
 
 /// Descriptor for one overload of an expression function.
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// Owns every field. A descriptor borrowed from a static catalog (the
+/// built-in or mutation catalog) yields `&'static` field views; one borrowed
+/// from a host catalog lives as long as that catalog.
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExpressionFunctionDescriptor {
     /// The canonical name.
-    pub name: &'static str,
+    pub name: Box<str>,
     /// The aliases dispatch also accepts for this function.
-    pub aliases: &'static [&'static str],
+    pub aliases: Box<[Box<str>]>,
     /// The display key: parameter names only, optional ones bracketed and a
     /// rest parameter as `...` (`round(x, [fallback])`, `and(...)`). Read by
     /// `md schema about`, the generated doc table, DMLS, and lifecycle verb
     /// parsing.
-    pub signature: &'static str,
-    pub description: &'static str,
-    pub category: &'static str,
+    pub signature: Box<str>,
+    pub description: Box<str>,
+    pub category: Box<str>,
     /// 1-based position within its category, counting every overload.
     pub order: usize,
     /// Index within the function's overloads, in authored order.
     pub overload: usize,
-    pub parameters: &'static [FunctionParameterDescriptor],
+    pub parameters: Box<[FunctionParameterDescriptor]>,
     /// The return type in canonical grammar spelling.
-    pub returns: &'static str,
+    pub returns: Box<str>,
     pub fallible: bool,
-    pub function_type: &'static FunctionType,
-    pub examples: &'static [FunctionExample],
-    /// The first inline example, for [`Described`].
-    pub example: Option<Example>,
+    pub function_type: FunctionType,
+    pub examples: Box<[FunctionExample]>,
 }
 
 impl ExpressionFunctionDescriptor {
@@ -151,20 +153,35 @@ impl ExpressionFunctionDescriptor {
 }
 
 impl Described for ExpressionFunctionDescriptor {
-    fn key(&self) -> &'static str {
-        self.signature
+    fn key(&self) -> &str {
+        &self.signature
     }
-    fn description(&self) -> &'static str {
-        self.description
+    fn description(&self) -> &str {
+        &self.description
     }
-    fn category(&self) -> &'static str {
-        self.category
+    fn category(&self) -> &str {
+        &self.category
     }
     fn order(&self) -> usize {
         self.order
     }
-    fn example(&self) -> Option<&Example> {
-        self.example.as_ref()
+    /// The first inline example; a file-form example has no shared view.
+    fn example(&self) -> Option<Example<'_>> {
+        self.examples.iter().find_map(|example| match example {
+            FunctionExample::Call {
+                call,
+                result,
+                display_only,
+                ..
+            } => Some(Example {
+                invocation: call,
+                result,
+                verification: display_only
+                    .as_deref()
+                    .map_or(ExampleVerification::Executable, ExampleVerification::DisplayOnly),
+            }),
+            FunctionExample::File { .. } => None,
+        })
     }
 }
 
@@ -173,8 +190,8 @@ impl Described for ExpressionFunctionDescriptor {
 /// name, then authored overload order).
 #[derive(Debug)]
 pub struct FunctionCatalog {
-    pub categories: &'static [CatalogCategory],
-    pub descriptors: &'static [ExpressionFunctionDescriptor],
+    pub categories: Box<[CatalogCategory]>,
+    pub descriptors: Box<[ExpressionFunctionDescriptor]>,
     /// The non-function `types:` entries, for resolving references in
     /// signatures.
     named_types: IndexMap<String, PropertyDef>,
@@ -183,14 +200,14 @@ pub struct FunctionCatalog {
 impl FunctionCatalog {
     /// Every overload of the function `name` names: case-insensitive, by
     /// canonical name or registered alias. Empty for an unknown name.
-    pub fn descriptors_for(&self, name: &str) -> &'static [ExpressionFunctionDescriptor] {
+    pub fn descriptors_for(&self, name: &str) -> &[ExpressionFunctionDescriptor] {
         let lower = name.to_ascii_lowercase();
         let canonical = super::functions::alias_canonical(&lower).unwrap_or(lower.as_str());
-        let descriptors = self.descriptors;
-        let Some(start) = descriptors.iter().position(|descriptor| descriptor.name == canonical) else {
+        let descriptors = &self.descriptors;
+        let Some(start) = descriptors.iter().position(|descriptor| &*descriptor.name == canonical) else {
             return &[];
         };
-        let len = descriptors[start..].iter().take_while(|descriptor| descriptor.name == canonical).count();
+        let len = descriptors[start..].iter().take_while(|descriptor| &*descriptor.name == canonical).count();
         &descriptors[start..start + len]
     }
 
@@ -228,7 +245,7 @@ pub fn expression_function_catalog() -> &'static FunctionCatalog {
 
 /// Every overload's descriptor, in documentation order.
 pub fn expression_function_descriptors() -> &'static [ExpressionFunctionDescriptor] {
-    expression_function_catalog().descriptors
+    &expression_function_catalog().descriptors
 }
 
 /// Every overload of the function `name` names, resolving aliases and case
@@ -251,8 +268,9 @@ pub(crate) enum CatalogError {
 /// per function, no entry written as null, and every file-form example present in `example_files` and
 /// valid under the example envelope.
 ///
-/// Descriptors are leaked to `'static`; the embedded catalog loads once, and
-/// tests load small fixtures.
+/// The result owns every name, type, and example it projects and borrows
+/// nothing from `source` or `example_files`; nothing is built on an error
+/// path that outlives the call.
 pub(crate) fn load_catalog(
     source: &str,
     path: &str,
@@ -325,17 +343,16 @@ pub(crate) fn load_catalog(
     }
     functions.sort_by(|left, right| (left.category_index, left.name).cmp(&(right.category_index, right.name)));
 
-    let leaked_categories: Vec<CatalogCategory> = categories
+    let catalog_categories: Box<[CatalogCategory]> = categories
         .iter()
         .map(|category| CatalogCategory {
-            name: leak(category.name.clone()),
-            description: category.description.clone().map(leak),
+            name: category.name.as_str().into(),
+            description: category.description.as_deref().map(Box::from),
         })
         .collect();
-    let leaked_categories: &'static [CatalogCategory] = Box::leak(leaked_categories.into_boxed_slice());
 
     let mut descriptors = Vec::new();
-    let mut position_in_category = vec![0usize; leaked_categories.len()];
+    let mut position_in_category = vec![0usize; catalog_categories.len()];
     for CatalogFunction {
         category_index,
         name,
@@ -343,36 +360,22 @@ pub(crate) fn load_catalog(
         raw,
     } in functions
     {
-        let name: &'static str = leak(name.clone());
-        let aliases = super::functions::registered_aliases(name);
+        let aliases: Box<[Box<str>]> =
+            super::functions::registered_aliases(name).iter().map(|alias| Box::from(*alias)).collect();
         for (overload, (atom, raw)) in atoms.into_iter().zip(raw).enumerate() {
             let TypeExpr::Function(function_type) = &atom.ty else {
                 unreachable!("every overload atom is a function");
             };
-            let function_type: &'static FunctionType = Box::leak(function_type.clone());
             position_in_category[category_index] += 1;
             let examples = project_examples(name, atom, function_type, raw.as_deref(), example_files)
                 .map_err(&invalid)?;
-            let example = examples.iter().find_map(|example| match example {
-                FunctionExample::Call {
-                    call,
-                    result,
-                    display_only,
-                    ..
-                } => Some(Example {
-                    invocation: call,
-                    result,
-                    verification: display_only.map_or(ExampleVerification::Executable, ExampleVerification::DisplayOnly),
-                }),
-                FunctionExample::File { .. } => None,
-            });
-            let parameters: Vec<FunctionParameterDescriptor> = function_type
+            let parameters: Box<[FunctionParameterDescriptor]> = function_type
                 .parameters
                 .as_slice()
                 .iter()
                 .map(|parameter| FunctionParameterDescriptor {
-                    name: leak(parameter.name.clone()),
-                    type_text: leak(type_text(&parameter.def)),
+                    name: parameter.name.as_str().into(),
+                    type_text: type_text(&parameter.def).into(),
                     optional: parameter.optional,
                     rest: parameter.rest,
                 })
@@ -390,26 +393,25 @@ pub(crate) fn load_catalog(
                 })
                 .collect();
             descriptors.push(ExpressionFunctionDescriptor {
-                name,
-                aliases,
-                signature: leak(format!("{name}({})", display.join(", "))),
-                description: leak(atom.description.clone().unwrap_or_default()),
-                category: leaked_categories[category_index].name,
+                name: name.as_str().into(),
+                aliases: aliases.clone(),
+                signature: format!("{name}({})", display.join(", ")).into(),
+                description: atom.description.clone().unwrap_or_default().into(),
+                category: catalog_categories[category_index].name.clone(),
                 order: position_in_category[category_index],
                 overload,
-                parameters: Box::leak(parameters.into_boxed_slice()),
-                returns: leak(type_text(&function_type.returns)),
+                parameters,
+                returns: type_text(&function_type.returns).into(),
                 fallible: function_type.fallible,
-                function_type,
-                examples: Box::leak(examples.into_boxed_slice()),
-                example,
+                function_type: (**function_type).clone(),
+                examples: examples.into(),
             });
         }
     }
 
     Ok(FunctionCatalog {
-        categories: leaked_categories,
-        descriptors: Box::leak(descriptors.into_boxed_slice()),
+        categories: catalog_categories,
+        descriptors: descriptors.into(),
         named_types,
     })
 }
@@ -486,7 +488,7 @@ fn raw_type_entries(source: &str) -> IndexMap<String, Vec<Option<String>>> {
 fn project_examples(
     function: &str,
     atom: &PropertyAtom,
-    function_type: &'static FunctionType,
+    function_type: &FunctionType,
     raw: Option<&str>,
     example_files: &[(&str, &str)],
 ) -> Result<Vec<FunctionExample>, String> {
@@ -502,10 +504,10 @@ fn project_examples(
             (None, ExampleOutcome::Value(value)) => value.to_string(),
         };
         examples.push(FunctionExample::Call {
-            call: leak(example.call.clone()),
+            call: example.call.as_str().into(),
             expected: example.expected.clone(),
-            result: leak(result),
-            display_only: example.display_only.clone().map(leak),
+            result: result.into(),
+            display_only: example.display_only.as_deref().map(Box::from),
         });
     }
     for constraint in &atom.constraints {
@@ -537,10 +539,10 @@ fn file_example(function: &str, reference: &str, example_files: &[(&str, &str)])
         None => String::new(),
     };
     Ok(FunctionExample::File {
-        path: leak(path.to_string()),
-        invocation: leak(invocation.to_string()),
-        returns: leak(returns),
-        description: object.get("description").and_then(Value::as_str).map(|text| leak(text.to_string())),
+        path: (*path).into(),
+        invocation: invocation.into(),
+        returns: returns.into(),
+        description: object.get("description").and_then(Value::as_str).map(Box::from),
     })
 }
 
@@ -555,10 +557,6 @@ fn type_text(def: &PropertyDef) -> String {
         PropertyDef::Union(arms) => PropertyDef::Union(arms.iter().map(strip).collect()),
     };
     serialize_property_def(&bare)
-}
-
-fn leak(value: String) -> &'static str {
-    Box::leak(value.into_boxed_str())
 }
 
 /// Generates the Markdown function-reference table for

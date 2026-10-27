@@ -1200,7 +1200,7 @@ fn error_dependencies(error: &SchemaError) -> Vec<PathBuf> {
             }
             SchemaError::ConstraintConflict { site, constraints, .. } => {
                 file(&site.source, out);
-                constraints.iter().for_each(|origin| file(&origin.source, out));
+                constraints.iter().for_each(|participant| file(&participant.origin.source, out));
             }
             SchemaError::UnionReference { site, definition, .. } => {
                 file(&site.source, out);

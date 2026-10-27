@@ -130,9 +130,9 @@ fn fixture() -> (TempDir, Lookup) {
 fn registered_aliases() -> BTreeMap<&'static str, &'static str> {
     let mut aliases = BTreeMap::new();
     for descriptor in expression_function_descriptors() {
-        for alias in descriptor.aliases {
-            if let Some(previous) = aliases.insert(*alias, descriptor.name) {
-                assert_eq!(previous, descriptor.name, "alias `{alias}` names two functions");
+        for alias in &descriptor.aliases {
+            if let Some(previous) = aliases.insert(&**alias, &*descriptor.name) {
+                assert_eq!(previous, &*descriptor.name, "alias `{alias}` names two functions");
             }
         }
     }
@@ -186,8 +186,8 @@ fn documentation_lists_canonicals_once() {
     let aliases = registered_aliases();
     let mut overloads: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     for descriptor in descriptors {
-        assert!(!aliases.contains_key(descriptor.name), "`{}` is listed under an alias", descriptor.name);
-        overloads.entry(descriptor.name).or_default().push(descriptor.overload);
+        assert!(!aliases.contains_key(&*descriptor.name), "`{}` is listed under an alias", descriptor.name);
+        overloads.entry(&descriptor.name).or_default().push(descriptor.overload);
     }
     for (name, indices) in &overloads {
         let expected: Vec<usize> = (0..indices.len()).collect();
@@ -198,8 +198,8 @@ fn documentation_lists_canonicals_once() {
     assert_eq!(listed, registered);
 
     for (alias, canonical) in &aliases {
-        let by_alias: Vec<_> = function_descriptors(alias).iter().map(|descriptor| descriptor.signature).collect();
-        let by_name: Vec<_> = function_descriptors(canonical).iter().map(|descriptor| descriptor.signature).collect();
+        let by_alias: Vec<_> = function_descriptors(alias).iter().map(|descriptor| &*descriptor.signature).collect();
+        let by_name: Vec<_> = function_descriptors(canonical).iter().map(|descriptor| &*descriptor.signature).collect();
         assert!(!by_name.is_empty(), "`{canonical}` has descriptors");
         assert_eq!(by_alias, by_name, "`{alias}` looks up `{canonical}`");
     }

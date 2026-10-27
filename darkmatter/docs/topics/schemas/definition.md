@@ -1061,8 +1061,10 @@ The rules:
   depth and wherever in the arm the type is used. Any other file in the arm
   only suggests: a file alternative of a union (`file(match(…)) | number`,
   also through a named type), a file inside an inline object, a dictionary
-  value, a tuple slot, or a list of a union. Outside a root union every glob
-  only suggests.
+  value, a tuple slot, or a list of a union. That holds as well for a file
+  inside a [shared named type](#shared-named-types) used twice: it suggests,
+  exactly as the copied type did, while a recursive type the shared type
+  uses is still enforced. Outside a root union every glob only suggests.
 
   ```yaml
   $schema:
@@ -1346,7 +1348,7 @@ and the inline form on any other type is a schema-load error.
 
 ### Cross-File Named-Type Imports (`Name@file`)
 
-`Name@fileref` **inlines** the definition of the named type `Name` from the referenced file at the use site — structural substitution, not a persistent reference. The one exception is a type that refers back to itself, which is stored once and referenced (see [Recursive Named Types](#recursive-named-types)). A schema file's **top-level mapping entries are its named types** — the entries under `$schema:` in a pure envelope, or under `types:` in a `kind: schema` envelope (see [Standalone Schema Documents](#standalone-schema-documents)). Each is a full SimplifiedSchema definition (scalar, enum, union, or an inline object with literal or pattern keys).
+`Name@fileref` gives the use site the definition of the named type `Name` from the referenced file — structural substitution: each use validates exactly as if the definition were written there. In the generated JSON Schema most uses are such a copy. Two kinds of type are stored once and referenced instead: a type that refers back to itself (see [Recursive Named Types](#recursive-named-types)), and a structured type that two or more places use (see [Shared Named Types](#shared-named-types)). A schema file's **top-level mapping entries are its named types** — the entries under `$schema:` in a pure envelope, or under `types:` in a `kind: schema` envelope (see [Standalone Schema Documents](#standalone-schema-documents)). Each is a full SimplifiedSchema definition (scalar, enum, union, or an inline object with literal or pattern keys).
 
 A type defined in the same schema may be referenced by its **bare name**: `type` and `type@this` are the same reference. See [Local Type References](./local-type-references.md) for where local names live, built-in collisions, and why a bare name inside an imported definition still resolves in its defining file.
 
@@ -1377,7 +1379,7 @@ Rules:
 - The right side resolves as a `biscuit_file::FileReference` whose `cwd` is the schema file's directory, in the request's file-resolution context when one is supplied — the same resolution as root-union file refs and `$schema`.
 - The target must be a SimplifiedSchema file whose payload is a mapping with a matching named type. Importing from a raw JSON Schema file, from a root-union schema file, from a file whose whole payload is a reference to another file, or from a missing file is a schema error. A name the target does not define is `SchemaError::UnknownNamedType`, naming the type, the schema searched, and the property that holds the reference.
 - **Every constraint of the definition survives the reference**, including `required` and `generated`. An inherited `required` keeps its scope: on `people: person[]` it makes `people` required, and inside one arm of a property-level union it is hoisted to the property like any arm's `required`. Requiring a field *inside* an object type does not require the property that holds the object.
-- Expansion is **eager, bounded, and cycle-checked**. A named type may refer back to itself, directly or through other named types in the same or other files, as long as every cycle passes through a child value; see [Recursive Named Types](#recursive-named-types). A type that does not recurse is inlined at each use, so its JSON Schema is unchanged. A chain of non-repeating references deeper than 32 is rejected (`SchemaError::ImportCycle`) — the same protection as the inline-object nesting cap.
+- Expansion is **eager, bounded, and cycle-checked**. A named type may refer back to itself, directly or through other named types in the same or other files, as long as every cycle passes through a child value; see [Recursive Named Types](#recursive-named-types). A type that does not recurse is either copied into each use or, when it is structured and used from two or more places, stored once and referenced (see [Shared Named Types](#shared-named-types)); either way it accepts and rejects the same values. A chain of non-repeating references deeper than 32 is rejected (`SchemaError::ImportCycle`) — the same protection as the inline-object nesting cap.
 - Each import of another file is a **dependency edge** recorded on the resolved schema (`ResolvedSchema.imports`) so the schema cache and DMLS index can invalidate when an imported file changes. A local reference adds no edge.
 - An inherited `example(...)` reference resolves from the file that declared it, not from the importing schema.
 - `to_json_schema` rejects any unresolved import that reaches conversion, exactly as it rejects unresolved root-union file arms — imports are always expanded by the resolver first.
@@ -1412,9 +1414,11 @@ $schema:
 `primary` is required, while `backup` remains optional. Neither use changes
 `name` in the library. A reference written inside an imported definition reads
 that definition's own file for `@this` and bare local names, even if the root
-document declares a type with the same name. Recursive types share their
-compiled bodies as described in [Recursive Named Types](#recursive-named-types);
-use-site modifiers still do not mutate those bodies.
+document declares a type with the same name. Recursive types and repeated
+structured types share their compiled bodies as described in
+[Recursive Named Types](#recursive-named-types) and
+[Shared Named Types](#shared-named-types); use-site modifiers still do not
+mutate those bodies.
 
 There are two cache lifetimes. The expansion's namespace cache ends with that
 operation. Separately, a bounded cache in the running process retains parsed
@@ -1547,18 +1551,72 @@ The rules in detail:
   type does not accept is rejected, as on any property.
 
 A `ConstraintConflict` names the property, the kind of conflict (`Bounds`,
-`Scheme`, or `Default`), and every declaration involved as a
-`SchemaConstraintOrigin`: its source (a file or the inline document), path,
-keyword, and, for a file, the byte span of the constraint. In a multi-hop
-chain each origin points at the declaration that introduced the value. When
-the conflict arises inside a schema the document references,
+`Scheme`, `Default`, or `Options`), and every declaration involved as a
+`SchemaConstraintParticipant`, in merge order (inherited first). Each
+participant has two fields:
+
+- `origin: SchemaConstraintOrigin`: where the constraint was declared: its
+  source (a file or the inline document), path, keyword, occurrence, and, for
+  a file, the byte span of the constraint. In a multi-hop chain the origin
+  points at the declaration that introduced the value.
+- `constraint: Constraint`: the complete value that took part in the conflict.
+
+With `label: string(min(10))` in `./types.yaml` and
+`title: label(max(5))@./types.yaml` in the document, the error reads:
+
+```text
+title: contradictory bounds on named type `label`: `min(10)` in `./types.yaml` and `max(5)` in the inline `$schema`
+```
+
+The terminal status block lists the same values, one line per participant
+(`` `min(10)` at label in ./types.yaml ``), and DMLS relates each declaration
+as `` `max(5)` is declared here `` (see
+[DMLS Schema Support](./dmls-schema-support.md#named-type-references)).
+
+Which value a participant holds depends on the kind:
+
+| Kind | Participant values |
+|---|---|
+| `Bounds` | the surviving (strictest) bound of each side, such as `min(10)` and `max(5)`; equal bounds keep the first origin |
+| `Default` | each `default(…)` as declared, keeping its JSON type: `default('3')` and `default(3)` are different values, as are `default('null')` and `default(null)` |
+| `Options` | the named type's option set and the use site's, such as `alphanumeric(allow-dashes)` and `alphanumeric(allow-periods)` |
+| `Scheme` | the inherited scheme list as it stood just before the failing intersection, and the use site's list |
+
+Two values need care when you read them:
+
+- **Effective schemes.** An inherited scheme list can already have been
+  narrowed by earlier, successful merges. With `link: url(scheme(http, https))`
+  and the use `narrow: link(scheme(https, ftp); scheme(ftp))`, the first
+  intersection leaves `https` and the second is empty. The inherited
+  participant is `scheme(https)`, even though its origin still points at the
+  `scheme(http, https)` declaration that introduced the group.
+  The value is the effective constraint at the failing merge, not the
+  authored text, and DMLS words every scheme participant that way.
+- **Empty options.** A named type declared as bare `alphanumeric` takes part
+  as `Constraint::Options` with an empty set, rendered `alphanumeric`. It
+  has no option token, so its origin has no span and points at the type's
+  declaration instead.
+
+Messages never format values by hand. Each one is
+`Constraint::diagnostic_excerpt()`: the constraint's canonical schema text
+(`Constraint::to_schema_text(None)`), with line breaks, tabs, and other
+control characters escaped (`\n`, `\t`, `\u{1b}`), shortened to at most 160
+Unicode scalar values including a final `…`. The same excerpt appears in
+`Display`, the terminal block, and DMLS, always inside a code span, so schema
+text cannot become terminal markup. Paths and sources are not part of the
+limit, and the structured `constraint` keeps the full value. A compound
+default that only Rust code can build, such as an object, is rendered as
+compact JSON (`default({"a":1})`); that is a diagnostic spelling, not schema
+grammar.
+
+When the conflict arises inside a schema the document references,
 `SchemaError::ReferencedSchema` wraps it.
 
 The same contradictions on a single atom, with no reuse involved, are errors
 too: `string(min(10); max(5))`, `url(scheme(http); scheme(ftp))`, and two
 different defaults are each a `SchemaError::Convert` naming the property.
 
-Because a named type can be *any* definition and `@` inlines it, composition (named types + `@` + `[]` + unions + pattern keys) **is** the type system — SimplifiedSchema's ergonomic answer to JSON Schema `$ref` / `$defs`.
+Because a named type can be *any* definition and `@` substitutes it, composition (named types + `@` + `[]` + unions + pattern keys) **is** the type system — SimplifiedSchema's ergonomic answer to JSON Schema `$ref` / `$defs`.
 
 ### Recursive Named Types
 
@@ -1586,9 +1644,10 @@ that needs a nesting limit enforces it in its own parser.
 
 This describes finite values, not unlimited resources. Existing parser and
 conversion limits still apply, and exhausting a traversal limit is an error;
-it never makes an unchecked remainder valid. Acyclic named types continue to
-be inlined, so recursion removes repeated copies of cyclic bodies without
-promising compact output for every possible schema.
+it never makes an unchecked remainder valid. Recursion stores each cyclic body
+once; a type outside any cycle follows the rules in
+[Shared Named Types](#shared-named-types). Neither promises compact output for
+every possible schema.
 
 #### Supported cycles
 
@@ -1642,7 +1701,7 @@ flowchart TD
     N --> C
     C -->|yes| E["SchemaError::NonDescendingCycle<br/>names each reference of that cycle"]
     C -->|"no, but the types form a cycle"| R["stored once in the root $defs;<br/>every use becomes a $ref"]
-    C -->|no cycle at all| I[inlined at each use, as before]
+    C -->|no cycle at all| I["copied into each use, or shared<br/>(see Shared Named Types)"]
 ```
 
 So a group holding a good cycle and a bad one reports only the bad one.
@@ -1734,8 +1793,10 @@ are the same on every run, and never contain a file path.
   the merged root, and a key two of them share with different bodies is
   renamed in the schema that joins (`item` becomes `item-2`) along with that
   schema's own references, so a reference never binds to another layer's
-  type. A raw JSON Schema baseline or trigger payload stays a simple object
-  schema with no root `$ref` or root union; see
+  type. A key two of them share with an equal body is kept once. Shared
+  acyclic definitions (see [Shared Named Types](#shared-named-types)) merge by
+  the same rules. A raw JSON Schema baseline or trigger payload stays a simple
+  object schema with no root `$ref` or root union; see
   [JSON Schema Baseline Restrictions](#json-schema-baseline-restrictions).
 - **Function types** are still not allowed anywhere a document schema can
   reach: a `function(...)` property inside a recursive definition is a
@@ -1747,6 +1808,199 @@ are the same on every run, and never contain a file path.
   [Completing inside a union value](#completing-inside-a-union-value) for the
   library API and [DMLS Schema Support](./dmls-schema-support.md) for the
   editor.
+
+### Shared Named Types
+
+A structured named type that a schema uses in two or more places is stored
+once in the generated JSON Schema, and each use points to it, even when the
+type never refers back to itself. This keeps a schema that reuses large
+objects or unions from growing with every reference. It is automatic: there is
+no syntax to request or prevent it, and it never changes which values a schema
+accepts, where an error is reported, or what an editor offers. Only the shape
+of the JSON Schema changes, which matters if you read `md schema` output or a
+resolved schema's JSON directly.
+
+```yaml
+# types.yaml
+kind: schema
+types:
+    contact: "{ name: string(required), email: email }"
+    slug: alphanumeric(allow-dashes)
+```
+
+```yaml
+$schema:
+    author:   contact@./types.yaml              # stored once, referenced here
+    reviewer: contact(required)@./types.yaml    # ... and here
+    handle:   slug(min(3))@./types.yaml         # copied: a primitive alias
+    nickname: slug@./types.yaml                 # copied
+```
+
+`contact` is an object used twice, so its body appears once under the root
+`$defs` and both properties refer to it. Each use keeps its own presence,
+description, and added bounds beside the reference, exactly as for a
+[recursive type](#definitions-and-use-sites): `reviewer` is required, while
+`author` is optional and wraps its reference with a `null` arm.
+`slug` is a primitive alias, so each use is copied and stays flat and readable
+with its own narrowing (`minLength: 3` on `handle` only):
+
+```json
+{
+  "properties": {
+    "author":   { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/contact" }] },
+    "reviewer": { "$ref": "#/$defs/contact" },
+    "handle":   { "type": "string", "minLength": 3, "pattern": "…" },
+    "nickname": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "…" }] }
+  },
+  "required": ["reviewer"],
+  "$defs": { "contact": { "type": "object", "properties": { … }, "required": ["name"] } }
+}
+```
+
+#### Which types are shared
+
+A named type outside any reference cycle is shared when **both** hold:
+
+1. **Its value is structured.** Arrays and unions are judged by what they
+   contain, and an alias by the type it names.
+
+   | Shared | Never shared |
+   |---|---|
+   | an object, such as `"{ name: string }"` | a primitive or primitive alias: `alphanumeric(allow-dashes)`, `string(min(3))` |
+   | a pattern-key dictionary (`<string>: number`) | a list of primitives: `string[]` |
+   | a tuple: `tuple([string, number])` | a union of primitives only: `[string, number]`, and a list of one |
+   | a list of structured items: `"{ n: string }[]"` | a `function(...)` signature |
+   | a union with at least one structured arm: `["{ n: string }", number]` | |
+
+2. **Two or more distinct authored references reach it** (see
+   [Counting uses](#counting-uses)).
+
+Some structured types are still never shared, because what they mean depends
+on the place that uses them and a reference beside an unchanged body could not
+carry it:
+
+- a type whose top level admits `null`, such as `[null, "{ n: string }"]`, or
+  carries `operands(...)` or `deferred`;
+- a union whose arms carry `required`, `generated`, `default(...)`, or
+  `suggest(...)`, admit `null`, include a `file` arm (a list of files is
+  fine), or refer to a recursive type.
+
+A `file(match(...))` in the body does not stop sharing. Its glob keeps
+suggesting at every use, also in a [root union](#files) arm, where only a
+recursive type's globs are enforced.
+
+[Global catalog](#the-built-in-baseline) declarations, the built-in baseline
+`fm` among them, follow the same rules: a type a declaration uses at two or
+more sites is stored once in that declaration's definition table. The
+lifecycle stacks `composed`, `failed`, `cancelled`, and `finalize` of the
+built-in baseline all use `md-stack`, so it is stored once and referenced four
+times.
+
+#### Counting uses
+
+A use is one reference written in a schema file or inline `$schema`,
+identified by where it is written and the type it names:
+
+- **Two places that write the reference count twice**, whether both are
+  properties (`author` and `reviewer` above), two references inside one type's
+  body, or two aliases of the type.
+- **A reference inside another type counts once**, however often that type is
+  used. With `team: "{ lead: contact }"` used by three properties, `contact`
+  has one use from `team`'s body; `team` itself has three.
+- **Unused declarations and callable signatures count for nothing.** A library
+  type no reference reaches, and a type named only inside a `function(...)`
+  signature, add no uses.
+- **A type is its file plus its name.** `entry@./a.yaml` and `entry@./b.yaml`
+  are two different types with one use each, so neither is shared. Two
+  spellings of one file (`entry@./a.yaml` and `entry@a.yaml`) name the same
+  type, so it has two uses and is shared. Each inline arm of a root union is
+  its own namespace.
+- **Counts belong to one resolution.** The baseline, each trigger payload, and
+  the document's `$schema` are resolved separately and never pool their uses.
+  Two triggers that each import `contact` once do not share it, even when both
+  apply to the same document.
+
+#### When one use is copied instead
+
+Being shared is decided once per type. Each use then keeps the reference only
+when the reference plus the use's own additions behaves exactly as a copy
+would; otherwise that one use is copied, and the other uses stay references.
+The schema stays exactly as valid or as invalid as before: a contradictory
+constraint is still a `SchemaError::ConstraintConflict`, never turned into a
+copy to make it pass.
+
+A use keeps its reference when it adds only presence and annotation markers
+(`required`, `generated`, `eager`, `default(...)`, `example(...)`, a
+description) and, on an object, `min-keys`/`max-keys`, or on a list,
+`min`/`max`/`unique`. A use is copied when it:
+
+- adds `suggest(...)` or any other value constraint;
+- adds `uncounted-keys(...)` that changes how the body's own key bounds count;
+- is an arm of a union and either carries a postfix or names a union, a list,
+  or a type with presence markers. Copying keeps the enclosing union's
+  alternatives one flat list, with markers hoisted as usual (see
+  [Named Union References](#named-union-references));
+- names an alias of a shared type with a postfix the reference cannot carry.
+  The whole alias chain down to the body is copied.
+
+Key exclusion shows why a reference cannot always stand in for a copy. In a
+type library:
+
+```yaml
+# types.yaml
+kind: schema
+types:
+    entry: "{ value: string, note: string }(max-keys(1))"
+```
+
+```yaml
+$schema:
+    ordinary:  entry@./types.yaml
+    annotated: entry(uncounted-keys(note))@./types.yaml
+```
+
+| Value | `ordinary` | `annotated` |
+|---|---|---|
+| `{ value: v }` | valid | valid |
+| `{ value: v, note: n }` | invalid: two keys, above `max-keys(1)` | valid: `note` is not counted |
+
+Copied, `annotated` merges its `uncounted-keys(note)` with the inherited
+`max-keys(1)` into one count. A reference cannot: the stored body keeps
+counting `note`, and a sibling constraint cannot loosen a bound inside the
+definition. So `annotated` is copied and `ordinary` stays a reference. Had the
+body already declared `uncounted-keys(note)`, the same use would keep its
+reference.
+
+```mermaid
+flowchart TD
+    T["named type"] --> C{"member of a<br/>reference cycle?"}
+    C -- yes --> R["stored: recursive rules"]
+    C -- no --> S{"structured value, eligible,<br/>and two or more authored uses?"}
+    S -- no --> I["copied into every use"]
+    S -- yes --> D["selected for storage"]
+    D --> U{"for each use: does a reference<br/>plus this use's additions<br/>behave exactly like a copy?"}
+    U -- yes --> REF["$ref to the stored body"]
+    U -- no --> CP["this use copied;<br/>the others keep their $ref"]
+```
+
+#### What the output looks like
+
+- Shared bodies sit in the root `$defs` beside recursive ones. Keys follow the
+  type name (`contact`, then `contact-2` for a different `contact`), are the
+  same on every run, and never contain a file path.
+- A body is emitted only if some surviving reference reaches it. When every
+  use of a selected type is copied, the schema has no `$defs` entry for it.
+- Validation, phases, conversion, and editors follow a shared reference as
+  they follow a recursive one (see
+  [Where recursive types reach](#where-recursive-types-reach)), so problem
+  codes, document paths, and line and column positions are those of the copy.
+  Only internal JSON Schema keyword paths can move into `$defs`.
+- Merged layers keep their own `$defs`: an equal body under the same key is
+  kept once, and a different body is renamed with the references that layer
+  wrote. Two layers that each store the same imported type therefore end up
+  with one body.
+- The 32-level import-chain limit applies exactly as for copied types, so
+  sharing never makes a rejected chain valid.
 
 ### Pattern / Dictionary Keys
 
@@ -2564,10 +2818,21 @@ on disk:
 - an embedded document is never a file dependency, so DMLS never watches it
   and `EffectiveSchema::dependencies()` does not list it;
 - the baseline is prepared and lowered to JSON Schema once per process and
-  shared by every caller.
+  shared by every caller;
+- a structured type the baseline uses at two or more sites is
+  [stored once](#shared-named-types) under the lowered schema's root
+  `$defs`. When a document schema or trigger payload is merged over the
+  baseline, those definitions join the merged root, with
+  [the merge's key rules](#merge-semantics-baseline--document), and a
+  definition only overridden properties reached is dropped.
+
+`darkmatter_base_schema()` is the one definition-free form: it returns the
+baseline with every acyclic type expanded at each use, for callers that read
+a `SimplifiedSchema` without a definition table. It accepts exactly what the
+lowered baseline accepts.
 
 Resolving the authored `darkmatter.yaml` from a checkout with the ordinary
-disk resolver gives the same typed schema and the same JSON Schema.
+disk resolver gives the same JSON Schema.
 
 ### Lifecycle Event Typing
 
@@ -2855,7 +3120,7 @@ Those definitions move to the merged root, so the baseline's references must kee
 - Properties present only in the baseline remain in the effective schema.
 - Properties present only in the document are added.
 - For root unions, the baseline is merged into each arm independently.
-- The baseline's `$defs` join the document's root `$defs` (the root of a root union, never an arm). The document's keys and references never change. A baseline key the document also uses is shared when both hold the same body and renamed (`item-2`) otherwise, together with every baseline reference to it; literal data that only looks like a reference (`const`, `enum`, `default`, `examples`, and extension annotations) is left byte-for-byte. A root-union arm that declares its own `$id` cannot receive a baseline with `$defs` (`SchemaError::UnsupportedMergeReference`), since references inside it would resolve in that arm.
+- The baseline's `$defs` join the document's root `$defs` (the root of a root union, never an arm). Only the definitions a copied baseline property reaches join; one reached only from properties the document replaces is dropped. The document's keys and references never change. A baseline key the document also uses is shared when both hold the same body and renamed (`item-2`) otherwise, together with every baseline reference to it; literal data that only looks like a reference (`const`, `enum`, `default`, `examples`, and extension annotations) is left byte-for-byte. A root-union arm that declares its own `$id` cannot receive a baseline with `$defs` (`SchemaError::UnsupportedMergeReference`), since references inside it would resolve in that arm.
 
 This semantics is chosen because per-constraint merging produces surprising results (e.g. a baseline `min(5)` silently shadowing a document `min(3)`).
 
@@ -3633,12 +3898,98 @@ Detection is passive: it derives the supplied context to each document and never
 - `lint_suggestions(&SimplifiedSchema)` — check every `suggest(...)` candidate against its target schema; returns `Vec<SuggestionLintProblem>` (never a `SchemaError` for an invalid candidate).
 - `suggestions_for_path(&SimplifiedSchema, &[&str])` — query lint-valid completion candidates for a property path; returns `Option<SuggestionQuery>` with YAML-safe insertion text.
 - `parse_standalone_schema_document(&str, path)` — classify and parse a standalone YAML file as a SimplifiedSchema authoring document; returns `Option<StandaloneSchemaDocument>` (`None` for ordinary YAML / raw JSON Schema).
-- `darkmatter_base_schema()` — the Darkmatter base frontmatter schema (the global catalog's `fm`, authored in `schemas/partials/fm.yaml` and compiled in with the schemas it imports; see [The Built-in Baseline](#the-built-in-baseline)) as a `SimplifiedSchema`.
-- `darkmatter_base_json_schema()` — the same base schema compiled to an independently owned Draft 2020-12 JSON Schema value.
+- `darkmatter_base_schema()` — the Darkmatter base frontmatter schema (the global catalog's `fm`, authored in `schemas/partials/fm.yaml` and compiled in with the schemas it imports; see [The Built-in Baseline](#the-built-in-baseline)) as a `SimplifiedSchema` with no definition table: every acyclic type is expanded at each use.
+- `darkmatter_base_json_schema()` — the same base schema compiled to an independently owned Draft 2020-12 JSON Schema value, each repeated structured type stored once under its root `$defs`.
+- `GlobalCatalog::baseline()` — a catalog's `fm` as a `SimplifiedSchema` with the definition table its references point into; lower the pair with `to_json_schema_with_definitions`.
 - `darkmatter_base_json_schema_ref()` — a read-only borrow of the process-cached JSON Schema, avoiding a deep clone.
 
 Use `DarkmatterSchemas::with_darkmatter_baseline_json_schema()` when configuring
 the built-in baseline; each configured instance shares the cached JSON Schema.
+
+### Source-Aware Parsing and Located Failures
+
+An editor or linter that underlines a schema error needs to know *where* the
+rejected text was written, not just what was wrong. Three passive functions
+return that location along with the semantic error. None of them reads a
+file, resolves an import, or evaluates anything.
+
+| Function | Input | Success | Failure |
+|---|---|---|---|
+| `parse_property_definition_with_source(property, &value, yaml_source, source_offset)` | one property definition | `SourceAware<PropertyDef>` | `LocatedDefinitionFailure` |
+| `parse_schema_declaration_with_source(&value, yaml_source, source_offset)` | one whole declaration, such as a frontmatter `$schema` value | `SourceAware<SchemaDeclaration>` | `LocatedDefinitionFailure` |
+| `locate_standalone_definition_failure(source)` | a whole standalone schema file | — | `Option<LocatedDefinitionFailure>` |
+
+A successful `SourceAware<T>` holds the same `value` the source-free parser
+returns and a `source_map` of authored byte ranges. The source-free parsers
+(`parse_property_definition`, `parse_schema_declaration`, `parse_yaml_schema`)
+still return `Result<_, SchemaError>` with the same variants and messages.
+
+A failure carries four fields:
+
+```rust
+pub struct LocatedDefinitionFailure {
+    pub path: SchemaSourcePath,              // the rejected node
+    pub error: Box<SchemaError>,             // what the source-free parser reports
+    pub authored_span: Option<Range<usize>>, // the rejected token
+    pub value_span: Option<Range<usize>>,    // the whole rejected value
+}
+```
+
+For example:
+
+```rust
+let source = "tags:\n  - string\n  - string(min(nope))\n";
+let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(source)?;
+let failure = parse_schema_declaration_with_source(&value, source, 0).unwrap_err();
+assert_eq!(failure.path, SchemaSourcePath::root().property("tags").union_arm(1));
+assert_eq!(&source[failure.authored_span.unwrap()], "nope");
+```
+
+- **`path`** is structural, never rebuilt from a message. Mapping keys are
+  literal (`"a.b"` is one key), and sequence members, including root-union
+  arms, are zero-based `union_arm` indexes. A property call starts at that
+  definition, a declaration call at the declaration, and the standalone
+  helper at the envelope, so its paths begin with `types` or `$schema`.
+- **The node that introduced the violation is the one reported.** In
+  `color: [string(suggest(red)), string(suggest(blue))]` each arm is valid
+  alone, but a property allows one `suggest`; the failure is
+  `color[1]` with its token at `blue`.
+- **Ranges are UTF-8 byte offsets into the caller's document**, with
+  `source_offset` added once. A DMLS client converts them to its negotiated
+  position encoding.
+- **`authored_span` is `None`** when the failure has no token (an empty union
+  `tags: []`, a wrong-type arm `tags: [string, 7]`, an aliased value), when
+  the presentation is outside the
+  [source-aware boundary](#source-aware-presentation-boundary) (such as a
+  quoted scalar continued across lines anywhere in the document), or when the
+  authored text does not decode to the parsed value. `value_span` is then the
+  rejected value when that can still be located, and `None` otherwise. The
+  `error` is always returned; a missing location never hides it.
+- **A successful semantic parse whose source cannot be projected** returns
+  the projection error at the root path with no ranges.
+
+`locate_standalone_definition_failure` recognizes a file exactly as
+`parse_standalone_schema_document` does (a pure `$schema` envelope or a
+`kind: schema` document with `types`). It returns the first definition
+failure in parser order, including one inside a pure root-union mapping arm
+(`$schema[1].b`). It returns `None` for a valid file, ordinary YAML, invalid
+YAML, a global catalog, and every envelope or declaration-shape error, which
+`parse_standalone_schema_document` reports as before inside
+`SchemaError::SchemaDocument`.
+
+For partial input, where no document parses yet, two helpers read a plain
+scalar the way YAML folds it:
+
+- `decode_plain_scalar_node(source, start, parent_indent)` decodes the plain
+  scalar whose node starts at `start`, after any same-line anchor or tag,
+  and returns its decoded map and end offset. It returns `None` for a quoted
+  or block scalar, a collection, an alias, a comment, an empty value, and an
+  anchor whose scalar starts on a later line.
+- `locate_type_definition_cursor_in_scalar(source, &scalar, cursor)` and
+  `locate_schema_declaration_cursor_in_scalar(source, &scalar, cursor)` are
+  the cursor parsers over that decoded scalar. An anchor or tag never enters
+  the reported token. The cursor must sit inside the scalar, at its end, or
+  after trailing spaces or tabs on its last line.
 
 ### Span-Aware Validation and Normalization
 
@@ -3757,7 +4108,7 @@ Editors that complete inside one value of a union — typically an element of a 
 - `completion::alternatives_for_def(&def, site, &value)` — the same answer for a `PropertyDef` the caller already resolved.
 - `completion::for_path(&effective, &frontmatter, &[PathStep::Key("tree"), PathStep::Key("children"), PathStep::Index(0)])` — the same answer at any depth, following a recursive type one level per path step; `completion::def_at_path(…)` returns the declaration there, for hover.
 
-Below a recursive type, lookup opens only the definitions on the cursor's path, so an unused recursive descendant is never expanded. An element not authored yet, or an object still missing its required keys, still offers the keys for the next insertion:
+Below a recursive or [shared](#shared-named-types) type, lookup opens only the definitions on the cursor's path, so an unused descendant is never expanded. An element not authored yet, or an object still missing its required keys, still offers the keys for the next insertion:
 
 ```yaml
 types:
@@ -3771,7 +4122,7 @@ tree: item(required)
 | `tree.children[0]` (any depth)     | `value`, `children`   |
 | `tree.children[3]`, not yet written | `value`, `children`  |
 
-The `*_in` variants (`alternatives_for_def_in`, `alternative_accepts_in`) take a `DefinitionLookup` (an `EffectiveSchema` or a `DefinitionTable`); a reference whose definition is missing offers nothing. Without a lookup, `alternative_accepts` treats a recursive reference as accepting nothing.
+The `*_in` variants (`alternatives_for_def_in`, `alternative_accepts_in`) take a `DefinitionLookup` (an `EffectiveSchema` or a `DefinitionTable`); a reference whose definition is missing offers nothing. Without a lookup, `alternative_accepts` treats a reference to a stored (recursive or shared) definition as accepting nothing.
 
 To judge many values against one alternative, prepare it once: `AlternativeMatcher::prepare(atom, &definitions)` lowers the alternative and fetches or compiles its validator, and `matcher.accepts(&value)` gives the same answer `alternative_accepts_in` does. `alternative_fingerprint(atom, &definitions)` identifies an alternative by content, including every definition it reaches, so an editor can keep prepared matchers across schema assemblies: equal fingerprints prepare the same matcher. It builds no schema, is `None` when a reached definition is missing, and is stable within one process only.
 
@@ -3828,7 +4179,7 @@ All failure modes are variants of `SchemaError`:
 | `UnresolvedReference`   | A local `$ref` names no definition in the schema it was written in, or a chain of references never reaches a schema. Carries the schema's label, the reference, and its JSON Pointer location. |
 | `UnsupportedMergeReference` | A schema joined at a merge (a baseline or a root-union arm; a trigger payload reports it inside `TriggerPayloadNotMergeable`) uses a reference form whose meaning would change at the merged root (`$id`, an anchor, a dynamic or external reference, or a local reference outside `#/$defs/…`). See [JSON Schema Baseline Restrictions](#json-schema-baseline-restrictions). |
 | `UnknownNamedType`      | A named-type reference names a type its schema does not define. Carries the name, the schema searched (`SchemaSourceId`), and the reference site (`SchemaReferenceSite`). |
-| `ConstraintConflict`    | Constraints merged onto a reused named type contradict each other (`Bounds`, `Scheme`, `Default`, or `Options` for a different `alphanumeric` option set). Carries every conflicting declaration as a `SchemaConstraintOrigin`. See [Merging use-site constraints](#merging-use-site-constraints). |
+| `ConstraintConflict`    | Constraints merged onto a reused named type contradict each other (`Bounds`, `Scheme`, `Default`, or `Options` for a different `alphanumeric` option set). Carries every conflicting declaration as a `SchemaConstraintParticipant`: its `origin` (a `SchemaConstraintOrigin`) and the `constraint` value that took part. See [Merging use-site constraints](#merging-use-site-constraints). |
 | `UnionReference`        | A reference to a union-typed named type adds something it cannot take. Carries the name, the `SchemaUnionRejection` (`Constraint`, `ArrayArm`, or `ScalarDefault`), the reference site, and the union's definition site. See [Named Union References](#named-union-references). |
 | `InvalidExample`        | An `example(...)` file is malformed or fails validation against the example envelope or inherited target shape. |
 | `BuildValidator`        | `jsonschema` could not build a validator from the produced schema.                                        |
@@ -3932,7 +4283,7 @@ written. See [Selecting the Baseline](#selecting-the-baseline).
 ## Limitations (v1)
 
 - **No remote `$schema`.** Download referenced schemas locally for now.
-- **No authored `$ref`.** Reuse a definition through [named types](#cross-file-named-type-imports-namefile). Non-recursive named types are inlined at each use site; [recursive ones](#recursive-named-types) lower to generated `$ref`s into the root `$defs`.
+- **No authored `$ref`.** Reuse a definition through [named types](#cross-file-named-type-imports-namefile). [Recursive](#recursive-named-types) and [repeated structured](#shared-named-types) named types lower to generated `$ref`s into the root `$defs`; every other use is copied in place. Which types are stored is decided automatically and cannot be requested or prevented.
 - **No `lenient` opt-out for inline object `additionalProperties: false`.** Every inline object rejects extra keys. Authors who want looser object typing should drop down to the opaque `object` type, which preserves the root-schema `additionalProperties: true` behavior.
 - **Hard 32-level inline object nesting cap.** The parser rejects deeper nesting with `SchemaError::Grammar`. Use a [recursive named type](#recursive-named-types) for repeating structures, or reference a JSON Schema file for deeper typing.
 - **No inline object detection.** `md schema detect` continues to emit `object` for object-typed values; inline object schemas must be hand-written.

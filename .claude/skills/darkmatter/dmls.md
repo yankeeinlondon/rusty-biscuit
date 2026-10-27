@@ -428,6 +428,12 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   `RunOptions::with_clock` injects the clock. Never log text, frontmatter
   values, or payloads; `lsp_server`'s own debug trace already prints full
   payloads, so a leak test must scope to `dmls`/`darkmatter` records.
+- Log-assertion trap: `request_timing` logs a finished request as
+  `request complete` (DEBUG) below its threshold and `slow request` (WARN)
+  above it, and a loaded host crosses that threshold. A test that finds a
+  request's completion line must match both messages, never `matching("request
+  complete")` alone; likewise `validation_timing`'s `slow schema validation`
+  WARN appears only under load, so never compare a whole captured sequence.
 - Fixture traps: sniff recognizes a package only under a workspace manifest,
   and counts a declared member whose directory exists even without its own
   manifest. Inline `$schema` `file` is lazy (syntax only); use `file(eager)`
@@ -446,7 +452,10 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   hover and go-to-definition on bare, `@this`, and cross-file spellings;
   `UnknownNamedType`/`ConstraintConflict`/`NonDescendingCycle`/`ImportCycle`
   publish as `dm.schema.invalid_type_definition` on the reference's
-  `ImportName` span with conflict origins as `relatedInformation` (a
+  `ImportName` span with each conflict participant as `relatedInformation`
+  carrying its value (`` `max(5)` is declared here ``; see
+  [schema.md](schema.md) for the scheme wording and located grammar
+  failures, never re-derived by reparsing) (a
   non-descending cycle is ranged on the first cycle reference this document
   wrote; the others are related information). Standalone schema files
   resolve their references through `resolve::expand_named_types`. Imported
@@ -458,6 +467,11 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   Definition hover adds `schema_type_descriptor` text and, for
   `alphanumeric`, `PropertyAtom::alphanumeric_options()` with the
   `AsciiCharSet` `Display` rendering.
+- Frontmatter key hover on a stored definition (`$defs`, cyclic or shared
+  acyclic) whose body resolves to two or more alternatives lists them as the
+  inlined union did (`providers/frontmatter.rs::stored_union_type_line`);
+  any other stored reference renders "`X` is defined as". Hovering opens only
+  the top-level references of the hovered type.
 - Expression completion, hover, and parse diagnostics inside
   expression-typed frontmatter.
 - Hover/documentation from typed descriptor catalogs.
@@ -482,7 +496,13 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   `lifecycle_call_checks`, with the host's registry, for stack spans and
   expression-typed stack values alike. Without a usable artifact the stacks
   are md's and `dm.lifecycle.incomplete_analysis` names each catalog's
-  reason. DMLS never depends on a host crate; `md_host::` appears only in
+  reason. Discovery is lazy and stops at the first usable profile. A
+  combined diagnostics pass (`ProviderRegistry::diagnostics`) discovers the
+  host once, in its own panic boundary, and hands it to providers whose
+  `reads_lifecycle_host()` is true via `diagnostics_with_host`; a discovery
+  panic is logged as each such provider's panic and drops their diagnostics.
+  Standalone `diagnostics(ctx)`, hover, and completion discover for
+  themselves. DMLS never depends on a host crate; `md_host::` appears only in
   `event_views.rs` (the fallback and its tests). Completion offers only the
   globals the event may read; `err` where the event has none is
   `dm.expression.unavailable_global` (the view's reason, never `fm.err`).

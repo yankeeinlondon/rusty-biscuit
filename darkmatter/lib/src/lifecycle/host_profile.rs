@@ -68,7 +68,7 @@ use crate::markdown::compose::expression::host::artifact::{
     array, describe, nullable, object, parse_strict, reject_unknown, required, required_in, sorted, string,
 };
 use crate::markdown::compose::expression::{Availability, BindingView, ScopeId, UnavailabilityReason};
-use crate::markdown::schemas::catalog::GlobalCatalog;
+use crate::markdown::schemas::catalog::CatalogHandle;
 
 /// The artifact format this library writes and reads.
 pub const LIFECYCLE_ARTIFACT_FORMAT_VERSION: u64 = 1;
@@ -136,11 +136,11 @@ pub fn lifecycle_artifact(options: &LifecycleParseOptions<'_>, effect_names: &[&
         _ => Value::Null,
     };
     let host_globals: Vec<&str> =
-        registry.host_globals().iter().copied().filter(|name| !GENERIC_GLOBALS.contains(name)).collect();
-    let unknown_verbs = match options.unknown_verbs {
+        registry.host_globals().iter().map(AsRef::as_ref).filter(|name| !GENERIC_GLOBALS.contains(name)).collect();
+    let unknown_verbs = match &options.unknown_verbs {
         UnknownVerbPolicy::Reject => json!("reject"),
         UnknownVerbPolicy::Ignore => json!("ignore"),
-        UnknownVerbPolicy::IgnoreUnprovided(verbs) => json!({ "ignore_unprovided": verbs }),
+        UnknownVerbPolicy::IgnoreUnprovided(verbs) => json!({ "ignore_unprovided": verbs.iter().collect::<Vec<_>>() }),
     };
     let effects: BTreeSet<&str> = effect_names.iter().copied().filter(|name| (options.is_known_effect)(name)).collect();
     let root = json!({
@@ -230,7 +230,7 @@ impl HostLifecycleProfile {
         LifecycleParseOptions {
             is_known_effect: &*self.is_known_effect,
             authored,
-            unknown_verbs: self.unknown_verbs,
+            unknown_verbs: self.unknown_verbs.clone(),
             registry: &self.registry,
         }
     }
@@ -240,9 +240,9 @@ impl HostLifecycleProfile {
     /// globals with `catalog` when the host registered its catalog. Passive:
     /// nothing is run.
     ///
-    /// The late-global names and an `ignore_unprovided` verb list must be
-    /// `'static` for the registry, so they are leaked; a caller rebuilds a
-    /// profile once per distinct artifact.
+    /// The profile owns what it reads: its registry holds the catalog, the
+    /// late-global names, and the `ignore_unprovided` verbs, and releases
+    /// them when the last holder of the profile or registry drops.
     ///
     /// ## Errors
     ///
@@ -252,19 +252,19 @@ impl HostLifecycleProfile {
     /// records a registration the registry refuses (an outcome alternative
     /// with no event, a renamed fixed event, a reserved root, …).
     pub fn from_artifact(
-        catalog: &'static GlobalCatalog,
+        catalog: impl Into<CatalogHandle>,
         catalog_path: &Path,
         catalog_text: &str,
         artifact: FactsArtifact<'_>,
     ) -> Result<Self, String> {
         let file = format!("the lifecycle artifact `{}`", lifecycle_artifact_path(catalog_path).display());
-        read(catalog, catalog_text, artifact).map_err(|reason| format!("{file} {reason}"))
+        read(catalog.into(), catalog_text, artifact).map_err(|reason| format!("{file} {reason}"))
     }
 }
 
 // ── reader ──────────────────────────────────────────────────────────────────
 
-fn read(catalog: &'static GlobalCatalog, catalog_text: &str, artifact: FactsArtifact<'_>) -> Result<HostLifecycleProfile, String> {
+fn read(catalog: CatalogHandle, catalog_text: &str, artifact: FactsArtifact<'_>) -> Result<HostLifecycleProfile, String> {
     let text = match artifact {
         FactsArtifact::Text(text) => text,
         FactsArtifact::Absent => return Err("is absent".to_string()),
@@ -367,7 +367,7 @@ fn read(catalog: &'static GlobalCatalog, catalog_text: &str, artifact: FactsArti
 
     for (index, name) in array(required(&root, "host_globals")?, "host_globals")?.iter().enumerate() {
         let name = string(name, &format!("host_globals[{index}]"))?;
-        registry.declare_host_global(Box::leak(name.to_string().into_boxed_str())).map_err(refused)?;
+        registry.declare_host_global(name.to_string()).map_err(refused)?;
     }
     match required(&root, "global_catalog")? {
         Value::Bool(true) => registry.register_global_catalog(catalog).map_err(refused)?,
@@ -384,12 +384,9 @@ fn read(catalog: &'static GlobalCatalog, catalog_text: &str, artifact: FactsArti
             let verbs = array(required_in(policy, "ignore_unprovided", "unknown_verbs")?, "unknown_verbs.ignore_unprovided")?
                 .iter()
                 .enumerate()
-                .map(|(index, verb)| {
-                    string(verb, &format!("unknown_verbs.ignore_unprovided[{index}]"))
-                        .map(|verb| &*Box::leak(verb.to_string().into_boxed_str()))
-                })
-                .collect::<Result<Vec<&'static str>, String>>()?;
-            UnknownVerbPolicy::IgnoreUnprovided(Box::leak(verbs.into_boxed_slice()))
+                .map(|(index, verb)| string(verb, &format!("unknown_verbs.ignore_unprovided[{index}]")).map(str::to_string))
+                .collect::<Result<Vec<String>, String>>()?;
+            UnknownVerbPolicy::IgnoreUnprovided(verbs.into())
         }
         other => {
             return Err(format!(

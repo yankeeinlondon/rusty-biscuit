@@ -1,0 +1,423 @@
+ SimplifiedSchema Language Reference
+
+ A SimplifiedSchema describes the frontmatter a Markdown file expects. Put it
+ under [38;2;152;195;121m[48;2;40;44;52m$schema[0m to name required fields, allowed types, defaults, and simple
+ constraints. Darkmatter uses that schema when you run [38;2;152;195;121m[48;2;40;44;52mmd schema validate[0m and
+ during compose, so invalid frontmatter fails early and common string values
+ can be coerced before the page is rendered.
+
+ Use this as a quick authoring reference: what shapes are allowed, which type
+ keywords exist, which constraints can be attached, and what Darkmatter does
+ with values during compose.
+
+ Schema Shapes
+
+ A [38;2;152;195;121m[48;2;40;44;52m$schema[0m value can use any of these forms. Choose the simplest shape that
+ describes the frontmatter you expect.
+
+ - [1mSingle object.[0m Use this for the common case: property names mapped to type
+   expressions.
+   - Example: [38;2;152;195;121m[48;2;40;44;52mtitle: string(required)[0m
+ - [1mRoot-level union.[0m Use this when a document may follow one of several
+   schema alternatives.
+   - Example: [38;2;152;195;121m[48;2;40;44;52m- title: string\n- ./schemas/post.yaml[0m
+ - [1mProperty-level union.[0m Use this when one property may have one of several
+   allowed types.
+   - Example: [38;2;152;195;121m[48;2;40;44;52mdata: [string, "{ foo: string }"][0m
+ - [1mInline object literal.[0m Use this to validate a nested object without
+   creating a separate schema file.
+   - Example: [38;2;152;195;121m[48;2;40;44;52m{ foo: string(required), bar: number }[0m
+ - [1mNested mapping object.[0m Use a YAML mapping as a property value to declare a
+   nested object shape. Equivalent to the inline object literal for the
+   cases both forms can express; the mapping form additionally permits
+   sequence union arms without quoting.
+   - Example: [38;2;152;195;121m[48;2;40;44;52maddr:\n  street: string\n  zip: number[0m
+ - [1mArray of a named union.[0m Use this when every item of a list may be any one
+   of a named union type's alternatives. Each item must match at least one
+   alternative, and every alternative keeps its own constraints and
+   description. [38;2;152;195;121m[48;2;40;44;52mmin[0m, [38;2;152;195;121m[48;2;40;44;52mmax[0m, [38;2;152;195;121m[48;2;40;44;52munique[0m, [38;2;152;195;121m[48;2;40;44;52mrequired[0m, [38;2;152;195;121m[48;2;40;44;52mgenerated[0m, and [38;2;152;195;121m[48;2;40;44;52meager[0m after [38;2;152;195;121m[48;2;40;44;52m[][0m
+   apply to the list, and a [38;2;152;195;121m[48;2;40;44;52m->[0m description describes the list. [38;2;152;195;121m[48;2;40;44;52mrequired[0m,
+   [38;2;152;195;121m[48;2;40;44;52mgenerated[0m, and [38;2;152;195;121m[48;2;40;44;52meager[0m may also come before [38;2;152;195;121m[48;2;40;44;52m[][0m ([38;2;152;195;121m[48;2;40;44;52mstep(eager)[][0m) with the
+   same meaning; any other constraint there is rejected. A value constraint
+   such as [38;2;152;195;121m[48;2;40;44;52mpattern[0m is rejected rather than copied onto every alternative,
+   [38;2;152;195;121m[48;2;40;44;52m[][0m is rejected when an alternative is already a list, and [38;2;152;195;121m[48;2;40;44;52meager[0m on the
+   list never makes a lazy [38;2;152;195;121m[48;2;40;44;52mfile[0m alternative check existence. Give the union
+   a name first: an unnamed union cannot take [38;2;152;195;121m[48;2;40;44;52m[][0m.
+   - Example: [38;2;152;195;121m[48;2;40;44;52mstep: ["string -> A shell command", "{ run: string(required)[0m
+   [38;2;152;195;121;48;2;40;44;52m  }"]\nsteps: step[](min(1); unique) -> The steps to run[0m
+ - [1mMarked union reference.[0m Use this to mark a property typed by a named union
+   type as [38;2;152;195;121m[48;2;40;44;52mrequired[0m, [38;2;152;195;121m[48;2;40;44;52mgenerated[0m, or [38;2;152;195;121m[48;2;40;44;52meager[0m, or to describe it. The markers
+   and description apply to the property as a whole; the alternatives keep
+   their own descriptions. Any other constraint is rejected rather than
+   copied onto every alternative.
+   - Example: [38;2;152;195;121m[48;2;40;44;52mchoice: [string, number]\nanswer: choice(required) -> The[0m
+   [38;2;152;195;121;48;2;40;44;52m  chosen value[0m
+
+ Type System
+
+ ┌─────────────────┬──────────────────────────────┬──────────────────────────┐
+ │ Type            │ Meaning                      │ Constraints              │
+ ├─────────────────┼──────────────────────────────┼──────────────────────────┤
+ │ string          │ Text.                        │ eager, min, max,         │
+ │                 │                              │ not-empty, pattern,      │
+ │                 │                              │ suggest, default,        │
+ │                 │                              │ required, generated,     │
+ │                 │                              │ deferred                 │
+ │ date            │ ISO-8601 date (YYYY-MM-DD).  │ eager, default,          │
+ │                 │                              │ required, generated,     │
+ │                 │                              │ deferred                 │
+ │ datetime        │ ISO-8601 datetime; the       │ eager, default,          │
+ │                 │ timezone offset is optional. │ required, generated,     │
+ │                 │                              │ deferred                 │
+ │ time            │ Time of day with optional    │ eager, default,          │
+ │                 │ timezone.                    │ required, generated,     │
+ │                 │                              │ deferred                 │
+ │ number          │ A numeric value.             │ eager, min, max,         │
+ │                 │                              │ integer, suggest,        │
+ │                 │                              │ default, required,       │
+ │                 │                              │ generated, deferred      │
+ │ numberlike      │ A number, or text that       │ eager, default,          │
+ │                 │ reads as a number; kept      │ required, generated,     │
+ │                 │ exactly as written ("02134"  │ deferred                 │
+ │                 │ stays text).                 │                          │
+ │ boolean         │ A true or false value.       │ eager, default,          │
+ │                 │                              │ required, generated,     │
+ │                 │                              │ deferred                 │
+ │ boolish         │ A boolean, or a boolean      │ eager, default,          │
+ │                 │ word (yes, On, 0, any        │ required, generated,     │
+ │                 │ case); kept exactly as       │ deferred                 │
+ │                 │ written.                     │                          │
+ │ object          │ Any object shape. Use an     │ eager, default,          │
+ │                 │ inline object literal when   │ required, generated,     │
+ │                 │ you want to validate nested  │ deferred                 │
+ │                 │ fields.                      │                          │
+ │ file            │ A path-like file reference.  │ eager, match, default,   │
+ │                 │ Lazy by default (syntax-     │ required, generated,     │
+ │                 │ only); add eager to require  │ deferred                 │
+ │                 │ the file to exist. Use       │                          │
+ │                 │ match(...) to suggest        │                          │
+ │                 │ accepted paths.              │                          │
+ │ enum            │ Value must be one of the     │ <members>, eager,        │
+ │                 │ constraint-supplied members. │ default, required,       │
+ │                 │                              │ generated, deferred      │
+ │ url             │ Absolute URL.                │ eager, scheme, default,  │
+ │                 │                              │ required, generated,     │
+ │                 │                              │ deferred                 │
+ │ email           │ RFC 5322 addr-spec.          │ eager, default,          │
+ │                 │                              │ required, generated,     │
+ │                 │                              │ deferred                 │
+ │ literal         │ The value must equal         │ <value>, eager, default, │
+ │                 │ exactly one scalar of any    │ required, generated,     │
+ │                 │ scalar type. Bare            │ deferred                 │
+ │                 │ true/false types as          │                          │
+ │                 │ boolean, a bare numberlike   │                          │
+ │                 │ token as number, and quoted  │                          │
+ │                 │ or any other bare token as   │                          │
+ │                 │ string. Replaces the single- │                          │
+ │                 │ member enum and makes        │                          │
+ │                 │ discriminated unions first-  │                          │
+ │                 │ class. Coerces a document    │                          │
+ │                 │ value to the literal's       │                          │
+ │                 │ scalar type ("2" against     │                          │
+ │                 │ literal(2) → 2); string      │                          │
+ │                 │ literals never coerce.       │                          │
+ │ expression      │ A string that must parse     │ eager, default,          │
+ │                 │ under the Darkmatter         │ required, generated,     │
+ │                 │ expression grammar. Parse-   │ deferred                 │
+ │                 │ only and never evaluated —   │                          │
+ │                 │ the third content-format     │                          │
+ │                 │ string type alongside yaml   │                          │
+ │                 │ and json. Native             │                          │
+ │                 │ boolean/number values        │                          │
+ │                 │ coerce to their string       │                          │
+ │                 │ forms (true → "true");       │                          │
+ │                 │ mappings and sequences are   │                          │
+ │                 │ type mismatches.             │                          │
+ │ type-definition │ One complete                 │ default, required,       │
+ │                 │ SimplifiedSchema property    │ generated, deferred      │
+ │                 │ definition carried by a      │                          │
+ │                 │ YAML string, mapping, or     │                          │
+ │                 │ sequence. Parse-only and     │                          │
+ │                 │ side-effect-free; DMLS uses  │                          │
+ │                 │ it for schema-language       │                          │
+ │                 │ completion, hover, and       │                          │
+ │                 │ diagnostics.                 │                          │
+ │ schema          │ One complete $schema         │ default, required,       │
+ │                 │ declaration carried by a     │ generated, deferred      │
+ │                 │ YAML string, mapping, or     │                          │
+ │                 │ sequence. Parse-only and     │                          │
+ │                 │ side-effect-free; DMLS uses  │                          │
+ │                 │ it for declaration           │                          │
+ │                 │ completion, hover, and       │                          │
+ │                 │ diagnostics.                 │                          │
+ │ unknown         │ Every value, including       │ eager, default,          │
+ │ alias: any      │ null, or omission; required  │ required, generated,     │
+ │                 │ has no effect. any is an     │ deferred                 │
+ │                 │ equivalent alias; unknown    │                          │
+ │                 │ is the canonical spelling.   │                          │
+ │ null            │ Only an explicit null        │ eager, default,          │
+ │                 │ value, or omission;          │ required, generated,     │
+ │                 │ required has no effect.      │ deferred                 │
+ │                 │ Written unquoted (null, ~,   │                          │
+ │                 │ or an empty value) or as     │                          │
+ │                 │ the string "null" at a       │                          │
+ │                 │ property, union-arm, or      │                          │
+ │                 │ named-type position. A       │                          │
+ │                 │ default must be null.        │                          │
+ │ alphanumeric    │ A string of ASCII letters    │ <options>, min, max,     │
+ │                 │ and digits ([A-Za-z0-9]);    │ not-empty, pattern,      │
+ │                 │ no option is on by default.  │ suggest, eager, default, │
+ │                 │ Options written before the   │ required, generated,     │
+ │                 │ first ; widen or narrow the  │ deferred                 │
+ │                 │ character set and are part   │                          │
+ │                 │ of the type's identity;      │                          │
+ │                 │ redundant options are        │                          │
+ │                 │ dropped from its canonical   │                          │
+ │                 │ form.                        │                          │
+ │ shell           │ A string holding a shell     │ eager, default,          │
+ │                 │ command: at least one non-   │ required, generated,     │
+ │                 │ whitespace character.        │ deferred                 │
+ │                 │ Passive: never parsed as     │                          │
+ │                 │ shell syntax, approved, or   │                          │
+ │                 │ executed. Constraints,       │                          │
+ │                 │ coercion of native booleans  │                          │
+ │                 │ and numbers to text, and     │                          │
+ │                 │ pending-value deferral       │                          │
+ │                 │ mirror expression.           │                          │
+ └─────────────────┴──────────────────────────────┴──────────────────────────┘
+
+ Any of the above types can be made into an array by adding [38;2;152;195;121m[48;2;40;44;52m[][0m to the end of
+ the type:
+
+                                                                        [0m[48;2;250;250;250m[38;2;0;0;0m yaml [0m
+ [0m[48;2;250;250;250m                                                                             [0m
+ [0m[48;2;250;250;250m [38;2;228;86;73m$schema[38;2;56;58;66m:                                                                    [0m
+ [0m[48;2;250;250;250m [38;2;56;58;66m    [38;2;160;161;167m#[38;2;160;161;167m a string type                                                         [0m
+ [0m[48;2;250;250;250m [38;2;56;58;66m    [38;2;228;86;73mfoo[38;2;56;58;66m:[38;2;56;58;66m [38;2;80;161;79mstring                                                             [0m
+ [0m[48;2;250;250;250m [38;2;56;58;66m    [38;2;160;161;167m#[38;2;160;161;167m can be made into a string array                                       [0m
+ [0m[48;2;250;250;250m [38;2;56;58;66m    [38;2;228;86;73mbar[38;2;56;58;66m:[38;2;56;58;66m [38;2;80;161;79mstring[]                                                           [0m
+ [0m[48;2;250;250;250m                                                                             [0m
+
+ All types listed here, including those with the [38;2;152;195;121m[48;2;40;44;52m[][0m array modifier, can add
+ constraints to the type by putting parentheses after the type. Multiple
+ constraints are always delimited by the [38;2;152;195;121m[48;2;40;44;52m;[0m character. As an example:
+
+                                                                        [0m[48;2;250;250;250m[38;2;0;0;0m yaml [0m
+ [0m[48;2;250;250;250m                                                                             [0m
+ [0m[48;2;250;250;250m [38;2;228;86;73m$schema[38;2;56;58;66m:                                                                    [0m
+ [0m[48;2;250;250;250m [38;2;56;58;66m  [38;2;228;86;73mfoo[38;2;56;58;66m:[38;2;56;58;66m [38;2;80;161;79mstring(required)                                                     [0m
+ [0m[48;2;250;250;250m [38;2;56;58;66m  [38;2;228;86;73mbar[38;2;56;58;66m:[38;2;56;58;66m [38;2;80;161;79m"[38;2;80;161;79mnumber(required; min(0); max(10))[38;2;80;161;79m"                                  [0m
+ [0m[48;2;250;250;250m [38;2;56;58;66m  [38;2;228;86;73mbaz[38;2;56;58;66m:[38;2;56;58;66m [38;2;80;161;79m"[38;2;80;161;79mstring[](min(1))[38;2;80;161;79m"                                                   [0m
+ [0m[48;2;250;250;250m                                                                             [0m
+
+ In this example, constraints are added to a string, a number, and an array
+ of strings. The next section lists the available constraints.
+
+ [38;2;100;100;100m▐   [39m[1mNote:[0m the [3mvalues[0m in schemas must be valid YAML strings. In some cases
+ [38;2;100;100;100m▐   [39myou won't need to put single or double quotes around them, but you can
+ [38;2;100;100;100m▐   [39malways quote the string and then you don't need to think about it.
+
+ Type Options: alphanumeric
+
+ Options go before the first [38;2;152;195;121m[48;2;40;44;52m;[0m in [38;2;152;195;121m[48;2;40;44;52malphanumeric(...)[0m, separated by commas, and
+ are part of the type's identity; constraints follow the [38;2;152;195;121m[48;2;40;44;52m;[0m. For example
+ [38;2;152;195;121m[48;2;40;44;52malphanumeric(allow-dashes; min(1))[0m. An option that cannot change the
+ accepted values is redundant: the canonical form drops it, and options are
+ listed in the order below.
+
+ ┌──────────────────────┬────────────────────────────────────────────────┐
+ │ Option               │ Effect                                         │
+ ├──────────────────────┼────────────────────────────────────────────────┤
+ │ allow-dashes         │ Also allows -                                  │
+ │ allow-underscores    │ Also allows _                                  │
+ │ allow-slashes        │ Also allows /                                  │
+ │ allow-periods        │ Also allows .                                  │
+ │ allow-whitespace     │ Also allows the ASCII space character (U+0020) │
+ │ block-double-periods │ The value may not contain ..                   │
+ │                      │ - redundant without allow-periods              │
+ │ block-leading-dash   │ The first character may not be -               │
+ │                      │ - redundant without allow-dashes               │
+ │                      │ - redundant with leading-alpha                 │
+ │ block-leading-slash  │ The first character may not be /               │
+ │                      │ - redundant without allow-slashes              │
+ │                      │ - redundant with leading-alpha                 │
+ │ leading-alpha        │ The first character must be an ASCII letter    │
+ └──────────────────────┴────────────────────────────────────────────────┘
+
+ Constraint Vocabulary
+
+ Constraints go inside [38;2;152;195;121m[48;2;40;44;52m(...)[0m after a type, separated by commas or semicolons.
+ They narrow what a value may contain or provide metadata such as defaults.
+
+ ┌──────────────────────────┬──────────────────┬─────────────────────────────┐
+ │ Write                    │ Applies To       │ Meaning                     │
+ ├──────────────────────────┼──────────────────┼─────────────────────────────┤
+ │ required                 │ all types        │ The property must be        │
+ │                          │                  │ present.                    │
+ │ default(value)           │ all types        │ Provides the value to use   │
+ │                          │                  │ when the property is        │
+ │                          │                  │ absent.                     │
+ │ generated                │ all types        │ The value is supplied by    │
+ │                          │                  │ the host runtime (e.g.      │
+ │                          │                  │ Darkmatter context          │
+ │                          │                  │ capture), not authored in   │
+ │                          │                  │ static frontmatter.         │
+ │                          │                  │ Orthogonal to required,     │
+ │                          │                  │ which controls              │
+ │                          │                  │ type/nullability.           │
+ │ deferred                 │ all types        │ A value here that is a {{   │
+ │                          │                  │ … }} template is supplied   │
+ │                          │                  │ later, when the template    │
+ │                          │                  │ is rendered, so schema      │
+ │                          │                  │ validation accepts it       │
+ │                          │                  │ without judging it; every   │
+ │                          │                  │ literal value here is       │
+ │                          │                  │ still judged. Before [] it  │
+ │                          │                  │ marks each item, after []   │
+ │                          │                  │ the list. In a union a | b  │
+ │                          │                  │ it marks only the           │
+ │                          │                  │ alternative that carries    │
+ │                          │                  │ it.                         │
+ │ eager                    │ all types        │ Validates a supplied value  │
+ │                          │                  │ at stabilized launch.       │
+ │                          │                  │ Eager alone does not        │
+ │                          │                  │ require the property:       │
+ │                          │                  │ absence is allowed unless   │
+ │                          │                  │ required is also declared.  │
+ │                          │                  │ required; eager makes       │
+ │                          │                  │ presence mandatory at       │
+ │                          │                  │ launch. An eager file       │
+ │                          │                  │ value or item must resolve  │
+ │                          │                  │ to an existing file.        │
+ │ min(number)              │ string, number,  │ Sets a lower bound.         │
+ │                          │ array            │ - string: minimum length    │
+ │                          │                  │ - number: minimum value     │
+ │                          │                  │ - array: minimum item count │
+ │ max(number)              │ string, number,  │ Sets an upper bound.        │
+ │                          │ array            │ - string: maximum length    │
+ │                          │                  │ - number: maximum value     │
+ │                          │                  │ - array: maximum item count │
+ │ integer                  │ number           │ Restrict to integer values. │
+ │ not-empty                │ string           │ Disallow empty /            │
+ │                          │                  │ whitespace-only strings.    │
+ │ pattern(regex)           │ string           │ ECMA-262 regex the value    │
+ │                          │                  │ must match.                 │
+ │ enum(member, ...)        │ enum             │ Lists the allowed values.   │
+ │                          │                  │ At least one member is      │
+ │                          │                  │ required.                   │
+ │ literal(value)           │ literal          │ The single scalar value     │
+ │                          │                  │ the property must equal.    │
+ │                          │                  │ Typed like YAML: bare       │
+ │                          │                  │ true/false → boolean, bare  │
+ │                          │                  │ numberlike → number,        │
+ │                          │                  │ quoted or any other bare    │
+ │                          │                  │ token → string. Exactly     │
+ │                          │                  │ one value; use enum(...)    │
+ │                          │                  │ for a set.                  │
+ │ alphanumeric(opt, ...)   │ alphanumeric     │ The alphanumeric type       │
+ │                          │                  │ options, written before     │
+ │                          │                  │ the first ;: allow-dashes,  │
+ │                          │                  │ allow-underscores, allow-   │
+ │                          │                  │ slashes, allow-periods,     │
+ │                          │                  │ allow-whitespace, block-    │
+ │                          │                  │ double-periods, block-      │
+ │                          │                  │ leading-dash, block-        │
+ │                          │                  │ leading-slash, leading-     │
+ │                          │                  │ alpha. Options are part of  │
+ │                          │                  │ the type's identity; a      │
+ │                          │                  │ list without ; and without  │
+ │                          │                  │ an option keyword is        │
+ │                          │                  │ constraints only.           │
+ │ match(glob, ...)         │ file             │ Glob patterns that shape    │
+ │                          │                  │ file path suggestions       │
+ │                          │                  │ (completion). Patterns      │
+ │                          │                  │ starting with ! exclude.    │
+ │                          │                  │ In a root union, an         │
+ │                          │                  │ existing file outside a     │
+ │                          │                  │ simplified arm's declared   │
+ │                          │                  │ glob rules that arm out;    │
+ │                          │                  │ in a single schema the      │
+ │                          │                  │ glob only suggests.         │
+ │ scheme(http, https, ...) │ url              │ Allowed URL schemes         │
+ │                          │                  │ (lowercased).               │
+ │ suggest(value, ...)      │ string, number   │ Advisory completion         │
+ │                          │                  │ candidates for DMLS. Non-   │
+ │                          │                  │ validating: a document      │
+ │                          │                  │ value is valid when it      │
+ │                          │                  │ satisfies the underlying    │
+ │                          │                  │ type and constraints,       │
+ │                          │                  │ whether or not it appears   │
+ │                          │                  │ in the list. At most one    │
+ │                          │                  │ suggest(...) per complete   │
+ │                          │                  │ property definition         │
+ │                          │                  │ (including across property- │
+ │                          │                  │ union atoms). Array forms   │
+ │                          │                  │ (string[], number[])        │
+ │                          │                  │ describe individual         │
+ │                          │                  │ elements, not whole arrays. │
+ │ operands(<verb>-<form>)  │ all types        │ Marks a value as the short  │
+ │                          │                  │ or long form of a           │
+ │                          │                  │ Darkmatter lifecycle verb   │
+ │                          │                  │ (an expression function or  │
+ │                          │                  │ side effect). Schema        │
+ │                          │                  │ validation binds the        │
+ │                          │                  │ value's operands through    │
+ │                          │                  │ that verb's runtime         │
+ │                          │                  │ registration, and the       │
+ │                          │                  │ binder's verdict replaces   │
+ │                          │                  │ the type's for them:        │
+ │                          │                  │ numeric recovery, source    │
+ │                          │                  │ exclusions, and overload    │
+ │                          │                  │ selection decide. {{ … }}   │
+ │                          │                  │ operands stay deferred,     │
+ │                          │                  │ but a span that does not    │
+ │                          │                  │ parse is a positioned       │
+ │                          │                  │ problem. The lifecycle      │
+ │                          │                  │ schema generator writes it  │
+ │                          │                  │ on every generated verb     │
+ │                          │                  │ arm; a verb the parser      │
+ │                          │                  │ owns itself (say, proxy,    │
+ │                          │                  │ set, …) carries it on its   │
+ │                          │                  │ hand-written type, where    │
+ │                          │                  │ it only checks the strings  │
+ │                          │                  │ the parser reads as         │
+ │                          │                  │ templates.                  │
+ │ unique                   │ array            │ Array items must be         │
+ │                          │                  │ distinct.                   │
+ └──────────────────────────┴──────────────────┴─────────────────────────────┘
+
+ Trigger Schemas
+
+ Trigger schemas activate an object-schema payload for matching documents.
+ Their match language is pure and side-effect-free.
+ - [1mEnvelope.[0m [38;2;152;195;121m[48;2;40;44;52mkind: schema-trigger[0m — Claims a discovered YAML file as a
+   trigger envelope; [38;2;152;195;121m[48;2;40;44;52m$schema[0m is its merge-compatible object-schema payload,
+   and a trigger without one layers nothing. The former [38;2;152;195;121m[48;2;40;44;52mschema-trigger[0m
+   spelling is an error.
+ - [1mProperty condition.[0m [38;2;152;195;121m[48;2;40;44;52mproperty: type-expr[0m — A bare expression is an optional
+   guard; [38;2;152;195;121m[48;2;40;44;52mrequired[0m makes it a presence gate. Present values must satisfy
+   the type and match-safe constraints.
+ - [1m$path.[0m [38;2;152;195;121m[48;2;40;44;52m$path: glob | [glob, ...][0m — Matches the document's path with glob
+   references ([38;2;152;195;121m[48;2;40;44;52m&[0m, [38;2;152;195;121m[48;2;40;44;52m^[0m, [38;2;152;195;121m[48;2;40;44;52m~[0m, absolute, or bare, read from the trigger's folder).
+   Case-sensitive; a glob naming no folder matches that file name at any
+   depth, and [38;2;152;195;121m[48;2;40;44;52m![0m patterns exclude. [38;2;152;195;121m[48;2;40;44;52m@[0m, [38;2;152;195;121m[48;2;40;44;52m%[0m, [38;2;152;195;121m[48;2;40;44;52mvault:[0m, and [38;2;152;195;121m[48;2;40;44;52m{{VAR}}[0m are refused.
+ - [1mall.[0m [38;2;152;195;121m[48;2;40;44;52mall: [condition, ...][0m — Matches when every child condition matches.
+ - [1mgroup.[0m [38;2;152;195;121m[48;2;40;44;52mgroup: [condition, ...][0m — Matches when at least one child condition
+   matches. The former [38;2;152;195;121m[48;2;40;44;52many:[0m spelling is an error.
+ - [1mnone.[0m [38;2;152;195;121m[48;2;40;44;52mnone: [condition, ...][0m — Matches when no child condition matches.
+ - [1mmin-match.[0m [38;2;152;195;121m[48;2;40;44;52mmin-match: { count: N, of: [condition, ...] }[0m — Matches when at
+   least N of the child conditions match.
+ - [1mTop-level conditions.[0m [38;2;152;195;121m[48;2;40;44;52mmatch: [condition, ...][0m — A mapping is one
+   condition; every entry of a list must match (AND). OR is always a
+   [38;2;152;195;121m[48;2;40;44;52mgroup:[0m; a list entry that is itself a list is invalid, as is mixing
+   property and structural keys in one mapping.
+ - [1mVacuous-match lint.[0m [38;2;152;195;121m[48;2;40;44;52mevery way to match requires a positive gate[0m — Every
+   way of satisfying the whole expression must require presence through
+   [38;2;152;195;121m[48;2;40;44;52mrequired[0m or [38;2;152;195;121m[48;2;40;44;52m$path[0m, outside [38;2;152;195;121m[48;2;40;44;52mnone[0m; a trigger that could match a document
+   with none of its keys is rejected.
+ [1mMatch-safe constraints only:[0m [38;2;152;195;121m[48;2;40;44;52mrequired[0m, [38;2;152;195;121m[48;2;40;44;52m<members>[0m, [38;2;152;195;121m[48;2;40;44;52m<options>[0m, [38;2;152;195;121m[48;2;40;44;52mpattern[0m, [38;2;152;195;121m[48;2;40;44;52mmin[0m,
+ [38;2;152;195;121m[48;2;40;44;52mmax[0m, [38;2;152;195;121m[48;2;40;44;52minteger[0m, [38;2;152;195;121m[48;2;40;44;52mnot-empty[0m, [38;2;152;195;121m[48;2;40;44;52munique[0m, [38;2;152;195;121m[48;2;40;44;52mmin-keys[0m, [38;2;152;195;121m[48;2;40;44;52mmax-keys[0m. Constraints such as
+ [38;2;152;195;121m[48;2;40;44;52mdefault[0m, [38;2;152;195;121m[48;2;40;44;52mgenerated[0m, [38;2;152;195;121m[48;2;40;44;52msuggest[0m, [38;2;152;195;121m[48;2;40;44;52meager[0m, [38;2;152;195;121m[48;2;40;44;52mmatch[0m, and [38;2;152;195;121m[48;2;40;44;52mscheme[0m are rejected because
+ trigger evaluation cannot transform values or consult external state.
+
+  use --verbose to see additional details

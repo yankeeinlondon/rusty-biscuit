@@ -590,6 +590,27 @@ also names the operation so a reader need not memorize the codes.
 - **Downsides:** Phase 1's `LiveFrontmatterCopy` rows are not comparable by
   value with later ones.
 
+### Re-baseline A2 and A3 after shared acyclic definitions
+
+- **Decision:** `2026-10-25-shared-acyclic-definitions` changed the totals
+  this feature measures, so phase 2's re-measurement on the merged code (its
+  precondition 2) is the only valid comparison point; no spike-report figure
+  for A2 or A3 is compared against directly. On the same macOS host, the
+  Claudine effective schema for both triggers fell from 1,844,516 to 768,262
+  compact bytes (cold resolve 529 → 304 ms, compile 444 → 168 ms), and A3's
+  a3x1-warm totals fell from 804 MB to 53 MB allocated (diagnostics 437 MB →
+  37 MB). A3's verb hover rose from 58,763 to 66,277 bytes, because a stored
+  union now hovers by opening its top-level alternatives; expression hover
+  is 69,943. These replace the 58,763/105,025 hover figures in the X1
+  decision as the reference for A3's hovers.
+- **Alternatives considered:** keep the spike-report and X1 figures as
+  baselines; they would credit this feature with savings sharing produced.
+- **Why:** the measurements are recorded in that feature's implementation
+  log; items such as D1, D4, and D12 act on validator compilation and
+  resolver work whose size sharing reduced by more than half.
+- **Downsides:** some items that met a clause in the spike may now fall
+  below the 10 ms / 10 MB floor and close as "measured, no change".
+
 ## Out of scope
 
 - Every item that other tracks specify (listed above).

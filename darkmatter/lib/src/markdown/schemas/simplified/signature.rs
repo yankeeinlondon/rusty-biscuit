@@ -28,6 +28,15 @@ pub(crate) fn duplicate_overload(
     arms: &[PropertyAtom],
     named: Option<&IndexMap<String, PropertyDef>>,
 ) -> Option<String> {
+    duplicate_overload_arm(arms, named).map(|(_, message)| message)
+}
+
+/// [`duplicate_overload`] together with the index into `arms` of the later
+/// option of the pair, the one that introduced the duplicate.
+pub(crate) fn duplicate_overload_arm(
+    arms: &[PropertyAtom],
+    named: Option<&IndexMap<String, PropertyDef>>,
+) -> Option<(usize, String)> {
     let mut seen: Vec<(String, usize)> = Vec::new();
     for (index, arm) in arms.iter().enumerate() {
         let TypeExpr::Function(function) = &arm.ty else {
@@ -38,12 +47,13 @@ pub(crate) fn duplicate_overload(
         }
         let contract = binding_contract(function, named);
         if let Some((_, first)) = seen.iter().find(|(seen, _)| *seen == contract) {
-            return Some(format!(
+            let message = format!(
                 "overloads {} and {} have the same binding contract `{contract}`; \
                  every call that binds one binds the other",
                 first + 1,
                 index + 1
-            ));
+            );
+            return Some((index, message));
         }
         seen.push((contract, index));
     }
@@ -243,5 +253,17 @@ mod tests {
         ];
         assert!(duplicate_overload(&union, None).is_none(), "unresolved names differ");
         assert!(duplicate_overload(&union, Some(&named)).is_some());
+    }
+
+    #[test]
+    fn duplicate_overload_arm_names_the_later_duplicate() {
+        let union = [
+            arms("function(parameters(a: string); returns(string))").remove(0),
+            arms("function(parameters(a: number); returns(string))").remove(0),
+            arms("function(parameters(b: string); returns(number))").remove(0),
+        ];
+        let (index, message) = duplicate_overload_arm(&union, None).expect("arms 0 and 2 bind alike");
+        assert_eq!(index, 2);
+        assert_eq!(Some(message), duplicate_overload(&union, None));
     }
 }

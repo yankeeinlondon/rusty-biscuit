@@ -7,6 +7,113 @@ phase: 1
 agent: "codex/gpt-6.1-sol"
 yolo: true
 human_review: false
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+    - darkmatter
+    - darkmatter-cli
+    - dmls
+    - claudine
+    - claudine-cli
+source_files_during_phase_2:
+    - darkmatter/lib/src/catalog/mod.rs
+    - darkmatter/lib/src/effects/catalog.rs
+    - darkmatter/lib/src/effects/types.rs
+    - darkmatter/lib/src/lifecycle/schema_projection.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/capabilities.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/semantics.rs
+    - darkmatter/lib/tests/l1/function_catalog_parity.rs
+    - darkmatter/lib/tests/l1/function_dispatch.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+    - darkmatter/lib/tests/l1/predict_conflicts.rs
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - claudine/cli/src/commands/context/effects.rs
+    - claudine/cli/src/commands/context/expressions.rs
+    - claudine/cli/src/commands/context/format.rs
+    - claudine/cli/src/commands/context/mod.rs
+    - claudine/cli/src/commands/context/tests.rs
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+docs_updated_during_phase_2:
+    - darkmatter/lib/src/catalog/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/expressions.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/catalog/host_function_cache_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/host-functions.md
+    - darkmatter/lib/src/catalog/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/library-surfaces.md
+source_files_during_phase_4:
+    - claudine/lib/src/composition/lifecycle/prewarm/fakes.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker/tests.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_code:
+    - darkmatter/lib/src/catalog/mod.rs
+    - darkmatter/lib/src/effects/catalog.rs
+    - darkmatter/lib/src/effects/types.rs
+    - darkmatter/lib/src/lifecycle/schema_projection.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/capabilities.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/semantics.rs
+    - darkmatter/lib/tests/l1/function_catalog_parity.rs
+    - darkmatter/lib/tests/l1/function_dispatch.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+    - darkmatter/lib/tests/l1/predict_conflicts.rs
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - claudine/cli/src/commands/context/effects.rs
+    - claudine/cli/src/commands/context/expressions.rs
+    - claudine/cli/src/commands/context/format.rs
+    - claudine/cli/src/commands/context/mod.rs
+    - claudine/cli/src/commands/context/tests.rs
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/catalog/host_function_cache_tests.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/fakes.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker/tests.rs
+documentation:
+    - darkmatter/lib/src/catalog/README.md
+    - darkmatter/docs/topics/host-functions.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/library-surfaces.md
+completed_phase: 4
+implemented: true
 ---
 
 # Host function catalog ownership plan
@@ -123,6 +230,23 @@ are needed.
    - **Downsides:** This proves ownership and cache bounds rather than an RSS
      reduction; allocator behavior is outside the acceptance claim.
 
+8. **Facts from `2026-10-25-fix-now`** (recorded after that fix was implemented)
+   - **Decision:** `host_function_set`, `ArtifactKey`, and the function cache are
+     unchanged by that fix, so Decision 4 stands. For Decision 5, the same file
+     now has `catalog::discovery_probe` (`cfg(any(test, feature =
+     "work-counters"))`, thread-local): a read log, a build counter, and injected
+     read errors for lifecycle discovery. Extend it, or follow its pattern, for
+     any host-function observation rather than adding a second seam. The
+     lifecycle profile cache is a separate `profile_cache()`; do not merge the two.
+   - **Alternatives considered:** A separate test-only seam for host functions;
+     merging both caches into one map.
+   - **Why:** One observation mechanism per discovery file keeps test seams
+     consistent; the two caches have different failure policies (see the spec's
+     "Relationship to the lifecycle profile cache").
+   - **Downsides:** `discovery_probe` currently instruments only lifecycle reads;
+     the artifact read in `host_function_set` still goes through `ArtifactKey::read`
+     and would need routing through the probe to be observed.
+
 ### Execution rules
 
 Waves have globally unique numbers and run in order. Tasks within a wave may
@@ -135,14 +259,14 @@ Stay in this worktree; do not commit, run `cargo fmt`, or move the fix into
 
 ### Wave 1 — Contract inventory
 
-- [ ] **Map consumers**
+- [x] **Map consumers**
   - Trace descriptor field reads, `Copy` assumptions, `Described` implementations,
     stored `Example` types, and direct `.example` reads across Darkmatter,
     DMLS, generators, tests, and Claudine. Use targeted text search; account for
     all actual implementations rather than relying on the spec's count.
   - Record affected files and existing test names in the implementation log.
     Identify each static API and each owner-borrowed API before editing.
-- [ ] **Pin preserved output**
+- [x] **Pin preserved output**
   - After consumer inventory, identify existing catalog metadata, example,
     plain `md schema about`, DMLS completion/hover/call-diagnostic, and Claudine
     registration/artifact expectations. Preserve their current expected values.
@@ -161,7 +285,7 @@ identified; no unresolved design choices or spikes remain.
 
 ### Wave 2 — Ownership migration
 
-- [ ] **Own catalog data**
+- [x] **Own catalog data**
   - Prerequisite: Wave 1. One task owns the shared framework and core catalog
     migration because their lifetime changes are coupled.
   - Convert `catalog/mod.rs`, expression catalog types, `load_catalog`,
@@ -194,7 +318,7 @@ integration tests/examples in the third, and docs/skills in the fourth. Coordina
 any newly discovered core API correction through the Wave 2 owner before merging
 dependent edits; do not have two lanes edit the core framework simultaneously.
 
-- [ ] **Bound revision retention**
+- [x] **Bound revision retention**
   - Replace the revision-tuple map in `schemas/catalog.rs::host_function_set`
     with one stored entry per path. Preserve `ArtifactKey::{Absent, Unreadable,
     Text}`, including unreadable reasons and exact text comparison.
@@ -226,7 +350,7 @@ dependent edits; do not have two lanes edit the core framework simultaneously.
     guard cannot accidentally substitute its registrations for the old set.
   - Correct `host_function_catalogs`' process-lifetime comment and cache comments.
 
-- [ ] **Adapt external consumers**
+- [x] **Adapt external consumers**
   - Update Darkmatter CLI descriptor consumers, DMLS completion/hover, and
     actual Claudine metadata consumers for borrowed fields and removed `Copy`
     behavior. Claudine currently registers no host expression functions:
@@ -240,7 +364,7 @@ dependent edits; do not have two lanes edit the core framework simultaneously.
   - Preserve Claudine registration and facts-artifact expectations without
     regenerating different artifact bytes or accepting new snapshots.
 
-- [ ] **Pin catalog contracts**
+- [x] **Pin catalog contracts**
   - Add compile checks assigning `expression_function_descriptors()`,
     `function_descriptors()`, and `effect_function_descriptors()` to their
     existing `&'static` slice types, plus lifecycle verb and parameter names to
@@ -257,7 +381,7 @@ dependent edits; do not have two lanes edit the core framework simultaneously.
     `lifecycle_schema_generator`; retain metadata ordering and generated text.
     Complete the bounded input coverage described below using existing tests.
 
-- [ ] **Document ownership contracts**
+- [x] **Document ownership contracts**
   - Update `docs/topics/host-functions.md` with owner lifetimes, per-path latest
     revision retention, deliberate survival of held old sets, and error recovery.
     Give compact examples; distinguish incomplete facts from catalog failures.
@@ -328,7 +452,7 @@ shared-cache reset, and require no terminal or browser focus.
 
 ### Wave 4 — Combined validation
 
-- [ ] **Verify scoped checks**
+- [x] **Verify scoped checks**
   - Prerequisite: all Wave 3 lanes integrated. Run `just test` and `just lint`
     in `darkmatter/` and in `claudine/`. Use the recipes' nextest execution;
     Darkmatter includes DMLS. Run any newly added targeted tests first while
@@ -358,7 +482,7 @@ shared-cache reset, and require no terminal or browser focus.
 
 ### Wave 5 — Closure audit
 
-- [ ] **Audit final ownership**
+- [x] **Audit final ownership**
   - Prerequisite: Wave 4 passes. Trace every dynamically projected category,
     descriptor, alias, parameter, compiled type, example text, and reason to its
     owner. Check success and partial-failure paths for leaks, global retention,

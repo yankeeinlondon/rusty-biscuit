@@ -494,7 +494,7 @@ fn contradictory_use_site_bounds_name_the_definition_and_the_use() {
         panic!("expected ConstraintConflict, got {error:?}");
     };
     assert_eq!(*kind, SchemaConstraintConflictKind::Bounds);
-    let paths: Vec<String> = constraints.iter().map(|origin| origin.path.to_string()).collect();
+    let paths: Vec<String> = constraints.iter().map(|participant| participant.origin.path.to_string()).collect();
     assert_eq!(paths, ["node", "root"], "{error:?}");
 }
 

@@ -43,6 +43,7 @@ pub struct DeclaredTypes<'s> {
 enum HostRoots<'s> {
     None,
     Names(&'s [&'s str]),
+    Registered(&'s [std::borrow::Cow<'static, str>]),
     View(&'s BindingView),
 }
 
@@ -222,6 +223,13 @@ impl<'s> DeclaredTypes<'s> {
     /// availability (every one is available).
     pub fn with_host_globals(mut self, roots: &'s [&'s str]) -> Self {
         self.host_roots = HostRoots::Names(roots);
+        self
+    }
+
+    /// [`Self::with_host_globals`] over an event registry's
+    /// [host globals](crate::lifecycle::registry::EventRegistry::host_globals).
+    pub(crate) fn with_registered_host_globals(mut self, roots: &'s [std::borrow::Cow<'static, str>]) -> Self {
+        self.host_roots = HostRoots::Registered(roots);
         self
     }
 
@@ -526,6 +534,7 @@ impl<'s> DeclaredTypes<'s> {
         match self.host_roots {
             HostRoots::None => None,
             HostRoots::Names(names) => names.contains(&root).then_some(&AVAILABLE),
+            HostRoots::Registered(names) => names.iter().any(|name| name == root).then_some(&AVAILABLE),
             HostRoots::View(view) => view.global(root).map(|declaration| declaration.availability()),
         }
     }

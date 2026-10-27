@@ -1,0 +1,681 @@
+Darkmatter Expression Engine
+
+Expressions evaluate in interpolation {{ ... }} and conditions when="..." surfaces.
+
+Operator Precedence
+
+ ┌─────────────────────────┬────────────────────────────────────────────────────────────────────┬─────────────────────────────────────────┐
+ │ Precedence              │ Operators                                                          │ Example                                 │
+ ├─────────────────────────┼────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────┤
+ │ 1                       │ literals, variables, function calls, `foo.bar`, `foo[0]`, `(expr)` │ 1 + 2 * 3 → 7                           │
+ │ 2                       │ `!`, `-`                                                           │ !true → false                           │
+ │ 3                       │ `*`, `/`, `%`                                                      │ 10 / 2 * 3 → 15                         │
+ │ 4                       │ `+`, `-`                                                           │ "count: " + 5 → count: 5                │
+ │ 5                       │ `==`, `!=`, `>`, `>=`, `<`, `<=`                                   │ 1 < 2 → true                            │
+ │ 6                       │ `&&`                                                               │ true && false → false                   │
+ │ 7                       │ `||`                                                               │ false || "default" → default            │
+ │ 8                       │ `? :`                                                              │ true ? "yes" : "no" → yes               │
+ └─────────────────────────┴────────────────────────────────────────────────────────────────────┴─────────────────────────────────────────┘
+
+Truthiness
+
+ ┌─────────────────────┬───────┬──────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │ Value               │ Falsy │ Example                                                                                                  │
+ ├─────────────────────┼───────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+ │ `null` / missing    │ yes   │ !missing → true                                                                                          │
+ │ `false`             │ yes   │ !false → true                                                                                            │
+ │ `0`                 │ yes   │ !0 → true                                                                                                │
+ │ `0.0`               │ yes   │ !0.0 → true                                                                                              │
+ │ `""` (empty string) │ yes   │ !"" → true                                                                                               │
+ │ `[]` (empty array)  │ yes   │ !empty_array → true                                                                                      │
+ │ `{}` (empty object) │ yes   │ !empty_object → true                                                                                     │
+ │ any other value     │ no    │ !"hello" → false                                                                                         │
+ └─────────────────────┴───────┴──────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+Unary Operators
+
+ ┌──────────┬──────────────────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────┐
+ │ Operator │ Description                                              │ Example                                                          │
+ ├──────────┼──────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┤
+ │ `!x`     │ boolean negation (`!truthy ⇒ false`, `!falsy ⇒ true`)    │ !"" → true                                                       │
+ │ `-x`     │ numeric negation; `-null` is `null`; `-"hi"` is an error │ -7 → -7                                                          │
+ └──────────┴──────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────┘
+
+Comparison Operators
+
+ ┌──────────────────────┬─────────────────────────────────────────────────────────────────────────────────┬───────────────────────────────┐
+ │ Operator             │ Description                                                                     │ Example                       │
+ ├──────────────────────┼─────────────────────────────────────────────────────────────────────────────────┼───────────────────────────────┤
+ │ `==` and `!=`        │ equal only with the same runtime type and value, recursively through arrays     │ 5 == "5" → false              │
+ │                      │ and objects; no conversion                                                      │                               │
+ │ explicit conversion  │ convert before an equality check, for example with `number(...)`                │ 5 == number("5") → true       │
+ │ `>`, `>=`, `<`, `<=` │ coerce both sides to numbers, so ordering can hold where `==` does not          │ "10" > 2 → true               │
+ │ both sides missing   │ a missing value is `null`, which equals `null`: `a == b` is true and `a != b`   │ missing_a == missing_b → true │
+ │                      │ is false                                                                        │                               │
+ │ one side missing     │ `null` equals nothing else, not even the empty string: `==` is false and `!=`   │ "" != missing → true          │
+ │                      │ is true                                                                         │                               │
+ └──────────────────────┴─────────────────────────────────────────────────────────────────────────────────┴───────────────────────────────┘
+
+Arithmetic Operators
+
+ ┌─────────────────────────┬───────────────────────────────────────────────────────────────────────────────┬──────────────────────────────┐
+ │ Operator                │ Description                                                                   │ Example                      │
+ ├─────────────────────────┼───────────────────────────────────────────────────────────────────────────────┼──────────────────────────────┤
+ │ `+`, `-`, `*`, `/`, `%` │ require numeric operands                                                      │ 7 % 3 → 1                    │
+ │ `+`                     │ coerces a numeric string paired with a number; otherwise concatenates strings │ "a" + "b" → ab               │
+ │ division by zero        │ `x / 0` and `x % 0` raise an error                                            │ 5 / 0 → error                │
+ │ `%`                     │ follows C-style semantics: the sign of `a % b` follows the sign of `a`        │ -7 % 3 → -1                  │
+ └─────────────────────────┴───────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┘
+
+Variable Access
+
+ ┌────────────────────────────┬───────────────────────────────────────────────────────────┬───────────────────────────────────────────────┐
+ │ Form                       │ Description                                               │ Example                                       │
+ ├────────────────────────────┼───────────────────────────────────────────────────────────┼───────────────────────────────────────────────┤
+ │ simple keys                │ `draft`                                                   │ draft → hello                                 │
+ │ nested keys                │ `user.role`                                               │ user.role → admin                             │
+ │ context variables          │ `ctx.today`, `ctx.repo`, `ctx.current_package`            │ ctx.repo → rusty-biscuit                      │
+ │ environment keys           │ `env.AGENT`, `env.HOME`                                   │ env.AGENT → opencode                          │
+ │ dot access on missing path │ a non-existent path resolves to `null` (no error)         │ user.missing → null                           │
+ │ dot access on `null` base  │ `null.foo` returns `null`                                 │ null.foo → null                               │
+ │ numeric dot access         │ `foo.0` is not supported — use bracket syntax             │ foo.0 → parse error                           │
+ │ bracket arrays             │ `foo[0]`, `foo[-1]` (negative indexes count from the end) │ numbers[-1] → 3                               │
+ │ bracket objects            │ `foo["key"]` (string keys only)                           │ config["name"] → dark                         │
+ │ chained access             │ `items[-1].name`, `config["key"][0]`                      │ items[0].name → first                         │
+ └────────────────────────────┴───────────────────────────────────────────────────────────┴───────────────────────────────────────────────┘
+
+Interpolation vs. Condition Mode
+
+The parser supports two modes with different operator behavior:
+
+ ┌─────────────────────────────┬───────────────────────────────────┬──────────────────────────────────────────────────────────────────────┐
+ │ Surface                     │ `||` meaning                      │ Example                                                              │
+ ├─────────────────────────────┼───────────────────────────────────┼──────────────────────────────────────────────────────────────────────┤
+ │ `{{ ... }}` (interpolation) │ fallback, first truthy value wins │ "a" || "b" → a                                                       │
+ │ `when="..."` (condition)    │ logical OR, returns a boolean     │ false || true → true                                                 │
+ └─────────────────────────────┴───────────────────────────────────┴──────────────────────────────────────────────────────────────────────┘
+
+- `when="a || b"` is logical OR and evaluates to a boolean
+- `{{ a || "default" }}` is fallback sugar and expands to the first truthy value
+- `{{ a && b }}` is logical AND — `&&` is identical in both modes
+- `when="a && b"` is logical AND
+- the function-call forms `and(...)` and `or(...)` are valid in both modes
+
+Null Propagation Summary
+
+ ┌─────────────────────────────────────┬────────────────────────────────────┬─────────────────────────────────────────────────────────────┐
+ │ Operation                           │ Behavior                           │ Example                                                     │
+ ├─────────────────────────────────────┼────────────────────────────────────┼─────────────────────────────────────────────────────────────┤
+ │ Dot access on `null` / missing path │ `null`                             │ null.foo → null                                             │
+ │ Numeric dot access (`foo.0`)        │ parse error / unsupported          │ foo.0 → parse error                                         │
+ │ Bracket out-of-bounds               │ `null`                             │ numbers[9] → null                                           │
+ │ Bracket on `null` base              │ `null`                             │ null[0] → null                                              │
+ │ Bracket key on non-collection       │ `null`                             │ "text"["key"] → null                                        │
+ │ Negative index from the end         │ element or `null` if outside range │ numbers[-1] → 3                                             │
+ └─────────────────────────────────────┴────────────────────────────────────┴─────────────────────────────────────────────────────────────┘
+
+Functions
+
+Type Predicates
+ ┌──────────────────────────────────────────┬────────────────────────────────────────────────────────────────┬────────────────────────────┐
+ │ Function                                 │ Description                                                    │ Example                    │
+ ├──────────────────────────────────────────┼────────────────────────────────────────────────────────────────┼────────────────────────────┤
+ │ is_array(x)                              │ Returns true when the value is an array.                       │ is_array([1, 2, 3]) ⇒ true │
+ │ is_empty(x)                              │ Returns true when the value is null, empty text, an empty      │ is_empty("") ⇒ true        │
+ │                                          │ array, or an empty object.                                     │                            │
+ │ is_integer(val)                          │ Returns true when the value is a number with no fractional     │ is_integer(7) ⇒ true       │
+ │                                          │ part; text is never an integer.                                │                            │
+ │ is_negative(val)                         │ Returns true when the number is less than zero; null is false. │ is_negative(-3) ⇒ true     │
+ │ is_null(x)                               │ Returns true when the value is null.                           │ is_null(null) ⇒ true       │
+ │ is_number(x)                             │ Returns true when the value is a number; numeric text such as  │ is_number(42) ⇒ true       │
+ │                                          │ `"4"` is not.                                                  │                            │
+ │ is_object(x)                             │ Returns true when the value is an object.                      │ is_object({a: 1}) ⇒ true   │
+ │ is_positive(val)                         │ Returns true when the number is greater than zero; null is     │ is_positive(5) ⇒ true      │
+ │                                          │ false.                                                         │                            │
+ │ is_string(x)                             │ Returns true when the value is text.                           │ is_string("hello") ⇒ true  │
+ └──────────────────────────────────────────┴────────────────────────────────────────────────────────────────┴────────────────────────────┘
+
+Math
+ ┌──────────────────────────────────────────┬────────────────────────────────────────────────────────────────────┬────────────────────────┐
+ │ Function                                 │ Description                                                        │ Example                │
+ ├──────────────────────────────────────────┼────────────────────────────────────────────────────────────────────┼────────────────────────┤
+ │ abs(x)                                   │ Returns the absolute value of a number.                            │ abs(-3) ⇒ 3            │
+ │ max(a, b)                                │ Returns the larger of two numbers.                                 │ max(2, 5) ⇒ 5          │
+ │ min(a, b)                                │ Returns the smaller of two numbers.                                │ min(2, 5) ⇒ 2          │
+ │                                          │                                                                    │ min("4", 5) ⇒ 4        │
+ │                                          │                                                                    │ min("pear", 5) ⇒ error │
+ │ round(x, [fallback])                     │ Rounds a number or numeric text to the nearest whole number,       │ round(3.7) ⇒ 4         │
+ │                                          │ halfway values away from zero. When `x` is not a number or         │ round("3.7") ⇒ 4       │
+ │                                          │ numeric text, a supplied `fallback` is rounded and returned        │ round(-2.5) ⇒ -3       │
+ │                                          │ instead; without one the call is a type error.                     │ round("pear", 2.7) ⇒ 3 │
+ │                                          │                                                                    │ round("pear") ⇒ error  │
+ └──────────────────────────────────────────┴────────────────────────────────────────────────────────────────────┴────────────────────────┘
+
+Collection
+ ┌──────────────────────────────────────────┬───────────────────────────────────────────────────────────┬─────────────────────────────────┐
+ │ Function                                 │ Description                                               │ Example                         │
+ ├──────────────────────────────────────────┼───────────────────────────────────────────────────────────┼─────────────────────────────────┤
+ │ contains(haystack, needle)               │ Returns true when the needle occurs in the haystack.      │ contains("hello", "ell") ⇒ true │
+ │                                          │ Text is searched for a case-sensitive substring; array    │ contains([4], "4") ⇒ true       │
+ │                                          │ elements and object values (never keys) are compared by   │ contains({a: "x"}, "a") ⇒ false │
+ │                                          │ their rendered text, so `4` matches `"4"`. A null needle  │                                 │
+ │                                          │ renders as empty text, and a null haystack is false.      │                                 │
+ │ first(x)                                 │ Returns the first element of a list, or null when the     │ first([1, 2, 3]) ⇒ 1            │
+ │                                          │ list is empty or null.                                    │                                 │
+ │ has_key(obj, key)                        │ Returns true when the object has the given key; a null    │ has_key({a: 1}, "a") ⇒ true     │
+ │                                          │ object or key is false.                                   │                                 │
+ │ keys(obj)                                │ Returns the keys of a map in the order they were          │ keys({b: 1, a: 2}) ⇒ ["b", "a"] │
+ │                                          │ written; a null map has no keys. Its counterpart is       │                                 │
+ │                                          │ `values`.                                                 │                                 │
+ │ last(x)                                  │ Returns the last element of a list, or null when the      │ last([1, 2, 3]) ⇒ 3             │
+ │                                          │ list is empty or null.                                    │                                 │
+ │ length(val)                              │ Counts the characters of text, the elements of an array,  │ length("hello") ⇒ 5             │
+ │                                          │ or the keys of an object; a number counts the characters  │ length("true") ⇒ 4              │
+ │                                          │ of its displayed text. A boolean is a type error.         │ length(2.5) ⇒ 3                 │
+ │                                          │                                                           │ length({a: 1}) ⇒ 1              │
+ │                                          │                                                           │ length(true) ⇒ error            │
+ │ values(obj)                              │ Returns the values of a map in the order their keys were  │ values({b: 1, a: 2}) ⇒ [1, 2]   │
+ │                                          │ written; a null map has no values. Its counterpart is     │                                 │
+ │                                          │ `keys`.                                                   │                                 │
+ └──────────────────────────────────────────┴───────────────────────────────────────────────────────────┴─────────────────────────────────┘
+
+String Predicates
+ ┌──────────────────────────────────────────┬─────────────────────────────────────────────────────────┬───────────────────────────────────┐
+ │ Function                                 │ Description                                             │ Example                           │
+ ├──────────────────────────────────────────┼─────────────────────────────────────────────────────────┼───────────────────────────────────┤
+ │ ends_with(x, find)                       │ Returns true when the text ends with the given suffix ( │ ends_with("hello", "lo") ⇒ true   │
+ │                                          │ case-sensitive); null is false.                         │                                   │
+ │ starts_with(x, find)                     │ Returns true when the text starts with the given        │ starts_with("hello", "he") ⇒ true │
+ │                                          │ prefix (case-sensitive); null is false.                 │                                   │
+ └──────────────────────────────────────────┴─────────────────────────────────────────────────────────┴───────────────────────────────────┘
+
+String Mutations
+ ┌──────────────────────────────────────────┬──────────────────────────────────────────────────┬──────────────────────────────────────────┐
+ │ Function                                 │ Description                                      │ Example                                  │
+ ├──────────────────────────────────────────┼──────────────────────────────────────────────────┼──────────────────────────────────────────┤
+ │ camel_case(x)                            │ Converts text to camelCase; null passes through. │ camel_case("hello world") ⇒ "helloWorld" │
+ │ capitalize(x)                            │ Capitalizes the first character of the text;     │ capitalize("hello") ⇒ "Hello"            │
+ │                                          │ null passes through.                             │                                          │
+ │ ensure_leading(var, prefix)              │ Ensures the text form of a value starts with a   │ ensure_leading("world", "hello ") ⇒      │
+ │                                          │ prefix, adding it only when missing. A value     │ "hello world"                            │
+ │                                          │ that already starts with it is returned          │                                          │
+ │                                          │ unchanged, and a number given a numeric prefix   │                                          │
+ │                                          │ stays a number. Null passes through.             │                                          │
+ │ ensure_trailing(var, postfix)            │ Ensures the text form of a value ends with a     │ ensure_trailing("hello", " world") ⇒     │
+ │                                          │ postfix, adding it only when missing. A value    │ "hello world"                            │
+ │                                          │ that already ends with it is returned unchanged, │                                          │
+ │                                          │ and a number given a numeric postfix stays a     │                                          │
+ │                                          │ number. Null passes through.                     │                                          │
+ │ kebab_case(x)                            │ Converts text to kebab-case; null passes         │ kebab_case("Hello World") ⇒ "hello-      │
+ │                                          │ through.                                         │ world"                                   │
+ │ lower(x)                                 │ Converts text to lowercase; null passes through. │ lower("HELLO") ⇒ "hello"                 │
+ │ pascal_case(x)                           │ Converts text to PascalCase; null passes         │ pascal_case("hello world") ⇒             │
+ │                                          │ through.                                         │ "HelloWorld"                             │
+ │ replace(x, find, replacement)            │ Replaces every literal, case-sensitive           │ replace("a.b.c", ".", "/") ⇒ "a/b/c"     │
+ │                                          │ occurrence of a substring; an empty `find`       │                                          │
+ │                                          │ changes nothing. Null passes through.            │                                          │
+ │ replace_first(x, find, replacement)      │ Replaces the first literal, case-sensitive       │ replace_first("a.b.c", ".", "/") ⇒ "a/b. │
+ │                                          │ occurrence of a substring; an empty `find`       │ c"                                       │
+ │                                          │ changes nothing. Null passes through.            │                                          │
+ │ replace_last(x, find, replacement)       │ Replaces the last literal, case-sensitive        │ replace_last("a.b.c", ".", "/") ⇒ "a.b/  │
+ │                                          │ occurrence of a substring; an empty `find`       │ c"                                       │
+ │                                          │ changes nothing. Null passes through.            │                                          │
+ │ snake_case(x)                            │ Converts text to snake_case; null passes         │ snake_case("Hello World") ⇒ "hello_      │
+ │                                          │ through.                                         │ world"                                   │
+ │ title_case(x)                            │ Converts text to Title Case; null passes         │ title_case("hello world") ⇒ "Hello       │
+ │                                          │ through.                                         │ World"                                   │
+ │ trim(text)                               │ Removes leading and trailing whitespace; null    │ trim("  a  ") ⇒ "a"                      │
+ │                                          │ passes through.                                  │ trim(null) ⇒ null                        │
+ │ upper(x)                                 │ Converts text to uppercase; null passes through. │ upper("hello") ⇒ "HELLO"                 │
+ │                                          │                                                  │ upper(2026) ⇒ "2026"                     │
+ │ without_date(string)                     │ Removes every substring that is a real YYYY-MM-  │ without_date("Note 2024-06-15") ⇒ "Note  │
+ │                                          │ DD calendar date, leaving the surrounding text   │ "                                        │
+ │                                          │ untouched; null passes through.                  │                                          │
+ └──────────────────────────────────────────┴──────────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+Rendering
+ ┌──────────────────────────────────────────┬───────────────────────────────────────────────────────────────┬─────────────────────────────┐
+ │ Function                                 │ Description                                                   │ Example                     │
+ ├──────────────────────────────────────────┼───────────────────────────────────────────────────────────────┼─────────────────────────────┤
+ │ terminal(content)                        │ Renders Prose markup to terminal text with ANSI SGR           │ terminal("hello") ⇒ "hello" │
+ │                                          │ sequences; null passes through.                               │                             │
+ └──────────────────────────────────────────┴───────────────────────────────────────────────────────────────┴─────────────────────────────┘
+
+Date Formatting
+ ┌──────────────────────────────────────────┬──────────────────────────────────────────────────┬──────────────────────────────────────────┐
+ │ Function                                 │ Description                                      │ Example                                  │
+ ├──────────────────────────────────────────┼──────────────────────────────────────────────────┼──────────────────────────────────────────┤
+ │ date(iso, fmt)                           │ Formats an ISO date or datetime in a named       │ date("2024-06-15", "long") ⇒ "Sat, June  │
+ │                                          │ format. `short` is `MMMM Do`, `short-optional`   │ 15th, 2024"                              │
+ │                                          │ is `MMMM Do [YYYY]`, and `long` is `ddd, MMMM    │                                          │
+ │                                          │ Do, YYYY`; a `[YYYY]` year appears only when it  │                                          │
+ │                                          │ is not the current year. Null passes through.    │                                          │
+ └──────────────────────────────────────────┴──────────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+Date Validators
+ ┌──────────────────────────────────────────┬──────────────────────────────────────────────────┬──────────────────────────────────────────┐
+ │ Function                                 │ Description                                      │ Example                                  │
+ ├──────────────────────────────────────────┼──────────────────────────────────────────────────┼──────────────────────────────────────────┤
+ │ is_date(x)                               │ Returns true when the value is text holding a    │ is_date("2024-06-15") ⇒ true             │
+ │                                          │ valid ISO date (YYYY-MM-DD).                     │                                          │
+ │ is_date_time(x)                          │ Returns true when the value is text holding a    │ is_date_time("2024-06-15T12:30:00") ⇒    │
+ │                                          │ valid ISO datetime, with or without an offset.   │ true                                     │
+ │ is_date_time_utc(x)                      │ Same as is_date_time; a datetime's format does   │ is_date_time_utc("2024-06-15T12:30:00Z") │
+ │                                          │ not depend on the time zone.                     │ ⇒ true                                   │
+ │ is_date_utc(x)                           │ Same as is_date; a date's format does not        │ is_date_utc("2024-06-15") ⇒ true         │
+ │                                          │ depend on the time zone.                         │                                          │
+ │ is_this_month(x)                         │ Returns true when the value is an ISO date or    │ is_this_month("2024-06-15") ⇒ true (     │
+ │                                          │ datetime in the current local month.             │ display only: wall-clock dependent)      │
+ │ is_this_month_utc(x)                     │ Returns true when the value is an ISO date or    │ is_this_month_utc("2024-06-15") ⇒ true ( │
+ │                                          │ datetime in the current UTC month.               │ display only: wall-clock dependent)      │
+ │ is_this_year(x)                          │ Returns true when the value is an ISO date or    │ is_this_year("2024-06-15") ⇒ true (      │
+ │                                          │ datetime in the current local year.              │ display only: wall-clock dependent)      │
+ │ is_this_year_utc(x)                      │ Returns true when the value is an ISO date or    │ is_this_year_utc("2024-06-15") ⇒ true (  │
+ │                                          │ datetime in the current UTC year.                │ display only: wall-clock dependent)      │
+ │ is_today(x)                              │ Returns true when the value is an ISO date or    │ is_today("2024-06-15") ⇒ true (display   │
+ │                                          │ datetime that falls on today's local date.       │ only: wall-clock dependent)              │
+ │ is_today_utc(x)                          │ Returns true when the value is an ISO date or    │ is_today_utc("2024-06-15") ⇒ true (      │
+ │                                          │ datetime that falls on today's UTC date.         │ display only: wall-clock dependent)      │
+ │ is_tomorrow(x)                           │ Returns true when the value is an ISO date or    │ is_tomorrow("2024-06-16") ⇒ true (       │
+ │                                          │ datetime that falls on tomorrow's local date.    │ display only: wall-clock dependent)      │
+ │ is_tomorrow_utc(x)                       │ Returns true when the value is an ISO date or    │ is_tomorrow_utc("2024-06-16") ⇒ true (   │
+ │                                          │ datetime that falls on tomorrow's UTC date.      │ display only: wall-clock dependent)      │
+ │ is_yesterday(x)                          │ Returns true when the value is an ISO date or    │ is_yesterday("2024-06-14") ⇒ true (      │
+ │                                          │ datetime that falls on yesterday's local date.   │ display only: wall-clock dependent)      │
+ │ is_yesterday_utc(x)                      │ Returns true when the value is an ISO date or    │ is_yesterday_utc("2024-06-14") ⇒ true (  │
+ │                                          │ datetime that falls on yesterday's UTC date.     │ display only: wall-clock dependent)      │
+ └──────────────────────────────────────────┴──────────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+Date Arithmetic
+ ┌──────────────────────────────────────────┬──────────────────────────────────────────────────┬──────────────────────────────────────────┐
+ │ Function                                 │ Description                                      │ Example                                  │
+ ├──────────────────────────────────────────┼──────────────────────────────────────────────────┼──────────────────────────────────────────┤
+ │ date_delta(date1, date2, diff)           │ Returns true when the two dates are at least     │ date_delta("2024-06-01", "2024-06-20",   │
+ │                                          │ the given duration apart, in either order. A     │ "14d") ⇒ true                            │
+ │                                          │ duration is a whole count and a unit, such as    │                                          │
+ │                                          │ `14d`, `2mo`, or `1 hour`; `m` means minutes     │                                          │
+ │                                          │ and `mo` months.                                 │                                          │
+ │ newer_than(date1, date2, diff)           │ Returns true when date1 is at least the given    │ newer_than("2024-06-20", "2024-06-01",   │
+ │                                          │ duration newer (later) than date2.               │ "14d") ⇒ true                            │
+ │ older_than(date1, date2, diff)           │ Returns true when date1 is at least the given    │ older_than("2024-06-01", "2024-06-20",   │
+ │                                          │ duration older (earlier) than date2.             │ "14d") ⇒ true                            │
+ └──────────────────────────────────────────┴──────────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+Logical
+ ┌──────────────────────────────────────────┬────────────────────────────────────────────────────────────────────┬────────────────────────┐
+ │ Function                                 │ Description                                                        │ Example                │
+ ├──────────────────────────────────────────┼────────────────────────────────────────────────────────────────────┼────────────────────────┤
+ │ and(...)                                 │ Returns true when every argument is truthy, evaluating them in     │ and(true, true) ⇒ true │
+ │                                          │ order and stopping at the first falsy one.                         │                        │
+ │ or(...)                                  │ Returns true when any argument is truthy, evaluating them in       │ or(false, true) ⇒ true │
+ │                                          │ order and stopping at the first truthy one.                        │                        │
+ └──────────────────────────────────────────┴────────────────────────────────────────────────────────────────────┴────────────────────────┘
+
+Type Conversion
+ ┌──────────────────────────────────────────┬─────────────────────────────────────────────────────────┬───────────────────────────────────┐
+ │ Function                                 │ Description                                             │ Example                           │
+ ├──────────────────────────────────────────┼─────────────────────────────────────────────────────────┼───────────────────────────────────┤
+ │ number(x, [fallback])                    │ Converts a number or numeric text to a number. When     │ number("42") ⇒ 42                 │
+ │                                          │ `x` cannot convert (malformed text, null, a boolean, a  │ number("4") ⇒ 4                   │
+ │                                          │ list, an object, or a number that cannot be held        │ number(" 4 ") ⇒ 4                 │
+ │                                          │ exactly), a supplied `fallback` is returned instead;    │ number("pear", 7) ⇒ 7             │
+ │                                          │ without one the call is a type error. The fallback      │ number(null, 7) ⇒ 7               │
+ │                                          │ must itself be a number.                                │ number(true, 7) ⇒ 7               │
+ │                                          │                                                         │ number([], 7) ⇒ 7                 │
+ │                                          │                                                         │ number("9007199254740993", 7) ⇒ 7 │
+ │                                          │                                                         │ number("pear") ⇒ error            │
+ │                                          │                                                         │ number("4", "x") ⇒ error          │
+ │                                          │                                                         │ number() ⇒ error                  │
+ └──────────────────────────────────────────┴─────────────────────────────────────────────────────────┴───────────────────────────────────┘
+
+Filesystem
+ ┌──────────────────────────────────────────┬──────────────────────────────────────────────────┬──────────────────────────────────────────┐
+ │ Function                                 │ Description                                      │ Example                                  │
+ ├──────────────────────────────────────────┼──────────────────────────────────────────────────┼──────────────────────────────────────────┤
+ │ absolute(file)                           │ Returns the absolute path a file reference       │ absolute("fixture.md") ⇒ "/path/to/      │
+ │                                          │ names, in native spelling. A missing target      │ fixture.md" (display only: resolves to   │
+ │                                          │ returns the first location it would be resolved  │ an absolute path of the resolution       │
+ │                                          │ at, so the result does not prove the file        │ context, which is not portable)          │
+ │                                          │ exists. Rejects HTTP(S) URLs; null passes        │                                          │
+ │                                          │ through.                                         │                                          │
+ │ basename(file)                           │ Returns the final path component, including its  │ basename("sub/note.md") ⇒ "note.md"      │
+ │                                          │ extension; null passes through.                  │                                          │
+ │ basename_without_index(file)             │ Returns the basename with any index suffix (`-   │ basename_without_index("review-1.md") ⇒  │
+ │                                          │ NNN`) removed from its stem; null passes         │ "review.md"                              │
+ │                                          │ through.                                         │                                          │
+ │ code_link(file)                          │ Creates a Markdown link to a local file whose    │ code_link("fixture.md") ⇒ "]8;;file:///path/to/fixture.md\`fixture.]8;;\[0m     │
+ │                                          │ text is its relative path as inline code.        │ ]8;;file:///path/to/fixture.md\md`]8;;\" (display only: result includes an   │
+ │                                          │ Destinations, null handling, and errors match    │ absolute path, which is not portable)    │
+ │                                          │ link().                                          │                                          │
+ │ code_link(target, desc)                  │ Creates a Markdown link whose text is the        │ code_link("fixture.md", "md hash") ⇒     │
+ │                                          │ description as inline code; brackets and         │ "]8;;file:///path/to/fixture.md\`md hash`]8;;\" (display only: result        │
+ │                                          │ backslashes are kept as written. Destinations,   │ includes an absolute destination path,   │
+ │                                          │ null handling, and errors match link().          │ which is not portable)                   │
+ │ decrement_file_index(file)               │ Decrements the numeric index suffix, clamped at  │ decrement_file_index("review-2.md") ⇒    │
+ │                                          │ 0, in the resolved file's directory; an          │ "review-1.md"                            │
+ │                                          │ unindexed name gets index 0. An absolute input   │                                          │
+ │                                          │ returns an absolute path; null passes through.   │                                          │
+ │ dir_leading(file)                        │ Returns the directory path above the last        │ dir_leading("sub/note.md") ⇒ ""          │
+ │                                          │ directory segment, dropping the basename and     │                                          │
+ │                                          │ its parent (the complement of file_trailing);    │                                          │
+ │                                          │ empty when there is none. Null passes through.   │                                          │
+ │ dirname(file)                            │ Returns the directory portion of the display     │ dirname("sub/note.md") ⇒ "sub"           │
+ │                                          │ path; an absolute input returns its absolute     │                                          │
+ │                                          │ parent directory. Null passes through.           │                                          │
+ │ ext(file)                                │ Returns the final extension without its leading  │ ext("sub/note.md") ⇒ "md"                │
+ │                                          │ dot, or empty text when there is none; null      │                                          │
+ │                                          │ passes through.                                  │                                          │
+ │ file_exists(value)                       │ Returns true when the file exists, locally or    │ file_exists("fixture.md") ⇒ true         │
+ │                                          │ as a fetched remote URL. The argument is         │                                          │
+ │                                          │ inspected, never converted, so null, a number,   │                                          │
+ │                                          │ a boolean, an array, or an object is false, and  │                                          │
+ │                                          │ so is text that is not a well-formed file        │                                          │
+ │                                          │ reference (`""`, `https://`), which is never     │                                          │
+ │                                          │ looked up. A resolution failure (a tree escape   │                                          │
+ │                                          │ or a missing home, vault, or repository anchor), │                                          │
+ │                                          │ a probe failure, or a failed remote fetch is an  │                                          │
+ │                                          │ error.                                           │                                          │
+ │ file_index(file)                         │ Returns the numeric index suffix of the file's   │ file_index("review-1.md") ⇒ 1            │
+ │                                          │ stem, or -1 when it has none; null passes        │                                          │
+ │                                          │ through.                                         │                                          │
+ │ file_trailing(file)                      │ Returns the last directory segment plus the      │ file_trailing("sub/note.md") ⇒ "sub/     │
+ │                                          │ basename, or the basename alone when there is    │ note.md"                                 │
+ │                                          │ no directory; null passes through.               │                                          │
+ │ find_files(pattern)                      │ Returns every file a glob reference matches (    │ length(find_files("**/note.md")) ⇒ 2     │
+ │                                          │ `&dir/**/name.md`, `^docs/*.md`) as absolute     │                                          │
+ │                                          │ paths, merged across every root of its prefix:   │                                          │
+ │                                          │ the most local root first, then the shallowest,  │                                          │
+ │                                          │ then by path component. A bare pattern searches  │                                          │
+ │                                          │ the document's folder, then the repository root. │                                          │
+ │                                          │ A matched file symlink whose target leaves the   │                                          │
+ │                                          │ file tree is skipped with a `dm.glob.skipped_    │                                          │
+ │                                          │ symlink` warning, and a directory the search     │                                          │
+ │                                          │ cannot read is an error. A null pattern lists    │                                          │
+ │                                          │ nothing.                                         │                                          │
+ │ find_first_index(file)                   │ Returns the lowest-indexed existing member of    │ find_first_index("review-2.md") ⇒        │
+ │                                          │ the file's index family in its directory, the    │ "review-1.md"                            │
+ │                                          │ unindexed base sorting first; returns the input  │                                          │
+ │                                          │ when no member exists. An absolute input         │                                          │
+ │                                          │ returns an absolute path; null passes through.   │                                          │
+ │ find_last_index(file)                    │ Returns the highest-indexed existing member of   │ find_last_index("review-1.md") ⇒         │
+ │                                          │ the file's index family in its directory;        │ "review-2.md"                            │
+ │                                          │ returns the input when no member exists. An      │                                          │
+ │                                          │ absolute input returns an absolute path; null    │                                          │
+ │                                          │ passes through.                                  │                                          │
+ │ frontmatter(file)                        │ Reads the frontmatter of a Markdown file as an   │ frontmatter("fixture.md") ⇒ {title:      │
+ │                                          │ object; null passes through. A missing or        │ "Fixture Title"}                         │
+ │                                          │ unparsable file is an error.                     │                                          │
+ │ frontmatter(file, prop)                  │ Reads one top-level frontmatter property of a    │ frontmatter("fixture.md", "title") ⇒     │
+ │                                          │ Markdown file, or null when the property is      │ "Fixture Title"                          │
+ │                                          │ absent or the file is null.                      │                                          │
+ │ has_binary(name_or_path)                 │ Returns true when the command is found on PATH   │ has_binary("sh") ⇒ true (display only:   │
+ │                                          │ or is an existing executable absolute path; the  │ result is host-dependent)                │
+ │                                          │ same check as has_command. The command is never  │                                          │
+ │                                          │ run.                                             │                                          │
+ │ has_command(cmd)                         │ Returns true when the command is found on PATH   │ has_command("sh") ⇒ true (display only:  │
+ │                                          │ or is an existing executable absolute path; it   │ result is host-dependent)                │
+ │                                          │ is never run. Null, empty text, and a relative   │                                          │
+ │                                          │ path with a directory part are false.            │                                          │
+ │ increment_file_index(file)               │ Increments the numeric index suffix, preserving  │ increment_file_index("review-1.md") ⇒    │
+ │                                          │ its zero-padding width, in the resolved file's   │ "review-2.md"                            │
+ │                                          │ directory; an unindexed name gets index 2. An    │                                          │
+ │                                          │ absolute input returns an absolute path; null    │                                          │
+ │                                          │ passes through.                                  │                                          │
+ │ is_file_type(value)                      │ Returns true when the value is text that is a    │ is_file_type("./docs/spec.md") ⇒ true    │
+ │                                          │ well-formed file reference (a local, Windows,    │ is_file_type("hello world") ⇒ true       │
+ │                                          │ project, vault, recursive, or HTTP(S) reference, │ is_file_type("https://") ⇒ false         │
+ │                                          │ on every host); it never resolves, reads, or     │ is_file_type(42) ⇒ false                 │
+ │                                          │ fetches anything, so true does not mean the      │                                          │
+ │                                          │ file exists. Empty text, malformed reference     │                                          │
+ │                                          │ syntax, and every non-text value are false.      │                                          │
+ │ is_indexed_file(file)                    │ Returns true when the file's stem ends in a      │ is_indexed_file("review-1.md") ⇒ true    │
+ │                                          │ numeric index suffix (`base-NNN`); null is       │                                          │
+ │                                          │ false.                                           │                                          │
+ │ join(left, right)                        │ Joins two path strings with normalized           │ join("sub", "note.md") ⇒ "sub/note.md"   │
+ │                                          │ separators and validates the result as a path;   │                                          │
+ │                                          │ HTTP(S) arguments are rejected. Null passes      │                                          │
+ │                                          │ through.                                         │                                          │
+ │ link(file)                               │ Creates a Markdown link to a local file, using   │ link("fixture.md") ⇒ "]8;;file:///path/to/fixture.md\fixture.md]8;;\" (      │
+ │                                          │ its relative path as the link text and its       │ display only: result includes an         │
+ │                                          │ absolute path as the destination. HTTP(S) URLs   │ absolute path, which is not portable)    │
+ │                                          │ are rejected because they need a description;    │                                          │
+ │                                          │ null passes through.                             │                                          │
+ │ link(target, desc)                       │ Creates a Markdown link to a local file or an    │ link("fixture.md", "Fixture") ⇒          │
+ │                                          │ HTTP(S) URL with the given description as its    │ "]8;;file:///path/to/fixture.md\Fixture]8;;\" (display only: result          │
+ │                                          │ text; null passes through.                       │ includes an absolute destination path,   │
+ │                                          │                                                  │ which is not portable)                   │
+ │ markdown_body_empty(file)                │ Returns true when the Markdown file's body       │ markdown_body_empty("fixture.md") ⇒      │
+ │                                          │ holds only whitespace; null is false.            │ false                                    │
+ │ markdown_title(file)                     │ Returns the Markdown file's frontmatter `title`, │ markdown_title("fixture.md") ⇒ "Fixture  │
+ │                                          │ else its first H1 heading, else null; null       │ Title"                                   │
+ │                                          │ passes through.                                  │                                          │
+ │ parent_dir(file)                         │ Returns the directory segment immediately above  │ parent_dir("sub/note.md") ⇒ "sub"        │
+ │                                          │ the basename, or empty text when there is none;  │                                          │
+ │                                          │ null passes through.                             │                                          │
+ │ relative(file)                           │ Returns a best-effort relative path from the     │ relative("fixture.md") ⇒ "fixture.md"    │
+ │                                          │ document's base directory, with forward          │                                          │
+ │                                          │ slashes; null passes through.                    │                                          │
+ │ try_frontmatter(file)                    │ Reads the frontmatter of a Markdown file as      │ try_frontmatter("fixture.md") ⇒ {ok:     │
+ │                                          │ `{ok, value, error}`. A file that reads and      │ true, value: {title: "Fixture Title"},   │
+ │                                          │ parses gives `ok` true and the frontmatter as    │ error: null}                             │
+ │                                          │ `value`; a missing, unreadable, or unparsable    │                                          │
+ │                                          │ file gives `ok` false and its reason as `error`  │                                          │
+ │                                          │ instead of failing. Null passes through.         │                                          │
+ │ validate_schema(file)                    │ Returns whether a Markdown document's            │ validate_schema("fixture.md") ⇒ true     │
+ │                                          │ frontmatter is valid against its declared        │                                          │
+ │                                          │ schema; a document that declares no schema is    │                                          │
+ │                                          │ valid. Null passes through; a file that cannot   │                                          │
+ │                                          │ be loaded, or a schema that cannot be processed, │                                          │
+ │                                          │ is an error.                                     │                                          │
+ │ validate_schema(file, obj)               │ Merges `obj` over a Markdown document's          │ validate_schema("fixture.md", {}) ⇒ true │
+ │                                          │ frontmatter (nested objects merge; supplied      │                                          │
+ │                                          │ values, arrays, and explicit nulls win) and      │                                          │
+ │                                          │ returns whether the combined page is valid       │                                          │
+ │                                          │ against its schema. Validation happens in        │                                          │
+ │                                          │ memory; the file and `obj` are never modified.   │                                          │
+ └──────────────────────────────────────────┴──────────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+Context
+ ┌──────────────────────────────────────────┬──────────────────────────────────────────────────┬──────────────────────────────────────────┐
+ │ Function                                 │ Description                                      │ Example                                  │
+ ├──────────────────────────────────────────┼──────────────────────────────────────────────────┼──────────────────────────────────────────┤
+ │ has_local_skill(name)                    │ Returns true when a skill directory with this    │ has_local_skill("darkmatter") ⇒ true (   │
+ │                                          │ name exists in a local-scoped skill root of the  │ display only: depends on agent-specific  │
+ │                                          │ executing agent. Null and empty text are false;  │ skill roots outside the tempdir fixture) │
+ │                                          │ a name with a path separator is an error.        │                                          │
+ │ has_skill(name)                          │ Returns true when a skill directory with this    │ has_skill("darkmatter") ⇒ true (display  │
+ │                                          │ name exists in a user-scoped or local-scoped     │ only: depends on agent-specific skill    │
+ │                                          │ skill root of the executing agent. Null and      │ roots outside the tempdir fixture)       │
+ │                                          │ empty text are false; a name with a path         │                                          │
+ │                                          │ separator is an error.                           │                                          │
+ └──────────────────────────────────────────┴──────────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+List Formatting
+ ┌──────────────────────────────────────────┬──────────────────────────────────────────────────┬──────────────────────────────────────────┐
+ │ Function                                 │ Description                                      │ Example                                  │
+ ├──────────────────────────────────────────┼──────────────────────────────────────────────────┼──────────────────────────────────────────┤
+ │ as_csv(list)                             │ Joins a list into comma-separated text (`, `     │ as_csv([1, 2, 3]) ⇒ "1, 2, 3"            │
+ │                                          │ between elements); null passes through.          │                                          │
+ │ as_json(list)                            │ Renders a list as compact JSON, the explicit     │ as_json(["a", 1]) ⇒ '["a",1]'            │
+ │                                          │ spelling of how a bare array renders in text.    │                                          │
+ │                                          │ An empty list renders as `[]`; null passes       │                                          │
+ │                                          │ through.                                         │                                          │
+ │ as_json5(list)                           │ Renders a list as compact single-line JSON5,     │ as_json5(["a", 1]) ⇒ "['a', 1]"          │
+ │                                          │ with single-quoted strings and unquoted object   │                                          │
+ │                                          │ keys where they are valid identifiers. An empty  │                                          │
+ │                                          │ list renders as `[]`; null passes through.       │                                          │
+ │ as_line_separated(list)                  │ Joins a list into newline-separated text, one    │ as_line_separated(["a", "b", "c"]) ⇒ "a\ │
+ │                                          │ element per line; null passes through.           │ nb\nc" (from function-examples/as_line_  │
+ │                                          │                                                  │ separated.yaml)                          │
+ │ as_ordered_list(list)                    │ Renders a list as a Markdown ordered list,       │ as_ordered_list(["first", ["a", "b"],    │
+ │                                          │ nesting nested arrays and object-array shapes    │ "second"]) ⇒ "1. first\n  1. a\n  2. b\  │
+ │                                          │ as indented sublists; null passes through.       │ n2. second" (from function-examples/as_  │
+ │                                          │                                                  │ ordered_list.yaml)                       │
+ │ as_space_separated(list)                 │ Joins a list into space-separated text; null     │ as_space_separated([1, 2, 3]) ⇒ "1 2 3"  │
+ │                                          │ passes through.                                  │                                          │
+ │ as_tsv(list)                             │ Joins a list into tab-separated text; null       │ as_tsv(["a", "b", "c"]) ⇒ "a\tb\tc" (    │
+ │                                          │ passes through.                                  │ from function-examples/as_tsv.yaml)      │
+ │ as_unordered_list(list)                  │ Renders a list as a Markdown unordered list,     │ as_unordered_list([{package:             │
+ │                                          │ nesting nested arrays and object-array shapes    │ "darkmatter", dependencies: ["biscuit-   │
+ │                                          │ as indented sublists; null passes through.       │ terminal", "renderable"]}, {package:     │
+ │                                          │                                                  │ "renderable", dependencies: []}]) ⇒ "-   │
+ │                                          │                                                  │ darkmatter\n  - biscuit-terminal\n  -    │
+ │                                          │                                                  │ renderable\n- renderable" (from          │
+ │                                          │                                                  │ function-examples/as_unordered_list.     │
+ │                                          │                                                  │ yaml)                                    │
+ └──────────────────────────────────────────┴──────────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+Git
+ ┌──────────────────────────────────────────┬──────────────────────────────────────────────────┬──────────────────────────────────────────┐
+ │ Function                                 │ Description                                      │ Example                                  │
+ ├──────────────────────────────────────────┼──────────────────────────────────────────────────┼──────────────────────────────────────────┤
+ │ branch_exists_on_remote()                │ Returns whether the caller's current branch      │ branch_exists_on_remote() ⇒ true (       │
+ │                                          │ exists on the selected remote, from its live     │ display only: Requires an allowlisted    │
+ │                                          │ ref advertisement or authoritative provider API. │ remote-provider fixture.)                │
+ │ branch_exists_on_remote(branch)          │ Returns whether the exact branch exists on the   │ branch_exists_on_remote("main") ⇒ true ( │
+ │                                          │ selected remote, from its live ref               │ display only: Requires an allowlisted    │
+ │                                          │ advertisement or authoritative provider API.     │ remote-provider fixture.)                │
+ │ branch_exists_on_remote(branch, remote)  │ Returns whether the exact branch exists on the   │ branch_exists_on_remote("main",          │
+ │                                          │ named remote, from its live ref advertisement    │ "origin") ⇒ true (display only:          │
+ │                                          │ or authoritative provider API.                   │ Requires an allowlisted remote-provider  │
+ │                                          │                                                  │ fixture.)                                │
+ │ predict_conflicts(branch)                │ Returns the repository-relative paths that       │ predict_conflicts("feature/example") ⇒ [ │
+ │                                          │ would conflict if the named local branch were    │ "src/config.rs"] (display only:          │
+ │                                          │ merged into the caller's current branch; null    │ Requires a Git fixture with divergent    │
+ │                                          │ passes through.                                  │ local branch tips.)                      │
+ │ recent_commits(count)                    │ Returns the newest `count` commits of the        │ recent_commits(3) ⇒ ["- [abc1234] feat(  │
+ │                                          │ caller's repository, newest first, rendered as   │ sniff) at 1:01pm Today: add gateways\n\  │
+ │                                          │ `ctx.recent_commits` renders them. `ctx.recent_  │ n"] (display only: result depends on     │
+ │                                          │ commits` holds the last 10, captured at the      │ the repository history and the local     │
+ │                                          │ start of execution; `recent_commits(count)`      │ clock)                                   │
+ │                                          │ returns the newest `count`, evaluated at call    │                                          │
+ │                                          │ time. Commits that touched no files are left     │                                          │
+ │                                          │ out, so the list can be shorter than `count`;    │                                          │
+ │                                          │ it is empty outside a repository.                │                                          │
+ │ remote_vendor([remote])                  │ Returns the canonical provider token for the     │ remote_vendor() ⇒ "github" (display      │
+ │                                          │ selected configured remote, probing an           │ only: Requires a configured caller       │
+ │                                          │ ambiguous self-hosted server only when           │ repository remote.)                      │
+ │                                          │ allowlisted.                                     │                                          │
+ └──────────────────────────────────────────┴──────────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+Pull Requests
+ ┌──────────────────────────────────────────┬──────────────────────────────────────────────────┬──────────────────────────────────────────┐
+ │ Function                                 │ Description                                      │ Example                                  │
+ ├──────────────────────────────────────────┼──────────────────────────────────────────────────┼──────────────────────────────────────────┤
+ │ pr(id)                                   │ Returns one pull or merge request, addressed by  │ pr(123) ⇒ "]8;;https://provider/pr/123\PR #123 — Fix parser]8;;\ · open   │
+ │                                          │ number or canonical URL, in canonical Markdown   │ · @alice" (display only: Requires an     │
+ │                                          │ form.                                            │ allowlisted remote-provider fixture.)    │
+ │ pr_list(query)                           │ Queries pull or merge requests with the          │ pr_list({ state: "open", limit: 5 }) ⇒   │
+ │                                          │ canonical bounded filter vocabulary. See the     │ ]8;;https://provider/pr/123\"[PR #123 — Fix parser]8;;\ · open · @alice"] │
+ │                                          │ ]8;;file:///private/tmp/darkmatter-expressions.md%23provider-query-vocabulary\provider query vocabulary]8;;\ for keys, enum values, │ (display only: Requires an allowlisted   │
+ │                                          │ defaults, and bounds.                            │ remote-provider fixture.)                │
+ │ pr_list(count)                           │ Lists the most recent `count` pull or merge      │ pr_list(5) ⇒ ]8;;https://provider/pr/123\"[PR #123 — Fix parser]8;;\ ·    │
+ │                                          │ requests, from 1 to 100.                         │ open · @alice"] (display only: Requires  │
+ │                                          │                                                  │ an allowlisted remote-provider fixture.) │
+ └──────────────────────────────────────────┴──────────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+CI/CD
+ ┌──────────────────────────────────────────┬──────────────────────────────────────────────────┬──────────────────────────────────────────┐
+ │ Function                                 │ Description                                      │ Example                                  │
+ ├──────────────────────────────────────────┼──────────────────────────────────────────────────┼──────────────────────────────────────────┤
+ │ cicd(id)                                 │ Returns one provider-addressable CI/CD job,      │ cicd(456) ⇒ "]8;;https://provider/job/456\CI job #456 — test]8;;\ ·        │
+ │                                          │ addressed by number or canonical URL, in         │ failed" (display only: Requires an       │
+ │                                          │ canonical Markdown form.                         │ allowlisted remote-provider fixture.)    │
+ │ cicd_list(query)                         │ Queries CI/CD jobs with bounded direct listing   │ cicd_list({ statuses: ["failed"], limit: │
+ │                                          │ or parent-execution traversal. See the ]8;;file:///private/tmp/darkmatter-expressions.md%23provider-query-vocabulary\provider]8;;\[0m  │ 5 }) ⇒ ]8;;https://provider/job/456\"[CI job #456 — test]8;;\ · failed"] ( │
+ │                                          │ ]8;;file:///private/tmp/darkmatter-expressions.md%23provider-query-vocabulary\query vocabulary]8;;\ for keys, enum values,          │ display only: Requires an allowlisted    │
+ │                                          │ defaults, and bounds.                            │ remote-provider fixture.)                │
+ │ cicd_list(count)                         │ Lists the most recent `count` CI/CD jobs, from   │ cicd_list(5) ⇒ ]8;;https://provider/job/456\"[CI job #456 — test]8;;\ ·    │
+ │                                          │ 1 to 100.                                        │ failed"] (display only: Requires an      │
+ │                                          │                                                  │ allowlisted remote-provider fixture.)    │
+ └──────────────────────────────────────────┴──────────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+Shell
+ ┌──────────────────────────────────────────┬──────────────────────────────────────────────────┬──────────────────────────────────────────┐
+ │ Function                                 │ Description                                      │ Example                                  │
+ ├──────────────────────────────────────────┼──────────────────────────────────────────────────┼──────────────────────────────────────────┤
+ │ can_execute(name)                        │ Returns true when the name is a binary, an       │ can_execute("git") ⇒ true (display only: │
+ │                                          │ alias, a shell builtin, or a user function (has_ │ result depends on the host and the       │
+ │                                          │ binary, then the login-shell probes). Null and   │ login shell profile)                     │
+ │                                          │ empty text are false; the name is never run.     │                                          │
+ │ has_alias(name)                          │ Returns true when the name is an alias in the    │ has_alias("ll") ⇒ true (display only:    │
+ │                                          │ login shell ($SHELL, or pwsh then powershell.    │ result depends on the login shell        │
+ │                                          │ exe on Windows). Any probe failure, null, and    │ profile)                                 │
+ │                                          │ empty text are false; the name is never run.     │                                          │
+ │ has_builtin_function(name)               │ Returns true when the name is a shell builtin (  │ has_builtin_function("cd") ⇒ true (      │
+ │                                          │ or a PowerShell cmdlet) in the login shell. Any  │ display only: result depends on the      │
+ │                                          │ probe failure, null, and empty text are false;   │ login shell)                             │
+ │                                          │ the name is never run.                           │                                          │
+ │ has_user_function(name)                  │ Returns true when the name is a user-defined     │ has_user_function("mkcd") ⇒ true (       │
+ │                                          │ function in the login shell. Any probe failure,  │ display only: result depends on the      │
+ │                                          │ null, and empty text are false; the name is      │ login shell profile)                     │
+ │                                          │ never run.                                       │                                          │
+ └──────────────────────────────────────────┴──────────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+Agentic CLIs
+ ┌──────────────────────────────────────────┬──────────────────────────────────────────────────┬──────────────────────────────────────────┐
+ │ Function                                 │ Description                                      │ Example                                  │
+ ├──────────────────────────────────────────┼──────────────────────────────────────────────────┼──────────────────────────────────────────┤
+ │ has_agentic_cli(agent)                   │ Returns true when the named agentic CLI is       │ has_agentic_cli("claude") ⇒ true (       │
+ │                                          │ installed on PATH, from the request's captured   │ display only: result depends on the      │
+ │                                          │ agent observation. Names are the Claudine        │ host PATH)                               │
+ │                                          │ provider roster slugs and their aliases; null    │                                          │
+ │                                          │ is false.                                        │                                          │
+ └──────────────────────────────────────────┴──────────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+Repository
+ ┌──────────────────────────────────────────┬──────────────────────────────────────────────────┬──────────────────────────────────────────┐
+ │ Function                                 │ Description                                      │ Example                                  │
+ ├──────────────────────────────────────────┼──────────────────────────────────────────────────┼──────────────────────────────────────────┤
+ │ package(where)                           │ Returns the name of the package containing the   │ package("darkmatter/lib/src/lib.rs") ⇒   │
+ │                                          │ path, from the captured repository observation.  │ "darkmatter" (display only: result       │
+ │                                          │ Returns empty text outside the repository,       │ depends on the captured repository)      │
+ │                                          │ outside a monorepo, or when no package contains  │                                          │
+ │                                          │ the path.                                        │                                          │
+ │ package_area(where)                      │ Returns the name of the package area containing  │ package_area("darkmatter/lib/src/lib.    │
+ │                                          │ the path, from the captured repository           │ rs") ⇒ "darkmatter" (display only:       │
+ │                                          │ observation. Returns empty text outside the      │ result depends on the captured           │
+ │                                          │ repository, outside a monorepo, or when no area  │ repository)                              │
+ │                                          │ contains the path.                               │                                          │
+ └──────────────────────────────────────────┴──────────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+Network
+ ┌──────────────────────────────────────────┬──────────────────────────────────────────────────┬──────────────────────────────────────────┐
+ │ Function                                 │ Description                                      │ Example                                  │
+ ├──────────────────────────────────────────┼──────────────────────────────────────────────────┼──────────────────────────────────────────┤
+ │ ipv4([filter])                           │ Returns the host's IPv4 addresses, excluding     │ ipv4("192.168.0.0/16") ⇒ ["192.168.10.   │
+ │                                          │ loopback and link-local, from the request's      │ 5"] (display only: result depends on     │
+ │                                          │ captured network observation. A valid CIDR       │ the host interfaces)                     │
+ │                                          │ filter selects addresses inside that network (   │                                          │
+ │                                          │ and can include loopback or link-local); any     │                                          │
+ │                                          │ other filter is a substring match over the       │                                          │
+ │                                          │ default set.                                     │                                          │
+ │ ipv6([filter])                           │ Returns the host's IPv6 addresses, excluding     │ ipv6("::1/128") ⇒ ["::1"] (display only: │
+ │                                          │ loopback and link-local; scoped addresses keep   │ result depends on the host interfaces)   │
+ │                                          │ their %scope suffix. Filters behave as in ipv4.  │                                          │
+ │ ping(address, [timeout])                 │ Sends one ICMP echo to an IP address and         │ ping("192.168.1.1", 250) ⇒ true (        │
+ │                                          │ returns true when it replies within `timeout`    │ display only: result depends on the      │
+ │                                          │ milliseconds (default 100, at most 60000).       │ network and the ICMP grant)              │
+ │                                          │ Returns null with a warning when the address is  │                                          │
+ │                                          │ not granted through --allow host=HOST, false     │                                          │
+ │                                          │ when there is no reply, and an error when the    │                                          │
+ │                                          │ host cannot send ICMP.                           │                                          │
+ │ ping_under(address, timeout, [attempts]) │ Sends `attempts` ICMP echoes (default 3) one     │ ping_under("192.168.1.1", 50, 5) ⇒       │
+ │                                          │ after another, each with a timeout of `timeout`  │ "unstable" (display only: result         │
+ │                                          │ milliseconds. Returns true when every reply      │ depends on the network and the ICMP      │
+ │                                          │ arrives in time, false when none does, and       │ grant)                                   │
+ │                                          │ "unstable" otherwise. Consent and error rules    │                                          │
+ │                                          │ match ping.                                      │                                          │
+ └──────────────────────────────────────────┴──────────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+Composition
+ ┌──────────────────────────────────────────┬──────────────────────────────────────────────────┬──────────────────────────────────────────┐
+ │ Function                                 │ Description                                      │ Example                                  │
+ ├──────────────────────────────────────────┼──────────────────────────────────────────────────┼──────────────────────────────────────────┤
+ │ as_markdown(content)                     │ Composes the text as Markdown through the root   │ as_markdown("::file ./intro.md") ⇒ "#    │
+ │                                          │ document's request (same context, base           │ Introduction" (display only: result      │
+ │                                          │ directory, consent, and recursion budget) and    │ depends on the transcluded file)         │
+ │                                          │ returns the composed Markdown; null passes       │                                          │
+ │                                          │ through.                                         │                                          │
+ └──────────────────────────────────────────┴──────────────────────────────────────────────────┴──────────────────────────────────────────┘
+

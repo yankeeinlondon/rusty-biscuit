@@ -23,6 +23,7 @@ const CLAUDINE_BUNDLE: EmbeddedSchemaBundle = EmbeddedSchemaBundle::new(
     &[
         ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
         ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
+        ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
         ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
         ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
         ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
@@ -361,19 +362,19 @@ fn schema_document_transcludes_same_file_as_library_source() {
         resolve_yaml_schema(&declaration, catalog_dir, &crate::request_support::context_at(catalog_dir))
             .expect("the authored baseline resolves from disk");
     assert!(from_disk.imports.contains(&policy_path), "{:?}", from_disk.imports);
-    let Some(darkmatter::markdown::schemas::SimplifiedSchema::Single(declared)) = &from_disk.simplified else {
-        panic!("the declaration is a single shape");
-    };
-    let Some(darkmatter::markdown::schemas::PropertyDef::Single(fm)) = declared.properties.get("fm") else {
-        panic!("`fm` is a single atom");
-    };
-    let darkmatter::markdown::schemas::TypeExpr::InlineObject(fm) = &fm.ty else {
-        panic!("`fm` is an object shape");
-    };
-    let from_disk = darkmatter::markdown::schemas::SimplifiedSchema::Single(fm.clone());
-    assert_eq!(from_disk, darkmatter_base_schema());
+    // The disk catalog's baseline stores the same shared types the embedded
+    // one does; their identities name different sources, so compare the
+    // lowered schemas.
+    let catalog = darkmatter::markdown::schemas::catalog::GlobalCatalog::from_file(
+        &catalog_path,
+        darkmatter::markdown::schemas::catalog::DARKMATTER_GLOBALS,
+        &crate::request_support::context_at(catalog_dir),
+    )
+    .expect("the authored catalog loads from disk");
+    let (from_disk, definitions) = catalog.baseline().expect("the catalog declares `fm`");
+    assert!(!definitions.is_empty(), "the disk baseline stores its shared types");
     assert_eq!(
-        darkmatter::markdown::schemas::to_json_schema(&from_disk).expect("lowers"),
+        darkmatter::markdown::schemas::to_json_schema_with_definitions(&from_disk, &definitions).expect("lowers"),
         darkmatter_base_json_schema()
     );
 }

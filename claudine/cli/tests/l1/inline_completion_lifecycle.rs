@@ -957,7 +957,10 @@ fn a_conditional_required_property_never_blocks_an_inline_launch() {
         "original body\n",
     );
     let fixture = Fixture::new(source);
-    fixture.workspace.seed_inline_metadata_schema(include_str!("../../../schemas/inline-compose.yaml"));
+    fixture.workspace.seed_inline_metadata_schema(
+        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../schemas/document.yaml"),
+    );
     let calls = fixture.path().join("calls.txt");
     write_executable(
         &fixture.bin.join("goose"),

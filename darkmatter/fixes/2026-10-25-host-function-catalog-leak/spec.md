@@ -28,13 +28,16 @@ next_spec: 2026-10-25-schema-diagnostic-provenance
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-26
-review_iterations: 1
+review_iterations: 3
 human_review: false
 needs_rulings: false
 related:
     - 2026-10-25-fix-now
     - 2026-10-25-pipeline-improvements
     - 2026-10-27-darkmatter-lifecycle-ownership
+completed: true
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Host function catalogs are owned, not leaked
@@ -197,8 +200,10 @@ Direct users of the removed field must switch to the method.
 
 **Decision:** `host_function_set`'s cache keeps one entry per catalog path.
 A lookup whose catalog hash or artifact differs replaces the entry. A failed load is cached
-the same way and is discarded when its revision is replaced. This is the same
-rule `2026-10-25-fix-now` applies to the lifecycle profile cache.
+the same way and is discarded when its revision is replaced. This follows the
+latest-per-path rule `2026-10-25-fix-now` applies to the lifecycle profile
+cache, with the differences recorded in "Relationship to the lifecycle profile
+cache" below.
 
 A `HostFunctions` value obtained earlier keeps working after replacement,
 because it holds its own `Arc`.
@@ -284,6 +289,36 @@ Comments to correct:
   explanation of why `suggest_strings` is separate (its actual distinction is
   plain strings versus descriptor records after this change).
 - `leak` in the expression catalog module is removed with its last caller.
+
+### Relationship to the lifecycle profile cache
+
+Recorded after `2026-10-25-fix-now` was implemented, to correct this spec's
+earlier statement that both caches follow "the same rule".
+
+**Decision:** keep this spec's host function cache policy as written. The
+lifecycle profile cache (`profile_cache()` in
+`markdown/schemas/catalog.rs`) differs in two ways that this fix does not
+copy: it does not cache a catalog that fails to load (only a refused
+artifact or a non-host file), and listing a visited schema root drops cached
+paths in that root that are no longer listed. Both caches already share
+`ArtifactKey` and the `biscuit_hash::blake3_hash` revision digest in the same
+file; `host_function_set` is unchanged by `2026-10-25-fix-now`.
+
+**Alternatives considered:**
+
+- Adopt root-listing pruning here too. It is sound (it is scoped to one root's
+  own listing, not to one document's discovery), but nothing in this spec's
+  acceptance needs it, and the per-path bound already stops revision growth.
+- Stop caching failed host function loads, as the lifecycle cache does for an
+  invalid catalog. That would re-parse an unchanged failing catalog on every
+  lookup, which this spec deliberately avoids.
+
+**Why:** the fixes have different failure models: a lifecycle catalog that
+fails to load is reported by the catalog diagnostics, while a failed host
+function load is itself the reported result.
+
+**Downsides:** the two caches remain similar but not identical, so a reader
+must not assume one rule from the other.
 
 ## Out of scope
 

@@ -269,12 +269,56 @@ fn resolved_exports(repo: &SchemaRepo, file: &str, exports: &[&str]) -> BTreeMap
     exports
         .iter()
         .map(|export| {
-            let mut fragment = effective.json_schema["properties"][format!("t_{export}")].clone();
+            let fragment = &effective.json_schema["properties"][format!("t_{export}")];
             assert!(!fragment.is_null(), "{file} exports `{export}`");
+            let mut fragment = dereferenced(fragment, &effective.json_schema["$defs"], &mut Vec::new());
             strip_optional_null(&mut fragment);
             (export.to_string(), fragment)
         })
         .collect()
+}
+
+/// `fragment` with every acyclic local `$ref` replaced by the definition it
+/// names, so a test reads an export the same way whether the resolver stored a
+/// repeated type once or inlined it. A reference back into a definition being
+/// replaced stays a reference.
+fn dereferenced(fragment: &Value, defs: &Value, open: &mut Vec<String>) -> Value {
+    match fragment {
+        Value::Object(map) => {
+            if let Some(key) = map.get("$ref").and_then(Value::as_str).and_then(|r| r.strip_prefix("#/$defs/"))
+                && !open.iter().any(|name| name == key)
+                && let Some(Value::Object(body)) = defs.get(key)
+            {
+                open.push(key.to_string());
+                let mut merged = match dereferenced(&Value::Object(body.clone()), defs, open) {
+                    Value::Object(merged) => merged,
+                    _ => unreachable!("an object dereferences to an object"),
+                };
+                open.pop();
+                for (name, value) in map.iter().filter(|(name, _)| name.as_str() != "$ref") {
+                    merged.insert(name.clone(), dereferenced(value, defs, open));
+                }
+                return Value::Object(merged);
+            }
+            Value::Object(map.iter().map(|(name, value)| (name.clone(), dereferenced(value, defs, open))).collect())
+        }
+        Value::Array(items) => Value::Array(items.iter().map(|item| dereferenced(item, defs, open)).collect()),
+        other => other.clone(),
+    }
+}
+
+/// Every `$ref` in `fragment`, in document order.
+pub(crate) fn collect_references(fragment: &Value, found: &mut Vec<String>) {
+    match fragment {
+        Value::Object(map) => {
+            if let Some(Value::String(reference)) = map.get("$ref") {
+                found.push(reference.clone());
+            }
+            map.values().for_each(|value| collect_references(value, found));
+        }
+        Value::Array(items) => items.iter().for_each(|item| collect_references(item, found)),
+        _ => {}
+    }
 }
 
 /// An optional property lowers to `anyOf: [null, …]`; this returns the
@@ -294,7 +338,16 @@ fn strip_optional_null(fragment: &mut Value) {
 /// the fragment itself.
 fn arms_of(fragment: &Value) -> Vec<Value> {
     match fragment.get("anyOf").and_then(Value::as_array) {
-        Some(arms) => arms.iter().filter(|arm| *arm != &json!({ "type": "null" })).cloned().collect(),
+        // An arm that is only another union is a stored union reached by
+        // reference; its alternatives are this union's.
+        Some(arms) => arms
+            .iter()
+            .filter(|arm| *arm != &json!({ "type": "null" }))
+            .flat_map(|arm| match arm.as_object() {
+                Some(map) if map.len() == 1 && map.contains_key("anyOf") => arms_of(arm),
+                _ => vec![arm.clone()],
+            })
+            .collect(),
         None => vec![fragment.clone()],
     }
 }
@@ -378,7 +431,7 @@ pub(crate) fn generated_verbs() -> BTreeSet<String> {
     effect_descriptors()
         .iter()
         .map(|descriptor| name_of(descriptor.signature))
-        .chain(expression_function_descriptors().iter().map(|descriptor| name_of(descriptor.signature)))
+        .chain(expression_function_descriptors().iter().map(|descriptor| name_of(&descriptor.signature)))
         .filter(|name| name != "set")
         .collect()
 }
@@ -405,6 +458,7 @@ macro_rules! shipped_bundle {
             ("action.yaml", include_str!("../../../schemas/action.yaml").to_string()),
             ("lifecycle.yaml", include_str!("../../../schemas/lifecycle.yaml").to_string()),
             ("linking.yaml", include_str!("../../../schemas/linking.yaml").to_string()),
+            ("document.yaml", include_str!("../../../schemas/document.yaml").to_string()),
             ("claudine.yaml", include_str!("../../../schemas/claudine.yaml").to_string()),
             ("inline-compose.yaml", include_str!("../../../schemas/inline-compose.yaml").to_string()),
             ("sequence-types.yaml", include_str!("../../../schemas/sequence-types.yaml").to_string()),
@@ -738,6 +792,8 @@ fn every_file_loads_and_every_export_resolves() {
         "user-invocable", "disable-model-invocation", "argument-hint", "max_turns",
     ];
     assert_eq!(resolved_exports(&repo, "linking.yaml", &linking_exports).len(), 11);
+    let document_exports = ["prompt", "hash", "last_updated"];
+    assert_eq!(resolved_exports(&repo, "document.yaml", &document_exports).len(), document_exports.len());
     let sequence_exports = ["steps", "step", "task", "group"];
     assert_eq!(resolved_exports(&repo, "sequence-types.yaml", &sequence_exports).len(), sequence_exports.len());
 
@@ -1514,39 +1570,298 @@ fn linked_prompt_declares_every_linking_key_and_keeps_the_root_open() {
     assert!(effective.validate(&frontmatter_json(&markdown)).valid, "`ticket: 123` is accepted beside the controls");
 }
 
+/// The metadata properties `document.yaml` declares and both metadata
+/// triggers import.
+const DOCUMENT_METADATA: [&str; 3] = ["prompt", "hash", "last_updated"];
+
+/// Compares two resolved JSON Schema graphs, each fragment read against the
+/// schema root whose `$defs` its references name.
+///
+/// Generated definition keys are not compared: a local `$ref` on each side is
+/// followed into its root, and the pair of references joins a bijective
+/// mapping, so two spellings of the same definition agree and one spelling
+/// never stands for two definitions. A visited pair is compared once, so a
+/// recursive graph terminates. A reference on one side only is compared by
+/// its target (with its sibling annotations), so an inlined and a shared
+/// definition of one type agree.
+struct GraphParity<'a> {
+    left_root: &'a Value,
+    right_root: &'a Value,
+    forward: BTreeMap<String, String>,
+    backward: BTreeMap<String, String>,
+    visited: BTreeSet<(String, String)>,
+}
+
+impl<'a> GraphParity<'a> {
+    fn new(left_root: &'a Value, right_root: &'a Value) -> Self {
+        Self { left_root, right_root, forward: BTreeMap::new(), backward: BTreeMap::new(), visited: BTreeSet::new() }
+    }
+
+    /// The local reference of `fragment`, when it has one.
+    fn local_ref(fragment: &Value) -> Option<&str> {
+        fragment.get("$ref").and_then(Value::as_str).filter(|reference| reference.starts_with("#/"))
+    }
+
+    /// The definition `reference` names in `root`, with `fragment`'s other
+    /// keys laid over it.
+    fn dereferenced(root: &Value, fragment: &Value, reference: &str, at: &str) -> Value {
+        let target = root
+            .pointer(&reference[1..])
+            .unwrap_or_else(|| panic!("{at}: `{reference}` names a definition of its root"));
+        let siblings = fragment.as_object().expect("a reference is an object").iter().filter(|(key, _)| *key != "$ref");
+        match target {
+            Value::Object(map) => {
+                let mut merged = map.clone();
+                merged.extend(siblings.map(|(key, value)| (key.clone(), value.clone())));
+                Value::Object(merged)
+            }
+            other => {
+                assert!(siblings.count() == 0, "{at}: `{reference}` names a boolean schema beside annotations");
+                other.clone()
+            }
+        }
+    }
+
+    fn assert_same(&mut self, left: &Value, right: &Value, at: &str) {
+        self.compare(left, right, at, 0);
+    }
+
+    fn compare(&mut self, left: &Value, right: &Value, at: &str, depth: usize) {
+        assert!(depth < 512, "{at}: the comparison does not terminate");
+        match (Self::local_ref(left), Self::local_ref(right)) {
+            (Some(left_ref), Some(right_ref)) => {
+                let mapped = self.forward.entry(left_ref.to_string()).or_insert_with(|| right_ref.to_string());
+                assert_eq!(mapped, right_ref, "{at}: `{left_ref}` is already paired with another definition");
+                let mapped = self.backward.entry(right_ref.to_string()).or_insert_with(|| left_ref.to_string());
+                assert_eq!(mapped, left_ref, "{at}: `{right_ref}` is already paired with another definition");
+                let without_ref = |fragment: &Value| -> Value {
+                    let mut map = fragment.as_object().expect("an object").clone();
+                    map.remove("$ref");
+                    Value::Object(map)
+                };
+                self.compare(&without_ref(left), &without_ref(right), &format!("{at} (beside $ref)"), depth + 1);
+                if self.visited.insert((left_ref.to_string(), right_ref.to_string())) {
+                    let left_target = self.left_root.pointer(&left_ref[1..]).cloned();
+                    let right_target = self.right_root.pointer(&right_ref[1..]).cloned();
+                    let left_target = left_target.unwrap_or_else(|| panic!("{at}: `{left_ref}` resolves"));
+                    let right_target = right_target.unwrap_or_else(|| panic!("{at}: `{right_ref}` resolves"));
+                    self.compare(&left_target, &right_target, &format!("{at} -> {left_ref}"), depth + 1);
+                }
+                return;
+            }
+            (Some(reference), None) => {
+                let target = Self::dereferenced(self.left_root, left, reference, at);
+                return self.compare(&target, right, &format!("{at} -> {reference}"), depth + 1);
+            }
+            (None, Some(reference)) => {
+                let target = Self::dereferenced(self.right_root, right, reference, at);
+                return self.compare(left, &target, &format!("{at} -> {reference}"), depth + 1);
+            }
+            (None, None) => {}
+        }
+        match (left, right) {
+            (Value::Object(left_map), Value::Object(right_map)) => {
+                let left_keys: BTreeSet<&String> = left_map.keys().collect();
+                let right_keys: BTreeSet<&String> = right_map.keys().collect();
+                assert_eq!(left_keys, right_keys, "{at}: the same keywords");
+                for (key, value) in left_map {
+                    self.compare(value, &right_map[key], &format!("{at}/{key}"), depth + 1);
+                }
+            }
+            (Value::Array(left_items), Value::Array(right_items)) => {
+                assert_eq!(left_items.len(), right_items.len(), "{at}: the same number of items");
+                for (index, (left_item, right_item)) in left_items.iter().zip(right_items).enumerate() {
+                    self.compare(left_item, right_item, &format!("{at}/{index}"), depth + 1);
+                }
+            }
+            _ => assert_eq!(left, right, "{at}"),
+        }
+    }
+}
+
+/// The comparison follows references into `$defs` whatever their keys,
+/// agrees an inlined definition with a shared one, terminates on a recursive
+/// graph, and rejects a key that would stand for two definitions.
+#[test]
+fn graph_parity_compares_definitions_through_a_bijective_reference_mapping() {
+    let recursive = |key: &str| {
+        let reference = format!("#/$defs/{key}");
+        json!({
+            "$defs": { key: { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "$ref": reference }] } } },
+            "properties": { "tree": { "$ref": reference } }
+        })
+    };
+    let (left, right) = (recursive("node"), recursive("node-2"));
+    GraphParity::new(&left, &right).assert_same(&left["properties"]["tree"], &right["properties"]["tree"], "recursive");
+
+    let shared = json!({ "$defs": { "h": { "type": "string" } }, "properties": { "a": { "$ref": "#/$defs/h" } } });
+    let inlined = json!({ "properties": { "a": { "type": "string" } } });
+    GraphParity::new(&shared, &inlined).assert_same(&shared["properties"]["a"], &inlined["properties"]["a"], "inlined");
+
+    let one = json!({ "$defs": { "h": { "type": "string" } }, "a": { "$ref": "#/$defs/h" }, "b": { "$ref": "#/$defs/h" } });
+    let two = json!({
+        "$defs": { "x": { "type": "string" }, "y": { "type": "string" } },
+        "a": { "$ref": "#/$defs/x" },
+        "b": { "$ref": "#/$defs/y" }
+    });
+    let merged = std::panic::catch_unwind(|| {
+        GraphParity::new(&one, &two).assert_same(&json!([one["a"], one["b"]]), &json!([two["a"], two["b"]]), "bijection");
+    });
+    assert!(merged.is_err(), "one definition must not pair with two");
+    let differs = std::panic::catch_unwind(|| {
+        let other = json!({ "$defs": { "h": { "type": "number" } }, "a": { "$ref": "#/$defs/h" } });
+        GraphParity::new(&one, &other).assert_same(&one["a"], &other["a"], "target");
+    });
+    assert!(differs.is_err(), "different definitions behind equal keys differ");
+}
+
+/// `prompt`, `hash`, and `last_updated` resolve to one type graph through
+/// the library itself, through each metadata trigger alone, and through the
+/// effective schema that merges them, on disk and embedded. Each comparison
+/// follows every definition the property reaches, so this holds whether a
+/// definition is inlined or shared, and however its key is spelled.
 #[test]
 fn shared_payload_properties_have_identical_types() {
-    let repo = SchemaRepo::new(&shipped_bundle!());
-    let discovered = repo.discover().expect("the shipped bundle loads");
-    let lowered = |name: &str, frontmatter: &str| {
+    let shipped = shipped_bundle!();
+    let without = |dropped: &[&str]| -> Vec<BundleFile> {
+        shipped.iter().filter(|(name, _)| !dropped.contains(name)).cloned().collect()
+    };
+    let effective_of = |discovered: &Discovered, repo: &SchemaRepo, name: &str, frontmatter: &str| {
         let path = repo.write_document(name, frontmatter);
         let markdown = Markdown::try_from(path.as_path())
             .expect("document loads")
             .with_source(ComposeSource::File(path.clone()));
-        let effective = discovered.schemas.effective_for(&markdown).expect("effective").expect("schema");
-        ["prompt", "hash", "last_updated"]
-            .iter()
-            .map(|key| (key.to_string(), effective.json_schema["properties"][*key].clone()))
-            .collect::<BTreeMap<_, _>>()
+        discovered.schemas.effective_for(&markdown).expect("effective").expect("schema")
     };
-    // Only `claudine.yaml` matches the first document. `prompt` selects both
-    // triggers, and `inline-compose.yaml` is applied after `claudine.yaml`,
-    // so the second shows the inline declarations.
-    let claudine_only = lowered("claudine-only.md", "---\nstart: [stop]\n---\n");
-    let inline_last = lowered("inline.md", "---\nprompt: hi\n---\n");
-    assert!(claudine_only.values().all(|fragment| !fragment.is_null()));
-    assert_eq!(claudine_only, inline_last);
 
-    let inline = include_str!("../../../schemas/inline-compose.yaml");
-    let claudine = include_str!("../../../schemas/claudine.yaml");
-    let payload_lines = |text: &'static str| -> BTreeSet<&'static str> {
-        text.split("\n$schema:\n").nth(1).expect("a payload").lines().collect()
-    };
-    let shared: BTreeSet<&str> = payload_lines(inline);
-    assert!(
-        shared.is_subset(&payload_lines(claudine)),
-        "every inline-compose declaration is spelled exactly as in claudine.yaml"
+    // The library's own types, imported by a document's `$schema`.
+    let library_repo = SchemaRepo::new(&[("document.yaml", include_str!("../../../schemas/document.yaml").to_string())]);
+    let mut imports = String::from("---\n$schema:\n");
+    for property in DOCUMENT_METADATA {
+        imports.push_str(&format!("    {property}: {property}@../schemas/document.yaml\n"));
+    }
+    imports.push_str("---\n");
+    let library = effective_of(&library_repo.discover().expect("discovery"), &library_repo, "library.md", &imports);
+    let library: &Value = &library.json_schema;
+
+    // (label, bundle, frontmatter, embedded): each trigger alone, then the
+    // normal merge, where `inline-compose.yaml` is applied after
+    // `claudine.yaml` and its declarations win.
+    let paths: [(&str, Vec<BundleFile>, &str, bool); 6] = [
+        ("claudine.yaml alone", without(&["inline-compose.yaml"]), "---\nprompt: hi\n---\n", false),
+        ("inline-compose.yaml alone", without(&["claudine.yaml"]), "---\nprompt: hi\n---\n", false),
+        ("the shipped bundle, claudine.yaml only", shipped.to_vec(), "---\nstart: [stop]\n---\n", false),
+        ("the shipped bundle, both triggers", shipped.to_vec(), "---\nprompt: hi\n---\n", false),
+        ("the embedded bundle, claudine.yaml only", shipped.to_vec(), "---\nstart: [stop]\n---\n", true),
+        ("the embedded bundle, both triggers", shipped.to_vec(), "---\nprompt: hi\n---\n", true),
+    ];
+    let mut payloads = Vec::new();
+    for (label, bundle, frontmatter, embedded) in paths {
+        let (repo, discovered) = if embedded {
+            let repo = SchemaRepo::new(&[]);
+            let discovered = repo.discover_embedded(embedded_bundle(&bundle)).expect("the embedded bundle loads");
+            (repo, discovered)
+        } else {
+            let repo = SchemaRepo::new(&bundle);
+            let discovered = repo.discover().expect("the bundle loads");
+            (repo, discovered)
+        };
+        payloads.push((label, effective_of(&discovered, &repo, "metadata.md", frontmatter)));
+    }
+
+    let (first_label, first) = &payloads[0];
+    let first: &Value = &first.json_schema;
+    for property in DOCUMENT_METADATA {
+        let first_fragment = &first["properties"][property];
+        assert!(!first_fragment.is_null(), "{first_label} declares `{property}`");
+
+        // Every payload declaration, optional presence included, is one graph.
+        for (label, payload) in &payloads[1..] {
+            let payload: &Value = &payload.json_schema;
+            let fragment = &payload["properties"][property];
+            assert!(!fragment.is_null(), "{label} declares `{property}`");
+            GraphParity::new(first, payload).assert_same(
+                first_fragment,
+                fragment,
+                &format!("`{property}`: {first_label} vs {label}"),
+            );
+        }
+
+        // And it is the library's type, apart from the optional null arm.
+        let mut declared = first_fragment.clone();
+        strip_optional_null(&mut declared);
+        let mut exported = library["properties"][property].clone();
+        strip_optional_null(&mut exported);
+        GraphParity::new(first, library).assert_same(
+            &declared,
+            &exported,
+            &format!("`{property}`: {first_label} vs document.yaml"),
+        );
+    }
+
+    // Behavioral parity: each payload accepts and rejects the same values.
+    for (value, valid) in [
+        (json!({ "prompt": "hi", "hash": "abc", "last_updated": "2026-10-26" }), true),
+        (json!({ "prompt": "hi", "hash": { "kind": "detailed", "value": [1, { "a": "b" }], "ignored": ["x"] } }), true),
+        (json!({ "prompt": "hi", "hash": [1] }), false),
+        (json!({ "prompt": "hi", "hash": { "kind": "bogus" } }), false),
+        (json!({ "prompt": ["hi"] }), false),
+    ] {
+        for (label, payload) in &payloads {
+            let report = payload.validate(&value);
+            assert_eq!(report.valid, valid, "{label}: {value}: {:?}", problems(&report));
+        }
+    }
+}
+
+/// One library type imported into two properties of the same schema keeps
+/// both stored hash forms valid at each use, and an invalid value at either
+/// use is reported at that property's instance path.
+#[test]
+fn hash_imported_twice_accepts_both_stored_forms_at_each_use() {
+    let repo = SchemaRepo::new(&[("document.yaml", include_str!("../../../schemas/document.yaml").to_string())]);
+    let discovered = repo.discover().expect("discovery");
+    let path = repo.write_document(
+        "two-hashes.md",
+        "---\n$schema:\n    first: hash@../schemas/document.yaml\n    second: hash@../schemas/document.yaml\n---\n",
     );
+    let markdown = Markdown::try_from(path.as_path())
+        .expect("document loads")
+        .with_source(ComposeSource::File(path.clone()));
+    let effective = discovered.schemas.effective_for(&markdown).expect("resolves").expect("an inline schema");
+
+    // Two uses in one schema store `hash` once; each property refers to it.
+    let references = |property: &str| {
+        let mut found = Vec::new();
+        collect_references(&effective.json_schema["properties"][property], &mut found);
+        found
+    };
+    let (first_refs, second_refs) = (references("first"), references("second"));
+    assert_eq!(first_refs.len(), 1, "`first` refers to one definition: {first_refs:?}");
+    assert_eq!(first_refs, second_refs, "both uses refer to the same definition");
+    let defs = effective.json_schema["$defs"].as_object().expect("the shared body is a definition");
+    let key = first_refs[0].strip_prefix("#/$defs/").expect("a local definition");
+    assert!(defs.contains_key(key), "`{key}` is stored: {defs:?}");
+    assert_eq!(defs.len(), 1, "only `hash` is stored: {:?}", defs.keys().collect::<Vec<_>>());
+
+    let shorthand = json!("0123456789abcdef");
+    let longhand = json!({ "kind": "structured", "value": { "mixed": [1, true] }, "ignored": ["title"] });
+    for (first, second) in [(&shorthand, &longhand), (&longhand, &shorthand), (&shorthand, &shorthand), (&longhand, &longhand)] {
+        let report = effective.validate(&json!({ "first": first, "second": second }));
+        assert!(report.valid, "first: {first}, second: {second}: {:?}", problems(&report));
+    }
+    for property in ["first", "second"] {
+        for invalid in [json!([1]), json!({ "kind": "bogus" }), json!({ "ignored": "title" })] {
+            let other = if property == "first" { "second" } else { "first" };
+            let report = effective.validate(&json!({ property: invalid, other: shorthand }));
+            assert!(!report.valid, "`{property}: {invalid}` is rejected");
+            let found = problems(&report);
+            assert!(
+                found.iter().all(|(pointer, _)| pointer == &format!("/{property}") || pointer.starts_with(&format!("/{property}/"))),
+                "`{property}: {invalid}` is reported at /{property} alone: {found:?}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -2351,3 +2666,4 @@ fn single_action_long_forms_bind_through_the_registration() {
         assert!(parsed.is_ok(), "the parser accepts `{frontmatter}`: {parsed:?}");
     }
 }
+

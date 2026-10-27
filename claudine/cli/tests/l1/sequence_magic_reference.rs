@@ -115,7 +115,7 @@ exit 0
 }
 
 #[cfg(unix)]
-fn assert_sequence_reference_launch_scope(magic: bool, metadata_schema: &str) {
+fn assert_sequence_reference_launch_scope(magic: bool, metadata_schema: &str, document_library: &str) {
     // Ruling 2 of 2026-09-23-local-before-home: a nested `@` reference keeps
     // the invocation's launch tree as its local root, while explicit-relative
     // references stay anchored on the source document. Launching from
@@ -128,7 +128,7 @@ fn assert_sequence_reference_launch_scope(magic: bool, metadata_schema: &str) {
     // source doc lives) and `unrelated/` (the process CWD), each carrying
     // its own fixtures with a distinguishable step count.
     let fixture = CliProcessFixture::named("sequence-magic-reference");
-    fixture.seed_inline_metadata_schema(metadata_schema);
+    fixture.seed_inline_metadata_schema(metadata_schema, document_library);
 
     // --- Primary repo: source doc + source-relative fixtures (1 step) ---
     let repo_root = fixture.cwd().join("repo");
@@ -209,6 +209,7 @@ macro_rules! sequence_reference_launch_tests {
                 assert_sequence_reference_launch_scope(
                     $magic,
                     include_str!("../../../schemas/inline-compose.yaml"),
+                    include_str!("../../../schemas/document.yaml"),
                 );
             }
         )*

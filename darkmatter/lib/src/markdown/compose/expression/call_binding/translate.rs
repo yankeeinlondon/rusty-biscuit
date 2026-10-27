@@ -30,7 +30,7 @@
 //! never looks for the file, even for `file(eager)`.
 
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex, OnceLock};
+use std::sync::LazyLock;
 
 use serde_json::{Value, json};
 
@@ -49,6 +49,7 @@ use crate::markdown::schemas::simplified::{
     AlphanumericOptions, Constraint, DefKey, DefinitionOuter, DefinitionTable, PatternKey, PropertyAtom, PropertyDef,
     SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType, TupleType, TypeExpr,
 };
+use crate::markdown::schemas::validate::ValidatorCache;
 
 /// How many named-type references deep translation follows before failing.
 /// A recursive named type counts once per path, since its uses below a value
@@ -1316,27 +1317,89 @@ fn expression_source(value: &Value) -> String {
     }
 }
 
+/// Structural validators for [`format_assertion`]: bounded, so distinct
+/// refined signatures (an editor rebuilding constrained `url` types, say) do
+/// not accumulate validators for the life of the process.
+static FORMAT_VALIDATORS: LazyLock<ValidatorCache> = LazyLock::new(ValidatorCache::new);
+
 /// A passive assertion judged by the validator JSON Schema validation builds
 /// for `fragment`, so both translators agree on what a format accepts.
-/// Validators are built once per distinct fragment for the process.
+/// Validators come from a bounded cache; the assertion holds its own
+/// validator, so evicting the cache entry never changes what it accepts.
 fn format_assertion(description: &str, fragment: Value) -> Result<Assertion, TranslateError> {
-    type Validators = Mutex<HashMap<String, Arc<jsonschema::Validator>>>;
-    static VALIDATORS: OnceLock<Validators> = OnceLock::new();
-    let key = fragment.to_string();
-    let validators = VALIDATORS.get_or_init(Default::default);
-    let cached = validators.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(&key).cloned();
-    let validator = match cached {
-        Some(validator) => validator,
-        None => {
-            let built = crate::markdown::schemas::validate::build_structural_validator(&fragment)
-                .map_err(|error| invalid("", format!("cannot build the `{description}` check: {error}")))?;
-            let built = Arc::new(built);
-            validators
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .insert(key, Arc::clone(&built));
-            built
-        }
-    };
+    format_assertion_in(&FORMAT_VALIDATORS, description, &fragment)
+}
+
+fn format_assertion_in(cache: &ValidatorCache, description: &str, fragment: &Value) -> Result<Assertion, TranslateError> {
+    let validator = cache
+        .structural_validator_for(fragment)
+        .map_err(|error| invalid("", format!("cannot build the `{description}` check: {error}")))?;
     Ok(Assertion::new(description, move |value| validator.is_valid(value)))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+
+    /// A capacity-one cache evicts assertion A's validator when B is built,
+    /// yet A keeps judging with the validator it retained.
+    #[test]
+    fn an_evicted_validator_keeps_judging_for_its_assertion() {
+        let cache = ValidatorCache::with_capacity(1);
+        let https_only = json!({ "format": "uri", DARKMATTER_URL_SCHEME_KEYWORD: ["https"] });
+        let file = json!({ "format": DARKMATTER_FILE_REFERENCE_FORMAT });
+
+        let a = format_assertion_in(&cache, "url(scheme(https))", &https_only).expect("A builds");
+        let a_cached = cache.structural_validator_for(&https_only).expect("A is cached");
+        let a_holders = Arc::strong_count(&a_cached);
+        let _b = format_assertion_in(&cache, "file", &file).expect("B builds");
+
+        assert_eq!(cache.len(), 1);
+        assert_eq!(Arc::strong_count(&a_cached), a_holders - 1, "the cache must drop A's validator");
+        assert!(a.holds(&json!("https://example.com")));
+        assert!(!a.holds(&json!("http://example.com")));
+        assert!(!a.holds(&json!("not a url")));
+        let rebuilt = cache.structural_validator_for(&https_only).expect("A rebuilds");
+        assert!(!Arc::ptr_eq(&rebuilt, &a_cached), "an evicted fragment compiles again");
+    }
+
+    /// A passive `file` check judges syntax alone: a missing file passes, a
+    /// malformed reference does not.
+    #[test]
+    fn a_file_assertion_judges_syntax_without_looking_for_the_file() {
+        let cache = ValidatorCache::with_capacity(1);
+        let file = json!({ "format": DARKMATTER_FILE_REFERENCE_FORMAT });
+
+        let assertion = format_assertion_in(&cache, "file", &file).expect("file check builds");
+
+        assert!(assertion.holds(&json!("./definitely-not-present-anywhere.md")));
+        assert!(!assertion.holds(&json!("")));
+    }
+
+    #[test]
+    fn a_custom_format_assertion_applies_the_registered_format() {
+        let cache = ValidatorCache::with_capacity(1);
+        let time = json!({ "format": DARKMATTER_TIME_FORMAT });
+
+        let assertion = format_assertion_in(&cache, "time", &time).expect("time check builds");
+
+        assert!(assertion.holds(&json!("13:45")));
+        assert!(!assertion.holds(&json!("25:99")));
+    }
+
+    #[test]
+    fn a_validator_build_failure_names_the_check() {
+        let cache = ValidatorCache::with_capacity(1);
+
+        let error = format_assertion_in(&cache, "url", &json!({ "type": 5 })).expect_err("an invalid fragment");
+
+        let TranslateError::Invalid { path, message } = error else {
+            panic!("expected TranslateError::Invalid, got {error:?}");
+        };
+        assert_eq!(path, "");
+        assert!(message.starts_with("cannot build the `url` check: "), "{message}");
+        assert!(cache.is_empty(), "a failed build caches nothing");
+    }
 }

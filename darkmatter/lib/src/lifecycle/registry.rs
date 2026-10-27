@@ -36,6 +36,7 @@
 //! assert_eq!(EventRegistry::md().resolve_key("start"), KeyResolution::Data);
 //! ```
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
@@ -48,7 +49,7 @@ use crate::markdown::compose::expression::{
 };
 
 use super::LifecycleSignal;
-use crate::markdown::schemas::catalog::GlobalCatalog;
+use crate::markdown::schemas::catalog::{CatalogHandle, GlobalCatalog};
 
 /// The five events Darkmatter owns. A host may rename only `Composed` and
 /// `Failed`.
@@ -472,8 +473,8 @@ struct RegistryInner {
     core: BTreeMap<CoreEvent, CoreSlot>,
     events: Vec<EventDescriptor>,
     pair: Option<Pair>,
-    host_globals: Vec<&'static str>,
-    global_catalog: Option<&'static GlobalCatalog>,
+    host_globals: Vec<Cow<'static, str>>,
+    global_catalog: Option<CatalogHandle>,
 }
 
 /// A host's event registry. Clones share one registration; editing fails
@@ -515,7 +516,7 @@ impl EventRegistry {
                 core,
                 events: Vec::new(),
                 pair: None,
-                host_globals: GENERIC_GLOBALS.to_vec(),
+                host_globals: GENERIC_GLOBALS.into_iter().map(Cow::Borrowed).collect(),
                 global_catalog: None,
             }),
         }
@@ -683,13 +684,14 @@ impl EventRegistry {
     ///
     /// [`RegistrationError::ReservedRoot`] and
     /// [`RegistrationError::DuplicateGlobal`].
-    pub fn declare_host_global(&mut self, name: &'static str) -> Result<(), RegistrationError> {
+    pub fn declare_host_global(&mut self, name: impl Into<Cow<'static, str>>) -> Result<(), RegistrationError> {
+        let name = name.into();
         self.edit(|inner| {
-            if is_reserved_namespace(name) {
-                return Err(RegistrationError::ReservedRoot { name: name.to_string() });
+            if is_reserved_namespace(&name) {
+                return Err(RegistrationError::ReservedRoot { name: name.into_owned() });
             }
             if inner.host_globals.contains(&name) {
-                return Err(RegistrationError::DuplicateGlobal { name: name.to_string() });
+                return Err(RegistrationError::DuplicateGlobal { name: name.into_owned() });
             }
             inner.host_globals.push(name);
             Ok(())
@@ -703,7 +705,8 @@ impl EventRegistry {
     /// ## Errors
     ///
     /// [`RegistrationError::RunStarted`].
-    pub fn register_global_catalog(&mut self, catalog: &'static GlobalCatalog) -> Result<(), RegistrationError> {
+    pub fn register_global_catalog(&mut self, catalog: impl Into<CatalogHandle>) -> Result<(), RegistrationError> {
+        let catalog = catalog.into();
         self.edit(|inner| {
             inner.global_catalog = Some(catalog);
             Ok(())
@@ -712,8 +715,15 @@ impl EventRegistry {
 
     /// The host catalog that types the host's globals, when one is
     /// registered. Darkmatter's own globals are typed by its catalog.
-    pub fn global_catalog(&self) -> Option<&'static GlobalCatalog> {
-        self.inner.global_catalog
+    pub fn global_catalog(&self) -> Option<&GlobalCatalog> {
+        self.inner.global_catalog.as_deref()
+    }
+
+    /// The registered catalog as registered, so a test can observe a shared
+    /// catalog's ownership.
+    #[cfg(test)]
+    pub(crate) fn global_catalog_handle(&self) -> Option<&CatalogHandle> {
+        self.inner.global_catalog.as_ref()
     }
 
     /// Checks what can only be judged once registration is complete.
@@ -898,7 +908,7 @@ impl EventRegistry {
     /// The late globals a lifecycle placeholder may read that the host, not
     /// the document, supplies: Darkmatter's `err` and `timing`, then the
     /// host's own.
-    pub fn host_globals(&self) -> &[&'static str] {
+    pub fn host_globals(&self) -> &[Cow<'static, str>] {
         &self.inner.host_globals
     }
 

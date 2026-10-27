@@ -1,9 +1,11 @@
-//! The finite definition table behind recursive named types.
+//! The finite definition table behind stored named types.
 //!
 //! A named type that takes part in a reference cycle is stored once here and
-//! every use of it is a [`TypeExpr::Ref`]. Acyclic named types never enter the
-//! table: they inline at each use site exactly as before, so a schema without
-//! recursion has an empty table and lowers with no `$defs`.
+//! every use of it is a [`TypeExpr::Ref`]. So is an acyclic structured type
+//! (an object, dictionary, tuple, or a list or union of one) that two or
+//! more authored sites reference, at every use a reference can represent.
+//! Every other named type inlines at each use site, so a schema with neither
+//! has an empty table and lowers with no `$defs`.
 //!
 //! A [`Definition`] body is the reusable value shape. Property presence and
 //! annotations (`required`, `generated`, `eager`, `default`, `suggest`,
@@ -95,10 +97,11 @@ impl DefNamespace {
     }
 }
 
-/// One cyclic named type.
+/// One stored named type: a member of a reference cycle, or a shared
+/// acyclic type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Definition {
-    /// The reusable value shape, expanded. Nested uses of cyclic definitions
+    /// The reusable value shape, expanded. Nested uses of stored definitions
     /// are [`TypeExpr::Ref`]; presence markers and annotations were moved to
     /// the use sites.
     pub body: PropertyDef,
@@ -125,7 +128,7 @@ pub enum DefinitionOuter {
     Other,
 }
 
-/// The finite, immutable set of cyclic definitions one resolution reached.
+/// The finite, immutable set of stored definitions one resolution reached.
 ///
 /// Entries keep allocation order, which is the order the resolver first
 /// reached each definition, and that order is the `$defs` emission order.
@@ -136,7 +139,7 @@ pub struct DefinitionTable {
 }
 
 impl DefinitionTable {
-    /// Whether the table holds no definition (the acyclic case).
+    /// Whether the table holds no definition (nothing recurses or is shared).
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -190,6 +193,28 @@ impl DefinitionTable {
         None
     }
 
+    /// Whether `key` takes part in a reference cycle: its body reaches `key`
+    /// again through the table. A shared acyclic definition never does,
+    /// whatever cyclic definitions it references.
+    pub(crate) fn is_cyclic(&self, key: &DefKey) -> bool {
+        let mut pending = Vec::new();
+        if let Some(definition) = self.entries.get(key) {
+            super::query::collect_def_refs(&definition.body, &mut pending);
+        }
+        let mut seen = std::collections::HashSet::new();
+        while let Some(next) = pending.pop() {
+            if &next == key {
+                return true;
+            }
+            if let Some(definition) = self.entries.get(&next)
+                && seen.insert(next)
+            {
+                super::query::collect_def_refs(&definition.body, &mut pending);
+            }
+        }
+        false
+    }
+
     /// Adds `body` under `key`, allocating its `$defs` key, unless `key` is
     /// already present. Returns the definition's `$defs` key either way.
     ///
@@ -221,7 +246,15 @@ impl DefinitionTable {
                 .entries
                 .iter()
                 .map(|(key, definition)| {
-                    (key.clone(), Definition { body: project(&definition.body), ..definition.clone() })
+                    // Field by field, not `..definition.clone()`: that would
+                    // clone the body being replaced, and a new field must be
+                    // handled here explicitly.
+                    let projected = Definition {
+                        body: project(&definition.body),
+                        origin: definition.origin.clone(),
+                        json_key: definition.json_key.clone(),
+                    };
+                    (key.clone(), projected)
                 })
                 .collect(),
             by_json_key: self.by_json_key.clone(),

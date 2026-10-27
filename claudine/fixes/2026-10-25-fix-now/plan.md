@@ -6,6 +6,114 @@ phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
 human_review: false
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+    - darkmatter
+    - dmls
+    - claudine
+    - biscuit-speaks
+source_files_during_phase_2:
+    - biscuit-speaks/lib/Cargo.toml
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs/snapshot.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/shell_templates.rs
+    - claudine/lib/src/composition/lifecycle/registry.rs
+    - claudine/lib/src/harness/shell.rs
+    - claudine/lib/src/harness/shell/policy.rs
+    - claudine/lib/src/harness/shell/tests.rs
+    - claudine/lib/tests/l1/host_catalog.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/src/providers/lifecycle_host_tests.rs
+    - darkmatter/dmls/tests/l1/lifecycle_host_profile.rs
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/benches/pipeline_work_support/mod.rs
+    - darkmatter/lib/src/lifecycle/host_profile.rs
+    - darkmatter/lib/src/lifecycle/host_profile/tests.rs
+    - darkmatter/lib/src/lifecycle/md_host.rs
+    - darkmatter/lib/src/lifecycle/mod.rs
+    - darkmatter/lib/src/lifecycle/parse.rs
+    - darkmatter/lib/src/lifecycle/registry.rs
+    - darkmatter/lib/src/lifecycle/shell_template.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/catalog/discovery_tests.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/definitions.rs
+    - darkmatter/lib/tests/l1/global_catalog.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_named_import_errors.rs
+    - scripts/cross-check.sh
+docs_updated_during_phase_2:
+    - darkmatter/docs/topics/lifecycle/host-artifact.md
+    - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/lifecycle.md
+    - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_3:
+    - darkmatter/dmls/tests/l1/registry_preparation.rs
+    - darkmatter/dmls/tests/l1/startup_preparation.rs
+docs_updated_during_phase_3:
+    - biscuit-speaks/docs/tts-caching.md
+    - biscuit-speaks/docs/dependencies.md
+    - claudine/docs/topics/pre-flight-checks.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/dmls.md
+source_code:
+    - biscuit-speaks/lib/Cargo.toml
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs
+    - biscuit-speaks/lib/src/providers/cloud/elevenlabs/snapshot.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/shell_templates.rs
+    - claudine/lib/src/composition/lifecycle/registry.rs
+    - claudine/lib/src/harness/shell.rs
+    - claudine/lib/src/harness/shell/policy.rs
+    - claudine/lib/src/harness/shell/tests.rs
+    - claudine/lib/tests/l1/host_catalog.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/overlay/event_views.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/src/providers/lifecycle_host_tests.rs
+    - darkmatter/dmls/tests/l1/lifecycle_host_profile.rs
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/benches/pipeline_work_support/mod.rs
+    - darkmatter/lib/src/lifecycle/host_profile.rs
+    - darkmatter/lib/src/lifecycle/host_profile/tests.rs
+    - darkmatter/lib/src/lifecycle/md_host.rs
+    - darkmatter/lib/src/lifecycle/mod.rs
+    - darkmatter/lib/src/lifecycle/parse.rs
+    - darkmatter/lib/src/lifecycle/registry.rs
+    - darkmatter/lib/src/lifecycle/shell_template.rs
+    - darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs
+    - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/catalog/discovery_tests.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/definitions.rs
+    - darkmatter/lib/tests/l1/global_catalog.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_named_import_errors.rs
+    - scripts/cross-check.sh
+    - darkmatter/dmls/tests/l1/registry_preparation.rs
+    - darkmatter/dmls/tests/l1/startup_preparation.rs
+documentation:
+    - darkmatter/docs/topics/lifecycle/host-artifact.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - biscuit-speaks/docs/tts-caching.md
+    - biscuit-speaks/docs/dependencies.md
+    - claudine/docs/topics/pre-flight-checks.md
+    - .claude/skills/darkmatter/lifecycle.md
+    - .claude/skills/darkmatter/dmls.md
+completed_phase: 3
+implemented: true
 ---
 
 # Pipeline review: fix now — implementation plan
@@ -114,7 +222,7 @@ Retain or extend existing CLI wiring controls and one or two invalid-input cases
 
 ### Wave 1: Contract preparation
 
-- [ ] **P1.1 Contract inventory**
+- [x] **P1.1 Contract inventory**
   - Verify the predecessor's implementation status from code and evidence, then satisfy Decision 11 before dependent DMLS edits. Preserve unrelated existing worktree changes.
   - Search all consumers of `GlobalRequirement`, `CatalogErrorReason::Mismatch`, registry catalog/global accessors, `UnknownVerbPolicy`, `HostLifecycleProfile::from_artifact`, and `host_lifecycle_profiles`, including tests, compiled hosts, examples, and `darkmatter/lib/benches/pipeline_work_support/mod.rs`.
   - Map existing fixtures and tests to spec acceptance items 1–10 and the reader groups above; identify only missing coverage. Record the implementation task/file owners before parallel work starts.
@@ -126,7 +234,7 @@ Prerequisite: Phase 1 is complete. Wave numbers are global and unique. Within a 
 
 ### Wave 2: Ownership and runtime boundaries
 
-- [ ] **P2.1 Profile discovery**
+- [x] **P2.1 Profile discovery**
   - **Ownership:** Darkmatter `markdown/schemas/catalog.rs`, lifecycle `registry.rs`, `parse.rs`, `host_profile.rs`, their tests; affected compiled registrations/copy consumers in Darkmatter and Claudine; DMLS `overlay/event_views.rs`, `providers/mod.rs`, `providers/dsl.rs`, `diagnostics/frontmatter.rs`, and diagnostics helper plumbing. This task owns both spec items 1 and 2, including their shared public API migration.
   - Implement the ownership wrappers/Cow fields and error payload migration from Decision 1. Preserve constant registrations, verb matching, registration validation, deterministic serialization, and caller-owned registry/policy lifetimes. Update every inventory consumer, including benchmark support; remove runtime leaks and stale lifetime comments on these paths.
   - Implement observed-text loading, synchronized latest-per-path caching (including the existing non-catalog classification entries; Decision 12), unchanged-revision failure reuse, and lazy candidate iteration. Record shadowing before attempting a candidate. Prune stale success only on observed invalidation, including disappeared cached candidates in visited roots; use visited-directory listings to recognize disappearance without opening content beyond the winner. Never sweep unvisited roots or later content solely for pruning.
@@ -136,14 +244,14 @@ Prerequisite: Phase 1 is complete. Wave numbers are global and unique. Within a 
   - **Discovery checks:** Production-path read counters prove zero later catalog/artifact reads after a winner. Cover filename sorting, root order, earlier unusable filename shadowing, all failure reasons in order, one discovery for combined diagnostics, unchanged frontmatter/DSL results, repair clearing warnings, shared-discovery panic, and unaffected ordinary catalog diagnostics/other providers.
   - **Checkpoint:** Artifact comparisons remain byte-for-byte equal; a supplied-text test proves no second catalog read; focused ownership, registry, artifact, and combined DMLS tests pass. Runtime lifecycle load paths contain no `Box::leak`; separately scoped host-function leaks are not rewritten.
 
-- [ ] **P2.2 Blocking publication**
+- [x] **P2.2 Blocking publication**
   - **Ownership:** `biscuit-speaks/lib/src/providers/cloud/elevenlabs.rs`, `elevenlabs/snapshot.rs` only if needed for a private seam, `lib/Cargo.toml`, and existing ElevenLabs/atomic-cache tests. Implements spec item 3 independently of P2.1/P2.3.
   - Move both whole publications into awaited blocking closures with owned inputs and unchanged skip conditions. Keep network calls, playback, and `cache_exists` outside. Map audio I/O and join errors to `TtsError::TempFileError`; warn for record I/O/join errors without returning them. Preserve portable `tempfile`, sync, rename, names, expiry, and last-writer semantics.
   - On a current-thread runtime, inject a synchronous writer into each real publication path. It signals entry and waits for another task on the same runtime to release it, with a short independent `recv_timeout` watchdog so an inline-write regression fails and tears down within five seconds. Include default-record publication on an audio-cache hit.
   - Exercise successful awaited publication, ordinary write errors, closure panic/join errors, record skip cases, existing staging cleanup, and dropping a caller after write entry followed by a complete owned publication. Join or release every worker on failure; no fixed sleeps or Tokio-only deadlock timeouts. Preserve isolation of `TMPDIR`, `TMP`, and `TEMP` in ElevenLabs fixtures.
   - **Checkpoint:** Both async-progress tests and fatal/nonfatal error tests pass using fake transport and no playback. A production-feature compile confirms `rt` is enabled independently of dev-dependency feature unification.
 
-- [ ] **P2.3 Blacklist loading**
+- [x] **P2.3 Blacklist loading**
   - **Ownership:** `claudine/lib/src/harness/shell.rs` and shell-policy/runtime dispatch tests; coordinate any nearby registration fixtures with P2.1. Implements spec item 7.
   - Extract the per-file helper and switch runtime loading to captured-root `policy_paths_at` plus blacklist only. Keep full approval's two-file loading and underivable-root denial; retain all built-in blacklist enforcement.
   - Through an actual runtime dispatch check and private file-read observer, prove blacklist reads and zero whitelist opens, including a malformed whitelist. Edit the blacklist between dispatches and prove immediate enforcement.
@@ -154,19 +262,19 @@ Prerequisite: Phase 1 is complete. Wave numbers are global and unique. Within a 
 
 Prerequisite: Wave 2 is integrated. These tasks have no mutual dependency; their files are disjoint. P2.1 also establishes the final public ownership APIs before these tests compile against them.
 
-- [ ] **P2.4 Bounded assertions**
+- [x] **P2.4 Bounded assertions**
   - **Ownership:** `darkmatter/lib/src/markdown/compose/expression/call_binding/translate.rs` and its assertion tests. Implements spec item 4.
   - Replace only the unbounded validator memo with default `LazyLock<ValidatorCache>` structural lookup. Preserve the assertion's retained `Arc`, custom formats, syntax-only file behavior, and `TranslateError` category/context. Correct the process-lifetime doc comment.
   - Allow a capacity-one cache through the same private assertion-building path production uses. Build A then B, prove eviction of A, then prove the live A still accepts/rejects correctly. A generic-cache-only test is insufficient.
   - **Checkpoint:** Eviction, custom format, syntax-only file, and build-error-context checks pass; the old fragment memo is absent.
 
-- [ ] **P2.5 Named import parsing**
+- [x] **P2.5 Named import parsing**
   - **Ownership:** `darkmatter/lib/src/markdown/schemas/resolve.rs` and named-import tests. Implements spec item 5.
   - Remove the preliminary YAML deserialization and its stale comment; retain strict classifier/numeric admission. Through the public resolver, import a file containing `kind: schema` and `types: [` and assert the error category, imported path, and `not valid YAML` prefix.
   - Cover numeric-admission wording, ordinary non-schema YAML, unsupported envelopes, root unions, and whole-file references. Apply the loader robustness contract using existing fixtures and shared validators.
   - **Checkpoint:** Focused resolver tests, DMLS `named_type_references.rs`, and CLI `schema_triggers.rs` regressions pass. Inspection confirms removal of the preliminary parse; matching error strings alone is not parse-count evidence.
 
-- [ ] **P2.6 Definition projection**
+- [x] **P2.6 Definition projection**
   - **Ownership:** `darkmatter/lib/src/markdown/schemas/simplified/definitions.rs`. Implements spec item 6.
   - Construct each definition explicitly from its projected body and metadata clones, preserving `DefKey`, insertion/allocation order, origins, JSON names, and `by_json_key`.
   - Inspect the projection and run the existing recursive-definition/schema-lowering tests; do not add a behavior test that cannot distinguish this optimization.
@@ -180,14 +288,14 @@ Prerequisite: All Phase 2 tasks are integrated, with focused checkpoints passing
 
 These two tasks may run concurrently: one writes documentation, the other reads production/test code and produces the acceptance evidence ledger. Any repair found by the audit returns to its owning Phase 2 task before final gates.
 
-- [ ] **P3.1 Current documentation**
+- [x] **P3.1 Current documentation**
   - Update `darkmatter/docs/topics/lifecycle/host-artifact.md` and `darkmatter/dmls/docs/diagnostics.md` with one retained revision per visited path, caller-held lifetimes, observed invalidation, first-usable lazy discovery, one host per diagnostics pass, panic isolation, and fresh discovery across requests. Include a compact lifetime/discovery Mermaid flow where it clarifies the behavior.
   - Update `biscuit-speaks/docs/tts-caching.md` with both awaited blocking publications, the fatal-audio/nonfatal-record split, and caller-drop behavior; update the existing Tokio entry in `biscuit-speaks/docs/dependencies.md` for production `rt`. No crate is added or removed.
   - Update `claudine/docs/topics/pre-flight-checks.md` with fresh blacklist-only dispatch reads versus full approval loading both policies. Correct any affected Darkmatter/Claudine skill lifetime statements and relevant README overview drift only where present.
   - Remove stale comments about runtime leaks, once-per-editor catalog loading, process-wide fragment retention, and classifier syntax handling. Topic docs describe current behavior without linking to a dated spec.
   - **Checkpoint:** Docs and comments match final behavior, preserve predecessor documentation, and make no process-lifetime ownership or cancellation-rollback claims.
 
-- [ ] **P3.2 Acceptance audit**
+- [x] **P3.2 Acceptance audit**
   - Trace spec acceptance items 1–9 to named tests and inspection evidence from Phase 2. Audit the reader-validator groups and document loaders once each, preserving positive controls, absence/null distinctions, and the listed exceptions. Run the code-smell search and record intentional fallbacks.
   - Inspect all changed public-type consumers, including static registrations, `CatalogErrorReason::Mismatch`, artifact writers, test fixtures, examples, and benchmark support. Confirm exact artifact bytes, provider order/codes/ranges, panic boundaries, owned-policy lifetime, and no runtime lifecycle/catalog `Box::leak`.
   - Verify observers instrument actual production reads/builds/writes, capacity-one assertions use the production builder, tests are selected by L1 recipes, and async watchdogs release resources on regression. No success inference from warnings, permissions, cache-only tests, or behavioral parse/clone tests.
@@ -195,13 +303,13 @@ These two tasks may run concurrently: one writes documentation, the other reads 
 
 ### Wave 5: Integrated gates and closure
 
-- [ ] **P3.3 Scoped validation**
+- [x] **P3.3 Scoped validation**
   - Run `just test` and `just lint` from each of `darkmatter/`, `claudine/`, and `biscuit-speaks/` after integration. Darkmatter's recipes include DMLS and its CLI consumers. Use nextest through the recipes; never run `cargo test` suites or `cargo fmt`.
   - Compile affected declared examples and benchmarks with `cargo check --examples --benches` scoped to their actual packages/features, including Darkmatter's pipeline benchmark consumer. Verify the biscuit-speaks production-only feature graph includes `rt`, rather than relying on test runtime features.
   - Keep every new L1 case below five seconds. Use Test Toolkit fixtures/guards and portable failure injection. Read the `os` skill before any OS-specific/path-comparison edits or planning remote verification; use existing passing evidence when applicable and record macOS, Linux, native Windows, and WSL2 results separately. Never equate host-only evidence with all-platform verification.
   - **Checkpoint:** All required scoped gates pass, affected target consumers compile, acceptance item 10 is satisfied, and actual tested environments plus any unavailable evidence are explicit in the implementation log. Repair failures and rerun only checks invalidated by those repairs.
 
-- [ ] **P3.4 Review handoff**
+- [x] **P3.4 Review handoff**
   - Record decisions, completed task evidence, test commands/results, inspected optimizations, intentional diagnostic changes, and any deviations in `implementation-log.md`. Check off completed plan tasks only after their checkpoints pass.
   - Verify the final diff contains only implementation, tests, and documentation needed for this scope and preserves preexisting changes. Report implementation complete, ready for review, with exact validation limits.
   - Leave the active fix directory in place. Do not run `just complete`, move it to `_completed`, commit, or push.

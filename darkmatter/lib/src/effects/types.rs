@@ -36,7 +36,7 @@ pub fn effect_function_catalog() -> &'static FunctionCatalog {
 /// Every typed side-effect overload, in documentation order (category list
 /// order, then verb, then authored overload order).
 pub fn effect_function_descriptors() -> &'static [ExpressionFunctionDescriptor] {
-    effect_function_catalog().descriptors
+    &effect_function_catalog().descriptors
 }
 
 /// The binding registration for the side-effect `verb` (exact, case-sensitive
@@ -51,9 +51,9 @@ pub fn effect_registration(verb: &str) -> Option<&'static FunctionRegistration> 
     static REGISTRATIONS: LazyLock<HashMap<&'static str, FunctionRegistration>> = LazyLock::new(|| {
         let catalog = effect_function_catalog();
         let mut overloads: HashMap<&'static str, Vec<_>> = HashMap::new();
-        for descriptor in catalog.descriptors {
+        for descriptor in &catalog.descriptors {
             overloads
-                .entry(descriptor.name)
+                .entry(&*descriptor.name)
                 .or_default()
                 .push(descriptor.function_type.clone());
         }
@@ -173,7 +173,7 @@ mod tests {
                 .iter()
                 .find(|typed| typed_key(typed) == key)
                 .unwrap_or_else(|| panic!("no typed overload for `{}`", descriptor.signature));
-            assert_eq!(typed.category, descriptor.category, "{}", descriptor.signature);
+            assert_eq!(&*typed.category, descriptor.category, "{}", descriptor.signature);
         }
     }
 

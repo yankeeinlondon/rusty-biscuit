@@ -1016,3 +1016,332 @@ fn a_leaf_edit_does_not_respell_an_untouched_explicit_local_reference() {
         "canonical serialization is bare, so the splice above preserved authored text",
     );
 }
+
+// ── Located definition failures ───────────────────────────────────────────
+
+use darkmatter::markdown::schemas::{
+    LocatedDefinitionFailure, locate_standalone_definition_failure,
+    parse_standalone_schema_document,
+};
+
+fn root() -> SchemaSourcePath {
+    SchemaSourcePath::root()
+}
+
+/// The source-free error for the same declaration, which every located
+/// failure must carry unchanged.
+fn declaration_error(source: &str) -> String {
+    format!("{:?}", parse_schema_declaration(&yaml(source)).expect_err(source))
+}
+
+fn located_declaration_failure(source: &str, offset: usize) -> LocatedDefinitionFailure {
+    let failure = parse_schema_declaration_with_source(&yaml(source), source, offset)
+        .expect_err(source);
+    assert_eq!(format!("{:?}", failure.error), declaration_error(source), "{source:?}");
+    failure
+}
+
+/// The authored text a located range covers in a document whose first byte
+/// sits at `offset`.
+fn covered(source: &str, offset: usize, range: Option<std::ops::Range<usize>>) -> Option<&str> {
+    range.map(|range| authored(source, offset, &range))
+}
+
+#[test]
+fn a_located_property_failure_projects_its_token_through_each_scalar_presentation() {
+    const OFFSET: usize = 100;
+    for (source, value_text) in [
+        ("string(min(nope))", "string(min(nope))"),
+        ("'string(min(nope))'", "'string(min(nope))'"),
+        ("\"string(\\x6Din(nope))\"", "\"string(\\x6Din(nope))\""),
+        ("string(min(1);\n  min(nope))\n", "string(min(1);\n  min(nope))"),
+        ("string(min(1);\r\n  min(nope))\r\n", "string(min(1);\r\n  min(nope))"),
+        ("|-\n  string(min(nope))\n", "|-\n  string(min(nope))"),
+    ] {
+        let value = yaml(source);
+        let expected = parse_property_definition("candidate", &value).expect_err(source);
+        let failure = parse_property_definition_with_source("candidate", &value, source, OFFSET)
+            .expect_err(source);
+        assert_eq!(format!("{:?}", failure.error), format!("{expected:?}"), "{source:?}");
+        assert_eq!(failure.path, root(), "{source:?}");
+        assert_eq!(covered(source, OFFSET, failure.authored_span), Some("nope"), "{source:?}");
+        assert_eq!(covered(source, OFFSET, failure.value_span), Some(value_text), "{source:?}");
+    }
+}
+
+#[test]
+fn a_located_declaration_failure_follows_literal_keys_and_sequence_members() {
+    const OFFSET: usize = 7;
+    let nested = "outer:\n  \"a.b\":\n    \"c[0]/ü\": 'string(min(nope))'\n";
+    let failure = located_declaration_failure(nested, OFFSET);
+    assert_eq!(failure.path, root().property("outer").property("a.b").property("c[0]/ü"));
+    assert_eq!(covered(nested, OFFSET, failure.authored_span), Some("nope"));
+    assert_eq!(covered(nested, OFFSET, failure.value_span), Some("'string(min(nope))'"));
+
+    // The second member shares the first member's prefix; only its own token is named.
+    let members = "tags:\n  - string(min(1))\n  - string(min(nope))\n";
+    let failure = located_declaration_failure(members, OFFSET);
+    assert_eq!(failure.path, root().property("tags").union_arm(1));
+    let token = failure.authored_span.clone().expect("token");
+    assert_eq!(authored(members, OFFSET, &token), "nope");
+    assert_eq!(token.start - OFFSET, members.rfind("nope").expect("second member"));
+
+    let mapping_arm = "tags:\n  - string\n  - width: number(min(nope))\n";
+    let failure = located_declaration_failure(mapping_arm, OFFSET);
+    assert_eq!(failure.path, root().property("tags").union_arm(1).property("width"));
+    assert_eq!(covered(mapping_arm, OFFSET, failure.authored_span), Some("nope"));
+
+    // Root-union arms are followed by index too.
+    let root_union = "- a: string\n- b: string(min(nope))\n";
+    let failure = located_declaration_failure(root_union, OFFSET);
+    assert_eq!(failure.path, root().union_arm(1).property("b"));
+    assert_eq!(covered(root_union, OFFSET, failure.authored_span), Some("nope"));
+}
+
+/// Each member is valid alone; the second suggestion violates the
+/// property's one-suggestion rule, so only the cross-arm check can name it.
+#[test]
+fn a_second_suggestion_across_valid_arms_is_located_at_the_second_candidate() {
+    for source in [
+        "color: [string(suggest(red)), string(suggest(blue))]\n",
+        "color:\n  - string(suggest(red))\n  - string(suggest(blue))\n",
+    ] {
+        let failure = located_declaration_failure(source, 0);
+        assert_eq!(failure.path, root().property("color").union_arm(1), "{source:?}");
+        assert_eq!(covered(source, 0, failure.authored_span), Some("blue"), "{source:?}");
+        assert_eq!(
+            covered(source, 0, failure.value_span),
+            Some("string(suggest(blue))"),
+            "{source:?}"
+        );
+    }
+}
+
+#[test]
+fn structural_failures_have_a_value_range_but_no_token() {
+    for (source, path, value) in [
+        ("tags: []\n", root().property("tags"), "[]"),
+        ("tags: 7\n", root().property("tags"), "7"),
+        ("tags: [string, 7]\n", root().property("tags").union_arm(1), "7"),
+        ("tags: [7]\n", root().property("tags").union_arm(0), "7"),
+        (
+            "box:\n  $constraints:\n    min-keys: -1\n",
+            root().property("box").property("$constraints").property("min-keys"),
+            "-1",
+        ),
+    ] {
+        let failure = located_declaration_failure(source, 0);
+        assert_eq!(failure.path, path, "{source:?}");
+        assert_eq!(failure.authored_span, None, "{source:?}");
+        assert_eq!(covered(source, 0, failure.value_span), Some(value), "{source:?}");
+    }
+    // The declaration's own shape is located at the whole declaration.
+    let failure = located_declaration_failure("[]", 0);
+    assert_eq!((failure.path, failure.value_span), (root(), Some(0..2)));
+}
+
+#[test]
+fn an_unprojectable_failure_keeps_its_semantic_error() {
+    // A quoted scalar continued across lines is outside the strict locator,
+    // so the document cannot be located at all.
+    let sibling = "a: \"string(min(1);\n  max(2))\"\nb: string(min(nope))\n";
+    let failure = located_declaration_failure(sibling, 0);
+    assert_eq!(failure.path, root().property("b"));
+    assert_eq!((failure.authored_span, failure.value_span), (None, None));
+
+    // An alias has no scalar of its own to project the token into; its
+    // value range is still the alias where the definition is used.
+    let alias = "a: &s string(suggest(red))\nb: [*s, *s]\n";
+    let failure = located_declaration_failure(alias, 0);
+    assert_eq!(failure.path, root().property("b").union_arm(1));
+    assert_eq!(failure.authored_span, None);
+    assert_eq!(covered(alias, 0, failure.value_span), Some("*s"));
+
+    // Source text that authors different text from the parsed value.
+    let value = yaml("b: string(min(nope))");
+    let failure = parse_schema_declaration_with_source(&value, "b: string(min(nada))\n", 0)
+        .expect_err("semantic failure");
+    assert_eq!(failure.path, root().property("b"));
+    assert_eq!((failure.authored_span, failure.value_span), (None, None));
+    assert!(matches!(*failure.error, SchemaError::Grammar { .. }), "{:?}", failure.error);
+}
+
+#[test]
+fn a_projection_only_failure_is_wrapped_at_the_root_without_ranges() {
+    let value = yaml("b: string(min(1))");
+    let failure = parse_schema_declaration_with_source(&value, "b: string(min(2))\n", 0)
+        .expect_err("source does not author the value");
+    assert_eq!(
+        (failure.path.clone(), failure.authored_span.clone(), failure.value_span.clone()),
+        (root(), None, None)
+    );
+    assert!(failure.to_string().contains("could not project"), "{failure}");
+    let error: SchemaError = failure.into();
+    assert!(error.to_string().contains("could not project"), "{error}");
+}
+
+#[test]
+fn a_located_failure_ranges_cover_non_ascii_and_crlf_documents() {
+    const OFFSET: usize = 40;
+    let source = "titre:\r\n  \"é.ü\": 'string(min(1); max(nöpe))'\r\n";
+    let failure = located_declaration_failure(source, OFFSET);
+    assert_eq!(failure.path, root().property("titre").property("é.ü"));
+    assert_eq!(covered(source, OFFSET, failure.authored_span), Some("nöpe"));
+}
+
+// ── Standalone documents ──────────────────────────────────────────────────
+
+/// The classifier rejects the document, and its outer message still carries
+/// the located failure's semantic error.
+fn standalone_failure(source: &str) -> LocatedDefinitionFailure {
+    let failure = locate_standalone_definition_failure(source).expect(source);
+    let outer = parse_standalone_schema_document(source, "/w/types.yaml").expect_err(source);
+    assert!(matches!(outer, SchemaError::SchemaDocument { .. }), "{source:?}: {outer:?}");
+    assert!(outer.to_string().contains(&failure.error.to_string()), "{source:?}: {outer}");
+    failure
+}
+
+#[test]
+fn standalone_definition_failures_are_located_in_both_envelopes() {
+    for (source, path) in [
+        (
+            "kind: schema\ntypes:\n  slug: string(min(nope))\n",
+            root().property("types").property("slug"),
+        ),
+        (
+            "kind: schema\ntypes:\n  slug: 'string(min(nope))'\n",
+            root().property("types").property("slug"),
+        ),
+        (
+            "kind: schema\ntypes:\n  slug: string(min(1);\n    min(nope))\n",
+            root().property("types").property("slug"),
+        ),
+        (
+            "kind: schema\ntypes:\n  slug: |-\n    string(min(nope))\n",
+            root().property("types").property("slug"),
+        ),
+        (
+            "$schema:\n  slug: \"string(min(nope))\"\n",
+            root().property("$schema").property("slug"),
+        ),
+        (
+            "$schema:\n  page:\n    \"a.b\": string(min(nope))\n",
+            root().property("$schema").property("page").property("a.b"),
+        ),
+        (
+            "$schema:\n  - a: string\n  - b: string(min(nope))\n",
+            root().property("$schema").union_arm(1).property("b"),
+        ),
+    ] {
+        let failure = standalone_failure(source);
+        assert_eq!(failure.path, path, "{source:?}");
+        assert_eq!(covered(source, 0, failure.authored_span), Some("nope"), "{source:?}");
+    }
+}
+
+#[test]
+fn a_standalone_failure_is_returned_even_when_it_cannot_be_located() {
+    let source = "kind: schema\ntypes:\n  note: \"string(min(1);\n    max(2))\"\n  slug: string(min(nope))\n";
+    let failure = standalone_failure(source);
+    assert_eq!(failure.path, root().property("types").property("slug"));
+    assert_eq!((failure.authored_span, failure.value_span), (None, None));
+}
+
+#[test]
+fn standalone_documents_without_a_definition_failure_return_none() {
+    for source in [
+        // Valid payloads, including the YAML null type and an empty object.
+        "kind: schema\ntypes:\n  slug: string(min(1))\n",
+        "kind: schema\ntypes:\n  nothing:\n  empty: {}\n",
+        "kind: schema\ntypes: {}\n",
+        "$schema:\n  - a: string\n",
+        "$schema: ./types.yaml\n",
+        // Unrecognized documents.
+        "title: string(min(nope))\n",
+        "$schema:\n  slug: string(min(nope))\nother: 1\n",
+        "kind: note\ntypes:\n  slug: string(min(nope))\n",
+        "- string(min(nope))\n",
+    ] {
+        assert!(locate_standalone_definition_failure(source).is_none(), "{source:?}");
+        assert!(
+            parse_standalone_schema_document(source, "/w/types.yaml").is_ok(),
+            "{source:?}"
+        );
+    }
+}
+
+/// Outer failures stay the classifier's to report; the helper declines them
+/// rather than fabricating a definition range.
+#[test]
+fn outer_envelope_and_declaration_shape_failures_return_none() {
+    for source in [
+        // Loader: invalid YAML, a duplicate key, a second document, trailing garbage.
+        "kind: schema\ntypes:\n  slug: [\n",
+        "kind: schema\ntypes:\n  slug: string(min(nope))\n  slug: string\n",
+        "kind: schema\ntypes:\n  slug: string(min(nope))\n---\nkind: note\n",
+        "kind: schema\ntypes:\n  slug: string(min(nope))\n]\n",
+        // Envelopes: a global catalog, malformed `types`, extra tagged keys.
+        "kind: schema\n$schema:\n  slug: string(min(nope))\n",
+        "kind: schema\ntypes: 7\n",
+        "kind: schema\ntypes:\n",
+        "kind: schema\n",
+        "kind: schema\ntypes:\n  slug: string(min(nope))\nextra: 1\n",
+        // A non-string extra key is still an unsupported tagged key.
+        "kind: schema\ntypes:\n  slug: string(min(nope))\n7: x\n",
+        // Declaration shapes: payload and root-union arms of the wrong type,
+        // an empty root union, and a remote reference.
+        "$schema: 7\n",
+        "$schema:\n",
+        "$schema: []\n",
+        "$schema: [7]\n",
+        "$schema:\n  - https://example.com/types.yaml\n",
+    ] {
+        assert!(locate_standalone_definition_failure(source).is_none(), "{source:?}");
+        assert!(
+            parse_standalone_schema_document(source, "/w/types.yaml").is_err(),
+            "{source:?} must stay an outer failure"
+        );
+    }
+}
+
+#[test]
+fn standalone_definition_field_shapes_are_located_through_one_validator() {
+    // Control: the unedited fixture is valid, so each edit below is load-bearing.
+    let fixture = |definition: &str| format!("kind: schema\ntypes:\n  tags: {definition}\n");
+    assert!(locate_standalone_definition_failure(&fixture("[string, number]")).is_none());
+    for (definition, path, value) in [
+        ("7", root().property("types").property("tags"), "7"),
+        ("true", root().property("types").property("tags"), "true"),
+        ("[]", root().property("types").property("tags"), "[]"),
+        ("[string, 7]", root().property("types").property("tags").union_arm(1), "7"),
+        ("[7, true]", root().property("types").property("tags").union_arm(0), "7"),
+        ("[[string]]", root().property("types").property("tags").union_arm(0), "[string]"),
+    ] {
+        let source = fixture(definition);
+        let failure = standalone_failure(&source);
+        assert_eq!(failure.path, path, "{definition}");
+        assert_eq!(covered(&source, 0, failure.value_span), Some(value), "{definition}");
+    }
+}
+
+/// An inline frontmatter `$schema` declaration is located in whole-document
+/// bytes: the caller passes the declaration's text and its document offset
+/// once, and the ranges land on the document's own token.
+#[test]
+fn an_inline_frontmatter_declaration_failure_is_located_in_document_bytes() {
+    for newline in ["\n", "\r\n"] {
+        let document = format!(
+            "---{newline}title: café{newline}$schema:{newline}  page:{newline}    tags:{newline}      - string{newline}      - string(min(nope)){newline}---{newline}Body{newline}"
+        );
+        let start = document.find("  page:").expect("declaration");
+        let end = document.rfind("---").expect("closing fence");
+        let declaration = &document[start..end];
+        let failure = located_declaration_failure(declaration, start);
+        assert_eq!(failure.path, root().property("page").property("tags").union_arm(1));
+        let token = failure.authored_span.expect("token");
+        assert_eq!(&document[token.clone()], "nope", "{newline:?}");
+        assert_eq!(token.start, document.find("nope").expect("token"), "{newline:?}");
+        let value = failure.value_span.expect("value");
+        assert_eq!(&document[value], "string(min(nope))", "{newline:?}");
+    }
+}

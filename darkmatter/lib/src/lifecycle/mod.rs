@@ -115,7 +115,7 @@ pub use operands::{
 };
 pub use services::{LifecycleService, LifecycleServices, MissingServiceError};
 pub use parse::{
-    LOOP_ITERATION_KEYS, LifecycleParseOptions, UnknownVerbPolicy, parse_lifecycle_config_with,
+    LOOP_ITERATION_KEYS, LifecycleParseOptions, UnknownVerbPolicy, VerbList, parse_lifecycle_config_with,
     parse_loop_concerns_with, parse_single_action_with, parse_task_action_stack_with,
     scan_removed_validation_keys,
 };

@@ -56,7 +56,7 @@ fn by_signature<'a>(catalog: &'a FunctionCatalog, signature: &str) -> &'a Expres
     catalog
         .descriptors
         .iter()
-        .find(|descriptor| descriptor.signature == signature)
+        .find(|descriptor| &*descriptor.signature == signature)
         .unwrap_or_else(|| panic!("`{signature}` is cataloged"))
 }
 
@@ -122,7 +122,7 @@ fn an_entry_written_as_null_does_not_load() {
 #[test]
 fn a_non_function_entry_is_a_named_type_not_a_function() {
     let catalog = fixture();
-    assert!(catalog.descriptors.iter().all(|descriptor| descriptor.name != "ip-like"));
+    assert!(catalog.descriptors.iter().all(|descriptor| &*descriptor.name != "ip-like"));
     assert_eq!(catalog.named_type_names().collect::<Vec<_>>(), ["ip-like"]);
     assert!(catalog.named_type("ip-like").is_some());
 }
@@ -133,7 +133,7 @@ fn descriptors_follow_category_order_then_name_then_authored_overloads() {
     let order: Vec<(&str, &str, usize, usize)> = catalog
         .descriptors
         .iter()
-        .map(|descriptor| (descriptor.category, descriptor.name, descriptor.order, descriptor.overload))
+        .map(|descriptor| (&*descriptor.category, &*descriptor.name, descriptor.order, descriptor.overload))
         .collect();
     assert_eq!(
         order,
@@ -146,17 +146,17 @@ fn descriptors_follow_category_order_then_name_then_authored_overloads() {
             ("Logical", "is_string", 3, 1),
         ]
     );
-    assert_eq!(by_signature(&catalog, "is_string(x)").description, "One.");
-    assert_eq!(by_signature(&catalog, "is_string(x, y)").description, "Two.");
+    assert_eq!(&*by_signature(&catalog, "is_string(x)").description, "One.");
+    assert_eq!(&*by_signature(&catalog, "is_string(x, y)").description, "Two.");
     assert_eq!(
-        catalog.categories,
+        *catalog.categories,
         [
             CatalogCategory {
-                name: "Math",
-                description: Some("Numbers.")
+                name: "Math".into(),
+                description: Some("Numbers.".into())
             },
             CatalogCategory {
-                name: "Logical",
+                name: "Logical".into(),
                 description: None
             },
         ]
@@ -166,14 +166,14 @@ fn descriptors_follow_category_order_then_name_then_authored_overloads() {
 #[test]
 fn registered_aliases_attach_and_lookups_resolve_alias_and_case() {
     let catalog = fixture();
-    assert_eq!(by_signature(&catalog, "is_string(x)").aliases, ["isstring"]);
+    assert_eq!(*by_signature(&catalog, "is_string(x)").aliases, ["isstring".into()]);
     assert_eq!(catalog.descriptors_for("isString").len(), 2);
     assert_eq!(catalog.descriptors_for("IS_STRING").len(), 2);
     assert!(catalog.descriptors_for("nope").is_empty());
 
     let overloads = function_descriptors("isString");
     assert!(!overloads.is_empty());
-    assert!(overloads.iter().all(|descriptor| descriptor.name == "is_string"));
+    assert!(overloads.iter().all(|descriptor| &*descriptor.name == "is_string"));
 }
 
 #[test]
@@ -192,28 +192,28 @@ fn examples_keep_their_authored_text_and_files_are_embedded() {
     let catalog = fixture();
     let min = by_signature(&catalog, "min(a, b)");
     assert_eq!(
-        min.examples,
+        *min.examples,
         [
             FunctionExample::Call {
-                call: "min(3, 5)",
+                call: "min(3, 5)".into(),
                 expected: ExampleOutcome::Value(json!(3)),
-                result: "3",
+                result: "3".into(),
                 display_only: None,
             },
             FunctionExample::Call {
-                call: "min(\"a\", 5)",
+                call: "min(\"a\", 5)".into(),
                 expected: ExampleOutcome::Error,
-                result: "error",
-                display_only: Some("shows the type error"),
+                result: "error".into(),
+                display_only: Some("shows the type error".into()),
             },
         ]
     );
-    let example = min.example.expect("the first inline example");
+    let example = min.example().expect("the first inline example");
     assert_eq!((example.invocation, example.result), ("min(3, 5)", "3"));
     assert_eq!(example.verification, ExampleVerification::Executable);
 
     let upper = by_signature(&catalog, "upper(text)");
-    assert_eq!(upper.example.map(|example| example.result), Some("\"A\""));
+    assert_eq!(upper.example().map(|example| example.result), Some("\"A\""));
     let FunctionExample::File {
         path,
         invocation,
@@ -223,10 +223,116 @@ fn examples_keep_their_authored_text_and_files_are_embedded() {
     else {
         panic!("a file-form example: {:?}", upper.examples);
     };
-    assert_eq!((*path, *invocation, *returns), ("function-examples/as_tsv.yaml", r#"as_tsv(["a", "b", "c"])"#, "a\tb\tc"));
+    assert_eq!((&**path, &**invocation, &**returns), ("function-examples/as_tsv.yaml", r#"as_tsv(["a", "b", "c"])"#, "a\tb\tc"));
 
     let error = load_catalog(FIXTURE, "fixture.yaml", &[]).unwrap_err();
     assert!(error.to_string().contains("is not embedded"), "{error}");
+}
+
+/// `Described::example` is a view of the first inline call example: a
+/// display-only reason and an `=> error` outcome carry through, and a function
+/// whose only example is file-form, or that has none, has no view. Static
+/// descriptor tables lend the same view of their stored example.
+#[test]
+fn the_described_example_is_a_view_of_the_first_inline_call() {
+    use crate::effects::EFFECT_DESCRIPTORS;
+    use crate::markdown::compose::expression::semantics::OPERATOR_DESCRIPTORS;
+
+    const SOURCE: &str = r#"kind: schema
+categories:
+    - Text
+types:
+    shown: |-
+        function(
+            parameters(text: string);
+            returns(string);
+            category(Text);
+            example(shown("a") => "a"; display-only: depends on the host);
+            example(shown("b") => "b");
+        ) -> Shown.
+    failing: |-
+        function(
+            parameters(text: string);
+            returns(string);
+            category(Text);
+            fallible;
+            example(failing("") => error);
+            example(failing("a") => "a");
+        ) -> Failing.
+    filed: |-
+        function(
+            parameters(list: string[]);
+            returns(string);
+            category(Text);
+            example(./function-examples/as_tsv.yaml);
+        ) -> Filed.
+    bare: |-
+        function(parameters(x: string); returns(string); category(Text)) -> Bare.
+"#;
+    let catalog = load_catalog(SOURCE, "fixture.yaml", EXAMPLE_FILES).expect("the fixture loads");
+
+    let shown = by_signature(&catalog, "shown(text)").example().expect("an inline example");
+    assert_eq!((shown.invocation, shown.result), (r#"shown("a")"#, r#""a""#));
+    assert_eq!(shown.verification, ExampleVerification::DisplayOnly("depends on the host"));
+    assert_eq!(
+        by_signature(&catalog, "failing(text)").example(),
+        Some(Example {
+            invocation: r#"failing("")"#,
+            result: "error",
+            verification: ExampleVerification::Executable,
+        }),
+        "the first of two inline calls, with its `=> error` outcome"
+    );
+    let filed = by_signature(&catalog, "filed(list)");
+    assert_eq!(filed.examples.len(), 1, "the file-form example still loads");
+    assert_eq!(filed.example(), None);
+    assert_eq!(by_signature(&catalog, "bare(x)").example(), None);
+
+    let set = &EFFECT_DESCRIPTORS[0];
+    let effect: Option<Example<'static>> = set.example();
+    let effect = effect.expect("`set` has an example");
+    assert_eq!((set.signature, effect.invocation, effect.result), ("set(key, value)", r#"set("ready", true)"#, "null"));
+    assert!(
+        matches!(effect.verification, ExampleVerification::DisplayOnly(reason) if !reason.is_empty()),
+        "{effect:?}"
+    );
+    let operator: Option<Example<'static>> = OPERATOR_DESCRIPTORS[0].example();
+    assert_eq!(
+        operator,
+        Some(Example {
+            invocation: "1 + 2 * 3",
+            result: "7",
+            verification: ExampleVerification::Executable,
+        })
+    );
+}
+
+/// A loaded catalog owns its projection: dropping the source text and path
+/// it was loaded from leaves every name, type, example, and reason intact.
+#[test]
+fn a_loaded_catalog_outlives_the_text_it_was_loaded_from() {
+    let source = FIXTURE.to_string();
+    let path = "fixture.yaml".to_string();
+    let catalog = load_catalog(&source, &path, EXAMPLE_FILES).expect("the fixture loads");
+    drop((source, path));
+
+    let min = by_signature(&catalog, "min(a, b)");
+    assert_eq!(min.typed_signature(), "min(a: number, b: number) -> number | error");
+    assert_eq!((&*min.category, &*min.description), ("Math", "The smaller number."));
+    let FunctionExample::Call { display_only, .. } = &min.examples[1] else {
+        panic!("an inline example: {:?}", min.examples);
+    };
+    assert_eq!(display_only.as_deref(), Some("shows the type error"));
+    assert_eq!(
+        min.example(),
+        Some(Example {
+            invocation: "min(3, 5)",
+            result: "3",
+            verification: ExampleVerification::Executable,
+        })
+    );
+    assert_eq!(catalog.descriptors_for("is_string").len(), 2);
+    assert_eq!(catalog.categories[0].description.as_deref(), Some("Numbers."));
 }
 
 #[test]
@@ -234,11 +340,11 @@ fn the_embedded_catalog_loads_with_unique_display_keys() {
     let catalog = expression_function_catalog();
     assert!(!catalog.descriptors.is_empty());
     let mut seen = HashSet::new();
-    for descriptor in catalog.descriptors {
-        assert!(seen.insert(descriptor.signature), "duplicate display key `{}`", descriptor.signature);
+    for descriptor in &catalog.descriptors {
+        assert!(seen.insert(&descriptor.signature), "duplicate display key `{}`", descriptor.signature);
         assert!(!descriptor.category.is_empty());
     }
-    for category in catalog.categories {
+    for category in &catalog.categories {
         assert!(
             catalog.descriptors.iter().any(|descriptor| descriptor.category == category.name),
             "category `{}` lists no function",
@@ -332,7 +438,7 @@ fn partition_call_examples() -> CallExamples {
         display_only: Vec::new(),
     };
     for descriptor in expression_function_descriptors() {
-        for example in descriptor.examples {
+        for example in &descriptor.examples {
             if let FunctionExample::Call {
                 call,
                 expected,
@@ -341,8 +447,8 @@ fn partition_call_examples() -> CallExamples {
             } = example
             {
                 match display_only {
-                    None => examples.executable.push((*call, expected)),
-                    Some(reason) => examples.display_only.push((*call, *reason)),
+                    None => examples.executable.push((&**call, expected)),
+                    Some(reason) => examples.display_only.push((&**call, &**reason)),
                 }
             }
         }
@@ -478,7 +584,7 @@ fn query_vocabulary_link_resolves_to_an_existing_doc_anchor() {
     let linking: Vec<&str> = expression_function_descriptors()
         .iter()
         .filter(|descriptor| descriptor.description.contains(LINK))
-        .map(|descriptor| descriptor.signature)
+        .map(|descriptor| &*descriptor.signature)
         .collect();
     for signature in ["pr_list(query)", "cicd_list(query)"] {
         assert!(linking.contains(&signature), "`{signature}` must link to the query vocabulary; linking: {linking:?}");

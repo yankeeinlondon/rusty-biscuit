@@ -304,8 +304,8 @@ pub(crate) fn prepare_schemas(
         schemas = schemas.with_darkmatter_baseline_json_schema().map_err(|err| {
             prepare_error(format!("schema could not be prepared: {err}"), err)
         })?;
-    } else if let Some(baseline) = options.baseline_schema.clone() {
-        schemas = schemas.with_baseline(baseline).map_err(|err| {
+    } else if let Some(baseline) = &options.baseline_schema {
+        schemas = schemas.with_baseline_and_definitions(baseline, &options.baseline_definitions).map_err(|err| {
             prepare_error(format!("schema could not be prepared: {err}"), err)
         })?;
     }

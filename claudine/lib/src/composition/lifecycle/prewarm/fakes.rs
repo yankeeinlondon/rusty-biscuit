@@ -36,6 +36,7 @@ struct FakeState {
     /// [`FakePreparer::release`] grants it a permit.
     gate: Option<Semaphore>,
     call_count: watch::Sender<usize>,
+    completed_count: watch::Sender<usize>,
 }
 
 impl FakePreparer {
@@ -57,6 +58,7 @@ impl FakePreparer {
                 failing: Mutex::new(HashSet::new()),
                 gate,
                 call_count: watch::Sender::new(0),
+                completed_count: watch::Sender::new(0),
             }),
         }
     }
@@ -95,6 +97,19 @@ impl FakePreparer {
             .await
             .expect("the fake owns the sender");
     }
+
+    /// Wait until at least `count` calls have run to the end.
+    ///
+    /// A call is made before its future is polled, so a test that drops the
+    /// worker after [`Self::wait_for_calls`] can cancel the last call before
+    /// it completes; wait here before asserting on [`Self::completed`].
+    pub(crate) async fn wait_for_completed(&self, count: usize) {
+        let mut receiver = self.state.completed_count.subscribe();
+        receiver
+            .wait_for(|completed| *completed >= count)
+            .await
+            .expect("the fake owns the sender");
+    }
 }
 
 impl Preparer for FakePreparer {
@@ -111,6 +126,7 @@ impl Preparer for FakePreparer {
             }
             let failed = state.failing.lock().unwrap().contains(&text);
             state.completed.lock().unwrap().push(text);
+            state.completed_count.send_modify(|completed| *completed += 1);
             if failed { Err(PrewarmError::Prepare) } else { Ok(()) }
         })
     }

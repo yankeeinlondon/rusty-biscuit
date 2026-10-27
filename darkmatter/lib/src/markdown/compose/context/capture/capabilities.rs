@@ -128,7 +128,7 @@ impl DeferredCapabilities {
             }
             if expression_function_descriptors()
                 .iter()
-                .any(|descriptor| descriptor.name == name)
+                .any(|descriptor| &*descriptor.name == name)
             {
                 self.functions.insert(name.to_string());
             }

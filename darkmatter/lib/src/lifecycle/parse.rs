@@ -73,7 +73,7 @@ pub struct LifecycleParseOptions<'a> {
 ///
 /// Known verbs and the `when`/`then`/`else` structure validate identically
 /// under both policies; only an unknown verb's treatment differs.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum UnknownVerbPolicy {
     /// Reject it with [`LifecycleError::LifecycleUnknownVerb`]: a closed
     /// profile whose every verb is executable.
@@ -88,21 +88,78 @@ pub enum UnknownVerbPolicy {
     /// profile of a host that runs stacks but provides no service for these
     /// verbs (another host's `say`, `retry`, …). Every other verb parses and
     /// validates as under [`Self::Reject`].
-    IgnoreUnprovided(&'static [&'static str]),
+    IgnoreUnprovided(VerbList),
 }
 
 impl UnknownVerbPolicy {
     /// Whether `verb` becomes an opaque [`IgnoredAction`] under this policy.
     /// `set` is never ignored.
-    pub fn ignores(self, verb: &str) -> bool {
+    pub fn ignores(&self, verb: &str) -> bool {
         if verb == "set" {
             return false;
         }
         match self {
             Self::Reject => false,
             Self::Ignore => !is_known_lifecycle_verb(verb),
-            Self::IgnoreUnprovided(unprovided) => !is_known_lifecycle_verb(verb) || unprovided.contains(&verb),
+            Self::IgnoreUnprovided(unprovided) => !is_known_lifecycle_verb(verb) || unprovided.contains(verb),
         }
+    }
+}
+
+/// The verbs of [`UnknownVerbPolicy::IgnoreUnprovided`]: a compiled host's
+/// static list, or a list read at runtime and owned by every policy that
+/// shares it. Equality compares the verbs in order.
+#[derive(Debug, Clone)]
+pub enum VerbList {
+    Static(&'static [&'static str]),
+    Shared(std::sync::Arc<[String]>),
+}
+
+impl VerbList {
+    /// The verbs, in order.
+    pub fn iter(&self) -> impl Iterator<Item = &str> + '_ {
+        let (statics, owned): (&[&str], &[String]) = match self {
+            Self::Static(verbs) => (verbs, &[]),
+            Self::Shared(verbs) => (&[], verbs),
+        };
+        statics.iter().copied().chain(owned.iter().map(String::as_str))
+    }
+
+    /// Whether `verb` is listed.
+    pub fn contains(&self, verb: &str) -> bool {
+        self.iter().any(|listed| listed == verb)
+    }
+}
+
+impl PartialEq for VerbList {
+    fn eq(&self, other: &Self) -> bool {
+        self.iter().eq(other.iter())
+    }
+}
+
+impl Eq for VerbList {}
+
+impl From<&'static [&'static str]> for VerbList {
+    fn from(verbs: &'static [&'static str]) -> Self {
+        Self::Static(verbs)
+    }
+}
+
+impl<const N: usize> From<&'static [&'static str; N]> for VerbList {
+    fn from(verbs: &'static [&'static str; N]) -> Self {
+        Self::Static(verbs)
+    }
+}
+
+impl From<std::sync::Arc<[String]>> for VerbList {
+    fn from(verbs: std::sync::Arc<[String]>) -> Self {
+        Self::Shared(verbs)
+    }
+}
+
+impl From<Vec<String>> for VerbList {
+    fn from(verbs: Vec<String>) -> Self {
+        Self::Shared(verbs.into())
     }
 }
 

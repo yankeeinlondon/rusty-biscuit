@@ -20,8 +20,9 @@ use darkmatter::markdown::schemas::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::{
     Constraint, JsonPointer, PropertyAtom, PropertyDef, SchemaArm, SchemaCursor,
     SchemaCursorRole, SchemaDeclaration, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
-    decode_scalar, locate_schema_declaration_cursor, mapping_separator,
-    locate_type_definition_cursor, parse_property_definition, parse_schema_declaration,
+    DecodedScalar, decode_plain_scalar_node, decode_scalar, locate_schema_declaration_cursor,
+    locate_schema_declaration_cursor_in_scalar, mapping_separator, locate_type_definition_cursor,
+    locate_type_definition_cursor_in_scalar, parse_property_definition, parse_schema_declaration,
     schema_constraint_descriptors, schema_type_descriptor, schema_type_descriptors,
     flattened_alternatives, select_literal_discriminant_arm, suggestions_for_def,
 };
@@ -114,21 +115,30 @@ fn schema_completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem
 /// never from searching the value text for a delimiter.
 fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<CompletionItem>> {
     let overlay = ctx.overlay?;
-    let (value_start, kinds) = match flow_cursor(ctx, offset) {
-        Some((value_start, ancestors, key)) => {
-            (value_start, meta_schema_kinds_for_line(overlay, &ancestors, &key, false)?)
-        }
+    let cursor = match flow_cursor(ctx, offset) {
+        Some((value_start, ancestors, key)) => SemanticValueCursor {
+            value_start,
+            kinds: meta_schema_kinds_for_line(overlay, &ancestors, &key, false)?,
+            continued: None,
+        },
         None => block_cursor(ctx, overlay, offset)?,
     };
 
+    let value_start = cursor.value_start;
     let value_source = ctx.text.get(value_start..)?;
     let mut items = Vec::new();
-    for kind in kinds {
-        let state = match kind {
-            MetaSchemaKind::TypeDefinition => {
+    for kind in cursor.kinds {
+        let state = match (kind, &cursor.continued) {
+            (MetaSchemaKind::TypeDefinition, Some(scalar)) => {
+                locate_type_definition_cursor_in_scalar(ctx.text, scalar, offset)
+            }
+            (MetaSchemaKind::Schema, Some(scalar)) => {
+                locate_schema_declaration_cursor_in_scalar(ctx.text, scalar, offset)
+            }
+            (MetaSchemaKind::TypeDefinition, None) => {
                 locate_type_definition_cursor(value_source, value_start, offset)
             }
-            MetaSchemaKind::Schema => {
+            (MetaSchemaKind::Schema, None) => {
                 locate_schema_declaration_cursor(value_source, value_start, offset)
             }
         };
@@ -148,7 +158,18 @@ fn meta_schema_completion(ctx: &DocumentContext, offset: usize) -> Option<Vec<Co
     Some(dedup_completions(items))
 }
 
-/// The `(value_start, meta-schema kinds)` a block-presented cursor resolves to.
+/// The semantic value a completion cursor sits in.
+struct SemanticValueCursor {
+    /// Document offset where the value's authored text begins.
+    value_start: usize,
+    kinds: Vec<MetaSchemaKind>,
+    /// The decoded plain scalar the cursor continues onto a later line, when
+    /// no loaded model describes it; the cursor is read through this map
+    /// rather than from the raw text at `value_start`.
+    continued: Option<DecodedScalar>,
+}
+
+/// The semantic value a block-presented cursor resolves to.
 ///
 /// Standalone documents consult the shared source map first, which covers both
 /// implicit and explicit mapping pairs. Frontmatter and incomplete source then
@@ -157,7 +178,7 @@ fn block_cursor(
     ctx: &DocumentContext,
     overlay: &crate::overlay::DocumentOverlay,
     offset: usize,
-) -> Option<(usize, Vec<MetaSchemaKind>)> {
+) -> Option<SemanticValueCursor> {
     if let SchemaAuthoringState::Standalone { model: Some(model), .. } =
         &overlay.schema_authoring
         && let Some(schema) = model.schema()
@@ -167,7 +188,11 @@ fn block_cursor(
                 region.definition_span.start <= offset && offset <= region.definition_span.end
             })
     {
-        return Some((region.definition_span.start, vec![region.kind]));
+        return Some(SemanticValueCursor {
+            value_start: region.definition_span.start,
+            kinds: vec![region.kind],
+            continued: None,
+        });
     }
     line_cursor(ctx, overlay, offset)
 }
@@ -176,43 +201,70 @@ fn block_cursor(
 /// source no loaded model describes.
 ///
 /// A line that is neither a `key:` value nor a `- ` item may continue a plain
-/// scalar begun on an earlier line; the cursor then belongs to that scalar,
-/// whose value starts on its holder line.
+/// scalar begun on an earlier line. The cursor then belongs to that scalar
+/// only when the shared plain-scalar decoder, run from the holder's value
+/// start, consumes the text up to the cursor.
 fn line_cursor(
     ctx: &DocumentContext,
     overlay: &crate::overlay::DocumentOverlay,
     offset: usize,
-) -> Option<(usize, Vec<MetaSchemaKind>)> {
+) -> Option<SemanticValueCursor> {
     let (line_start, prefix) = line_prefix(ctx.text, offset);
     let indent = prefix.len() - prefix.trim_start().len();
     let trimmed = prefix.trim_start();
     let ancestors = enclosing_path(ctx, offset, line_start, indent);
 
-    if let Some((key, partial)) = value_cursor(ctx, offset, line_start, trimmed) {
+    let (value_start, kinds) = if let Some((key, partial)) =
+        value_cursor(ctx, offset, line_start, trimmed)
+    {
         let kinds = meta_schema_kinds_for_line(overlay, &ancestors, &key, false)?;
-        Some((semantic_value_start(ctx, offset, line_start, partial.len()), kinds))
+        (semantic_value_start(ctx, offset, line_start, partial.len()), kinds)
     } else if let Some(after_dash) = trimmed.strip_prefix("- ") {
         let kinds = meta_schema_kinds_for_line(overlay, &ancestors, "", true)?;
-        Some((offset - after_dash.len(), kinds))
+        (offset - after_dash.len(), kinds)
     } else if trimmed == "-" {
         let kinds = meta_schema_kinds_for_line(overlay, &ancestors, "", true)?;
-        Some((offset, kinds))
+        (offset, kinds)
     } else {
-        line_cursor(ctx, overlay, continued_scalar_holder(ctx.text, line_start, indent)?)
-    }
+        return continued_scalar_cursor(ctx, overlay, offset, line_start, indent);
+    };
+    Some(SemanticValueCursor { value_start, kinds, continued: None })
 }
 
-/// The content end of the line holding the plain scalar that the line at
-/// `line_start` (indented `indent`) continues, or `None` when it continues
-/// none.
+/// The semantic value whose plain scalar the cursor's line (starting at
+/// `line_start`, indented `indent`) continues.
+///
+/// Holder selection is a backward indentation scan, but whether the holder's
+/// value is a plain scalar that reaches the cursor is decided by
+/// [`decode_plain_scalar_node`] alone: same-line anchors and tags are skipped,
+/// while quoted and block scalars, collections, aliases, comments, empty
+/// values, and a dedented sibling do not continue.
+fn continued_scalar_cursor(
+    ctx: &DocumentContext,
+    overlay: &crate::overlay::DocumentOverlay,
+    offset: usize,
+    line_start: usize,
+    indent: usize,
+) -> Option<SemanticValueCursor> {
+    let (holder_end, parent_indent) = continued_scalar_holder(ctx.text, line_start, indent)?;
+    let holder = line_cursor(ctx, overlay, holder_end)?;
+    let (scalar, _) = decode_plain_scalar_node(ctx.text, holder.value_start, parent_indent)?;
+    // A declaration arm reads the whole scalar as one token, so this succeeds
+    // exactly when the scalar reaches the cursor (or only blanks follow it).
+    locate_schema_declaration_cursor_in_scalar(ctx.text, &scalar, offset)?;
+    Some(SemanticValueCursor { continued: Some(scalar), ..holder })
+}
+
+/// The content end of the line holding the scalar that the line at
+/// `line_start` (indented `indent`) may continue, and the column of the block
+/// collection holding that value (its key, or the `-` of a sequence item), or
+/// `None` when no such line precedes it.
 ///
 /// The holder is the nearest earlier line indented less that carries a `key:`
 /// or `- ` indicator; less-indented lines without one are earlier
 /// continuations of the same scalar. Blank lines fold into the scalar, while a
-/// comment line ends it. The holder's value must open a plain scalar on its
-/// own line: an empty value, a quoted or block scalar, a flow collection, or
-/// node properties are not continued this way.
-fn continued_scalar_holder(text: &str, line_start: usize, indent: usize) -> Option<usize> {
+/// comment line ends it.
+fn continued_scalar_holder(text: &str, line_start: usize, indent: usize) -> Option<(usize, usize)> {
     let mut needed = indent;
     let mut end = line_start;
     while end > 0 {
@@ -231,22 +283,19 @@ fn continued_scalar_holder(text: &str, line_start: usize, indent: usize) -> Opti
             continue;
         }
         let mut value = trimmed;
-        let mut held = false;
+        let mut holder_column = None;
         if let Some(after_dash) = value.strip_prefix("- ") {
             value = after_dash.trim_start();
-            held = true;
+            holder_column = Some(line_indent);
         }
-        if let Some(colon) = mapping_separator(value, false) {
-            value = value[colon + 1..].trim_start();
-            held = true;
+        if mapping_separator(value, false).is_some() {
+            holder_column = Some(line.len() - value.len());
         }
-        if !held {
+        let Some(holder_column) = holder_column else {
             needed = line_indent;
             continue;
-        }
-        let opens_plain = !value.is_empty()
-            && !value.starts_with(['#', '|', '>', '\'', '"', '[', '{', '!', '&', '*']);
-        return opens_plain.then_some(start + line.len());
+        };
+        return Some((start + line.len(), holder_column));
     }
     None
 }
@@ -1945,12 +1994,37 @@ pub(crate) fn schema_hover_body(key: &str, def: &PropertyDef, definitions: &dyn 
     Some(format!("**`{key}`**\n\n{details}"))
 }
 
+/// The type line of a reference whose definition resolves to several
+/// alternatives: the list the same union shows when it is inlined. The
+/// resolver stores a union two sites share, and that must not change what
+/// either use shows; the list is also the one the union-item note numbers.
+/// Opens only the references at the top of the hovered type. `None` when the
+/// reference resolves to one alternative.
+fn stored_union_type_line(atom: &PropertyAtom, definitions: &dyn DefinitionLookup) -> Option<String> {
+    let reference = PropertyDef::Single(PropertyAtom {
+        description: None,
+        ..atom.clone()
+    });
+    let alternatives = resolved_alternatives(&reference, definitions);
+    if alternatives.len() < 2 {
+        return None;
+    }
+    let lead = if alternatives.iter().all(|alternative| alternative.is_array) {
+        "Type: **array**, each item one of:"
+    } else {
+        "Type: one of:"
+    };
+    let atoms: Vec<&PropertyAtom> = alternatives.iter().map(|alternative| alternative.atom).collect();
+    Some(format!("{lead}\n{}", alternative_lines(&atoms, definitions)))
+}
+
 /// The schema-hover body **without** the leading `**`key`**` heading: type,
 /// required, eager, enum, default, and description. A union-typed reference
 /// (`U[]`, `U(required)`) is described by its flattened alternatives, each
-/// with its own description, in place of a single type. A recursive reference
-/// (`item[]`) is named as its type and followed by its definition's body
-/// looked up in `definitions`, in which every recursive use is again written
+/// with its own description, in place of a single type, whether the union was
+/// inlined or stored as a definition. Any other stored reference (`item[]`,
+/// recursive or shared) is named as its type and followed by its definition's
+/// body looked up in `definitions`, in which every stored use is again written
 /// by name, so the whole type shows once and never expands further. Callers
 /// that already display the property name in their own header (e.g. the
 /// interpolation hover's `**Expression**` block) use this to avoid repeating
@@ -1959,7 +2033,13 @@ pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn Definiti
     let atom = primary_atom(def)?;
     let mut lines = Vec::new();
 
+    let stored_union = match &atom.ty {
+        TypeExpr::Ref(_) => stored_union_type_line(atom, definitions),
+        _ => None,
+    };
+    let described_by_alternatives = stored_union.is_some();
     let type_line = match &atom.ty {
+        _ if let Some(line) = stored_union => line,
         TypeExpr::Primitive(ty) => {
             let suffix = if atom.is_array { "[]" } else { "" };
             format!("Type: **{}{}**", ty.as_keyword(), suffix)
@@ -1992,6 +2072,7 @@ pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn Definiti
     };
     lines.push(type_line);
     if let TypeExpr::Ref(key) = &atom.ty
+        && !described_by_alternatives
         && let Some(definition) = definitions.lookup_definition(key)
     {
         let body = darkmatter::markdown::schemas::simplified::serialize_property_def(&definition.body);

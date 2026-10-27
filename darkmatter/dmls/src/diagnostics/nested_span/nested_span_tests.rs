@@ -38,6 +38,7 @@ fn with_ctx<R>(text: &str, version: i32, f: impl FnOnce(&DocumentContext) -> R) 
                 schemas.path(),
                 &[
                     ("claudine.yaml", CLAUDINE_TRIGGER),
+                    ("document.yaml", CLAUDINE_DOCUMENT),
                     ("lifecycle.yaml", CLAUDINE_LIFECYCLE),
                     ("action.yaml", CLAUDINE_ACTION),
                     ("linking.yaml", CLAUDINE_LINKING),
@@ -334,6 +335,7 @@ fn ranges_are_inner_for_exact_styles_and_whole_for_folded_and_tagged() {
 // Claudine's authoritative schemas; DMLS has no Claudine dependency, so the
 // static inventory is held against the YAML itself.
 const CLAUDINE_TRIGGER: &str = include_str!("../../../../../claudine/schemas/claudine.yaml");
+const CLAUDINE_DOCUMENT: &str = include_str!("../../../../../claudine/schemas/document.yaml");
 const CLAUDINE_LIFECYCLE: &str = include_str!("../../../../../claudine/schemas/lifecycle.yaml");
 const CLAUDINE_ACTION: &str = include_str!("../../../../../claudine/schemas/action.yaml");
 const CLAUDINE_LINKING: &str = include_str!("../../../../../claudine/schemas/linking.yaml");

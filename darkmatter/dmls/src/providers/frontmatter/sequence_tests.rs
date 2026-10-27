@@ -23,8 +23,9 @@ use crate::source_map::{PositionEncoding, SourceMap};
 use FmPathSegment::{Index, Key};
 
 /// The Claudine schema files the `claudine.yaml` catalog's payload reads.
-const CLAUDINE_BUNDLE: [(&str, &str); 4] = [
+const CLAUDINE_BUNDLE: [(&str, &str); 5] = [
     ("claudine.yaml", include_str!("../../../../../claudine/schemas/claudine.yaml")),
+    ("document.yaml", include_str!("../../../../../claudine/schemas/document.yaml")),
     ("lifecycle.yaml", include_str!("../../../../../claudine/schemas/lifecycle.yaml")),
     ("action.yaml", include_str!("../../../../../claudine/schemas/action.yaml")),
     ("linking.yaml", include_str!("../../../../../claudine/schemas/linking.yaml")),

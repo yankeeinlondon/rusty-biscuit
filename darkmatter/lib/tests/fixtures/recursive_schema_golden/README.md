@@ -1,9 +1,30 @@
 # Recursive Schema Golden Corpus
 
-This corpus guards one promise: a schema with no cyclic named types lowers to
-exactly the same JSON Schema bytes, key order included, before and after the
-resolver learns to lower cyclic named types to `$defs`/`$ref`. The test is
+This corpus guards one promise: each frozen input keeps lowering to exactly the
+same JSON Schema bytes, key order included, unless resolver code intentionally
+changes the representation. The test is
 `darkmatter/lib/tests/l1/recursive_schema_golden.rs`.
+
+Acyclic output is not promised to stay byte-stable across such a change. The
+resolver stores a cyclic named type, and a structured named type used at two
+or more authored sites, once in `$defs` and points to it with a local `$ref`
+at each use:
+
+```json
+{
+  "properties": {
+    "primary": { "$ref": "#/$defs/endpoint" },
+    "backup": { "$ref": "#/$defs/endpoint" }
+  },
+  "$defs": {
+    "endpoint": { "type": "object", "properties": { "host": { "type": "string" } } }
+  }
+}
+```
+
+Changing what is shared moves these goldens without changing what any schema
+accepts. The behavior tests prove that the meaning is preserved; the goldens
+only pin the bytes.
 
 | Path | Holds |
 | --- | --- |
@@ -25,8 +46,9 @@ DARKMATTER_BLESS_RECURSIVE_GOLDEN=1 cargo nextest run -p darkmatter \
     --features effects-instrumentation --test l1 -E 'test(recursive_schema_golden)'
 ```
 
-Regenerate only for a change that is meant to alter how acyclic schemas lower,
-and say so in that change. A mismatch from any other change is a regression:
+Regenerate only for an intentional representation change, after the behavior
+tests pass, and record in that change which entries moved and why. A mismatch
+from any other change is a regression:
 the failure names the entry, the first differing line, and a temporary file
 holding the actual output.
 

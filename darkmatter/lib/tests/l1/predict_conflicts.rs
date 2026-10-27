@@ -7,6 +7,7 @@ use darkmatter::markdown::compose::expression::{
 };
 use darkmatter::markdown::compose::{ComposeOperation, ComposeOptions};
 use darkmatter::markdown::Markdown;
+use darkmatter::catalog::Described;
 use git2::{
     IndexAddOption, Oid, Repository, RepositoryInitOptions, ResetType,
     build::CheckoutBuilder,
@@ -178,16 +179,16 @@ fn shipped_catalog_describes_predict_conflicts_exactly() {
     let descriptors = expression_function_descriptors();
     let matches = descriptors
         .iter()
-        .filter(|descriptor| descriptor.signature == "predict_conflicts(branch)")
+        .filter(|descriptor| &*descriptor.signature == "predict_conflicts(branch)")
         .collect::<Vec<_>>();
 
     assert_eq!(matches.len(), 1);
     let descriptor = matches[0];
-    assert_eq!(descriptor.category, "Git");
+    assert_eq!(&*descriptor.category, "Git");
     // Order within a category is alphabetical by name, counting overloads.
     let earlier = descriptors
         .iter()
-        .filter(|other| other.category == "Git" && other.name < descriptor.name)
+        .filter(|other| &*other.category == "Git" && other.name < descriptor.name)
         .count();
     assert_eq!(descriptor.order, earlier + 1);
     assert_eq!(
@@ -195,10 +196,10 @@ fn shipped_catalog_describes_predict_conflicts_exactly() {
         "predict_conflicts(branch: string | null) -> string[] | null | error"
     );
     assert_eq!(
-        descriptor.description,
+        &*descriptor.description,
         "Returns the repository-relative paths that would conflict if the named local branch were merged into the caller's current branch; null passes through."
     );
-    let example = descriptor.example.as_ref().expect("catalog example");
+    let example = descriptor.example().expect("catalog example");
     assert_eq!(example.invocation, "predict_conflicts(\"feature/example\")");
     // The result is the authored literal text.
     assert_eq!(example.result, "[\"src/config.rs\"]");

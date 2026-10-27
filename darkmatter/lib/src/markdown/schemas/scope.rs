@@ -1,7 +1,7 @@
 //! Local `$ref` scope for lowered and raw JSON Schemas.
 //!
-//! A recursive named type lowers to one body under the root `$defs` of the
-//! schema that reaches it, and every use is a `#/$defs/<key>` pointer into
+//! A stored named type (recursive, or a shared acyclic one) lowers to one
+//! body under the root `$defs` of the schema that reaches it, and every use is a `#/$defs/<key>` pointer into
 //! that root. Three things keep such a pointer bound to the body it was
 //! written for:
 //!
@@ -270,6 +270,38 @@ pub(crate) fn fold_definitions(receiving: &mut Map<String, Value>, incoming: &mu
         let key = renames.get(&key).cloned().unwrap_or(key);
         receiving.entry(key).or_insert(body);
     }
+}
+
+/// Drops from `schema`'s root `$defs` every definition no property `kept`
+/// admits reaches, directly or through another definition.
+///
+/// A merge copies only the lower layer's properties the higher one does not
+/// declare; the definitions only an overridden property reached would
+/// otherwise join the merged root unreferenced.
+pub(crate) fn retain_reached_definitions(schema: &mut Value, kept: impl Fn(&str) -> bool) {
+    let Some(object) = schema.as_object_mut() else {
+        return;
+    };
+    let mut reached = BTreeSet::new();
+    let mut pending: Vec<String> = object
+        .get("properties")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(name, _)| kept(name))
+        .flat_map(|(_, property)| referenced_definitions(property))
+        .collect();
+    let Some(Value::Object(defs)) = object.get_mut("$defs") else {
+        return;
+    };
+    while let Some(key) = pending.pop() {
+        if let Some(body) = defs.get(&key)
+            && reached.insert(key)
+        {
+            pending.extend(referenced_definitions(body));
+        }
+    }
+    defs.retain(|key, _| reached.contains(key));
 }
 
 /// The `incoming` keys that must move, with their new names.

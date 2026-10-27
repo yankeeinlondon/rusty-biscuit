@@ -104,10 +104,39 @@ registration the artifact cannot carry fails exactly as it would in the host.
 `profile.registry()` its `EventRegistry`; pass both to
 `parse_lifecycle_config_with` and `lifecycle_call_checks`.
 `schemas::catalog::host_lifecycle_profiles(context)` does the discovery for a
-document. Reading is passive: nothing in a profile runs. Each call reads the
-schema roots' files and looks each one up by its path, content hash, and
-artifact; a file seen before with the same bytes, catalog or not, is not
-parsed again.
+document. Reading is passive: nothing in a profile runs.
+
+Discovery is a lazy iterator. It lists each root's directory when it reaches
+it and reads a candidate's catalog and artifact only when it visits that
+candidate, so a caller that stops at the first usable profile (as DMLS does)
+reads nothing after it:
+
+```rust
+let first = host_lifecycle_profiles(&context).find_map(|found| found.profile.ok());
+```
+
+The profile is built from the catalog bytes that were hashed against the
+artifact, never from a second read. It owns everything it loaded (its
+registry, catalog, host-global names, and ignored verbs), so dropping the last
+holder of the profile or its registry releases them.
+
+The process keeps one observation per catalog path: the catalog's content
+hash, the artifact as read (absent, unreadable with its reason, or its exact
+text), and the result. A visit with the same bytes reuses it without parsing,
+whether the result is a profile, an artifact's refusal reason, or "not a host
+catalog"; different bytes replace it. A refusal keeps only its reason. A
+catalog that is found removed, unreadable, or no longer loading loses its
+entry. A path in a root no request visits again keeps its entry until the
+process exits.
+
+```mermaid
+flowchart LR
+    A[visit candidate:<br/>read catalog + artifact] --> B{same hash and<br/>artifact as cached?}
+    B -- yes --> C[reuse the cached result]
+    B -- no --> D[build from the bytes read]
+    D --> E[replace the path's entry]
+    E --> F[old profile released once<br/>no caller holds it]
+```
 
 The reader is strict. Each of these makes the whole profile unusable, with a
 reason naming the file:

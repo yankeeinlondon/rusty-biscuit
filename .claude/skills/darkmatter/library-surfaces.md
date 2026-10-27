@@ -48,6 +48,19 @@ behavior.
   authored overload) or `function_descriptors(name)`, which resolves aliases
   and case like dispatch. List canonicals only; never re-sort by a field or
   keep a second signature list.
+- Descriptors own their data (`Box<str>`, boxed slices, owned `FunctionType`;
+  `Clone`, not `Copy`); `load_catalog` leaks nothing, even on error. `&'static`
+  views exist only by borrowing a `LazyLock` owner:
+  `expression_function_descriptors()`, `function_descriptors(name)`,
+  `effect_function_descriptors()`, lifecycle signatures.
+  `FunctionCatalog::descriptors_for`, `HostFunctionCatalog::function_names`,
+  and `Described::{key, description, category}` borrow from `&self`;
+  `Described::example()` returns a `Copy` `Example<'_>` view. Never
+  reintroduce a leak or `'static` field to satisfy a borrow; borrow or clone.
+- Host function catalogs (`HostFunctionCatalog`, `HostFunctions`) share one
+  `Arc` freed with the last holder. `host_function_catalogs` caches one result
+  per discovery path, replaced on any catalog/artifact byte change and never
+  evicted; see `expressions.md` and `docs/topics/host-functions.md`.
 - Non-function `types:` entries are named helper types that signatures use:
   `ip-address` (IPv4, IPv6, or a scoped `fe80::1%en0` literal; no DNS),
   `agentic-cli` (an `enum(...)` that a test pins to

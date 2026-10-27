@@ -79,7 +79,7 @@ fn group_expression_descriptors(
                 .iter()
                 .filter(|descriptor| descriptor.category == category.name)
                 .collect();
-            (category.name, functions)
+            (&*category.name, functions)
         })
         .filter(|(_, functions)| !functions.is_empty())
         .collect()

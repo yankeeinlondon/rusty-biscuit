@@ -1,7 +1,7 @@
 //! Claudine's embedded schema bundle and the launch verdict that uses it
 //! (`2026-10-21-claudine-schemas`, criteria 6, 10, and 13).
 //!
-//! - The embed: `CLAUDINE_SCHEMA_FILES` is the seven repository files byte for
+//! - The embed: `CLAUDINE_SCHEMA_FILES` is the eight repository files byte for
 //!   byte, each parses as its kind, and every export and every payload resolves
 //!   through the embedded seam with no disk schema anywhere.
 //! - The input robustness matrix of `claudine_schemas_matrix.rs`, walked with
@@ -9,9 +9,15 @@
 //! - Schema locations and the last-resort rule, through Claudine's public
 //!   launch verdict (`pre_validate_schema`) and the effective schema it judges
 //!   by.
+//! - Document metadata from `document.yaml`, judged by passive validation and
+//!   the launch verdict through each metadata trigger alone, their merge, a
+//!   disk copy of `inline-compose.yaml`, and one `hash` definition shared by
+//!   two properties; the longhand `kind` default is declared, never inserted.
 //! - The strict policy for Claudine controls at the library boundary.
 //! - Passive parity: for the AC5 fixtures, the launch verdict and the DMLS
 //!   path agree.
+//! - Each failing use of a lifecycle helper reached from several places keeps
+//!   its problem code, instance path, position, and declaring trigger.
 //!
 //! Every context is built from a `RequestSnapshot` with a fixture home and an
 //! explicit environment inside a temporary directory; neither the checkout,
@@ -151,16 +157,17 @@ fn judge_memory(schemas: &DarkmatterSchemas, frontmatter: &str) -> (EffectiveSch
 
 #[test]
 fn embedded_files_are_the_repository_files_byte_for_byte() {
-    let repository: [(&str, &str); 7] = [
+    let repository: [(&str, &str); 8] = [
         ("action.yaml", include_str!("../../../schemas/action.yaml")),
         ("claudine.yaml", include_str!("../../../schemas/claudine.yaml")),
+        ("document.yaml", include_str!("../../../schemas/document.yaml")),
         ("inline-compose.yaml", include_str!("../../../schemas/inline-compose.yaml")),
         ("lifecycle.yaml", include_str!("../../../schemas/lifecycle.yaml")),
         ("linking.yaml", include_str!("../../../schemas/linking.yaml")),
         ("sequence-types.yaml", include_str!("../../../schemas/sequence-types.yaml")),
         ("sequence.yaml", include_str!("../../../schemas/sequence.yaml")),
     ];
-    assert_eq!(CLAUDINE_SCHEMA_FILES, &repository[..], "the embed is the seven repository files, unchanged");
+    assert_eq!(CLAUDINE_SCHEMA_FILES, &repository[..], "the embed is the eight repository files, unchanged");
     assert_eq!(claudine_schema_bundle().name(), CLAUDINE_SCHEMA_BUNDLE_NAME);
     assert_eq!(claudine_schema_bundle().files(), CLAUDINE_SCHEMA_FILES);
 
@@ -177,6 +184,7 @@ fn embedded_files_are_the_repository_files_byte_for_byte() {
         assert_eq!(library.envelope, StandaloneSchemaEnvelope::Tagged, "{name} is a `kind: schema` library");
     }
     assert_eq!(triggers, CLAUDINE_TRIGGER_FILES, "exactly the three trigger files are trigger envelopes");
+    assert_eq!((CLAUDINE_SCHEMA_FILES.len(), triggers.len()), (8, 3), "eight trigger and library files, three of them triggers");
 }
 
 /// One export's probes: its library, its name, and a value it accepts and one
@@ -234,6 +242,13 @@ const LINKING_PROBES: &[ExportProbe] = &[
     ("disable-model-invocation", "false", "[1]"),
     ("argument-hint", "\"<file>\"", "{ a: 1 }"),
     ("max_turns", "4", "[4]"),
+];
+
+/// The longhand hash's `value` is `unknown`, so any data is accepted there.
+const DOCUMENT_PROBES: &[ExportProbe] = &[
+    ("prompt", "hi", "{ a: 1 }"),
+    ("hash", "{ kind: detailed, value: [1, { a: b }], ignored: [x] }", "{ kind: bogus }"),
+    ("last_updated", "2026-10-26", "[2026-10-26]"),
 ];
 
 /// A test trigger, added to a copy of the embedded bundle, whose payload
@@ -300,6 +315,11 @@ fn embedded_linking_exports_resolve_without_disk_schemas() {
     assert_exports_resolve_embedded("linking.yaml", LINKING_PROBES);
 }
 
+#[test]
+fn embedded_document_exports_resolve_without_disk_schemas() {
+    assert_exports_resolve_embedded("document.yaml", DOCUMENT_PROBES);
+}
+
 macro_rules! sequence_export_tests {
     ($($test:ident => $export:literal),* $(,)?) => {
         $(
@@ -335,7 +355,13 @@ sequence_export_tests! {
 /// The resolved size limit for Claudine's embedded trigger payloads: the
 /// compact `serde_json` text of the resolved JSON Schema, `$defs` included,
 /// as `recursive_schema_frozen_fixture.rs` measures it in Darkmatter.
-const PAYLOAD_LIMIT_BYTES: usize = 2_000_000;
+///
+/// A fixed constant, never derived at test time: the largest measured case
+/// (`both`, 768,262 bytes) plus 25% headroom, rounded up to the next
+/// 100,000 bytes. Re-measure and lower it deliberately when the shipped
+/// schemas shrink; a case that outgrows it is a regression to explain, not
+/// a reason to raise it.
+const PAYLOAD_LIMIT_BYTES: usize = 1_000_000;
 
 /// The recursive event families, each stored once as a definition.
 const EVENT_FAMILIES: &[(&str, &str)] = &[
@@ -384,12 +410,13 @@ fn embedded_definition(effective: &EffectiveSchema, file: &str, name: &str) -> b
     effective.definition(&DefKey::new(namespace, name)).is_some()
 }
 
-/// The recursive families are stored once as definitions and the container
-/// types reach them at every depth, so each trigger's resolved schema stays
-/// under the limit. The measured schema is the effective one, which also
-/// holds the built-in baseline, so the payload alone is smaller still.
+/// The recursive families and every repeated structured helper are stored
+/// once as definitions and referenced at each use, so each trigger's
+/// resolved schema stays within [`PAYLOAD_LIMIT_BYTES`]. The measured schema
+/// is the effective one, which also holds the built-in baseline, so the
+/// payload alone is smaller still.
 #[test]
-fn embedded_trigger_payloads_resolve_within_two_megabytes() {
+fn embedded_trigger_payloads_resolve_within_one_megabyte() {
     let bare = Bare::new();
     let schemas = bare.schemas(claudine_schema_bundle());
     let mut report = Vec::new();
@@ -998,6 +1025,233 @@ fn disk_and_embedded_bundles_own_the_same_properties() {
     assert!(matches!(disk.origins["start"].trigger_source(), Some(TriggerSource::File(_))));
 }
 
+/// Document metadata cases: the frontmatter and the one property a problem
+/// is reported under, or `None` when the document is valid. Absent and null
+/// metadata stay valid, both stored hash forms are accepted, and the
+/// longhand `value` takes any data. A scalar `prompt` or shorthand `hash` is
+/// convertible text, and `last_updated` must be a calendar date.
+const DOCUMENT_METADATA_CASES: &[(&str, Option<&str>)] = &[
+    ("prompt: hi", None),
+    ("prompt: hi\nhash: null\nlast_updated: null", None),
+    ("start: [stop]\nprompt: null", None),
+    ("prompt: 5", None),
+    ("prompt: true", None),
+    ("prompt: hi\nhash: 0123456789abcdef", None),
+    ("prompt: hi\nhash: 42", None),
+    ("prompt: hi\nhash: { kind: detailed, value: [1, { a: b }], ignored: [title] }", None),
+    ("prompt: hi\nhash: { value: 42 }", None),
+    ("prompt: hi\nhash: { value: { nested: [1, 2.5, true, null, text] } }", None),
+    ("prompt: hi\nhash: { value: null }", None),
+    ("prompt: hi\nhash: { kind: simple }", None),
+    ("prompt: hi\nhash: {}", None),
+    ("prompt: hi\nlast_updated: 2026-10-26", None),
+    ("prompt: hi\nhash: [1]", Some("hash")),
+    ("prompt: hi\nhash: { kind: bogus }", Some("hash")),
+    ("prompt: hi\nhash: { ignored: title }", Some("hash")),
+    ("prompt: hi\nhash: { kind: fm, extra: 1 }", Some("hash")),
+    ("prompt: hi\nlast_updated: [2026-10-26]", Some("last_updated")),
+    ("prompt: hi\nlast_updated: \"2026-02-30\"", Some("last_updated")),
+    ("prompt: hi\nlast_updated: yesterday", Some("last_updated")),
+    ("prompt: hi\nlast_updated: 2026-10-26T10:00:00Z", Some("last_updated")),
+    ("start: [stop]\nprompt: [hi]", Some("prompt")),
+    ("prompt: { a: 1 }", Some("prompt")),
+];
+
+/// The metadata properties `document.yaml` declares.
+const DOCUMENT_METADATA: [&str; 3] = ["prompt", "hash", "last_updated"];
+
+/// A disk trigger that never matches. It shadows the embedded trigger of its
+/// name, so the other metadata trigger applies alone.
+const NEVER_MATCHING_TRIGGER: &str =
+    "kind: schema-trigger\nmatch:\n    never_set: string(required)\n$schema:\n    never_set: string\n";
+
+/// Asserts the passive verdict and the launch verdict of every metadata
+/// case at `locations`.
+fn assert_document_metadata_cases(locations: &Locations, label: &str) {
+    let schemas = locations.schemas();
+    for (frontmatter, rejected_at) in DOCUMENT_METADATA_CASES {
+        let what = format!("{label}: `{frontmatter}`");
+        let expected: BTreeSet<String> = rejected_at.iter().map(|property| property.to_string()).collect();
+        assert_eq!(locations.passive(&schemas, "metadata", frontmatter), expected, "{what}: passive");
+        match rejected_at {
+            None => assert_accepts(locations.verdict("metadata", frontmatter), &what),
+            Some(property) => assert_rejects_at(locations.verdict("metadata", frontmatter), property, &what),
+        }
+    }
+}
+
+/// Passive validation and the launch verdict agree on every metadata case,
+/// with the embedded bundle alone and with the shipped bundle on disk, where
+/// the disk triggers import `document.yaml` from disk.
+#[test]
+fn document_metadata_verdicts_agree_between_passive_validation_and_launch() {
+    let embedded = Locations::new();
+    let on_disk = Locations::new();
+    on_disk.write_bundle(Root::Tree, &shipped_bundle!());
+    for (label, locations) in [("embedded", &embedded), ("disk", &on_disk)] {
+        assert_document_metadata_cases(locations, label);
+        let effective = locations.effective(&locations.schemas(), "origin", "prompt: hi");
+        for property in DOCUMENT_METADATA {
+            assert!(is_claudine_owned(&effective, property), "{label}: `{property}` is a Claudine control");
+        }
+    }
+}
+
+/// Each metadata trigger alone gives every metadata case the verdict the
+/// merged pair gives it. A never-matching disk copy shadows the other
+/// embedded trigger, so the metadata is declared by the one that applies.
+#[test]
+fn document_metadata_verdicts_agree_through_each_trigger_alone() {
+    for (shadowed, applies) in [("inline-compose.yaml", "claudine.yaml"), ("claudine.yaml", "inline-compose.yaml")] {
+        let locations = Locations::new();
+        locations.write_schema(Root::Tree, shadowed, NEVER_MATCHING_TRIGGER);
+        let label = format!("{applies} alone");
+        assert_document_metadata_cases(&locations, &label);
+        let effective = locations.effective(&locations.schemas(), "origin", "prompt: hi");
+        for property in DOCUMENT_METADATA {
+            assert_eq!(
+                effective.origins[property].trigger_source(),
+                Some(TriggerSource::Embedded { bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(), name: applies.to_string() }),
+                "{label}: `{property}`"
+            );
+            assert!(is_claudine_owned(&effective, property), "{label}: `{property}` is a Claudine control");
+        }
+    }
+}
+
+/// A disk `inline-compose.yaml` shadows the embedded one independently of
+/// `claudine.yaml`, and the nearest copy wins. Where the copy alone applies,
+/// its own type for `hash` judges the document. Where the embedded
+/// `claudine.yaml` also applies, it is later in registry order, so its
+/// declaration of `hash` replaces the copy's.
+#[test]
+fn a_disk_inline_compose_trigger_shadows_the_embedded_one_and_types_the_metadata() {
+    let locations = Locations::new();
+    let shadow = |hash: &str| {
+        format!("kind: schema-trigger\nmatch:\n    hash: number(required)\n$schema:\n    hash: \"{hash}\"\n")
+    };
+    let origin = |frontmatter: &str| locations.effective(&locations.schemas(), "origin", frontmatter).origins["hash"].trigger_source();
+    let embedded_claudine =
+        Some(TriggerSource::Embedded { bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(), name: "claudine.yaml".to_string() });
+    assert_accepts(locations.verdict("none", "hash: 0"), "no trigger applies without a copy");
+
+    let user = locations.write_schema(Root::Home, "inline-compose.yaml", &shadow("number(min(1))"));
+    assert_eq!(origin("hash: 5"), Some(TriggerSource::File(user)));
+    assert_accepts(locations.verdict("user", "hash: 5"), "user copy alone");
+    assert_rejects_at(locations.verdict("user", "hash: 0"), "hash", "user copy alone: below its minimum");
+
+    let project = locations.write_schema(Root::Package, "inline-compose.yaml", &shadow("number(max(0))"));
+    assert_eq!(origin("hash: 0"), Some(TriggerSource::File(project)));
+    assert_accepts(locations.verdict("project", "hash: 0"), "project copy alone");
+    assert_rejects_at(locations.verdict("project", "hash: 5"), "hash", "the project copy shadows the user copy");
+
+    // Beside a prompt the embedded claudine.yaml applies too, after the copy.
+    // The embedded inline-compose.yaml would follow it and own `hash`, so
+    // this origin also shows that the copy shadows it.
+    assert_eq!(origin("prompt: hi\nhash: 5"), embedded_claudine);
+    assert_accepts(locations.verdict("merged", "prompt: hi\nhash: 5"), "claudine.yaml's shorthand converts the number");
+    assert_rejects_at(locations.verdict("merged", "prompt: hi\nhash: [1]"), "hash", "claudine.yaml's `hash`");
+}
+
+/// The `default` of `kind` in `hash`'s longhand arm within `fragment`,
+/// following local references into `root`'s `$defs`.
+fn longhand_kind_default(root: &serde_json::Value, fragment: &serde_json::Value) -> Option<serde_json::Value> {
+    if let Some(reference) = fragment.get("$ref").and_then(serde_json::Value::as_str) {
+        return longhand_kind_default(root, root.pointer(reference.strip_prefix('#')?)?);
+    }
+    if let Some(default) = fragment.pointer("/properties/kind/default") {
+        return Some(default.clone());
+    }
+    fragment.get("anyOf")?.as_array()?.iter().find_map(|arm| longhand_kind_default(root, arm))
+}
+
+/// `hash`'s longhand `kind` declares `default(simple)`. The default survives
+/// as an annotation through each trigger alone and through their merge, and
+/// the launch never inserts it: a longhand without `kind` reaches the
+/// prepared frontmatter as written, and so does a shorthand string.
+#[test]
+fn longhand_hash_kind_default_is_declared_and_never_inserted() {
+    let both = Locations::new();
+    let claudine_alone = Locations::new();
+    claudine_alone.write_schema(Root::Tree, "inline-compose.yaml", NEVER_MATCHING_TRIGGER);
+    let inline_alone = Locations::new();
+    inline_alone.write_schema(Root::Tree, "claudine.yaml", NEVER_MATCHING_TRIGGER);
+    for (label, locations) in [("both", &both), ("claudine.yaml alone", &claudine_alone), ("inline-compose.yaml alone", &inline_alone)] {
+        let effective = locations.effective(&locations.schemas(), "default", "prompt: hi");
+        let schema = &effective.json_schema;
+        assert_eq!(
+            longhand_kind_default(schema, &schema["properties"]["hash"]),
+            Some(serde_json::json!("simple")),
+            "{label}: `kind` declares its default"
+        );
+    }
+
+    let context = both.context();
+    let prepared_hash = |name: &str, frontmatter: &str, inline: bool| {
+        let path = both.document(name, frontmatter);
+        let source = resolve_composition_source_in_context(path.to_str().expect("UTF-8 path"), &context).expect("resolves");
+        let options = claudine::composition::PrepareOptions::new(context.clone());
+        let prepared = if inline {
+            claudine::composition::prepare_inline_with_schema(&source, options)
+        } else {
+            claudine::composition::prepare_direct_with_schema(&source, options)
+        };
+        prepared.unwrap_or_else(|error| panic!("`{frontmatter}` prepares: {error:?}")).effective_frontmatter["hash"].clone()
+    };
+    for (frontmatter, inline, expected) in [
+        ("prompt: hi\nhash: { value: 42 }", true, serde_json::json!({ "value": 42 })),
+        ("start: [stop]\nhash: { value: 42 }", false, serde_json::json!({ "value": 42 })),
+        ("prompt: hi\nhash: { kind: fm, value: x }", true, serde_json::json!({ "kind": "fm", "value": "x" })),
+        ("prompt: hi\nhash: 0123456789abcdef", true, serde_json::json!("0123456789abcdef")),
+    ] {
+        assert_eq!(prepared_hash("prepared", frontmatter, inline), expected, "`{frontmatter}`");
+    }
+}
+
+/// One `hash` imported into two properties of an authored schema is one
+/// stored definition, referenced at both properties, that keeps its `kind`
+/// default. Through the launch verdict both stored forms pass at each use,
+/// and an invalid value is cleaned at its own property alone.
+#[test]
+fn a_shared_hash_definition_keeps_both_stored_forms_through_the_launch_verdict() {
+    let locations = Locations::new();
+    let library = locations.root.join("repo/area/pkg/docs/lib/document.yaml");
+    std::fs::create_dir_all(library.parent().expect("parent")).expect("library dir");
+    std::fs::write(&library, include_str!("../../../schemas/document.yaml")).expect("write the library");
+    let schema = "$schema:\n    first: hash@./lib/document.yaml\n    second: hash@./lib/document.yaml\ntitle: x";
+
+    let effective = locations.effective(&locations.schemas(), "shared", schema);
+    let json = &effective.json_schema;
+    let references = |property: &str| {
+        let mut found = Vec::new();
+        crate::claudine_schemas::collect_references(&json["properties"][property], &mut found);
+        found
+    };
+    let first_refs = references("first");
+    assert_eq!(first_refs.len(), 1, "`first` refers to one definition: {first_refs:?}");
+    assert_eq!(first_refs, references("second"), "both uses refer to the same definition");
+    let defs = json["$defs"].as_object().expect("the shared body is a definition");
+    assert_eq!(defs.len(), 1, "only `hash` is stored: {:?}", defs.keys().collect::<Vec<_>>());
+    for property in ["first", "second"] {
+        assert_eq!(longhand_kind_default(json, &json["properties"][property]), Some(serde_json::json!("simple")), "{property}");
+    }
+
+    let shorthand = "0123456789abcdef";
+    let longhand = "{ kind: structured, value: { mixed: [1, true] }, ignored: [title] }";
+    for (first, second) in [(shorthand, longhand), (longhand, shorthand), (shorthand, shorthand), (longhand, longhand)] {
+        let frontmatter = format!("{schema}\nfirst: {first}\nsecond: {second}");
+        assert_accepts(locations.verdict("shared", &frontmatter), &frontmatter);
+    }
+    for (property, other) in [("first", "second"), ("second", "first")] {
+        for invalid in ["[1]", "{ kind: bogus }", "{ ignored: title }"] {
+            let frontmatter = format!("{schema}\n{property}: {invalid}\n{other}: {shorthand}");
+            let validated = locations.verdict("shared", &frontmatter).unwrap_or_else(|error| panic!("{frontmatter}: {error:?}"));
+            let dropped: Vec<&str> = validated.dropped_optionals.iter().map(|dropped| dropped.property.as_str()).collect();
+            assert_eq!(dropped, [property], "{frontmatter}");
+        }
+    }
+}
+
 // ── The strict policy at the library boundary ──────────────────────────────
 
 /// An invalid optional Claudine control in a document with no `$schema`
@@ -1219,4 +1473,65 @@ passive_parity_tests! {
 fn passive_parity_tests_cover_every_ac5_fixture() {
     let ac5: Vec<&str> = AC5_GROUPS.iter().flat_map(|group| group.iter().copied()).collect();
     assert_eq!(PARITY_FIXTURES, &ac5[..], "one parity test per AC5 fixture, in table order");
+}
+
+/// The lifecycle helpers (`entry`, the action categories, the short-form
+/// bundle) are reached from several events, list items, and conditional
+/// bodies. Each failing use keeps the problem code, full instance path,
+/// line and column, the union explanation it reports, and its declaring
+/// trigger, whatever way the resolver stores those helpers. Recorded while
+/// every acyclic helper was inlined at each use.
+#[test]
+fn a_shared_lifecycle_helper_reports_each_failing_use_where_it_is_written() {
+    use darkmatter::markdown::schemas::ValidationProblemCode::ConstraintViolation;
+    use darkmatter::markdown::schemas::validate::build_position_map;
+
+    const BARE_VERB: &str = "a zero-argument verb written as a bare list item";
+    let bare = Bare::new();
+    let schemas = bare.schemas(claudine_schema_bundle());
+    /// `(instance path, line, column, explanation)` of each expected problem.
+    type Expected = &'static [(&'static str, u32, u32, &'static str)];
+    let cases: [(&str, Expected); 5] = [
+        (
+            "start:\n  - inf0: hi\nfinalize:\n  - say: hi\n  - inf0: hi\n",
+            &[("/start/0", 2, 5, BARE_VERB), ("/finalize/1", 5, 5, BARE_VERB)],
+        ),
+        (
+            "success:\n  - when: \"{{ ready }}\"\n    then:\n      - say: hi\n      - inf0: hi\n",
+            &[("/success/0/then/1", 5, 9, BARE_VERB)],
+        ),
+        ("start:\n  - say: hi\n    inf0: hi\n", &[("/start/0", 2, 5, BARE_VERB)]),
+        // `cancelled` admits a shell; `initialize` never does.
+        ("initialize:\n  - shell: ls\ncancelled:\n  - shell: ls\n", &[("/initialize/0", 2, 5, BARE_VERB)]),
+        // A loop action missing its required `prop`.
+        ("loop:\n  action:\n    op: set\n", &[("/loop/action", 3, 5, "an iteration action such as increment(iteration)")]),
+    ];
+    for (frontmatter, expected) in cases {
+        let markdown = memory_document(frontmatter);
+        let effective = schemas.effective_for(&markdown).expect("resolves").expect("a trigger applies");
+        let instance = crate::claudine_schemas::frontmatter_json(&markdown);
+        let report = effective.validate_with_positions(&instance, &build_position_map(frontmatter));
+        let found: Vec<_> = report
+            .problems
+            .iter()
+            .map(|problem| (problem.code, problem.path.as_str(), problem.line, problem.column, problem.description.as_deref()))
+            .collect();
+        let expected: Vec<_> = expected
+            .iter()
+            .map(|(path, line, column, description)| (ConstraintViolation, *path, Some(*line), Some(*column), Some(*description)))
+            .collect();
+        assert_eq!(found, expected, "`{frontmatter}`");
+        for property in instance.as_object().expect("a mapping").keys() {
+            let origin = effective.origins.get(property).unwrap_or_else(|| panic!("`{property}` has an origin"));
+            assert_eq!(
+                origin.trigger_source(),
+                Some(TriggerSource::Embedded {
+                    bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(),
+                    name: "claudine.yaml".to_string()
+                }),
+                "`{property}` in `{frontmatter}`"
+            );
+        }
+    }
+    bare.assert_untouched();
 }

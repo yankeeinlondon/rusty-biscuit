@@ -663,7 +663,7 @@ pub fn is_ctx_name(name: &str) -> bool {
 /// Thin wrapper over [`function_descriptor`]; new work that needs the typed
 /// signature must take the descriptor directly.
 pub fn function_description(name: &str) -> Option<&'static str> {
-    function_descriptor(name).map(|descriptor| descriptor.description)
+    function_descriptor(name).map(|descriptor| &*descriptor.description)
 }
 
 /// Renders the shared catalog-backed Markdown block for a `ctx.*` hover.
@@ -708,7 +708,7 @@ pub fn format_function_overloads_block(overloads: &[ExpressionFunctionDescriptor
         .map(|descriptor| format!("**`{}`**\n\n{}", descriptor.typed_signature(), descriptor.description))
         .collect::<Vec<_>>()
         .join("\n\n");
-    if let Some(vocabulary) = overloads.first().and_then(|descriptor| query_vocabulary_block(descriptor.name)) {
+    if let Some(vocabulary) = overloads.first().and_then(|descriptor| query_vocabulary_block(&descriptor.name)) {
         block.push_str("\n\n");
         block.push_str(vocabulary);
     }
@@ -863,7 +863,7 @@ pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<
     // case-insensitively as dispatch matches it) offers the canonical too.
     let alias_partial = partial.to_ascii_lowercase();
     for descriptor in function_descriptors() {
-        let name = descriptor.name;
+        let name = &*descriptor.name;
         let alias_matches = !partial.is_empty()
             && descriptor.aliases.iter().any(|alias| alias.starts_with(&alias_partial));
         if name.starts_with(partial) || alias_matches {
@@ -1808,9 +1808,9 @@ mod tests {
     #[test]
     fn test_function_descriptor_returns_typed_signature() {
         let length = function_descriptor("length").expect("`length` is a known function");
-        assert_eq!(length.name, "length");
+        assert_eq!(&*length.name, "length");
         // Thin wrapper agrees with the descriptor lookup.
-        assert_eq!(function_description("length"), Some(length.description));
+        assert_eq!(function_description("length"), Some(&*length.description));
         assert!(function_descriptor("definitely_not_a_function").is_none());
         assert!(function_description("definitely_not_a_function").is_none());
     }
@@ -1822,7 +1822,7 @@ mod tests {
     fn an_alias_resolves_and_completes_as_its_canonical() {
         let canonical = function_overloads("is_string");
         assert!(!canonical.is_empty());
-        assert!(canonical[0].aliases.contains(&"isstring"), "{:?}", canonical[0].aliases);
+        assert!(canonical[0].aliases.contains(&"isstring".into()), "{:?}", canonical[0].aliases);
         for spelling in ["isString", "isstring", "IS_STRING"] {
             assert_eq!(function_overloads(spelling), canonical, "`{spelling}`");
         }
@@ -1852,6 +1852,81 @@ mod tests {
         let second = block.find(&overloads[1].typed_signature()).expect("second overload");
         assert!(first < second, "{block}");
         assert_eq!(format_function_overloads_block(&overloads[..1]), format_function_block(&overloads[0]));
+    }
+
+    // The exact-text pins below were captured from the pre-owned-descriptor
+    // catalog, so they prove the hover and completion text survived that
+    // refactor byte for byte. A failure here means user-visible output changed.
+
+    #[test]
+    fn overloaded_function_hover_block_is_pinned_exactly() {
+        assert_eq!(
+            format_function_overloads_block(function_overloads("link")),
+            "**`link(file: file | null) -> string | null | error`**\n\n\
+             Creates a Markdown link to a local file, using its relative path as the link text and its \
+             absolute path as the destination. HTTP(S) URLs are rejected because they need a description; \
+             null passes through.\n\n\
+             **`link(target: file | null, desc: string | null) -> string | null | error`**\n\n\
+             Creates a Markdown link to a local file or an HTTP(S) URL with the given description as its \
+             text; null passes through."
+        );
+    }
+
+    #[test]
+    fn single_signature_function_hover_block_is_pinned_exactly() {
+        assert_eq!(
+            format_function_overloads_block(function_overloads("round")),
+            "**`round(x: numberlike, [fallback: number]) -> number`**\n\n\
+             Rounds a number or numeric text to the nearest whole number, halfway values away from zero. \
+             When `x` is not a number or numeric text, a supplied `fallback` is rounded and returned \
+             instead; without one the call is a type error."
+        );
+    }
+
+    #[test]
+    fn function_completion_items_are_pinned_exactly() {
+        let function_items: Vec<ExprCompletion> = completion_candidates("", &[])
+            .into_iter()
+            .filter(|candidate| candidate.insert_text == "link" || candidate.insert_text == "round")
+            .collect();
+        let expected = [
+            ExprCompletion {
+                label: "round(x, [fallback])".to_string(),
+                insert_text: "round".to_string(),
+                kind: ExprCompletionKind::Function,
+                detail: Some("round(x: numberlike, [fallback: number]) -> number".to_string()),
+                documentation: Some(
+                    "Rounds a number or numeric text to the nearest whole number, halfway values away from \
+                     zero. When `x` is not a number or numeric text, a supplied `fallback` is rounded and \
+                     returned instead; without one the call is a type error."
+                        .to_string(),
+                ),
+            },
+            ExprCompletion {
+                label: "link(file)".to_string(),
+                insert_text: "link".to_string(),
+                kind: ExprCompletionKind::Function,
+                detail: Some("link(file: file | null) -> string | null | error".to_string()),
+                documentation: Some(
+                    "Creates a Markdown link to a local file, using its relative path as the link text and \
+                     its absolute path as the destination. HTTP(S) URLs are rejected because they need a \
+                     description; null passes through."
+                        .to_string(),
+                ),
+            },
+            ExprCompletion {
+                label: "link(target, desc)".to_string(),
+                insert_text: "link".to_string(),
+                kind: ExprCompletionKind::Function,
+                detail: Some("link(target: file | null, desc: string | null) -> string | null | error".to_string()),
+                documentation: Some(
+                    "Creates a Markdown link to a local file or an HTTP(S) URL with the given description as \
+                     its text; null passes through."
+                        .to_string(),
+                ),
+            },
+        ];
+        assert_eq!(function_items, expected);
     }
 
     #[test]
@@ -1901,18 +1976,18 @@ mod tests {
         }
 
         for descriptor in function_descriptors() {
-            let name = descriptor.name;
+            let name = &*descriptor.name;
             let candidate = candidates
                 .iter()
                 .find(|candidate| {
-                    candidate.label == descriptor.signature && candidate.insert_text == name
+                    *candidate.label == *descriptor.signature && candidate.insert_text == name
                 })
                 .unwrap_or_else(|| {
                     panic!("function descriptor `{}` missing from completion", descriptor.signature)
                 });
             assert_eq!(candidate.kind, ExprCompletionKind::Function);
             assert_eq!(candidate.detail, Some(descriptor.typed_signature()));
-            assert_eq!(candidate.documentation.as_deref(), Some(descriptor.description));
+            assert_eq!(candidate.documentation.as_deref(), Some(&*descriptor.description));
         }
     }
 
@@ -2158,7 +2233,7 @@ mod tests {
         let block = format_function_block(recent);
         assert!(block.contains(&recent.typed_signature()));
         assert!(block.contains("| error"));
-        assert!(block.contains(recent.description));
+        assert!(block.contains(&*recent.description));
     }
 
     /// More-context plan 4.7: every added `ctx.*` variable and function is

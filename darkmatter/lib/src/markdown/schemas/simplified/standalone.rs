@@ -147,74 +147,15 @@ pub fn parse_standalone_schema_document(
     path: impl AsRef<Path>,
 ) -> Result<Option<StandaloneSchemaDocument>, SchemaError> {
     let path = path.as_ref();
-    // Numbers are admitted here too, so a schema file's numbers follow the
-    // same rules whichever loader reads the file first.
-    let value: YamlValue = crate::markdown::numeric::load_admitted_yaml(source).map_err(|error| {
-        if crate::markdown::numeric::is_yaml_admission_error(&error) {
-            schema_document_error(path, error.to_string())
-        } else {
-            schema_document_error(path, format!("not valid YAML: {error}"))
-        }
-    })?;
-    let Some(map) = value.as_mapping() else {
+    let Some(recognized) =
+        recognize_standalone(source).map_err(|message| schema_document_error(path, message))?
+    else {
         return Ok(None);
     };
-
-    let kind_key = YamlValue::String("kind".into());
-    let types_key = YamlValue::String("types".into());
+    let (envelope, payload_key) = (recognized.envelope, recognized.payload_key());
+    let map = recognized.mapping();
+    let payload = recognized.payload();
     let categories_key = YamlValue::String("categories".into());
-    let schema_key = YamlValue::String("$schema".into());
-    let tagged = map.get(&kind_key).and_then(YamlValue::as_str) == Some("schema");
-
-    let (envelope, payload) = if tagged {
-        if matches!(map.get(&schema_key), Some(YamlValue::Mapping(_))) && !map.contains_key(&types_key) {
-            return Err(schema_document_error(
-                path,
-                "is a global catalog (`kind: schema` with `$schema` declarations); a catalog declares \
-                 globals for a host to register and never applies as a document schema",
-            ));
-        }
-        let unsupported: Vec<String> = map
-            .keys()
-            .filter_map(YamlValue::as_str)
-            .filter(|key| !matches!(*key, "kind" | "types" | "categories"))
-            .map(str::to_string)
-            .collect();
-        let expected_len = 2 + usize::from(map.contains_key(&categories_key));
-        if !unsupported.is_empty() || map.len() != expected_len {
-            return Err(schema_document_error(
-                path,
-                format!(
-                    "tagged schema documents support only `kind`, `types`, and `categories`; \
-                     found unsupported keys: {}",
-                    unsupported.join(", ")
-                ),
-            ));
-        }
-        let Some(payload) = map.get(&types_key) else {
-            return Err(schema_document_error(
-                path,
-                "tagged schema document is missing the `types` mapping",
-            ));
-        };
-        if !matches!(payload, YamlValue::Mapping(_)) {
-            return Err(schema_document_error(
-                path,
-                "tagged schema document `types` must be a mapping",
-            ));
-        }
-        (StandaloneSchemaEnvelope::Tagged, payload)
-    } else if map.len() == 1 && map.contains_key(&schema_key) {
-        let payload = map.get(&schema_key).expect("key presence checked above");
-        (StandaloneSchemaEnvelope::Pure, payload)
-    } else {
-        return Ok(None);
-    };
-
-    let payload_key = match envelope {
-        StandaloneSchemaEnvelope::Pure => "$schema",
-        StandaloneSchemaEnvelope::Tagged => "types",
-    };
     let mut parsed = parse_standalone_schema_payload_with_source(payload, source, payload_key)
         .map_err(|error| {
             schema_document_error(path, format!("invalid SimplifiedSchema payload: {error}"))
@@ -245,6 +186,96 @@ pub fn parse_standalone_schema_document(
         suggestion_lints,
         categories,
     }))
+}
+
+/// A YAML document whose content claims a standalone schema envelope.
+pub(super) struct RecognizedStandalone {
+    /// The whole document, a mapping.
+    document: YamlValue,
+    envelope: StandaloneSchemaEnvelope,
+}
+
+impl RecognizedStandalone {
+    /// The envelope key holding the payload.
+    pub(super) fn payload_key(&self) -> &'static str {
+        match self.envelope {
+            StandaloneSchemaEnvelope::Pure => "$schema",
+            StandaloneSchemaEnvelope::Tagged => "types",
+        }
+    }
+
+    fn mapping(&self) -> &serde_yaml_ng::Mapping {
+        self.document.as_mapping().expect("recognition requires a mapping document")
+    }
+
+    /// The payload value; recognition checked that the key is present.
+    pub(super) fn payload(&self) -> &YamlValue {
+        self.mapping()
+            .get(self.payload_key())
+            .expect("recognition checked the payload key")
+    }
+}
+
+/// Loads `source` with admitted numbers and decides which envelope, if any,
+/// claims it.
+///
+/// `Ok(None)` is an ordinary document (not a mapping, or no envelope claims
+/// it). `Err` carries the message of an outer failure: text that is not YAML,
+/// a global catalog, or a malformed tagged envelope. The payload itself is
+/// not parsed here.
+pub(super) fn recognize_standalone(source: &str) -> Result<Option<RecognizedStandalone>, String> {
+    // Numbers are admitted here too, so a schema file's numbers follow the
+    // same rules whichever loader reads the file first.
+    let document: YamlValue = crate::markdown::numeric::load_admitted_yaml(source).map_err(|error| {
+        if crate::markdown::numeric::is_yaml_admission_error(&error) {
+            error.to_string()
+        } else {
+            format!("not valid YAML: {error}")
+        }
+    })?;
+    let Some(map) = document.as_mapping() else {
+        return Ok(None);
+    };
+
+    let kind_key = YamlValue::String("kind".into());
+    let types_key = YamlValue::String("types".into());
+    let categories_key = YamlValue::String("categories".into());
+    let schema_key = YamlValue::String("$schema".into());
+    let tagged = map.get(&kind_key).and_then(YamlValue::as_str) == Some("schema");
+
+    let envelope = if tagged {
+        if matches!(map.get(&schema_key), Some(YamlValue::Mapping(_))) && !map.contains_key(&types_key) {
+            return Err("is a global catalog (`kind: schema` with `$schema` declarations); a catalog declares \
+                 globals for a host to register and never applies as a document schema"
+                .into());
+        }
+        let unsupported: Vec<String> = map
+            .keys()
+            .filter_map(YamlValue::as_str)
+            .filter(|key| !matches!(*key, "kind" | "types" | "categories"))
+            .map(str::to_string)
+            .collect();
+        let expected_len = 2 + usize::from(map.contains_key(&categories_key));
+        if !unsupported.is_empty() || map.len() != expected_len {
+            return Err(format!(
+                "tagged schema documents support only `kind`, `types`, and `categories`; \
+                 found unsupported keys: {}",
+                unsupported.join(", ")
+            ));
+        }
+        let Some(payload) = map.get(&types_key) else {
+            return Err("tagged schema document is missing the `types` mapping".into());
+        };
+        if !matches!(payload, YamlValue::Mapping(_)) {
+            return Err("tagged schema document `types` must be a mapping".into());
+        }
+        StandaloneSchemaEnvelope::Tagged
+    } else if map.len() == 1 && map.contains_key(&schema_key) {
+        StandaloneSchemaEnvelope::Pure
+    } else {
+        return Ok(None);
+    };
+    Ok(Some(RecognizedStandalone { document, envelope }))
 }
 
 /// Reads a `categories:` list: each entry `Name` or `Name -> description`,

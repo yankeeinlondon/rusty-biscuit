@@ -21,24 +21,24 @@ pub struct OperatorDescriptor {
     /// Stable display order (highest precedence first).
     pub order: usize,
     /// Optional verified example expression and result.
-    pub example: Option<Example>,
+    pub example: Option<Example<'static>>,
 }
 
 impl Described for OperatorDescriptor {
-    fn key(&self) -> &'static str {
+    fn key(&self) -> &str {
         self.name
     }
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         self.description
     }
-    fn category(&self) -> &'static str {
+    fn category(&self) -> &str {
         "Operator Precedence"
     }
     fn order(&self) -> usize {
         self.order
     }
-    fn example(&self) -> Option<&Example> {
-        self.example.as_ref()
+    fn example(&self) -> Option<Example<'_>> {
+        self.example
     }
 }
 
@@ -146,24 +146,24 @@ pub struct TruthinessDescriptor {
     /// Stable display order.
     pub order: usize,
     /// Optional verified example expression and result.
-    pub example: Option<Example>,
+    pub example: Option<Example<'static>>,
 }
 
 impl Described for TruthinessDescriptor {
-    fn key(&self) -> &'static str {
+    fn key(&self) -> &str {
         self.form
     }
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         self.description
     }
-    fn category(&self) -> &'static str {
+    fn category(&self) -> &str {
         "Truthiness"
     }
     fn order(&self) -> usize {
         self.order
     }
-    fn example(&self) -> Option<&Example> {
-        self.example.as_ref()
+    fn example(&self) -> Option<Example<'_>> {
+        self.example
     }
 }
 
@@ -271,24 +271,24 @@ pub struct ModeDescriptor {
     /// Stable display order.
     pub order: usize,
     /// Optional verified example expression and result.
-    pub example: Option<Example>,
+    pub example: Option<Example<'static>>,
 }
 
 impl Described for ModeDescriptor {
-    fn key(&self) -> &'static str {
+    fn key(&self) -> &str {
         self.surface
     }
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         self.description
     }
-    fn category(&self) -> &'static str {
+    fn category(&self) -> &str {
         "Interpolation vs. Condition Mode"
     }
     fn order(&self) -> usize {
         self.order
     }
-    fn example(&self) -> Option<&Example> {
-        self.example.as_ref()
+    fn example(&self) -> Option<Example<'_>> {
+        self.example
     }
 }
 
@@ -328,24 +328,24 @@ pub struct NullPropagationDescriptor {
     /// Stable display order.
     pub order: usize,
     /// Optional verified example expression and result.
-    pub example: Option<Example>,
+    pub example: Option<Example<'static>>,
 }
 
 impl Described for NullPropagationDescriptor {
-    fn key(&self) -> &'static str {
+    fn key(&self) -> &str {
         self.operation
     }
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         self.behavior
     }
-    fn category(&self) -> &'static str {
+    fn category(&self) -> &str {
         "Null Propagation"
     }
     fn order(&self) -> usize {
         self.order
     }
-    fn example(&self) -> Option<&Example> {
-        self.example.as_ref()
+    fn example(&self) -> Option<Example<'_>> {
+        self.example
     }
 }
 
@@ -423,24 +423,24 @@ pub struct UnaryOperatorDescriptor {
     /// Stable display order.
     pub order: usize,
     /// Optional verified example expression and result.
-    pub example: Option<Example>,
+    pub example: Option<Example<'static>>,
 }
 
 impl Described for UnaryOperatorDescriptor {
-    fn key(&self) -> &'static str {
+    fn key(&self) -> &str {
         self.syntax
     }
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         self.description
     }
-    fn category(&self) -> &'static str {
+    fn category(&self) -> &str {
         "Unary Operators"
     }
     fn order(&self) -> usize {
         self.order
     }
-    fn example(&self) -> Option<&Example> {
-        self.example.as_ref()
+    fn example(&self) -> Option<Example<'_>> {
+        self.example
     }
 }
 
@@ -478,24 +478,24 @@ pub struct ComparisonOperatorDescriptor {
     /// Stable display order.
     pub order: usize,
     /// Optional verified example expression and result.
-    pub example: Option<Example>,
+    pub example: Option<Example<'static>>,
 }
 
 impl Described for ComparisonOperatorDescriptor {
-    fn key(&self) -> &'static str {
+    fn key(&self) -> &str {
         self.syntax
     }
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         self.description
     }
-    fn category(&self) -> &'static str {
+    fn category(&self) -> &str {
         "Comparison Operators"
     }
     fn order(&self) -> usize {
         self.order
     }
-    fn example(&self) -> Option<&Example> {
-        self.example.as_ref()
+    fn example(&self) -> Option<Example<'_>> {
+        self.example
     }
 }
 
@@ -563,24 +563,24 @@ pub struct ArithmeticOperatorDescriptor {
     /// Stable display order.
     pub order: usize,
     /// Optional verified example expression and result.
-    pub example: Option<Example>,
+    pub example: Option<Example<'static>>,
 }
 
 impl Described for ArithmeticOperatorDescriptor {
-    fn key(&self) -> &'static str {
+    fn key(&self) -> &str {
         self.syntax
     }
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         self.description
     }
-    fn category(&self) -> &'static str {
+    fn category(&self) -> &str {
         "Arithmetic Operators"
     }
     fn order(&self) -> usize {
         self.order
     }
-    fn example(&self) -> Option<&Example> {
-        self.example.as_ref()
+    fn example(&self) -> Option<Example<'_>> {
+        self.example
     }
 }
 
@@ -638,24 +638,24 @@ pub struct VariableAccessDescriptor {
     /// Stable display order.
     pub order: usize,
     /// Optional verified example expression and result.
-    pub example: Option<Example>,
+    pub example: Option<Example<'static>>,
 }
 
 impl Described for VariableAccessDescriptor {
-    fn key(&self) -> &'static str {
+    fn key(&self) -> &str {
         self.form
     }
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         self.description
     }
-    fn category(&self) -> &'static str {
+    fn category(&self) -> &str {
         "Variable Access"
     }
     fn order(&self) -> usize {
         self.order
     }
-    fn example(&self) -> Option<&Example> {
-        self.example.as_ref()
+    fn example(&self) -> Option<Example<'_>> {
+        self.example
     }
 }
 

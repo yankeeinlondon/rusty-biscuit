@@ -206,7 +206,10 @@ fn pty_sequence_authored_row_projection_satisfies_required_property() {
     expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let fixture = CliProcessFixture::named("sequence-overlay-pty");
-    fixture.seed_inline_metadata_schema(include_str!("../../../schemas/inline-compose.yaml"));
+    fixture.seed_inline_metadata_schema(
+        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../schemas/document.yaml"),
+    );
     let prompts_path = fixture.cwd().join("all-prompts.txt");
 
     // Goose stub: append the `-t <prompt>` argument from each invocation

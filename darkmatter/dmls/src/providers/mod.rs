@@ -18,6 +18,8 @@ pub mod folding;
 pub mod formatting;
 pub mod frontmatter;
 pub mod hover;
+#[cfg(test)]
+mod lifecycle_host_tests;
 pub mod location;
 pub mod references;
 pub mod rename;
@@ -40,6 +42,7 @@ use crate::context::{ContextFailure, DocumentResolution, ReferenceTarget, resolv
 use crate::config::DmlsConfig;
 use crate::graph::{DocumentId, WorkspaceGraph};
 use crate::overlay::DocumentOverlay;
+use crate::overlay::event_views::LifecycleHost;
 use crate::overlay::schema::standalone_semantic_region_covers;
 use crate::source_map::SourceMap;
 
@@ -145,6 +148,20 @@ pub trait Provider: Send + Sync {
     /// Push diagnostics for the whole document.
     fn diagnostics(&self, ctx: &DocumentContext) -> Vec<Diagnostic> {
         Vec::new()
+    }
+
+    /// Whether [`Self::diagnostics_with_host`] reads the lifecycle host, so
+    /// a combined pass must supply it (and drops this provider's
+    /// diagnostics when discovering it panics).
+    fn reads_lifecycle_host(&self) -> bool {
+        false
+    }
+
+    /// [`Self::diagnostics`] under `host`, the lifecycle host the combined
+    /// pass discovered once for every provider; a provider must not
+    /// rediscover it here.
+    fn diagnostics_with_host(&self, ctx: &DocumentContext, host: &LifecycleHost) -> Vec<Diagnostic> {
+        self.diagnostics(ctx)
     }
 }
 
@@ -297,6 +314,14 @@ impl Provider for FrontmatterProvider {
     fn diagnostics(&self, ctx: &DocumentContext) -> Vec<Diagnostic> {
         frontmatter::diagnostics(ctx)
     }
+
+    fn reads_lifecycle_host(&self) -> bool {
+        true
+    }
+
+    fn diagnostics_with_host(&self, ctx: &DocumentContext, host: &LifecycleHost) -> Vec<Diagnostic> {
+        crate::diagnostics::frontmatter::diagnostics_with_host(ctx, host)
+    }
 }
 
 /// The Layer-3 Darkmatter DSL provider: directives, transclusion,
@@ -338,6 +363,14 @@ impl Provider for DslProvider {
 
     fn diagnostics(&self, ctx: &DocumentContext) -> Vec<Diagnostic> {
         dsl::diagnostics(ctx)
+    }
+
+    fn reads_lifecycle_host(&self) -> bool {
+        true
+    }
+
+    fn diagnostics_with_host(&self, ctx: &DocumentContext, host: &LifecycleHost) -> Vec<Diagnostic> {
+        dsl::diagnostics_with_host(ctx, host)
     }
 }
 
@@ -451,9 +484,44 @@ impl ProviderRegistry {
     }
 
     /// Diagnostics: union (namespaced sources prevent collisions).
+    ///
+    /// The lifecycle host is discovered once for the pass and shared by every
+    /// provider that [reads it](Provider::reads_lifecycle_host); each request
+    /// discovers afresh.
     pub fn diagnostics(&self, ctx: &DocumentContext) -> Vec<Diagnostic> {
-        self.collect("diagnostics", |p| p.diagnostics(ctx))
+        self.diagnostics_discovering(ctx, pass_lifecycle_host)
     }
+
+    /// [`Self::diagnostics`] with the pass's host from `discover`, which runs
+    /// inside its own panic boundary. A panic there is logged as a panic of
+    /// each provider that reads the host, and drops their diagnostics, as
+    /// the same panic inside those providers would; the others are unaffected.
+    fn diagnostics_discovering(
+        &self,
+        ctx: &DocumentContext,
+        discover: impl FnOnce(&DocumentContext) -> LifecycleHost,
+    ) -> Vec<Diagnostic> {
+        let capability = "diagnostics";
+        let host = catch_unwind(AssertUnwindSafe(|| discover(ctx))).ok();
+        self.collect(capability, |p| match (p.reads_lifecycle_host(), &host) {
+            (false, _) => p.diagnostics(ctx),
+            (true, Some(host)) => p.diagnostics_with_host(ctx, host),
+            (true, None) => {
+                tracing::error!(provider = p.name(), capability, "provider panicked");
+                Vec::new()
+            }
+        })
+    }
+}
+
+/// The lifecycle host of one diagnostics pass. Only a document with
+/// frontmatter has lifecycle stacks to check, so one without is given the
+/// `md` host and no discovery runs, as none ran before discovery was shared.
+fn pass_lifecycle_host(ctx: &DocumentContext) -> LifecycleHost {
+    if ctx.overlay.is_none() {
+        return LifecycleHost::md();
+    }
+    LifecycleHost::for_document(ctx)
 }
 
 /// Deduplicates locations by `(uri, range)`, preserving first-seen order.

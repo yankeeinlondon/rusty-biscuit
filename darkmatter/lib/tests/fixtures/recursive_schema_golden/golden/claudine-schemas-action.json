@@ -419,20 +419,7 @@
                   "description": "stop the remaining actions of this stack"
                 },
                 {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "no_error": {
-                      "anyOf": [
-                        {
-                          "type": "null"
-                        },
-                        {
-                          "type": "boolean"
-                        }
-                      ]
-                    }
-                  }
+                  "$ref": "#/$defs/stop-long"
                 }
               ]
             },
@@ -2730,20 +2717,7 @@
                   "maxItems": 0
                 },
                 {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "no_error": {
-                      "anyOf": [
-                        {
-                          "type": "null"
-                        },
-                        {
-                          "type": "boolean"
-                        }
-                      ]
-                    }
-                  }
+                  "$ref": "#/$defs/stop-long"
                 }
               ]
             }
@@ -3330,6 +3304,24 @@
           }
         }
       ]
+    }
+  },
+  "$defs": {
+    "stop-long": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "no_error": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        }
+      }
     }
   }
 }

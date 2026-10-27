@@ -252,8 +252,9 @@ fn run_column(column: &str, shipped: Shipped<'_>) {
         let outcome = GlobalCatalog::from_documents(CATALOG_PATH, &documents, DARKMATTER_GLOBALS)
             .map_err(|error| error.to_string())
             .and_then(|catalog| {
-                let baseline = catalog.baseline().expect("the catalog declares `fm`");
-                let json = crate::markdown::schemas::to_json_schema(&baseline).map_err(|error| error.to_string())?;
+                let (baseline, definitions) = catalog.baseline().expect("the catalog declares `fm`");
+                let json = crate::markdown::schemas::to_json_schema_with_definitions(&baseline, &definitions)
+                    .map_err(|error| error.to_string())?;
                 DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(dir.path()))
                     .with_baseline_json_schema(json)
                     .map_err(|error| error.to_string())
