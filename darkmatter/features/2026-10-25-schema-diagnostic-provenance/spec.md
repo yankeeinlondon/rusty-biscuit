@@ -6,7 +6,8 @@ area: darkmatter
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-26
-review_iterations: 0
+review_iterations: 1
+completed: true
 needs_rulings: false
 $schema:
     status: |-
@@ -36,6 +37,8 @@ related:
     - 2026-10-11-schema-loader-yaml-spellings
     - 2026-10-13-named-type-presence-and-local-names
     - 2026-10-15-diagnostic-node-positions
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Schema diagnostics carry what the resolver already knows

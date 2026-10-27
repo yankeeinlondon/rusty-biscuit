@@ -60,6 +60,54 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4:
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/dmls.md
+source_code:
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/lib/tests/l1/recursive_schema_types.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_grammar.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/yaml_scalar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/signature.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/dmls/tests/l1/core_schema_types.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+documentation:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/dmls.md
+completed_phase: 4
+implemented: true
+---
 ---
 ---
 
@@ -371,7 +419,7 @@ Exceptions preserving current behavior:
 
 ### Wave 6 — Independent documentation and boundary regressions
 
-- [ ] **Document public behavior**
+- [x] **Document public behavior**
   - Own `darkmatter/docs/topics/schemas/definition.md`, including the conflict
     table and definitions/use-sites text; document participant values, effective
     schemes, empty options, bounded excerpts, source-aware return types, byte
@@ -385,7 +433,7 @@ Exceptions preserving current behavior:
     public claim and correct it if present; keep detailed references in `docs/`.
     Docs and skills must not link to a feature lifecycle path.
 
-- [ ] **Verify shipped consumers**
+- [x] **Verify shipped consumers**
   - Concurrent with documentation; own corpus, CLI, and Claudine regression tests.
     Extend the passive shipped-schema corpus and retain a normal CLI invocation
     using a shipped artifact through `CliProcessFixture`.
@@ -400,7 +448,7 @@ Exceptions preserving current behavior:
 
 ### Wave 7 — Final package gates
 
-- [ ] **Run package gates**
+- [x] **Run package gates**
   - After Wave 6, run `just test` and `just lint` in `darkmatter/`, `just test`
     in `claudine/`, and `just test-l2` in `darkmatter/`. Use nextest via these
     recipes; keep hermetic DMLS protocol tests in L1 and every L1 test below five

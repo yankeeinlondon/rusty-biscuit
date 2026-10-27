@@ -58,26 +58,57 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/schema.md
-message_to_agent: |-
-    Phase 3 (DMLS) is complete; Phase 4 owns the docs, which now lag the code:
-    - dmls/docs/diagnostics.md: inline `$schema` and `schema`/`type-definition`
-      meta-typed grammar errors underline the token (structural failures keep
-      the value; a `schema` failure with no property segment keeps the whole
-      value); a definition inside a pure root-union mapping arm is now
-      dm.schema.invalid_type_definition at its token (wrong-type arm stays
-      invalid_schema_shape); conflict related info reads
-      "`max(5)` is declared here" / "`scheme(https)` is the effective
-      constraint from this declaration", and bare `alphanumeric` relates its
-      definition span; an invalid tagged envelope (extra key) reports
-      document_malformed even if a definition inside is also bad.
-    - docs/topics/schemas/dmls-schema-support.md: anchored/tagged plain
-      continuations complete while typing; the cursor must be inside the
-      scalar, at its end, or after trailing spaces/tabs on its last line.
-    New public library API to document (definition.md / library surfaces):
-    locate_type_definition_cursor_in_scalar and
-    locate_schema_declaration_cursor_in_scalar (cursor.rs). Library fix:
-    decode_plain_scalar_node returns None at an empty holder's line break.
-    All decisions are in the log under Phase 3 -> Design Decisions.
+source_files_during_phase_4:
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/dmls.md
+source_code:
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/lib/tests/l1/recursive_schema_types.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_grammar.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/yaml_scalar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/signature.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/dmls/tests/l1/core_schema_types.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+documentation:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/dmls.md
+completed_phase: 4
+implemented: true
+pipeline_refreshed:
+    - 2026-10-25-shared-acyclic-definitions
+decisions_for_author: []
+---
 ---
 
 # Implementation Log for 2026-10-25-schema-diagnostic-provenance (4 phases)
@@ -703,3 +734,209 @@ code finds only deliberate `.ok()` uses (YAML that does not parse on its own
   behavior
 
 Phase 3 status: **implementation complete, ready for review**.
+
+## Phase 4
+
+Wave 6 (**Document public behavior**, **Verify shipped consumers**) and Wave 7
+(**Run package gates**). The shipped-consumer regressions ran as one
+foreground subagent with file ownership of the two test files; the
+documentation and skill edits were written directly.
+
+### What changed
+
+- **Docs**
+    - `docs/topics/schemas/definition.md`: the `ConstraintConflict` paragraph
+      in "Merging use-site constraints" now describes
+      `SchemaConstraintParticipant { origin, constraint }`, a rendered example
+      (`` `min(10)` in `./types.yaml` and `max(5)` in the inline `$schema` ``),
+      the per-kind participant-value table, effective (narrowed) schemes, empty
+      `alphanumeric` options, the shared 160-scalar escaped excerpt, and
+      compact-JSON compound defaults; the error-variant table row now names
+      participants. New "Source-Aware Parsing and Located Failures" section
+      under Library API: the three located-failure functions and their return
+      types, `LocatedDefinitionFailure` fields, a compact example, path rules,
+      cross-arm attribution, byte offsets, the `None`/fallback boundary, the
+      standalone helper's `None` cases, `decode_plain_scalar_node`, and the
+      `*_cursor_in_scalar` helpers.
+    - `dmls/docs/diagnostics.md`: `invalid_schema_shape` row (definition inside
+      a root-union mapping arm is now `invalid_type_definition` at its token),
+      `document_malformed` row (envelope error first), Ranging bullet rewritten
+      for token ranges in standalone files, inline `$schema`, and
+      `schema`/`type-definition` values, structural and fallback order, and
+      referenced-file failures; `relatedInformation` lists the conflict
+      wording.
+    - `docs/topics/schemas/dmls-schema-support.md`: conflict bullet shows the
+      related-information values and scheme wording; new paragraph and example
+      for anchored/tagged continuation completion during partial input
+      (plain-only, cursor rule, passive); public-surface list adds the
+      in-scalar cursor parsers and links the located-failure section.
+    - `docs/errors/README.md` reviewed: it holds rendering conventions only and
+      has no conflict catalog entry or example; the conflict renderer follows
+      its escaping rule via a code span. No change.
+    - `README.md` reviewed: no claim about conflict text, schema diagnostic
+      ranges, or completion changed. No change.
+- **Skills**: `.claude/skills/darkmatter/schema.md` (pointer to the user-facing
+  sections; the technical content landed in Phases 1–3) and `dmls.md`
+  (conflict related information carries values; located, never reparsed).
+- **Tests** (subagent)
+    - `lib/tests/l1/shipped_schema_corpus.rs`:
+      `shipped_schema_artifacts_parse_passively` asserts
+      `locate_standalone_definition_failure` is `None` for every shipped
+      standalone artifact (a `Draft` entry may only report its expected error)
+      inside the existing passivity checks;
+      `shipped_markdown_inline_schemas_parse_passively` runs
+      `parse_schema_declaration_with_source` on each authored inline `$schema`
+      (≥ 500) and requires the value to equal the source-free declaration (or
+      the same error message).
+    - `cli/tests/l1/schema_validate.rs`: two new invalid cases on a copied
+      shipped Claudine bundle with one edit each, through `md schema validate`
+      (`CliProcessFixture`): a grammar error in `lifecycle.yaml`
+      (`schema_validate_grammar_error_in_one_shipped_definition_names_its_location`)
+      and a bound conflict across an import of a shipped file
+      (`schema_validate_bound_conflict_across_an_import_of_a_shipped_file_shows_both_values`);
+      both assert exit 2, the rendered location/values, and that no output
+      file is published. Valid control: the existing
+      `schema_validate_shipped_claudine_schema_accepts_reused_lifecycle_and_loop_types`.
+
+### Design Decisions
+
+- **One shipped inline schema is an explicit source-aware exception**
+    - **decision:** the corpus check lists
+      `messenger/.../spikes/schema-pilots/probes/p14_multiline_inline.md` (a
+      multi-line quoted `$schema` value) as the one inline schema whose
+      source-aware parse must be the projection error at the root with no
+      ranges, while its source-free parse succeeds; the list fails if it stops
+      matching.
+    - **alternatives considered:** skip non-projectable files silently; widen
+      the source-aware grammar to multi-line quoted scalars.
+    - **why:** the spec keeps the strict presentation boundary ("do not broaden
+      accepted schema syntax"); a silent skip would hide a regression; the
+      exception asserts the documented projection-only failure.
+    - **downsides:** a new multi-line quoted inline schema in the repository
+      must be added to the exception list.
+- **The CLI grammar-error case names the edited file in `$schema`**
+    - **decision:** the document references `loop@./schemas/lifecycle.yaml`
+      directly rather than reaching the broken file only through a trigger.
+    - **alternatives considered:** reach it through Claudine's trigger.
+    - **why:** a broken trigger schema is skipped with a warning and exit 0
+      (documented trigger behavior), so it cannot prove a located failure.
+    - **downsides:** the trigger route is covered by the existing
+      invalid-trigger tests, not this one.
+- **The source-aware API is documented in `definition.md`, not a new page**
+    - **decision:** add one "Source-Aware Parsing and Located Failures"
+      section under Library API, beside the existing presentation-boundary
+      section it links.
+    - **alternatives considered:** a new `docs/topics/schemas/` page; the
+      library-surfaces skill only.
+    - **why:** the spec names `definition.md` as the owner of the located
+      failure and result-type change; the boundary it depends on is already
+      there.
+    - **downsides:** `definition.md` grows further.
+- **Fallback example uses the tested presentation**
+    - **decision:** the Ranging section's fallback example cited a *tagged*
+      sibling; it now cites a quoted value continued across lines, the
+      presentation `an_unprojectable_grammar_error_keeps_the_whole_value_fallback`
+      exercises and the presentation boundary lists as unsupported.
+    - **alternatives considered:** keep the tagged example.
+    - **why:** the docs describe tested behavior; the fallback order also
+      changed (value, then frontmatter entry, then document).
+    - **downsides:** none.
+
+### Requirement-to-test mapping (Phase 4 / acceptance close)
+
+| Acceptance group | Evidence |
+| ---------------- | -------- |
+| 1. Values in conflicts | Phase 2 library tests (`schemas_named_type_merge.rs` per kind, multi-hop, scheme narrowing, bare options, item/container defaults); Phase 4 CLI `schema_validate_bound_conflict_across_an_import_of_a_shipped_file_shows_both_values`; existing `schema_validate_multi_hop_bound_contradiction_names_both_origins` |
+| 2. Consistent, safe messages | Phase 2 `errors.rs`/`serialize.rs` excerpt tests (options, 160 scalars, controls, markup); Phase 3 DMLS `named_type_references::a_multi_hop_contradiction_names_the_reference_and_both_declarations`, `core_schema_types::{a_narrowed_scheme_conflict_relates_the_effective_constraint, a_bare_alphanumeric_conflict_participant_relates_its_definition}`, `a_wrapped_conflict_watches_every_participant_file` |
+| 3. No guessing | Phase 2 `schemas_source_projection.rs` located-failure tests (literal keys, sequence members, cross-arm suggestion, structural, unprojectable, mismatch, alias); Phase 3 deletion of `grammar_token_span`/`collect_string_scalars` and `schema_yaml_spellings` range tests |
+| 4. Frontmatter parity | Phase 3 `schema_yaml_spellings::{an_inline_schema_definition_error_is_ranged_at_its_token, a_referenced_definition_error_keeps_the_local_reference_range}` (LF/CRLF, non-BMP, UTF-8/16) |
+| 5. Anchored continuation | Phase 3 `cursor.rs`/`yaml_scalar.rs` tests and `schema_yaml_spellings` completion tests |
+| 6. Unchanged contracts | Phase 2 source-free variant/message tests; Phase 4 `shipped_schema_corpus::{shipped_schema_artifacts_parse_passively, shipped_markdown_inline_schemas_parse_passively}` (locator `None`, source-aware == source-free over ≥ 500 inline schemas, passivity counters); Phase 4 CLI grammar-error case plus valid control `schema_validate_shipped_claudine_schema_accepts_reused_lifecycle_and_loop_types` |
+| 7. Package gates | below |
+
+Input robustness: Phase 4 adds no loader or field validator (tests and docs
+only); the matrix is Phase 2's.
+
+### Verification
+
+- subagent, scoped: `cargo nextest run -p darkmatter --test l1 -E 'test(shipped)'`
+  27/27; `cargo nextest run -p darkmatter-cli --test l1 -E 'test(schema_validate)'`
+  149/149 (new tests 0.7 s and 2.0 s)
+- `just test` (darkmatter): **12669 passed**, 10 skipped, 0 failed (140.6 s, 21 slow
+  but no timeout). The subagent's parallel-load run saw five pre-existing
+  `schema_validate` tests pass 5 s (`..._applies_indentless_pure_root_union`,
+  `..._contested_file_match_...`, `..._enforces_each_root_union_arm_match`,
+  two `schema_validate_baseline` byte-identical tests); none is new, and all
+  passed in the full gate
+- `just lint` (darkmatter): passed, including the zed-dmls wasm check
+- `just test-l2` (darkmatter): passed (18 + 69 + 3 tests across its binaries);
+  harnesses never take focus
+- `just check-tier-coverage darkmatter`: 0 stranded
+- downstream Claudine (well over 200 tests, targeted): `cargo nextest run -p
+  claudine -p claudine-cli -E 'test(schema) | test(invalid_trigger) |
+  test(diagnostic_detail_conformance) | test(composition_representatives)'`
+  → **1289 passed**, 0 failed. Phase 4 changed no library source, so Claudine
+  is not affected by this phase. Its forwarding path
+  (`claudine/lib/src/composition/schema/translate.rs`) maps
+  `ConstraintConflict` to `SchemaLoad` with the display text; no Claudine test
+  asserts conflict text
+- gate skip did not apply: `affected_scope.py` over the working tree gives `packages: [darkmatter, darkmatter-cli, test-toolkit]`, `change_class: package`; it lists
+  packages (test sources changed)
+- cross-OS check skipped: Phase 4 changes Markdown docs and two L1 test files
+  whose assertions match filename fragments only (no path separators); the
+  CLI fixture is the existing cross-platform `CliProcessFixture`
+- final diff review: no schema/merge behavior change in this phase; no
+  passive API made effectful; docs describe the landed results (no
+  **planned** markers needed); no doc or skill links a feature lifecycle path
+
+Phase 4 status: **implementation complete, ready for review**.
+
+## Pipeline Refresh
+
+- `2026-10-25-shared-acyclic-definitions` (spec checked, unchanged; plan
+  changed, not started): Decision 4's landing-order note no longer hedges on
+  this feature landing. It names `SchemaConstraintParticipant { origin, constraint }`
+  and `Constraint::diagnostic_excerpt()`, and asks shared-reference conflict
+  tests to assert the participant values, including the effective `Scheme`
+  value.
+- `2026-10-25-pipeline-work-reduction` (claudine; depends on
+  `2026-10-25-shared-acyclic-definitions`, lists this spec as related): checked,
+  unchanged. Its measured items do not depend on the conflict or locator
+  surfaces.
+
+## Phase 4 review — iteration 1
+
+### Design Decisions
+
+- **Retain the recorded inner-definition classification for root-union mappings**
+    - **decision:** retain the implementation's `invalid_type_definition` code
+      for a rejected property inside a root-union mapping, with its token
+      range. Invalid arms themselves retain `invalid_schema_shape`.
+    - **alternatives considered:** preserve the former shape code for every
+      failure below a root-union arm.
+    - **why:** the spec specifically includes definitions inside root-union
+      mappings in the located-definition route, and Phase 3 already settled
+      this interpretation of its broader code-preservation language. The
+      protocol test exercises both a malformed property and an invalid arm.
+    - **downsides:** clients distinguishing these codes observe a different
+      code for malformed definitions inside mapping arms.
+- **Retain completion after trailing spaces on the scalar's final line**
+    - **decision:** keep the recorded same-line spaces/tabs extension to the
+      decoded scalar cursor boundary.
+    - **alternatives considered:** reject every position beyond the scalar's
+      last content byte, including a space after a completed constraint.
+    - **why:** Phase 3 settled preservation of existing completion behavior;
+      the cursor tests prove that a sibling, comment, or later line is still
+      rejected. This does not consume another YAML value.
+    - **downsides:** the accepted cursor boundary includes trailing horizontal
+      whitespace beyond the scalar's content bytes.
+
+### Verification
+
+- Review 1 independently ran `just test` in `darkmatter/`: **12,669 passed**,
+  10 skipped, 150.014 seconds.
+- Review 1 independently ran the full required `just test` in `claudine/`:
+  **11,654 passed**, 10 skipped, 484.048 seconds. This closes the earlier
+  substitution of filtered Claudine runs for acceptance criterion 7's full
+  gate; no requested verification remains deferred.
+- `just check-tier-coverage darkmatter`: **0 stranded tests**.
