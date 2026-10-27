@@ -237,7 +237,6 @@ pub(crate) fn resolve_yaml_schema_owned_by(
             base_dir,
             schema_roots,
             request_context,
-            Sharing::Automatic,
         ),
         YamlValue::Sequence(items) => {
             resolve_root_union(items, owner, base_dir, schema_roots, request_context, &mut stack)
@@ -252,15 +251,14 @@ pub(crate) fn resolve_yaml_schema_owned_by(
 }
 
 /// Resolves one global catalog declaration, `value` (a single-entry
-/// mapping), from schema files in `base_dir`. A declaration stores only its
-/// cyclic definitions: catalog consumers, the built-in baseline above all,
-/// read a declaration as a definition-free shape (see [`Sharing::Off`]).
+/// mapping), from schema files in `base_dir`. Its stored definitions, cyclic
+/// and shared, are returned with it, as for any inline `$schema` mapping.
 pub(crate) fn resolve_catalog_declaration(
     value: &YamlValue,
     base_dir: &Path,
     request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedSchema, SchemaError> {
-    resolve_inline_mapping(value, InlineOwner::Document, base_dir, &[], request_context, Sharing::Off)
+    resolve_inline_mapping(value, InlineOwner::Document, base_dir, &[], request_context)
 }
 
 /// Resolves the inline `$schema` mapping `value` authored by `owner`.
@@ -270,7 +268,6 @@ fn resolve_inline_mapping(
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
-    sharing: Sharing,
 ) -> Result<ResolvedSchema, SchemaError> {
     let schema = parse_yaml_schema(value)?;
     // Inline the definitions of any `Name@file` named-type imports
@@ -289,7 +286,7 @@ fn resolve_inline_mapping(
         owner.root(),
         &SchemaSourcePath::root(),
         source,
-        sharing,
+        Sharing::Automatic,
         &mut searched,
         &mut definitions,
     )?;
@@ -1305,12 +1302,13 @@ pub(crate) fn prepare_embedded_inline_schema(
 }
 
 /// [`prepare_embedded_inline_schema`] for one global catalog declaration,
-/// which stores only its cyclic definitions (see
-/// [`resolve_catalog_declaration`]).
+/// expanded with `sharing`: [`Sharing::Automatic`] for the catalog itself,
+/// [`Sharing::Off`] for a definition-free projection of it.
 pub(crate) fn prepare_embedded_catalog_declaration(
     value: &YamlValue,
     importer: &str,
     documents: &[EmbeddedDocument<'_>],
+    sharing: Sharing,
 ) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
     let schema = parse_yaml_schema(value)?;
     if matches!(schema, SimplifiedSchema::Union(_)) {
@@ -1319,7 +1317,7 @@ pub(crate) fn prepare_embedded_catalog_declaration(
             message: "an embedded inline schema cannot be a root union".into(),
         });
     }
-    lower_embedded_schema(schema, importer, documents, "", Sharing::Off)
+    lower_embedded_schema(schema, importer, documents, "", sharing)
 }
 
 /// Expands a single-object embedded schema authored at `path` and lowers it,
@@ -1918,14 +1916,16 @@ fn expand_document_imports(
 
 /// Whether an expansion stores repeated acyclic structured definitions once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Sharing {
-    /// Store each definition discovery selects (see `graph`).
+pub(crate) enum Sharing {
+    /// Store each definition discovery selects (see `graph`). Every
+    /// resolution, global catalog declarations included, expands this way.
     Automatic,
-    /// Store only cyclic definitions and inline everything else. A global
-    /// catalog declaration resolves this way: the built-in baseline is
-    /// published as a definition-free schema
-    /// ([`super::darkmatter_base_schema`]), and the catalog's consumers read
-    /// a declaration's members without a definition table.
+    /// Store only cyclic definitions and inline every other use. Only the
+    /// definition-free projection of the built-in baseline
+    /// ([`super::darkmatter_base_schema`]) expands this way: that public
+    /// convenience form carries no definition table, and the inline form an
+    /// acyclic use takes is the resolver's to decide, so the projection is
+    /// resolved rather than rebuilt from the shared form.
     Off,
 }
 
@@ -3921,9 +3921,11 @@ fn resolve_one_example(
 /// - Properties present only in one side are preserved verbatim.
 /// - The baseline's root `$defs` move to the document's root, where its
 ///   `#/$defs/…` references resolve once its properties are copied in (into
-///   every arm of a root union). The document's keys and references never
-///   change; a baseline key that collides with a different document body is
-///   re-keyed (`item-2`) along with the baseline's references to it.
+///   every arm of a root union). Only the definitions a copied property
+///   reaches move; those reached only from properties the document declares
+///   are dropped. The document's keys and references never change; a
+///   baseline key that collides with a different document body is re-keyed
+///   (`item-2`) along with the baseline's references to it.
 ///
 /// ## Errors
 ///
@@ -3941,8 +3943,9 @@ pub fn merge_baseline(baseline: &Value, document: Value) -> Result<Value, Schema
     merge_layer(&baseline, document)
 }
 
-/// The baseline with its root `$defs` moved into `document`'s root and its
-/// references renamed to match; borrowed unchanged when it has none.
+/// The baseline with the root `$defs` its copied properties reach moved into
+/// `document`'s root and its references renamed to match; borrowed unchanged
+/// when it has none.
 fn move_baseline_definitions<'b>(
     baseline: &'b Value,
     document: &mut Value,
@@ -3966,7 +3969,29 @@ fn move_baseline_definitions<'b>(
                 .into(),
         });
     }
+    // Only the properties some document arm leaves undeclared are copied in.
+    let arms: Vec<&Map<String, Value>> = match document_obj.get("anyOf").and_then(Value::as_array) {
+        Some(arms) => arms.iter().filter_map(Value::as_object).collect(),
+        None => vec![&*document_obj],
+    };
+    let copied: BTreeSet<String> = baseline
+        .get("properties")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(Map::keys)
+        .filter(|name| {
+            arms.iter().any(|arm| {
+                !arm.get("properties").and_then(Value::as_object).is_some_and(|properties| properties.contains_key(*name))
+            })
+        })
+        .cloned()
+        .collect();
     let mut baseline = baseline.clone();
+    super::scope::retain_reached_definitions(&mut baseline, |name| copied.contains(name));
+    if baseline.get("$defs").and_then(Value::as_object).is_some_and(Map::is_empty) {
+        baseline.as_object_mut().expect("validated baseline must be an object").remove("$defs");
+        return Ok(std::borrow::Cow::Owned(baseline));
+    }
     let mut document_defs = match document_obj.remove("$defs") {
         Some(Value::Object(defs)) => defs,
         Some(other) => {

@@ -548,7 +548,7 @@ where
     Some(hasher.0.finish())
 }
 
-fn collect_def_refs(def: &PropertyDef, out: &mut Vec<DefKey>) {
+pub(super) fn collect_def_refs(def: &PropertyDef, out: &mut Vec<DefKey>) {
     match def {
         PropertyDef::Single(atom) => collect_atom_refs(atom, out),
         PropertyDef::Union(atoms) => atoms.iter().for_each(|atom| collect_atom_refs(atom, out)),

@@ -30,9 +30,11 @@
 //! The loader is strict. Every required global must be declared exactly once
 //! with a non-null, non-empty, resolvable definition of the required kind; an
 //! undeclared name, a duplicate key, or trailing YAML is a [`CatalogError`]
-//! naming the field. A global typed by a recursive named type is of the
-//! object kinds when the type's body is an object; it keeps the type as a
-//! named reference into [`GlobalDeclaration::definitions`].
+//! naming the field. A declaration resolves like any document schema: a
+//! recursive named type, and a structured acyclic type the declaration uses
+//! at two or more sites, is stored once in [`GlobalDeclaration::definitions`]
+//! and named by reference. A global typed by such a type is of the object
+//! kinds when the type's body is an object.
 
 use std::borrow::Cow;
 use std::path::Path;
@@ -135,9 +137,9 @@ pub struct CatalogError {
 
 /// One global's resolved declaration.
 ///
-/// A global typed by a recursive named type keeps its definition as a named
-/// reference ([`TypeExpr::Ref`]) into [`Self::definitions`]; its description,
-/// like every whole-type description, names the type instead of expanding it.
+/// Every stored named type the declaration reaches, recursive or shared, stays
+/// a named reference ([`TypeExpr::Ref`]) into [`Self::definitions`]; a
+/// whole-type description names the type instead of expanding it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalDeclaration {
     name: String,
@@ -151,14 +153,15 @@ impl GlobalDeclaration {
         &self.name
     }
 
-    /// The resolved definition, every acyclic import expanded; a recursive
-    /// type stays a reference into [`Self::definitions`].
+    /// The resolved definition, with every import expanded; a use of a
+    /// stored type stays a reference into [`Self::definitions`].
     pub fn definition(&self) -> &PropertyDef {
         &self.definition
     }
 
-    /// The recursive definitions [`Self::definition`]'s references point
-    /// into; empty for an acyclic global.
+    /// The stored definitions, recursive or shared, that
+    /// [`Self::definition`]'s references point into; empty when it reaches
+    /// none.
     pub fn definitions(&self) -> &DefinitionTable {
         &self.definitions
     }
@@ -172,8 +175,8 @@ impl GlobalDeclaration {
     }
 
     /// The global's member shape; `None` for an open `object`. A global
-    /// typed by a recursive object type yields that type's body, whose
-    /// members still name the type rather than expanding it.
+    /// typed by a stored object type yields that type's body; members typed
+    /// by stored types still reference [`Self::definitions`].
     pub fn shape(&self) -> Option<&SchemaShape> {
         match &resolved_atom(&self.definition, &self.definitions)?.ty {
             TypeExpr::InlineObject(shape) => Some(shape),
@@ -409,11 +412,15 @@ impl GlobalCatalog {
         self.globals.values()
     }
 
-    /// The resolved `fm` definition as a document schema: the built-in
-    /// baseline when this is Darkmatter's catalog. `None` for a catalog that
-    /// declares no `fm`.
-    pub fn baseline(&self) -> Option<SimplifiedSchema> {
-        self.global("fm")?.shape().cloned().map(SimplifiedSchema::Single)
+    /// The resolved `fm` definition as a document schema, with the
+    /// definitions its references point into: the built-in baseline when this
+    /// is Darkmatter's catalog. Lower the pair with
+    /// [`to_json_schema_with_definitions`](super::to_json_schema_with_definitions).
+    /// `None` for a catalog that declares no `fm`.
+    pub fn baseline(&self) -> Option<(SimplifiedSchema, Arc<DefinitionTable>)> {
+        let fm = self.global("fm")?;
+        let shape = fm.shape()?.clone();
+        Some((SimplifiedSchema::Single(shape), Arc::clone(&fm.definitions)))
     }
 }
 
@@ -1039,8 +1046,7 @@ fn required<'v>(map: &'v Mapping, key: &str) -> Result<&'v YamlValue, CatalogErr
 }
 
 /// Parses and resolves one declaration on its own, so a failure names its
-/// global. The definition's recursive references point into the returned
-/// table.
+/// global. The definition's references point into the returned table.
 fn resolve_declaration(
     catalog: &str,
     name: &str,
@@ -1058,7 +1064,8 @@ fn resolve_declaration(
     let single = YamlValue::Mapping(single);
     let resolved = match source {
         Source::Embedded(documents) => {
-            resolve::prepare_embedded_catalog_declaration(&single, catalog, documents).map(|(resolved, _)| resolved)
+            resolve::prepare_embedded_catalog_declaration(&single, catalog, documents, resolve::Sharing::Automatic)
+                .map(|(resolved, _)| resolved)
         }
         Source::Disk { dir, context } => resolve::resolve_catalog_declaration(&single, dir, context),
     }
@@ -1070,6 +1077,43 @@ fn resolve_declaration(
             .map(|definition| (definition, resolved.definitions))
             .ok_or(CatalogErrorReason::Missing),
         _ => Err(CatalogErrorReason::WrongType { expected: "a single definition", found: "a union" }),
+    }
+}
+
+/// Darkmatter's built-in baseline as a definition-free schema: the shipped
+/// catalog's `fm` declaration resolved with every acyclic use inlined, the
+/// form [`super::darkmatter_base_schema`] publishes. The catalog itself
+/// ([`GlobalCatalog::darkmatter`]) stores the shared types once.
+///
+/// ## Panics
+///
+/// When the compiled-in declaration does not resolve: a library bug, which
+/// a test catches.
+pub(crate) fn darkmatter_inline_baseline() -> SimplifiedSchema {
+    let fail = |reason: &dyn std::fmt::Display| -> ! { panic!("the embedded baseline must resolve inline: {reason}") };
+    let document =
+        embedded::find(embedded::SHIPPED, DARKMATTER_CATALOG_PATH).unwrap_or_else(|| fail(&"the catalog is missing"));
+    let root: YamlValue = serde_yaml_ng::from_str(document.text).unwrap_or_else(|error| fail(&error));
+    let value = root
+        .get("$schema")
+        .and_then(|declarations| declarations.get("fm"))
+        .unwrap_or_else(|| fail(&"the catalog declares no `fm`"));
+    let mut single = Mapping::new();
+    single.insert(YamlValue::String("fm".into()), value.clone());
+    let (resolved, _) = resolve::prepare_embedded_catalog_declaration(
+        &YamlValue::Mapping(single),
+        DARKMATTER_CATALOG_PATH,
+        embedded::SHIPPED,
+        resolve::Sharing::Off,
+    )
+    .unwrap_or_else(|error| fail(&error));
+    let Some(SimplifiedSchema::Single(mut shape)) = resolved.simplified else {
+        fail(&"`fm` is not a single definition");
+    };
+    let definition = shape.properties.shift_remove("fm").unwrap_or_else(|| fail(&"`fm` is missing"));
+    match resolved_atom(&definition, &resolved.definitions).map(|atom| &atom.ty) {
+        Some(TypeExpr::InlineObject(shape)) => SimplifiedSchema::Single(shape.clone()),
+        _ => fail(&"`fm` is not an object shape"),
     }
 }
 

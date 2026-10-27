@@ -325,7 +325,9 @@ pub fn file_alternatives<'a>(
 
 /// [`collect_file_alternatives`] for the alternatives written on the property
 /// itself: only a reference is entered, and a `file` here is a
-/// suggestion-only alternative, so the property is not read as a file.
+/// suggestion-only alternative, so the property is not read as a file. A
+/// reference to a shared acyclic definition stands for its inlined value, so
+/// its body's alternatives are read as if written here.
 fn collect_reference_alternatives<'a>(
     atoms: &'a [PropertyAtom],
     in_array: bool,
@@ -339,6 +341,10 @@ fn collect_reference_alternatives<'a>(
         }
         let is_array = in_array || atom.is_array;
         match &atom.ty {
+            TypeExpr::Ref(key) if !definitions.is_cyclic(key) => {
+                let body = &definitions.get(key)?.body;
+                collect_reference_alternatives(alternatives_of(body), is_array, definitions, entered, alternatives)?;
+            }
             TypeExpr::Ref(_) => collect_file_alternatives(
                 std::slice::from_ref(atom),
                 in_array,

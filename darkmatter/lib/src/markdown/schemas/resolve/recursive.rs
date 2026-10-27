@@ -651,20 +651,15 @@ impl ImportEngine<'_> {
     /// counts, no optional `file` alternative, whose empty-string tolerance
     /// depends on the use, and no reference into a cycle.
     ///
-    /// Nor may the value hold a `file(match(...))` of its own: a root-union
-    /// arm enforces the glob inside every definition it references (through
-    /// the arm's copy), while the inlined copy of an acyclic type only
-    /// suggests, so storing one would rule out arms that accept the value.
+    /// A `file(match(...))` inside the value does not matter here: a
+    /// root-union arm lowers a reference to a shared acyclic definition as
+    /// the inlined value, suggesting its globs (see `MatchCopies` in
+    /// `simplified/convert.rs`).
     fn is_shareable(&self, base: &ExpandedDef) -> bool {
         let (top, arms): (Vec<&Constraint>, Option<&[PropertyAtom]>) = match base {
-            ExpandedDef::Union(arms) => {
-                if arms.iter().any(holds_file_match) {
-                    return false;
-                }
-                (Vec::new(), Some(arms))
-            }
+            ExpandedDef::Union(arms) => (Vec::new(), Some(arms)),
             ExpandedDef::Single(atom, _) => {
-                if atom.admits_null() || holds_file_match(atom) {
+                if atom.admits_null() {
                     return false;
                 }
                 let arms = match (&atom.ty, atom.is_array) {
@@ -696,35 +691,6 @@ impl ImportEngine<'_> {
                 && !(matches!(arm.ty, TypeExpr::Primitive(SimplifiedType::File)) && !arm.is_array)
                 && !matches!(&arm.ty, TypeExpr::Ref(target) if self.cyclic.contains(target))
         })
-    }
-}
-
-/// Whether `atom` holds a `file` with a `match(...)` group in its own
-/// expansion: in it, or in an object, dictionary, tuple, or union nested
-/// there. A reference is not entered: it is a cycle member, which a root-union
-/// arm copies and enforces whether or not this use is stored, or a shared
-/// definition, which passed this check itself.
-fn holds_file_match(atom: &PropertyAtom) -> bool {
-    let def_holds = |def: &PropertyDef| match def {
-        PropertyDef::Single(atom) => holds_file_match(atom),
-        PropertyDef::Union(arms) => arms.iter().any(holds_file_match),
-    };
-    match &atom.ty {
-        TypeExpr::Primitive(SimplifiedType::File) => atom
-            .constraints
-            .iter()
-            .any(|constraint| matches!(constraint, Constraint::Match(patterns) if !patterns.is_empty())),
-        TypeExpr::InlineObject(shape) => shape
-            .properties
-            .values()
-            .chain(shape.pattern_keys.iter().map(|pattern| &pattern.def))
-            .any(def_holds),
-        TypeExpr::Union(arms) => arms.iter().any(holds_file_match),
-        TypeExpr::Tuple(tuple) => {
-            tuple.elements.iter().any(|element| def_holds(&element.def))
-                || tuple.spread.as_deref().is_some_and(holds_file_match)
-        }
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Ref(_) => false,
     }
 }
 

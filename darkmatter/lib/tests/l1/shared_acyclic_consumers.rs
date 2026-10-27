@@ -14,7 +14,9 @@
 //! that share types (equal-body reuse, rekeying of different bodies together
 //! with the references between definitions, deterministic bytes), dependency
 //! invalidation of an imported shared type, embedded and reserved imports,
-//! and a root-union arm's suggestion-only `match(...)`.
+//! and `file(match(...))` in a shared type: suggestion-only in an ordinary
+//! schema and in a root-union arm, where a recursive type it reaches is still
+//! enforced, and the file alternatives a caller's value is judged by.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -24,12 +26,16 @@ use darkmatter::markdown::compose::expression::{
     ArgumentCategory, DeclaredTypes, TypeScope, check_expression_calls, parse_spanned,
 };
 use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::completion::{PathStep, for_path};
+use darkmatter::markdown::schemas::completion::{PathStep, def_at_path, for_path};
+use darkmatter::markdown::schemas::file_match::{file_alternatives, root_union_match_groups};
+use darkmatter::markdown::schemas::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_yaml_schema};
 use darkmatter::markdown::schemas::validate::build_position_map;
+use darkmatter::markdown::schemas::catalog::{DARKMATTER_GLOBALS, GlobalCatalog};
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, EmbeddedSchemaBundle, SchemaPhase, SimplifiedSchema, ValidationOptions,
-    ValidationProblemCode, ValidationReport, is_definition_subtype_with_definitions,
+    DarkmatterSchemas, EffectiveSchema, EmbeddedSchemaBundle, PropertyAtom, PropertyDef, SchemaArm, SchemaPhase,
+    SimplifiedSchema, TypeExpr, ValidationOptions, ValidationProblemCode, ValidationReport, darkmatter_base_json_schema,
+    darkmatter_base_schema, is_definition_subtype_with_definitions, to_json_schema, to_json_schema_with_definitions,
 };
 use serde_json::{Map, Value, json};
 use tempfile::TempDir;
@@ -490,11 +496,11 @@ fn subtyping_compares_a_shared_type_as_its_inlined_copy() {
 
 // ── Root-union `match(...)` ───────────────────────────────────────────────
 
-/// In a root-union arm a `file(match(...))` reached through an inlined
-/// acyclic type only suggests, while one reached through a stored
-/// definition is enforced by the arm's copy. A type holding a glob is
-/// therefore never stored, so two uses keep the inlined verdict; the same
-/// shape without the glob is stored, so the exclusion is the glob's alone.
+/// In a root-union arm a `file(match(...))` reached through an acyclic type
+/// only suggests, as it did inlined, while one reached through a recursive
+/// definition is enforced by the arm's copy. A repeated type holding a glob
+/// is stored like the same shape without it, and its glob keeps suggesting
+/// at both uses.
 #[test]
 fn a_root_union_arm_keeps_a_suggestion_only_match_through_a_repeated_type() {
     let repo = Repo::new();
@@ -514,7 +520,7 @@ fn a_root_union_arm_keeps_a_suggestion_only_match_through_a_repeated_type() {
             let document = repo.document(&format!("b/{}-{matched}.md", shape.replace(' ', "-")), &format!("---\n{schema}spec: {value}\n---\n"));
             let effective = effective(&schemas, &document);
             let lowered = effective.json_schema.to_string();
-            assert_eq!(has_definitions(&effective), !matched, "{shape}, glob {matched}: {lowered}");
+            assert!(has_definitions(&effective), "{shape}, glob {matched}: {lowered}");
             assert!(!lowered.contains("x-darkmatter-match"), "{shape}: an acyclic glob only suggests: {lowered}");
             let report = schemas.validate(&document).expect("validates");
             assert!(report.valid, "{shape}, glob {matched}: {:#?}", report.problems);
@@ -524,6 +530,175 @@ fn a_root_union_arm_keeps_a_suggestion_only_match_through_a_repeated_type() {
             }
         }
     }
+}
+
+/// A root-union arm still enforces a glob inside a recursive definition when
+/// it reaches that definition through a stored acyclic type, while the
+/// stored type's own glob keeps suggesting: `entry` (`own` suggests, `tree`
+/// reaches the recursive `node`) and `leaf`, used both at the arm's top
+/// level and inside `node`, whose copy enforces it there. Declared as a
+/// single schema, nothing is enforced.
+#[test]
+fn a_root_union_arm_enforces_a_recursive_glob_reached_through_a_shared_type() {
+    let repo = Repo::new();
+    let schemas = repo.schemas(false);
+    repo.write("a/notes/x.md", "# x\n");
+    repo.write("b/notes/y.md", "# y\n");
+    let (outside, inside) = ("../a/notes/x.md", "./notes/y.md");
+    let declarations = [
+        "leaf: \"{ path: file(match('./notes/*.md')) }\"",
+        "node: \"{ doc: file(match('./notes/*.md')), leaf: leaf, children: node[] }\"",
+        "entry: \"{ own: file(match('./notes/*.md')), tree: node }\"",
+        "spec: entry",
+        "other: entry",
+        "top: leaf",
+        "more: leaf",
+    ];
+    let single: String = declarations.iter().map(|line| format!("  {line}\n")).collect();
+    let arm: String =
+        declarations.iter().enumerate().map(|(at, line)| format!("{}{line}\n", if at == 0 { "  - " } else { "    " })).collect();
+    let cases = [
+        ("an own glob of a shared type", json!({ "spec": { "own": outside } }), true),
+        ("a top-level use of a type a recursive body also uses", json!({ "top": { "path": outside } }), true),
+        ("a recursive file below a shared type", json!({ "spec": { "own": outside, "tree": { "doc": outside } } }), false),
+        ("a recursive file inside the glob", json!({ "spec": { "own": outside, "tree": { "doc": inside } } }), true),
+        ("a shared type inside a recursive body", json!({ "spec": { "tree": { "leaf": { "path": outside } } } }), false),
+        ("a nested recursive use", json!({ "spec": { "tree": { "children": [{ "leaf": { "path": outside } }] } } }), false),
+        ("a shared type inside a recursive body, inside the glob", json!({ "spec": { "tree": { "leaf": { "path": inside } } } }), true),
+    ];
+    for (index, (case, value, union_valid)) in cases.into_iter().enumerate() {
+        let fields: String = value.as_object().expect("a mapping").iter().map(|(key, value)| format!("{key}: {value}\n")).collect();
+        let union = repo.document(&format!("b/union-{index}.md"), &format!("---\n$schema:\n{arm}  - spec: boolean\n{fields}---\n"));
+        let effective = effective(&schemas, &union);
+        assert!(has_definitions(&effective), "{case}");
+        let report = schemas.validate(&union).expect("validates");
+        assert_eq!(report.valid, union_valid, "{case}: {:#?}", report.problems);
+        let single = repo.document(&format!("b/single-{index}.md"), &format!("---\n$schema:\n{single}{fields}---\n"));
+        let report = schemas.validate(&single).expect("validates");
+        assert!(report.valid, "{case}, single schema: {:#?}", report.problems);
+    }
+}
+
+/// A caller's file value is judged by the file alternatives a property
+/// offers. A shared acyclic type offers what its inlined value offered, so a
+/// union with a file list (a suggestion-only alternative written on the
+/// property) is still not read as a file, whether the list is matched or
+/// eager; a recursive definition is still entered, and its glob judged.
+#[test]
+fn a_shared_type_offers_the_file_alternatives_of_its_inlined_value() {
+    let dir = TempDir::new().expect("tempdir");
+    let context = biscuit_file::FileResolutionContext::new(dir.path());
+    let resolve = |yaml: &str| {
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("fixture YAML");
+        resolve_yaml_schema(&value, dir.path(), &context).expect("fixture resolves")
+    };
+    let offered = |resolved: &ResolvedSchema| {
+        let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified else {
+            panic!("a single shape");
+        };
+        let arm = SchemaArm::Inline(shape.clone());
+        let alternatives = file_alternatives(&shape.properties["a"], &resolved.definitions)
+            .map(|alternatives| alternatives.iter().map(|alternative| (alternative.is_array, alternative.is_eager())).collect::<Vec<_>>());
+        let groups = root_union_match_groups(&arm, "a", &resolved.definitions)
+            .map(|groups| groups.iter().map(|groups| groups.iter().map(|group| group.to_vec()).collect::<Vec<_>>()).collect::<Vec<_>>());
+        (alternatives, groups)
+    };
+    for (case, ty, expected_is_file) in [
+        ("a matched file list", "file(match('*.md'))[] | { n: number }", false),
+        ("an eager file list", "file(eager)[] | { n: number }", false),
+        ("a recursive file", "file(match('*.md')) | { children: entry[] }", true),
+    ] {
+        let once = resolve(&format!("entry: \"{ty}\"\na: entry\n"));
+        let twice = resolve(&format!("entry: \"{ty}\"\na: entry\nb: entry\n"));
+        assert!(!twice.definitions.is_empty(), "{case}: stored");
+        assert_eq!(offered(&twice), offered(&once), "{case}");
+        assert_eq!(offered(&once).0.is_some(), expected_is_file, "{case}: {:?}", offered(&once));
+    }
+}
+
+// ── `file(match(...))` in an ordinary schema ─────────────────────────────
+
+const GLOB: &str = "file(match('./notes/*.md'))";
+
+/// `entry`, `ty` with `FILE` replaced by `file`, used at `uses`.
+fn file_entry_schema(ty: &str, file: &str, uses: &str) -> String {
+    format!("entry: \"{}\"\n{uses}", ty.replace("FILE", file))
+}
+
+/// A repeated type holding `file(match(...))` in an ordinary schema is stored
+/// once, as the same type with a plain `file` is, and its glob keeps only
+/// suggesting: a file outside it validates at both uses, and both uses
+/// suggest what the type's single, inlined use suggests at `path` below it.
+fn assert_a_matched_file_type_is_shared_like_a_plain_one(ty: &str, value: Value, path: &[PathStep<'_>]) {
+    let repo = Repo::new();
+    repo.write("a/notes/x.md", "# x\n");
+    repo.write("b/notes/y.md", "# y\n");
+    let base = repo.root.join("b");
+    let context = biscuit_file::FileResolutionContext::new(&base);
+    let definitions = |file: &str| {
+        let yaml: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str(&file_entry_schema(ty, file, "a: entry\nb: entry\n")).expect("fixture YAML");
+        resolve_yaml_schema(&yaml, &base, &context).expect("fixture resolves").definitions.len()
+    };
+    assert_eq!(definitions(GLOB), 1, "{ty}: stored once");
+    assert_eq!(definitions(GLOB), definitions("file"), "{ty}: as the plain control");
+
+    let schemas = repo.schemas(false);
+    let document = |name: &str, uses: &str, fields: &str| {
+        let schema: String = file_entry_schema(ty, GLOB, uses).lines().map(|line| format!("  {line}\n")).collect();
+        repo.document(&format!("b/{name}.md"), &format!("---\n$schema:\n{schema}{fields}---\n"))
+    };
+    let twice = document("twice", "a: entry\nb: entry\n", &format!("a: {value}\nb: {value}\n"));
+    let report = schemas.validate(&twice).expect("validates");
+    assert!(report.valid, "{ty}: {:#?}", report.problems);
+    let shared = effective(&schemas, &twice);
+    assert!(has_definitions(&shared), "{ty}");
+    assert!(!shared.json_schema.to_string().contains("x-darkmatter-match"), "{ty}: the glob only suggests");
+    for phase in [SchemaPhase::Launch, SchemaPhase::Completion] {
+        let verdict = shared.validate_for_phase(&json!({ "a": value, "b": value }), phase).expect("phase schema");
+        assert!(verdict.valid, "{ty}, {phase:?}: {:#?}", verdict.problems);
+    }
+
+    let inlined = effective(&schemas, &document("once", "a: entry\n", &format!("a: {value}\n")));
+    assert!(!has_definitions(&inlined), "{ty}: one use is inlined");
+    let suggestion = |effective: &EffectiveSchema, property: &'static str| {
+        let steps: Vec<PathStep<'_>> = std::iter::once(PathStep::Key(property)).chain(path.iter().copied()).collect();
+        let schema = effective.simplified.as_ref().expect("a simplified schema");
+        let frontmatter = json!({ property: value });
+        let (def, site) = def_at_path(schema, effective, &frontmatter, &steps).expect("the path is in the schema");
+        format!("{site:?} {:?}", resolved_alternatives(&def, effective))
+    };
+    let expected = suggestion(&inlined, "a");
+    assert!(expected.contains("notes/*.md"), "{ty}: the inlined use suggests the glob: {expected}");
+    assert_eq!(suggestion(&shared, "a"), expected, "{ty}: first use");
+    assert_eq!(suggestion(&shared, "b"), expected, "{ty}: second use");
+}
+
+macro_rules! matched_file_types_are_shared {
+    ($($name:ident: $ty:literal, $value:expr, [$($step:expr),*];)+) => {$(
+        #[test]
+        fn $name() {
+            assert_a_matched_file_type_is_shared_like_a_plain_one($ty, $value, &[$($step),*]);
+        }
+    )+};
+}
+
+matched_file_types_are_shared! {
+    a_matched_file_in_a_repeated_object_is_shared:
+        "{ path: FILE }", json!({ "path": "../a/notes/x.md" }), [PathStep::Key("path")];
+    a_matched_file_in_a_nested_list_is_shared:
+        "{ inner: { path: FILE }[] }", json!({ "inner": [{ "path": "../a/notes/x.md" }] }),
+        [PathStep::Key("inner"), PathStep::Index(0), PathStep::Key("path")];
+    a_matched_file_in_a_dictionary_is_shared:
+        "{ <pattern::^n>: FILE }", json!({ "n1": "../a/notes/x.md" }), [];
+    a_matched_file_in_a_tuple_is_shared:
+        "tuple([FILE, number])", json!(["../a/notes/x.md", 1]), [PathStep::Index(0)];
+    a_matched_file_list_in_a_union_is_shared:
+        "FILE[] | { n: number }", json!(["../a/notes/x.md"]), [PathStep::Index(0)];
+    a_matched_file_in_a_list_of_objects_is_shared:
+        "{ path: FILE }[]", json!([{ "path": "../a/notes/x.md" }]), [PathStep::Index(0), PathStep::Key("path")];
+    a_matched_file_in_a_tuple_spread_is_shared:
+        "tuple([string, ...FILE[]])", json!(["s", "../a/notes/x.md"]), [PathStep::Index(1)];
 }
 
 // ── Merges ────────────────────────────────────────────────────────────────
@@ -750,4 +925,203 @@ fn a_reserved_partial_type_is_shared_at_each_use() {
         paths.sort();
         assert_eq!(paths, [format!("/{property}/step_ms"), format!("/{property}/total_ms")], "{:#?}", report.problems);
     }
+}
+
+// ── Global catalogs and the baseline ─────────────────────────────────────
+
+/// A library whose `group` uses `entry` at two sites in one body.
+const CATALOG_TYPES: &str = "kind: schema\ntypes:\n    entry: \"{ n: string }\"\n    group: \"{ first: entry, second: entry }\"\n";
+
+/// A catalog declaring every Darkmatter global, `fm` typed by `group`.
+const CATALOG: &str = "kind: schema
+$schema:
+    fm: \"group@./types.yaml -> the frontmatter\"
+    ctx: \"{ a: string }\"
+    current: \"{ a: string }\"
+    env: object
+    err: \"{ message: string }\"
+    timing: \"{ ms: number }\"
+";
+
+impl Repo {
+    /// `catalog/catalog.yaml` beside its `types.yaml`, and a context there.
+    fn catalog(&self) -> (PathBuf, biscuit_file::FileResolutionContext) {
+        self.write("catalog/types.yaml", CATALOG_TYPES);
+        let path = self.write("catalog/catalog.yaml", CATALOG);
+        let snapshot = RequestSnapshot::new(self.root.join("catalog")).with_home(Some(self.home.clone()));
+        (path, build_resolution_context(&snapshot).expect("catalog context"))
+    }
+}
+
+/// The `fm` declaration's stored definition names, after checking the
+/// declaration's consumers: its description, member shape, and members
+/// that reference the stored `entry`.
+fn checked_fm(catalog: &GlobalCatalog) -> Vec<String> {
+    let fm = catalog.global("fm").expect("the catalog declares fm");
+    assert_eq!(fm.description(), Some("the frontmatter"));
+    let shape = fm.shape().expect("fm is an object shape");
+    assert_eq!(shape.properties.keys().collect::<Vec<_>>(), ["first", "second"]);
+    for member in ["first", "second"] {
+        let Some(PropertyDef::Single(atom)) = fm.member(member) else {
+            panic!("`{member}` is one atom");
+        };
+        let TypeExpr::Ref(key) = &atom.ty else {
+            panic!("`{member}` references the stored entry: {atom:?}");
+        };
+        let body = &fm.definitions().get(key).expect("the reference resolves in the table").body;
+        let PropertyDef::Single(PropertyAtom { ty: TypeExpr::InlineObject(entry), .. }) = body else {
+            panic!("entry is an object: {body:?}");
+        };
+        assert_eq!(entry.properties.keys().collect::<Vec<_>>(), ["n"]);
+    }
+    fm.definitions().iter().map(|(key, _)| key.name.clone()).collect()
+}
+
+/// The catalog's baseline lowered with its definitions.
+fn lowered_baseline(catalog: &GlobalCatalog) -> Value {
+    let (schema, definitions) = catalog.baseline().expect("the catalog declares fm");
+    to_json_schema_with_definitions(&schema, &definitions).expect("the baseline lowers")
+}
+
+#[test]
+fn a_disk_catalog_declaration_stores_a_repeated_type_once_like_ordinary_resolution() {
+    let repo = Repo::new();
+    let (path, context) = repo.catalog();
+    let control = resolve_yaml_schema(
+        &serde_yaml_ng::from_str("fm: group@./types.yaml").expect("declaration"),
+        &repo.root.join("catalog"),
+        &context,
+    )
+    .expect("the ordinary resolver control");
+    assert_eq!(control.definitions.len(), 1);
+
+    let catalog = GlobalCatalog::from_file(&path, DARKMATTER_GLOBALS, &context).expect("the disk catalog loads");
+    assert_eq!(checked_fm(&catalog), ["entry"]);
+    assert_eq!(catalog.global("fm").expect("fm").definitions().len(), control.definitions.len());
+
+    let lowered = lowered_baseline(&catalog);
+    assert_eq!(lowered["$defs"].as_object().expect("$defs").len(), 1, "{lowered:#}");
+    assert_eq!(reference_key(&lowered["properties"]["first"]), reference_key(&lowered["properties"]["second"]));
+}
+
+#[test]
+fn an_embedded_catalog_declaration_selects_what_the_disk_catalog_selects() {
+    let repo = Repo::new();
+    let (path, context) = repo.catalog();
+    let disk = GlobalCatalog::from_file(&path, DARKMATTER_GLOBALS, &context).expect("the disk catalog loads");
+    let embedded = GlobalCatalog::from_documents(
+        "host/catalog.yaml",
+        &[("host/catalog.yaml", CATALOG), ("host/types.yaml", CATALOG_TYPES)],
+        DARKMATTER_GLOBALS,
+    )
+    .expect("the embedded catalog loads");
+    assert_eq!(checked_fm(&embedded), ["entry"]);
+    assert_eq!(lowered_baseline(&embedded), lowered_baseline(&disk), "the same selection and bytes");
+}
+
+#[test]
+fn a_shared_catalog_baseline_merges_into_document_schemas_and_validates_as_inlined() {
+    let repo = Repo::new();
+    let (path, context) = repo.catalog();
+    let shared = DarkmatterSchemas::new(context.clone()).with_baseline_from_file(&path).expect("the catalog baseline loads");
+    let catalog = GlobalCatalog::from_file(&path, DARKMATTER_GLOBALS, &context).expect("the disk catalog loads");
+    let inlined = DarkmatterSchemas::new(context)
+        .with_baseline_json_schema(dereferenced(&lowered_baseline(&catalog)))
+        .expect("the inlined baseline loads");
+
+    // `entry` names a different body in the first document and the baseline's
+    // own body, imported from the same library, in the second.
+    let cases = [
+        (
+            "docs/different.md",
+            "---\n$schema:\n  entry: \"{ label: string(required) }\"\n  d1: entry\n  d2: entry\n---\n",
+            json!({ "label": "l" }),
+            json!({ "label": ["l"] }),
+            "/label",
+            vec![("d1", "entry"), ("d2", "entry"), ("first", "entry-2"), ("second", "entry-2")],
+        ),
+        (
+            "docs/equal.md",
+            "---\n$schema:\n  d1: entry@../catalog/types.yaml\n  d2: entry@../catalog/types.yaml\n---\n",
+            json!({ "n": "n" }),
+            json!({ "n": ["n"] }),
+            "/n",
+            vec![("d1", "entry"), ("d2", "entry"), ("first", "entry"), ("second", "entry")],
+        ),
+    ];
+    for (name, text, good, bad, bad_at, keys) in cases {
+        let document = repo.document(name, text);
+        let merged = effective(&shared, &document);
+        let control = effective(&inlined, &document);
+        let schema = &merged.json_schema;
+        let defs = schema["$defs"].as_object().expect("$defs");
+        let distinct: HashSet<&str> = keys.iter().map(|(_, key)| *key).collect();
+        assert_eq!(defs.len(), distinct.len(), "{name}: {:?}", defs.keys().collect::<Vec<_>>());
+        for (property, key) in &keys {
+            assert_eq!(&reference_key(&schema["properties"][*property]), key, "{name}: {property}");
+        }
+        // Every reference resolves: the dereferenced schema is the control's.
+        assert_eq!(dereferenced(schema)["properties"], dereferenced(&control.json_schema)["properties"], "{name}");
+
+        let valid = json!({ "first": { "n": "a" }, "second": { "n": "b" }, "d1": good, "d2": good });
+        assert!(merged.validate(&valid).valid, "{name}: {:#?}", merged.validate(&valid).problems);
+        for property in ["first", "second", "d1", "d2"] {
+            let value = if property.starts_with('d') { bad.clone() } else { json!({ "n": ["n"] }) };
+            let instance = json!({ property: value });
+            let (report, expected) = (merged.validate(&instance), control.validate(&instance));
+            let at = if property.starts_with('d') { bad_at } else { "/n" };
+            assert_eq!(
+                outcome(&report).into_iter().map(|(_, path, _)| path).collect::<Vec<_>>(),
+                [format!("/{property}{at}")],
+                "{name}: {:#?}",
+                report.problems
+            );
+            assert_eq!(outcome(&report), outcome(&expected), "{name}: {property} matches the inlined baseline");
+        }
+    }
+}
+
+#[test]
+fn a_baseline_definition_reached_only_by_overridden_properties_is_dropped_by_the_merge() {
+    let repo = Repo::new();
+    let (path, context) = repo.catalog();
+    let shared = DarkmatterSchemas::new(context).with_baseline_from_file(&path).expect("the catalog baseline loads");
+    let overriding = repo.document("docs/override.md", "---\n$schema:\n  first: string\n  second: string\n---\n");
+    let merged = effective(&shared, &overriding);
+    assert!(merged.json_schema.get("$defs").is_none(), "{:#}", merged.json_schema);
+    let keeping = repo.document("docs/keep.md", "---\n$schema:\n  first: string\n---\n");
+    let merged = effective(&shared, &keeping);
+    assert_eq!(reference_key(&merged.json_schema["properties"]["second"]), "entry");
+    assert_eq!(merged.json_schema["$defs"].as_object().map(Map::len), Some(1));
+}
+
+#[test]
+fn the_shipped_baseline_shares_its_lifecycle_types_and_validates_as_its_inlined_form() {
+    let declaration = GlobalCatalog::darkmatter().global("fm").expect("fm");
+    assert!(!declaration.definitions().is_empty(), "the shipped baseline stores its repeated types");
+    let lowered = darkmatter_base_json_schema();
+    assert!(lowered["$defs"].as_object().is_some_and(|defs| !defs.is_empty()), "{lowered:#}");
+    let inline = to_json_schema(&darkmatter_base_schema()).expect("the definition-free baseline lowers");
+    assert!(inline.get("$defs").is_none(), "the convenience form carries no definitions");
+    assert_eq!(dereferenced(&lowered)["properties"].as_object().map(Map::len), inline["properties"].as_object().map(Map::len));
+
+    let repo = Repo::new();
+    let context = || build_resolution_context(&RequestSnapshot::new(repo.root.join("docs"))).expect("context");
+    let shared = DarkmatterSchemas::new(context()).with_darkmatter_baseline_json_schema().expect("shared baseline");
+    let inlined = DarkmatterSchemas::new(context()).with_baseline(darkmatter_base_schema()).expect("inlined baseline");
+    let mut invalid = 0;
+    for frontmatter in [
+        "failed:\n  - shell: echo caught\n",
+        "composed:\n  - ensure_file: empty.txt\nfinalize:\n  - shell: echo done\n",
+        "failed: 5\n",
+        "cancelled:\n  - 5\n",
+        "finalize:\n  shell: 5\n",
+    ] {
+        let document = repo.document("docs/lifecycle.md", &format!("---\n{frontmatter}---\n"));
+        let (report, expected) = (shared.validate(&document).expect("validates"), inlined.validate(&document).expect("validates"));
+        assert_eq!(report.valid, expected.valid, "{frontmatter}");
+        assert_eq!(located(&report), located(&expected), "{frontmatter}");
+        invalid += usize::from(!report.valid);
+    }
+    assert!(invalid > 0, "an invalid lifecycle value is reported");
 }

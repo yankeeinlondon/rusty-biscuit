@@ -1,6 +1,13 @@
-//! The byte-identical golden corpus of acyclic schema lowering, frozen before
-//! the resolver learns to lower cyclic named types to `$defs`/`$ref`
-//! (`2026-10-29-recursive-schema-types`, acceptance criterion 1).
+//! The golden corpus of schema lowering: frozen inputs keep their lowered
+//! output byte for byte unless resolver code intentionally changes the
+//! representation.
+//!
+//! Acyclic output is not promised byte-stable across such a change. A cyclic
+//! named type, and a structured named type used at two or more authored
+//! sites, is stored once in `$defs` and referenced with a local `$ref` at
+//! each use, so a change in what the resolver shares moves goldens without
+//! changing what they accept. The behavior tests prove that semantic
+//! preservation; these goldens only pin the bytes.
 //!
 //! `tests/fixtures/recursive_schema_golden/manifest.yaml` lists every entry:
 //! a frozen input under `inputs/` and how it is resolved. Each entry's lowered
@@ -12,8 +19,8 @@
 //! `@darkmatter:` partials are the exception and are read live.
 //!
 //! `DARKMATTER_BLESS_RECURSIVE_GOLDEN=1` rewrites the goldens instead of
-//! comparing. That is legitimate only for a change meant to alter acyclic
-//! lowering.
+//! comparing. That is legitimate only for an intentional representation
+//! change, recorded with its cause, after the behavior tests pass.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;

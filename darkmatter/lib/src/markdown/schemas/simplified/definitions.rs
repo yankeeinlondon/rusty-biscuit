@@ -193,6 +193,28 @@ impl DefinitionTable {
         None
     }
 
+    /// Whether `key` takes part in a reference cycle: its body reaches `key`
+    /// again through the table. A shared acyclic definition never does,
+    /// whatever cyclic definitions it references.
+    pub(crate) fn is_cyclic(&self, key: &DefKey) -> bool {
+        let mut pending = Vec::new();
+        if let Some(definition) = self.entries.get(key) {
+            super::query::collect_def_refs(&definition.body, &mut pending);
+        }
+        let mut seen = std::collections::HashSet::new();
+        while let Some(next) = pending.pop() {
+            if &next == key {
+                return true;
+            }
+            if let Some(definition) = self.entries.get(&next)
+                && seen.insert(next)
+            {
+                super::query::collect_def_refs(&definition.body, &mut pending);
+            }
+        }
+        false
+    }
+
     /// Adds `body` under `key`, allocating its `$defs` key, unless `key` is
     /// already present. Returns the definition's `$defs` key either way.
     ///

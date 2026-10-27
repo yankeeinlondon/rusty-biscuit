@@ -943,13 +943,16 @@ fn darkmatter_base_json_schema_is_cached() {
 }
 
 /// The typed baseline is cached beside its lowered form: one preparation per
-/// process, and the JSON is that typed schema lowered.
+/// process, and the JSON is the shared typed schema lowered with its
+/// definitions. The definition-free form is cached too and lowers alone.
 #[test]
 fn darkmatter_base_schema_is_prepared_once_with_its_json() {
     assert!(std::ptr::eq(super::darkmatter_base_schema_ref(), super::darkmatter_base_schema_ref()));
     assert!(std::ptr::eq(super::shipped_baseline(), super::shipped_baseline()));
-    let lowered = to_json_schema(super::darkmatter_base_schema_ref()).expect("lowers");
+    let (schema, definitions) = super::darkmatter_shared_baseline();
+    let lowered = to_json_schema_with_definitions(schema, definitions).expect("lowers");
     assert_eq!(&lowered, super::darkmatter_base_json_schema_ref());
+    assert!(to_json_schema(super::darkmatter_base_schema_ref()).expect("lowers").get("$defs").is_none());
 }
 
 #[test]

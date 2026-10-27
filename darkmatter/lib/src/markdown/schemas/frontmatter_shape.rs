@@ -15,7 +15,8 @@
 //! Only literal properties are consulted; pattern-dictionary keys contribute
 //! no property definitions here.
 //!
-//! A recursive reference ([`TypeExpr::Ref`]) is followed only by the
+//! A reference to a stored definition, recursive or shared
+//! ([`TypeExpr::Ref`]), is followed only by the
 //! `_with_definitions` lookups, one definition body per path segment, so a
 //! lookup through a recursive type is as long as its path and never expands
 //! the type as a whole. Matching trigger payloads contribute through
@@ -67,6 +68,9 @@ pub(super) fn layered_property_shape(
     document: Option<&SimplifiedSchema>,
     frontmatter: &Value,
 ) -> SchemaShape {
+    // The definition-free baseline: this shape is read with the document's
+    // and payloads' tables (`EffectiveSchema::layered_definitions`), which
+    // hold none of the baseline's stored types.
     let mut shape = match darkmatter_base_schema_ref() {
         SimplifiedSchema::Single(shape) => shape.clone(),
         SimplifiedSchema::Union(_) => SchemaShape::default(),

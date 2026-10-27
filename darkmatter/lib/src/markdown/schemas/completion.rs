@@ -14,7 +14,8 @@
 //!
 //! ## Recursive references
 //!
-//! A recursive named type is a [`TypeExpr::Ref`] into a definition table.
+//! A recursive named type, or a shared acyclic one, is a [`TypeExpr::Ref`]
+//! into a definition table.
 //! Every entry point here opens a reference only where the position it answers
 //! is one, through a [`DefinitionLookup`] (the [`EffectiveSchema`] itself, or
 //! a table), so descending `tree.children[0].children[0]` opens `item` once

@@ -27,7 +27,8 @@
 //! yield `None`.
 //!
 //! An arm, a discriminant property, or its nullable wrapper may be a local
-//! `$ref` (a recursive named type lowers to `#/$defs/<key>` at each use).
+//! `$ref` (a stored named type, recursive or shared, lowers to
+//! `#/$defs/<key>` at each use).
 //! [`select_literal_discriminant_arm_in`] follows those references against the
 //! schema's root, reading the discriminants of every hop, since each hop's
 //! properties constrain the value; [`select_literal_discriminant_arm`] has no

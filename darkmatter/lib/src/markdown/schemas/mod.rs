@@ -162,28 +162,40 @@ pub use timings::{CompileCache, ValidationStage, ValidationTimings};
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 
 /// The runtime baseline, prepared from the embedded table: its typed form with
-/// every import expanded, and that form lowered to JSON Schema.
+/// every import expanded, the shared definitions its references point into,
+/// and the pair lowered to JSON Schema.
 struct ShippedBaseline {
     schema: SimplifiedSchema,
+    definitions: Arc<DefinitionTable>,
     json_schema: Arc<Value>,
 }
 
 /// Prepared and lowered once per process, on first use.
 static BASELINE: std::sync::OnceLock<ShippedBaseline> = std::sync::OnceLock::new();
 
+/// [`darkmatter_base_schema`]'s definition-free form, resolved on first use.
+static INLINE_BASELINE: std::sync::OnceLock<SimplifiedSchema> = std::sync::OnceLock::new();
+
 fn shipped_baseline() -> &'static ShippedBaseline {
     BASELINE.get_or_init(|| {
-        let schema = catalog::GlobalCatalog::darkmatter()
+        let (schema, definitions) = catalog::GlobalCatalog::darkmatter()
             .baseline()
             .expect("Darkmatter's catalog declares `fm`");
-        let json_schema = to_json_schema(&schema)
+        let json_schema = to_json_schema_with_definitions(&schema, &definitions)
             .unwrap_or_else(|error| panic!("the embedded baseline schema must lower: {error}"));
-        ShippedBaseline { schema, json_schema: Arc::new(json_schema) }
+        ShippedBaseline { schema, definitions, json_schema: Arc::new(json_schema) }
     })
 }
 
+/// The runtime baseline with the shared definitions its references point
+/// into: the form validation lowers ([`darkmatter_base_json_schema`]).
+pub(crate) fn darkmatter_shared_baseline() -> (&'static SimplifiedSchema, &'static Arc<DefinitionTable>) {
+    let baseline = shipped_baseline();
+    (&baseline.schema, &baseline.definitions)
+}
+
 fn darkmatter_base_schema_ref() -> &'static SimplifiedSchema {
-    &shipped_baseline().schema
+    INLINE_BASELINE.get_or_init(catalog::darkmatter_inline_baseline)
 }
 
 fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
@@ -196,8 +208,13 @@ fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
 /// catalog, `darkmatter/schemas/darkmatter.yaml`, compiled into the library
 /// with its partials ([`catalog::GlobalCatalog::darkmatter`]). Its imports,
 /// such as `content_policy`'s Content Policy types, resolve against the other
-/// compiled-in schema documents, never the disk, so the result carries every
-/// referenced definition inline. It is prepared at first call and cached.
+/// compiled-in schema documents, never the disk.
+///
+/// The result carries no definition table: every acyclic named type is
+/// expanded at each of its uses. The catalog declaration and the lowered
+/// baseline ([`darkmatter_base_json_schema`]) store a structured type the
+/// baseline uses at two or more sites once instead; both forms validate
+/// alike. It is prepared at first call and cached.
 ///
 /// ## Examples
 ///
@@ -218,9 +235,12 @@ pub fn darkmatter_base_schema() -> SimplifiedSchema {
 /// Returns the Darkmatter baseline frontmatter schema as a compiled Draft
 /// 2020-12 JSON Schema value.
 ///
-/// The result is [`darkmatter_base_schema`] lowered once and cached. Each
-/// call returns an independent owned value; callers that only need to read the
-/// schema can use [`darkmatter_base_json_schema_ref`] instead.
+/// The result is the baseline lowered once and cached, with each structured
+/// type it uses at two or more sites emitted once under its root `$defs`;
+/// [`darkmatter_base_schema`] is the same baseline with those types expanded,
+/// and it validates alike. Each call returns an independent owned value;
+/// callers that only need to read the schema can use
+/// [`darkmatter_base_json_schema_ref`] instead.
 ///
 /// ## Examples
 ///
@@ -415,8 +435,18 @@ impl DarkmatterSchemas {
     /// JSON Schema, or [`SchemaError::Baseline`] if the resulting JSON Schema
     /// is not a simple object schema (rooted at `"type": "object"` with only
     /// `properties` / `required`).
-    pub fn with_baseline(mut self, schema: SimplifiedSchema) -> Result<Self, SchemaError> {
-        let json = to_json_schema(&schema).map_err(|err| SchemaError::Baseline {
+    pub fn with_baseline(self, schema: SimplifiedSchema) -> Result<Self, SchemaError> {
+        self.with_baseline_and_definitions(&schema, &DefinitionTable::default())
+    }
+
+    /// [`Self::with_baseline`] for a schema whose stored named types are
+    /// references into `definitions`.
+    pub(crate) fn with_baseline_and_definitions(
+        mut self,
+        schema: &SimplifiedSchema,
+        definitions: &DefinitionTable,
+    ) -> Result<Self, SchemaError> {
+        let json = to_json_schema_with_definitions(schema, definitions).map_err(|err| SchemaError::Baseline {
             message: "baseline could not be converted to JSON Schema".into(),
             source: Some(Box::new(err)),
         })?;
@@ -445,8 +475,8 @@ impl DarkmatterSchemas {
                 &self.file_resolution_context,
             )
             .map_err(|error| SchemaError::Baseline { message: error.to_string(), source: None })?;
-            let schema = loaded.baseline().expect("Darkmatter's requirements include `fm`");
-            self.set_baseline_json(to_json_schema(&schema)?, Vec::new())?;
+            let (schema, definitions) = loaded.baseline().expect("Darkmatter's requirements include `fm`");
+            self.set_baseline_json(to_json_schema_with_definitions(&schema, &definitions)?, Vec::new())?;
             return Ok(self);
         }
         // Drive resolution through the file-reference path so YAML/JSON

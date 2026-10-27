@@ -355,7 +355,13 @@ sequence_export_tests! {
 /// The resolved size limit for Claudine's embedded trigger payloads: the
 /// compact `serde_json` text of the resolved JSON Schema, `$defs` included,
 /// as `recursive_schema_frozen_fixture.rs` measures it in Darkmatter.
-const PAYLOAD_LIMIT_BYTES: usize = 2_000_000;
+///
+/// A fixed constant, never derived at test time: the largest measured case
+/// (`both`, 768,262 bytes) plus 25% headroom, rounded up to the next
+/// 100,000 bytes. Re-measure and lower it deliberately when the shipped
+/// schemas shrink; a case that outgrows it is a regression to explain, not
+/// a reason to raise it.
+const PAYLOAD_LIMIT_BYTES: usize = 1_000_000;
 
 /// The recursive event families, each stored once as a definition.
 const EVENT_FAMILIES: &[(&str, &str)] = &[
@@ -404,12 +410,13 @@ fn embedded_definition(effective: &EffectiveSchema, file: &str, name: &str) -> b
     effective.definition(&DefKey::new(namespace, name)).is_some()
 }
 
-/// The recursive families are stored once as definitions and the container
-/// types reach them at every depth, so each trigger's resolved schema stays
-/// under the limit. The measured schema is the effective one, which also
-/// holds the built-in baseline, so the payload alone is smaller still.
+/// The recursive families and every repeated structured helper are stored
+/// once as definitions and referenced at each use, so each trigger's
+/// resolved schema stays within [`PAYLOAD_LIMIT_BYTES`]. The measured schema
+/// is the effective one, which also holds the built-in baseline, so the
+/// payload alone is smaller still.
 #[test]
-fn embedded_trigger_payloads_resolve_within_two_megabytes() {
+fn embedded_trigger_payloads_resolve_within_one_megabyte() {
     let bare = Bare::new();
     let schemas = bare.schemas(claudine_schema_bundle());
     let mut report = Vec::new();
