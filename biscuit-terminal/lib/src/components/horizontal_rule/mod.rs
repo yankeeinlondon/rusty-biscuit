@@ -1,13 +1,15 @@
 //! Horizontal rule component split into focused submodules.
 //!
 //! - [`style`] — `RuleStyle`, `RuleAlignment`, `RuleWeight`
-//! - [`browser`] — `impl BrowserRenderable for HorizontalRule`,
-//!   the `MarginToCss` extension trait, and CSS color parsing helpers
+//! - [`color`] — terminal color parsing helpers (CSS basic-16 names, `#rrggbb`)
+//! - [`browser`] — `impl BrowserRenderable for HorizontalRule`, delegating to
+//!   the render tree
 //!
 //! Public items are re-exported here so external consumers can import them
 //! from `biscuit_terminal::components::horizontal_rule` directly.
 
 mod browser;
+mod color;
 pub mod style;
 
 pub use style::{RuleAlignment, RuleStyle, RuleWeight};
@@ -24,7 +26,7 @@ use crate::terminal::Terminal;
 use crate::utils::color::TermColor;
 use crate::utils::layout::{Layout, LayoutTerminalExt};
 
-use self::browser::{parse_basic_color, parse_hex_color};
+use self::color::{parse_basic_color, parse_hex_color};
 use renderable::tree::{
     HrAlignment, HrKind, HrWeight, RenderNode, ThematicBreakAttrs, TreeRenderable,
 };
@@ -232,7 +234,10 @@ impl TreeRenderable for HorizontalRule {
     /// The structural `ThematicBreak` semantics (spec C9) are preserved on
     /// every target. The terminal renderer reconstructs a `HorizontalRule`
     /// from the typed attrs, so the bespoke glyph/image core survives a
-    /// tree round-trip; Browser lowers to `<hr>` and Markdown to `---`.
+    /// tree round-trip. Browser output is the `ThematicBreak` rendering — an
+    /// inline SVG under the default rich graphics mode, a plain `<hr>` with
+    /// `data-hr-*` attributes under `GraphicsMode::Off` — and Markdown lowers
+    /// to `---`.
     ///
     /// [`NodeKind::ThematicBreak`]: renderable::tree::NodeKind::ThematicBreak
     fn render_tree(&self) -> RenderNode {
@@ -735,8 +740,10 @@ impl HorizontalRule {
 
         tracing::warn!(
             color = %raw,
-            "unknown horizontal rule color string; browser rendering will pass \
-             the value through to the SVG, but the terminal output is uncolored. \
+            "unknown horizontal rule color string; terminal output is uncolored. \
+             Browser rendering validates color values independently and \
+             substitutes a safe fallback; browser-valid colors the terminal does \
+             not recognize (for example `tomato`) still render in the browser. \
              Recognized: CSS basic-16 names, `gray`/`grey`, and `#rrggbb` hex."
         );
         content
@@ -837,7 +844,7 @@ pub(crate) fn rasterize_svg_to_png(svg_data: &[u8]) -> Result<Vec<u8>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::browser::{MarginToCss, nearest_basic_color, parse_basic_color, parse_hex_color};
+    use super::color::{nearest_basic_color, parse_basic_color, parse_hex_color};
     use super::*;
     use crate::components::renderable::BrowserRenderable;
     use crate::discovery::detection::ColorDepth;
@@ -1447,10 +1454,11 @@ mod tests {
     fn test_render_to_browser() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
+            .alignment(RuleAlignment::Centered)
             .weight(RuleWeight::Medium)
             .width("50%")
             .color("blue");
-        let result = hr.render_browser_svg();
+        let result = hr.render_html_fragment().render();
         // Outer <svg> width remains a concrete value (not var-driven).
         assert!(result.contains(r#"width="50%""#));
         // A4: stroke and stroke-width flow through `var(--hr-*, fallback)`.
@@ -1471,7 +1479,7 @@ mod tests {
     #[test]
     fn test_render_to_browser_default() {
         let hr = HorizontalRule::new();
-        let result = hr.render_browser_svg();
+        let result = hr.render_html_fragment().render();
         assert!(result.contains(r#"width="100%""#));
         assert!(
             result.contains(r#"stroke="var(--hr-color, currentColor)""#),
@@ -1924,7 +1932,7 @@ mod tests {
                     .weight(weight.clone())
                     .width("100%");
 
-                let result = hr.render_browser_svg();
+                let result = hr.render_html_fragment().render();
                 assert_snapshot!(format!("browser_{}_{}", style_name, weight_name), result);
             }
         }
@@ -2017,7 +2025,7 @@ mod tests {
             .color("red");
 
         let terminal_result1 = hr1.render(&term);
-        let browser_result1 = hr1.render_browser_svg();
+        let browser_result1 = hr1.render_html_fragment().render();
 
         assert_snapshot!("terminal_custom_attributes", terminal_result1);
         assert_snapshot!("browser_custom_attributes", browser_result1);
@@ -2031,7 +2039,7 @@ mod tests {
             .color("#00ff00");
 
         let terminal_result2 = hr2.render(&term);
-        let browser_result2 = hr2.render_browser_svg();
+        let browser_result2 = hr2.render_html_fragment().render();
 
         assert_snapshot!("terminal_custom_attributes_2", terminal_result2);
         assert_snapshot!("browser_custom_attributes_2", browser_result2);
@@ -2531,7 +2539,7 @@ mod tests {
     #[test]
     fn test_render_to_browser_contains_css_variables() {
         let hr = HorizontalRule::new();
-        let result = hr.render_browser_svg();
+        let result = hr.render_html_fragment().render();
         assert!(
             result.contains("--hr-weight:"),
             "expected --hr-weight declaration: {result}"
@@ -2570,7 +2578,7 @@ mod tests {
         ];
         for style in styles {
             let hr = HorizontalRule::new().style(style.clone());
-            let result = hr.render_browser_svg();
+            let result = hr.render_html_fragment().render();
             assert!(
                 result.contains("var(--hr-color,"),
                 "style {style:?} missing var(--hr-color, …): {result}"
@@ -2604,7 +2612,7 @@ mod tests {
             (RuleWeight::Thick, "8"),
         ] {
             let hr = HorizontalRule::new().weight(weight.clone());
-            let result = hr.render_browser_svg();
+            let result = hr.render_html_fragment().render();
             let declared = format!("--hr-weight: {expected_px}");
             let fallback = format!("var(--hr-weight, {expected_px})");
             assert!(
@@ -2623,7 +2631,7 @@ mod tests {
     #[test]
     fn test_render_to_browser_fallbacks_work() {
         let hr = HorizontalRule::new().weight(RuleWeight::Medium);
-        let result = hr.render_browser_svg();
+        let result = hr.render_html_fragment().render();
         assert!(
             result.contains("var(--hr-weight, 4)"),
             "default medium weight must embed var(--hr-weight, 4): {result}"
@@ -2638,7 +2646,7 @@ mod tests {
     #[test]
     fn test_render_to_browser_color_declaration_reflects_component_color() {
         let hr = HorizontalRule::new().color("#ff00aa");
-        let result = hr.render_browser_svg();
+        let result = hr.render_html_fragment().render();
         assert!(
             result.contains("--hr-color: #ff00aa"),
             "expected --hr-color: #ff00aa: {result}"
@@ -2652,8 +2660,11 @@ mod tests {
     /// `--hr-width` is set from the component's `.width(..)` when provided.
     #[test]
     fn test_render_to_browser_width_declaration_reflects_component_width() {
-        let hr = HorizontalRule::new().width("60ch");
-        let result = hr.render_browser_svg();
+        let hr = HorizontalRule::new()
+            .alignment(RuleAlignment::Left)
+            .width("60ch");
+        let result = hr.render_html_fragment().render();
+        assert!(result.contains(r#"width="60ch""#), "expected width=\"60ch\": {result}");
         assert!(
             result.contains("--hr-width: 60ch"),
             "expected --hr-width: 60ch: {result}"
@@ -2714,33 +2725,8 @@ mod tests {
         );
     }
 
-    // ================================================================
-    // Phase 4: D4 — margin CSS lowering for the browser target
-    // ================================================================
-
-    /// A percent margin lowers to a `%` CSS value.
-    #[test]
-    fn test_margin_percent_emits_percent() {
-        let margin = TargetValue::universal(Length::percent(2.0).unwrap());
-        assert_eq!(margin.to_css_value("0"), "2%");
-    }
-
-    /// A zero margin lowers to the supplied default.
-    #[test]
-    fn test_margin_zero_emits_default() {
-        let margin: TargetValue<Length> = TargetValue::universal(Length::Zero);
-        assert_eq!(margin.to_css_value("0"), "0");
-    }
-
-    /// A cell margin lowers to a `ch` CSS value.
-    #[test]
-    fn test_margin_chars_emits_ch() {
-        let margin = TargetValue::universal(Length::ch(3));
-        assert_eq!(margin.to_css_value("0"), "3ch");
-    }
-
-    /// A percent margin composed into a full browser render emits legal
-    /// CSS inside the outer `<svg>`'s inline style.
+    /// A percent margin composed into a full browser render lands on the
+    /// tree renderer's outer wrapper as legal CSS.
     #[test]
     fn test_render_to_browser_percent_margin() {
         use crate::utils::layout::Layout;
@@ -2752,10 +2738,10 @@ mod tests {
             ..Layout::default()
         };
         let hr = HorizontalRule::new().with_layout(layout);
-        let result = hr.render_browser_svg();
+        let result = hr.render_html_fragment().render();
         assert!(
-            result.contains("margin: 2% auto"),
-            "expected 2% margin in browser output: {result}"
+            result.contains("margin-top:2%"),
+            "expected 2% top margin on the outer wrapper: {result}"
         );
     }
 
@@ -2764,7 +2750,7 @@ mod tests {
     // ================================================================
 
     /// When `apply_terminal_color` sees an unrecognized color name, the warn
-    /// log must explain that the browser SVG still receives the raw value.
+    /// log must explain that the browser validates the color independently.
     #[test]
     #[tracing_test::traced_test]
     fn test_apply_terminal_color_unknown_name_warns_with_asymmetry_note() {
@@ -2772,7 +2758,7 @@ mod tests {
         let term = text_terminal_with_width_and_color_depth(40, ColorDepth::TrueColor);
         let _ = hr.apply_terminal_color("body".to_string(), &term);
         assert!(
-            logs_contain("browser rendering will pass"),
+            logs_contain("Browser rendering validates color values independently"),
             "warn log must mention the browser-vs-terminal asymmetry"
         );
     }
@@ -2792,6 +2778,27 @@ mod tests {
         assert_eq!(parse_basic_color("Gray"), Some(BasicColor::BrightBlack));
         assert_eq!(parse_basic_color("grey"), Some(BasicColor::BrightBlack));
         assert_eq!(parse_basic_color("unknown-color-xyz"), None);
+    }
+
+    #[test]
+    #[serial_test::serial(locale_env)]
+    fn render_text_tier_matches_render_when_image_unavailable() {
+        let _guard = ScopedLcAll::force_utf8();
+        let hr = HorizontalRule::new()
+            .style(RuleStyle::Waves)
+            .alignment(RuleAlignment::Centered)
+            .width("50%");
+        let term = text_terminal_with_width(80);
+
+        // text_terminal disables the image tier, so render() falls through
+        // to the text tier automatically.
+        let via_render = hr.render(&term);
+        let via_text_tier = hr.render_text_tier(&term);
+
+        assert_eq!(
+            via_render, via_text_tier,
+            "render_text_tier must match render() when image tier is unavailable"
+        );
     }
 
     #[cfg(feature = "serde")]
@@ -2851,188 +2858,6 @@ mod tests {
             }
             let json = serde_json::to_string(&RuleWeight::Thick).unwrap();
             assert_eq!(json, "\"thick\"");
-        }
-
-        // ================================================================
-        // Phase 2 parity: renderable::tree::graphics::horizontal_rule_svg
-        // must match HorizontalRule::render_browser_svg byte-for-byte.
-        // ================================================================
-
-        #[test]
-        fn parity_default_dashes() {
-            let rule = HorizontalRule::new();
-            let expected = rule.render_browser_svg();
-            let actual = renderable::tree::graphics::horizontal_rule_svg(
-                None, None, None, None, "0", "0",
-            );
-            assert_eq!(
-                actual, expected,
-                "default dashed SVG must match between renderable and biscuit-terminal"
-            );
-        }
-
-        #[test]
-        fn parity_waves_thick_blue() {
-            let rule = HorizontalRule::new()
-                .style(RuleStyle::Waves)
-                .weight(RuleWeight::Thick)
-                .color("blue");
-            let expected = rule.render_browser_svg();
-            let actual = renderable::tree::graphics::horizontal_rule_svg(
-                Some("waves"),
-                Some("thick"),
-                None,
-                Some("blue"),
-                "0",
-                "0",
-            );
-            assert_eq!(
-                actual, expected,
-                "waves+thick+blue SVG must match between renderable and biscuit-terminal"
-            );
-        }
-
-        #[test]
-        fn parity_dots_thin_custom_width() {
-            let rule = HorizontalRule::new()
-                .style(RuleStyle::Dots)
-                .weight(RuleWeight::Thin)
-                .width("50%");
-            let expected = rule.render_browser_svg();
-            let actual = renderable::tree::graphics::horizontal_rule_svg(
-                Some("dots"),
-                Some("thin"),
-                Some("50%"),
-                None,
-                "0",
-                "0",
-            );
-            assert_eq!(
-                actual, expected,
-                "dots+thin+50% SVG must match between renderable and biscuit-terminal"
-            );
-        }
-
-        #[test]
-        fn parity_line_star() {
-            let rule = HorizontalRule::new().style(RuleStyle::LineStar);
-            let expected = rule.render_browser_svg();
-            let actual = renderable::tree::graphics::horizontal_rule_svg(
-                Some("line-star"),
-                None,
-                None,
-                None,
-                "0",
-                "0",
-            );
-            assert_eq!(
-                actual, expected,
-                "line-star SVG must match between renderable and biscuit-terminal"
-            );
-        }
-
-        #[test]
-        fn parity_line_circle() {
-            let rule = HorizontalRule::new().style(RuleStyle::LineCircle);
-            let expected = rule.render_browser_svg();
-            let actual = renderable::tree::graphics::horizontal_rule_svg(
-                Some("line-circle"),
-                None,
-                None,
-                None,
-                "0",
-                "0",
-            );
-            assert_eq!(
-                actual, expected,
-                "line-circle SVG must match between renderable and biscuit-terminal"
-            );
-        }
-
-        #[test]
-        fn parity_inset_line() {
-            let rule = HorizontalRule::new().style(RuleStyle::InsetLine);
-            let expected = rule.render_browser_svg();
-            let actual = renderable::tree::graphics::horizontal_rule_svg(
-                Some("inset-line"),
-                None,
-                None,
-                None,
-                "0",
-                "0",
-            );
-            assert_eq!(
-                actual, expected,
-                "inset-line SVG must match between renderable and biscuit-terminal"
-            );
-        }
-
-        #[test]
-        fn parity_curtain_rod() {
-            let rule = HorizontalRule::new().style(RuleStyle::CurtainRod);
-            let expected = rule.render_browser_svg();
-            let actual = renderable::tree::graphics::horizontal_rule_svg(
-                Some("curtain-rod"),
-                None,
-                None,
-                None,
-                "0",
-                "0",
-            );
-            assert_eq!(
-                actual, expected,
-                "curtain-rod SVG must match between renderable and biscuit-terminal"
-            );
-        }
-
-        #[test]
-        fn parity_with_custom_margins() {
-            let rule = HorizontalRule::new()
-                .with_layout(crate::utils::layout::Layout {
-                    margin: crate::utils::layout::Edges {
-                        top: renderable::layout::TargetValue::universal(
-                            renderable::layout::Length::ch(2),
-                        ),
-                        right: renderable::layout::TargetValue::universal(
-                            renderable::layout::Length::Zero,
-                        ),
-                        bottom: renderable::layout::TargetValue::universal(
-                            renderable::layout::Length::ch(1),
-                        ),
-                        left: renderable::layout::TargetValue::universal(
-                            renderable::layout::Length::Zero,
-                        ),
-                    },
-                    ..crate::utils::layout::Layout::default()
-                });
-            let expected = rule.render_browser_svg();
-            let actual = renderable::tree::graphics::horizontal_rule_svg(
-                None, None, None, None, "2ch", "1ch",
-            );
-            assert_eq!(
-                actual, expected,
-                "SVG with custom margins must match between renderable and biscuit-terminal"
-            );
-        }
-
-        #[test]
-        fn render_text_tier_matches_render_when_image_unavailable() {
-            let _guard = ScopedLcAll::force_utf8();
-            let hr = HorizontalRule::new()
-                .style(RuleStyle::Waves)
-                .alignment(RuleAlignment::Centered)
-                .width("50%");
-            let term = text_terminal_with_width(80);
-
-            // text_terminal disables the image tier, so render() falls through
-            // to the text tier automatically.
-            let via_render = hr.render(&term);
-            let via_text_tier = hr.render_text_tier(&term);
-
-            assert_eq!(
-                via_render, via_text_tier,
-                "render_text_tier must match render() when image tier is unavailable"
-            );
         }
     }
 }
