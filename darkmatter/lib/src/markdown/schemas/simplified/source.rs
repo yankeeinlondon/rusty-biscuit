@@ -23,9 +23,9 @@ use crate::markdown::schemas::errors::SchemaError;
 use super::grammar;
 use super::yaml_scalar::{self, DecodedScalar};
 use super::{
-    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaShape,
-    SimplifiedSchema, SimplifiedType, TypeExpr, parse_property_definition, parse_schema_declaration,
-    parse_yaml_schema,
+    Constraint, DefinitionFailure, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration,
+    SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr, parse_property_definition_located,
+    parse_schema_declaration, parse_schema_declaration_located, parse_yaml_schema,
 };
 
 /// One segment in a structural path through a schema declaration.
@@ -408,18 +408,23 @@ pub struct SourceAware<T> {
 ///
 /// ## Errors
 ///
-/// A grammar error from the semantic parser, or the projection error when the
-/// source is outside the strict presentation grammar or does not decode to
-/// `value`.
+/// A semantic failure returns the source-free parser's error, its path from
+/// this definition, and whatever authored ranges can be projected for the
+/// rejected node (see [`LocatedDefinitionFailure`]). When the semantic parse
+/// succeeds but the source is outside the strict presentation grammar or does
+/// not decode to `value`, the projection error is returned at the root path
+/// with no ranges.
 pub fn parse_property_definition_with_source(
     property: &str,
     value: &YamlValue,
     yaml_source: &str,
     source_offset: usize,
-) -> Result<SourceAware<PropertyDef>, SchemaError> {
-    let parsed = parse_property_definition(property, value)?;
-    let located = locate_yaml_value(yaml_source)?;
-    verify_located(&located, value)?;
+) -> Result<SourceAware<PropertyDef>, LocatedDefinitionFailure> {
+    let parsed = parse_property_definition_located(property, value).map_err(|failure| {
+        locate_definition_failure(failure, value, yaml_source, source_offset)
+    })?;
+    let located = locate_yaml_value(yaml_source).map_err(unlocated_failure)?;
+    verify_located(&located, value).map_err(unlocated_failure)?;
     let value = parsed;
     let mut source_map = SchemaSourceMap::default();
     project_property_source(
@@ -428,20 +433,28 @@ pub fn parse_property_definition_with_source(
         &SchemaSourcePath::root(),
         source_offset,
         &mut source_map,
-    )?;
+    )
+    .map_err(unlocated_failure)?;
     Ok(SourceAware { value, source_map })
 }
 
 /// Parses one complete schema declaration and projects its structure into
 /// authored source byte ranges without resolving references.
+///
+/// ## Errors
+///
+/// As [`parse_property_definition_with_source`], with failure paths starting
+/// at the declaration.
 pub fn parse_schema_declaration_with_source(
     value: &YamlValue,
     yaml_source: &str,
     source_offset: usize,
-) -> Result<SourceAware<SchemaDeclaration>, SchemaError> {
-    let parsed = parse_schema_declaration(value)?;
-    let located = locate_yaml_value(yaml_source)?;
-    verify_located(&located, value)?;
+) -> Result<SourceAware<SchemaDeclaration>, LocatedDefinitionFailure> {
+    let parsed = parse_schema_declaration_located(value).map_err(|failure| {
+        locate_definition_failure(failure, value, yaml_source, source_offset)
+    })?;
+    let located = locate_yaml_value(yaml_source).map_err(unlocated_failure)?;
+    verify_located(&located, value).map_err(unlocated_failure)?;
     let value = parsed;
     let mut source_map = SchemaSourceMap::default();
     let root = SchemaSourcePath::root();
@@ -458,13 +471,176 @@ pub fn parse_schema_declaration_with_source(
                 SchemaSpanKind::FileReference,
                 source_offset,
                 &mut source_map,
-            )?;
+            )
+            .map_err(unlocated_failure)?;
         }
         SchemaDeclaration::Schema(schema) => {
-            project_schema_source(schema, &located, source_offset, &mut source_map)?;
+            project_schema_source(schema, &located, source_offset, &mut source_map)
+                .map_err(unlocated_failure)?;
         }
     }
     Ok(SourceAware { value, source_map })
+}
+
+/// Finds the first definition failure in a standalone schema document and
+/// locates it in `source`.
+///
+/// Recognition and number admission are the standalone classifier's own
+/// ([`parse_standalone_schema_document`](super::parse_standalone_schema_document)),
+/// and the payload is parsed by the same shared parser, so the failure is the
+/// semantic error that parser reports first. Its path starts at the envelope:
+/// `types` for a tagged document, `$schema` for a pure one (including root-union
+/// mapping arms, by index). Ranges are byte offsets into `source`.
+///
+/// ## Returns
+///
+/// `None` for a valid payload, an unrecognized document, invalid YAML, and
+/// every outer envelope or declaration-shape failure (a global catalog, a
+/// malformed envelope, a payload or root-union arm of the wrong type, an
+/// invalid whole-file reference), all of which the classifier reports. A
+/// recognized definition failure is returned even when neither range can be
+/// projected.
+///
+/// ## Notes
+///
+/// Passive: parses `source` once, parses the payload once, and locates the
+/// authored tree at most once; it reads no files, resolves no imports, and
+/// evaluates nothing.
+pub fn locate_standalone_definition_failure(source: &str) -> Option<LocatedDefinitionFailure> {
+    let recognized = super::standalone::recognize_standalone(source).ok()??;
+    let payload = recognized.payload();
+    let failure = parse_schema_declaration_located(payload).err()?;
+    // A failure on no property is the declaration's own shape, not a definition.
+    if !failure
+        .path
+        .segments()
+        .iter()
+        .any(|segment| matches!(segment, SchemaSourcePathSegment::Property(_)))
+    {
+        return None;
+    }
+    let payload_key = recognized.payload_key();
+    let located = locate_yaml_value(source).ok();
+    let located_payload = located.as_ref().and_then(|located| match &located.kind {
+        LocatedKind::Mapping(pairs) => pairs
+            .iter()
+            .find(|pair| pair.key == payload_key)
+            .map(|pair| &pair.value),
+        _ => None,
+    });
+    Some(project_definition_failure(
+        failure,
+        located_payload.map(|located| (located, payload)),
+        &SchemaSourcePath::root().property(payload_key),
+        0,
+    ))
+}
+
+/// A projection error after a successful semantic parse: nothing was
+/// rejected, so there is no node to locate.
+fn unlocated_failure(error: SchemaError) -> LocatedDefinitionFailure {
+    LocatedDefinitionFailure {
+        path: SchemaSourcePath::root(),
+        error: Box::new(error),
+        authored_span: None,
+        value_span: None,
+    }
+}
+
+/// Locates `failure`, whose path is relative to `value`, in `yaml_source`
+/// (the authored text of `value`). An unlocatable source keeps the semantic
+/// error with no ranges.
+fn locate_definition_failure(
+    failure: DefinitionFailure,
+    value: &YamlValue,
+    yaml_source: &str,
+    source_offset: usize,
+) -> LocatedDefinitionFailure {
+    let located = locate_yaml_value(yaml_source).ok();
+    project_definition_failure(
+        failure,
+        located.as_ref().map(|located| (located, value)),
+        &SchemaSourcePath::root(),
+        source_offset,
+    )
+}
+
+/// Projects `failure` through `root`, the located tree paired with the YAML
+/// value the semantic parser read, and prefixes its path with `prefix`.
+///
+/// Every step along the path must agree structurally with the parsed value,
+/// and a token is projected only through a scalar whose decoded text equals
+/// the string the parser rejected; anything less leaves the range `None`
+/// rather than pointing at another node.
+fn project_definition_failure(
+    failure: DefinitionFailure,
+    root: Option<(&LocatedValue, &YamlValue)>,
+    prefix: &SchemaSourcePath,
+    source_offset: usize,
+) -> LocatedDefinitionFailure {
+    let rejected = root.and_then(|(located, value)| follow_path(located, value, &failure.path));
+    let value_span = rejected
+        .filter(|(located, value)| verify_located(located, value).is_ok())
+        .map(|(located, _)| offset_span(&located.span, source_offset));
+    let authored_span = match (&*failure.error, rejected) {
+        (
+            SchemaError::Grammar { span, .. },
+            Some((
+                LocatedValue {
+                    kind: LocatedKind::Scalar(scalar),
+                    ..
+                },
+                YamlValue::String(text),
+            )),
+        ) if !span.is_empty() && scalar.decoded() == text => scalar
+            .project(span.clone())
+            .filter(|projected| !projected.is_empty())
+            .map(|projected| offset_span(&projected, source_offset)),
+        _ => None,
+    };
+    LocatedDefinitionFailure {
+        path: prefix.join(&failure.path),
+        error: failure.error,
+        authored_span,
+        value_span,
+    }
+}
+
+/// The located node and parsed value `path` addresses, following both trees
+/// in lockstep. `None` as soon as they disagree in shape, size, or key.
+fn follow_path<'a>(
+    mut located: &'a LocatedValue,
+    mut value: &'a YamlValue,
+    path: &SchemaSourcePath,
+) -> Option<(&'a LocatedValue, &'a YamlValue)> {
+    for segment in path.segments() {
+        match (segment, &located.kind, value) {
+            (
+                SchemaSourcePathSegment::Property(key),
+                LocatedKind::Mapping(pairs),
+                YamlValue::Mapping(map),
+            ) if pairs.len() == map.len() => {
+                let (index, (_, child)) = map
+                    .iter()
+                    .enumerate()
+                    .find(|(_, (candidate, _))| candidate.as_str() == Some(key.as_str()))?;
+                let pair = &pairs[index];
+                if pair.key != *key {
+                    return None;
+                }
+                (located, value) = (&pair.value, child);
+            }
+            (
+                SchemaSourcePathSegment::UnionArm(index),
+                LocatedKind::Sequence(items),
+                YamlValue::Sequence(values),
+            ) if items.len() == values.len() => {
+                (located, value) = (items.get(*index)?, values.get(*index)?);
+            }
+            _ => return None,
+        }
+    }
+    Some((located, value))
 }
 
 pub(super) fn parse_standalone_schema_payload_with_source(

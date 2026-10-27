@@ -385,6 +385,72 @@ fn option_and_null_default_errors_are_ranged_on_the_offending_token() {
     fixture.shutdown();
 }
 
+/// A named type declared as bare `alphanumeric` takes part in an options
+/// conflict as the empty set. It authors no option token, so its related
+/// location is the type's definition.
+#[test]
+fn a_bare_alphanumeric_conflict_participant_relates_its_definition() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = start(&workspace);
+    let text = "kind: schema\ntypes:\n  code: alphanumeric(min(1))\n  id: code(allow-dashes)\n";
+    let buffer = Buffer::open(&fixture, &workspace, "bare.yaml", "kind: schema\ntypes: {}\n", text);
+    let diagnostics = fixture.wait_for_diagnostics(&buffer.uri);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    let related: Vec<(Value, &str)> = diagnostics[0]["relatedInformation"]
+        .as_array()
+        .expect("related locations")
+        .iter()
+        .map(|related| (related["location"].clone(), related["message"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        related,
+        vec![
+            (
+                json!({ "uri": buffer.uri, "range": buffer.range_of("alphanumeric(min(1))", 0) }),
+                "`alphanumeric` is declared here",
+            ),
+            (
+                json!({ "uri": buffer.uri, "range": buffer.range_of("allow-dashes", 0) }),
+                "`alphanumeric(allow-dashes)` is declared here",
+            ),
+        ]
+    );
+    fixture.shutdown();
+}
+
+/// A scheme conflict after an earlier successful narrowing relates the
+/// effective inherited list, worded as effective rather than authored, at the
+/// declaration that introduced it.
+#[test]
+fn a_narrowed_scheme_conflict_relates_the_effective_constraint() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = start(&workspace);
+    let text = "kind: schema\ntypes:\n  link: url(scheme(http, https))\n  narrow: link(scheme(https, ftp); scheme(ftp))\n";
+    let buffer = Buffer::open(&fixture, &workspace, "scheme.yaml", "kind: schema\ntypes: {}\n", text);
+    let diagnostics = fixture.wait_for_diagnostics(&buffer.uri);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    let related: Vec<(Value, &str)> = diagnostics[0]["relatedInformation"]
+        .as_array()
+        .expect("related locations")
+        .iter()
+        .map(|related| (related["location"].clone(), related["message"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        related,
+        vec![
+            (
+                json!({ "uri": buffer.uri, "range": buffer.range_of("scheme(http, https)", 0) }),
+                "`scheme(https)` is the effective constraint from this declaration",
+            ),
+            (
+                json!({ "uri": buffer.uri, "range": buffer.range_of("scheme(ftp)", 0) }),
+                "`scheme(ftp)` is the effective constraint from this declaration",
+            ),
+        ]
+    );
+    fixture.shutdown();
+}
+
 /// A use site whose options differ from its named definition's is a schema
 /// diagnostic on the reference, relating the definition's option group and
 /// the use site's options.
@@ -414,6 +480,20 @@ fn an_options_conflict_relates_the_definition_and_the_use_site() {
         vec![
             json!({ "uri": buffer.uri, "range": buffer.range_of("allow-dashes", 0) }),
             json!({ "uri": buffer.uri, "range": buffer.range_of("allow-periods", 0) }),
+        ]
+    );
+
+    let messages: Vec<&str> = diagnostic["relatedInformation"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|related| related["message"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        messages,
+        [
+            "`alphanumeric(allow-dashes)` is declared here",
+            "`alphanumeric(allow-periods)` is declared here",
         ]
     );
 

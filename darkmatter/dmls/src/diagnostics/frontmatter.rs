@@ -17,9 +17,10 @@ use darkmatter::markdown::schemas::{
     PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason,
     ValidationOptions, ValidationProblem, ValidationProblemCode, ValidationReport,
     SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
-    decode_scalar_node,
-    locate_schema_value,
-    parse_property_definition, parse_schema_declaration, parse_yaml_schema,
+    SchemaSourcePath, SchemaSourcePathSegment, locate_schema_value,
+    LocatedDefinitionFailure, locate_standalone_definition_failure, parse_property_definition,
+    parse_property_definition_with_source, parse_schema_declaration,
+    parse_schema_declaration_with_source, parse_yaml_schema,
 };
 use darkmatter::markdown::schemas::triggers::InvalidTriggerFinding;
 use darkmatter::style::{self, StyleWarningKind};
@@ -36,6 +37,7 @@ use crate::overlay::event_views::LifecycleHost;
 use crate::overlay::{
     FrontmatterAst, SchemaAuthoringState, SchemaBundle, SchemaOutcome, SuggestionState,
 };
+use crate::overlay::named_types::AuthoredDeclaration;
 use crate::overlay::schema::MetaSchemaKind;
 use crate::providers::DocumentContext;
 use crate::providers::frontmatter::ExpressionValue;
@@ -246,19 +248,10 @@ fn schema_prepare_diagnostic_with_origin(
         SchemaError::Grammar { property, .. } | SchemaError::Convert { property, .. }
             if property != "<root>" =>
         {
+            // A referenced file's failure has no range in this buffer.
             let span = referenced_origin
                 .is_none()
-                .then(|| {
-                    ast.and_then(|ast| {
-                        ast.entry_by_key_path(&["$schema", property])
-                            .or_else(|| {
-                                let mut path = vec!["$schema"];
-                                path.extend(property.split('.'));
-                                ast.entry_by_key_path(&path)
-                            })
-                    })
-                    .map(|entry| entry.value_span.clone())
-                })
+                .then(|| ast.and_then(|ast| inline_definition_span(ctx, ast, error, property)))
                 .flatten()
                 .or_else(|| fallback_span.clone());
             (code::SCHEMA_INVALID_TYPE_DEFINITION, error.to_string(), span)
@@ -293,6 +286,39 @@ fn schema_prepare_diagnostic_with_origin(
         }]);
     }
     out.push(diagnostic);
+}
+
+/// The authored range of an inline `$schema` definition failure.
+///
+/// When the source-aware declaration parser reports this same error, its
+/// located token wins, then the rejected value, then the deepest entry along
+/// its structural path. An error that parser does not report (a conversion
+/// failure) keeps the entry its property label names.
+fn inline_definition_span(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    error: &SchemaError,
+    property: &str,
+) -> Option<std::ops::Range<usize>> {
+    let fresh = ctx.overlay.is_some_and(|overlay| !overlay.stale);
+    if let Some(failure) = fresh
+        .then(|| AuthoredDeclaration::frontmatter_failure(ctx.text, ast))
+        .flatten()
+        .filter(|failure| failure.error.to_string() == error.to_string())
+    {
+        return failure
+            .authored_span
+            .clone()
+            .or_else(|| failure.value_span.clone())
+            .or_else(|| enclosing_entry_span(ctx.text, ast, &["$schema"], &failure.path));
+    }
+    ast.entry_by_key_path(&["$schema", property])
+        .or_else(|| {
+            let mut path = vec!["$schema"];
+            path.extend(property.split('.'));
+            ast.entry_by_key_path(&path)
+        })
+        .map(|entry| entry.value_span.clone())
 }
 
 /// Instance-validation problems mapped onto concrete ranges.
@@ -484,20 +510,22 @@ fn semantic_authored_diagnostics(
         let Some((kind, error)) = failures.into_iter().next() else {
             continue;
         };
-        let fallback_span = match &error {
-            SchemaError::Grammar { property, .. }
-                if property != "<root>" && property != &entry.key =>
-            {
-                nested_property_value_span(ast, ctx.text, entry, property)
-                    .unwrap_or_else(|| value_span.clone())
-            }
-            _ => value_span.clone(),
-        };
-        let span = if kind == MetaSchemaKind::TypeDefinition {
-            smallest_invalid_definition_span(ctx.text, entry).unwrap_or(fallback_span)
-        } else {
-            fallback_span
-        };
+        // Acceptance stays with the source-free parsers above; the
+        // source-aware parser only locates the failure they reported.
+        // A declaration failure on no property is the declaration's own shape,
+        // which keeps the whole value, as a standalone envelope's does.
+        let span = locate_meta_type_failure(ctx.text, value_span.clone(), kind, &entry.key)
+            .filter(|failure| failure.error.to_string() == error.to_string())
+            .filter(|failure| {
+                kind == MetaSchemaKind::TypeDefinition
+                    || failure
+                        .path
+                        .segments()
+                        .iter()
+                        .any(|segment| matches!(segment, SchemaSourcePathSegment::Property(_)))
+            })
+            .and_then(|failure| failure.authored_span.or(failure.value_span))
+            .unwrap_or_else(|| value_span.clone());
         let Some(range) = ctx.source_map.byte_range_to_lsp(span) else {
             continue;
         };
@@ -521,85 +549,28 @@ fn semantic_authored_diagnostics(
     diagnosed
 }
 
-/// The narrowest authored sub-definition of `parent` that the shared parser
-/// rejects, or `None` when the failure belongs to `parent` itself.
+/// The failure of a meta-typed frontmatter value at `value_span`, from the
+/// source-aware parser for `kind`, with ranges in `text`'s bytes; `None` when
+/// the value parses or is not YAML on its own.
 ///
-/// Candidates come from the library's structural locator
-/// ([`locate_schema_value`]), which is the same block/flow reader the
-/// source-aware parsers use. That matters because the frontmatter tree does not
-/// enumerate the interior of a sequence item, and because a delimiter search
-/// over the raw text would mistake a `[]` inside a quoted scalar for an empty
-/// union.
-fn smallest_invalid_definition_span(
+/// The value is re-parsed in place (the text before it on its first line
+/// replaced with spaces), so the parser reads the authored columns.
+fn locate_meta_type_failure(
     text: &str,
-    parent: &crate::overlay::FmEntry,
-) -> Option<std::ops::Range<usize>> {
-    let value_span = crate::overlay::frontmatter::line_aligned_span(
-        text,
-        complete_flow_value_span(text, parent.value_span.clone()),
-    );
-    // The slice is deliberately not dedented, and starts at its line: the
-    // locator reads indentation, so keeping the authored columns keeps every
-    // span it reports an exact document offset.
-    let root = locate_schema_value(text.get(value_span.clone())?, value_span.start)?;
-    let mut candidates = Vec::new();
-    collect_definition_candidates(&root, &parent.key, 0, &mut candidates);
-    candidates.sort_by_key(|(depth, _, _)| std::cmp::Reverse(*depth));
-    candidates.into_iter().find_map(|(_, key, span)| {
-        let raw = text.get(span.clone())?;
-        let raw = dedent_entry_yaml(raw, source_column(text, span.start));
-        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&raw).ok()?;
-        parse_property_definition(&key, &yaml).is_err().then_some(span)
-    })
-}
-
-/// Flattens a located value into `(depth, property_name, span)` candidates,
-/// skipping the root — a root failure is already the caller's fallback range.
-fn collect_definition_candidates(
-    node: &SchemaValueNode,
+    value_span: std::ops::Range<usize>,
+    kind: MetaSchemaKind,
     key: &str,
-    depth: usize,
-    out: &mut Vec<(usize, String, std::ops::Range<usize>)>,
-) {
-    if depth > 0 {
-        out.push((depth, key.to_string(), node.span.clone()));
-    }
-    match &node.kind {
-        SchemaValueKind::Scalar => {}
-        SchemaValueKind::Mapping(entries) => {
-            for entry in entries {
-                collect_definition_candidates(&entry.value, &entry.key, depth + 1, out);
-            }
+) -> Option<LocatedDefinitionFailure> {
+    let line_start = text[..value_span.start].rfind('\n').map_or(0, |index| index + 1);
+    let mut source = " ".repeat(value_span.start - line_start);
+    source.push_str(text.get(value_span)?);
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).ok()?;
+    match kind {
+        MetaSchemaKind::TypeDefinition => {
+            parse_property_definition_with_source(key, &yaml, &source, line_start).err()
         }
-        SchemaValueKind::Sequence(items) => {
-            for item in items {
-                collect_definition_candidates(item, key, depth + 1, out);
-            }
-        }
+        MetaSchemaKind::Schema => parse_schema_declaration_with_source(&yaml, &source, line_start).err(),
     }
-}
-
-fn nested_property_value_span(
-    ast: &FrontmatterAst,
-    text: &str,
-    parent: &crate::overlay::FmEntry,
-    property: &str,
-) -> Option<std::ops::Range<usize>> {
-    // Sequence interiors are excluded so the chosen property is the one the
-    // mapping-only arena reported before sequence descent.
-    ast.entries()
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| !ast.is_in_sequence(*index))
-        .map(|(_, entry)| entry)
-        .filter(|entry| {
-            entry.key == property
-                && entry.key_span.as_ref().is_some_and(|key| {
-                    key.start >= parent.value_span.start && key.end <= parent.value_span.end
-                })
-        })
-        .max_by_key(|entry| entry.depth)
-        .map(|entry| complete_flow_value_span(text, entry.value_span.clone()))
 }
 
 fn complete_flow_value_span(text: &str, span: std::ops::Range<usize>) -> std::ops::Range<usize> {
@@ -655,15 +626,10 @@ fn semantic_problem_range(
 ) -> Option<Range> {
     let entry = ast.entry_or_ancestor(&problem.path)?;
     let span = if kind == SemanticProblemKind::TypeDefinition {
-        let raw = ctx.text.get(entry.value_span.clone())?;
-        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(raw).ok()?;
-        match parse_property_definition(&entry.key, &yaml) {
-            Err(SchemaError::Grammar { property, .. }) if property != entry.key => ast
-                .child_entry(&entry.pointer, property.as_str())
-                .map(|nested| nested.value_span.clone())
-                .unwrap_or_else(|| entry.value_span.clone()),
-            _ => entry.value_span.clone(),
-        }
+        let value_span = complete_flow_value_span(ctx.text, entry.value_span.clone());
+        locate_meta_type_failure(ctx.text, value_span, MetaSchemaKind::TypeDefinition, &entry.key)
+            .and_then(|failure| failure.authored_span.or(failure.value_span))
+            .unwrap_or_else(|| entry.value_span.clone())
     } else {
         entry.value_span.clone()
     };
@@ -1324,133 +1290,53 @@ fn standalone_error_diagnostic(ctx: &DocumentContext, error: &SchemaError) -> Di
     )
 }
 
+/// A standalone definition the shared parser rejects, ranged at the library's
+/// located token, then the rejected value, then the enclosing definition, and
+/// only then the whole document. `None` leaves the failure to the outer
+/// declaration and document diagnostics.
 fn standalone_type_definition_diagnostic(ctx: &DocumentContext) -> Option<Diagnostic> {
-    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(ctx.text).ok()?;
-    let mapping = yaml.as_mapping()?;
-    let payload_key = standalone_payload_key(mapping);
-    let payload = mapping.get(serde_yaml_ng::Value::String(payload_key.to_string()))?;
-    let payload = payload.as_mapping()?;
-    let parsed = FrontmatterAst::parse_yaml(ctx.text);
-    let ast = parsed.ast?;
-
-    for (key, value) in payload {
-        let key = key.as_str()?;
-        let Err(error) = parse_property_definition(key, value) else {
-            continue;
-        };
-        // Key segments, not a dotted join: a property name containing `.` would
-        // otherwise miss its entry and fall through to the whole-document
-        // `dm.schema.document_malformed` fallback.
-        let entry = ast.entry_by_key_path(&[payload_key, key])?;
-        let token = grammar_token_span(ctx.text, payload_key, key, value, &error);
-        let span = token.unwrap_or_else(|| match &error {
-            SchemaError::Grammar { property, .. } if property != key => ast
-                .entry_by_key_path(&[payload_key, key, property])
-                .map(|nested| nested.value_span.clone())
-                .unwrap_or_else(|| entry.value_span.clone()),
-            _ => entry.value_span.clone(),
-        });
-        let range = ctx.source_map.byte_range_to_lsp(span)?;
-        return Some(diagnostic(
-            range,
-            DiagnosticSeverity::ERROR,
-            source::SCHEMA,
-            code::SCHEMA_INVALID_TYPE_DEFINITION,
-            error.to_string(),
-        ));
-    }
-    None
+    let failure = locate_standalone_definition_failure(ctx.text)?;
+    let span = failure
+        .authored_span
+        .clone()
+        .or_else(|| failure.value_span.clone())
+        .or_else(|| {
+            enclosing_entry_span(ctx.text, &FrontmatterAst::parse_yaml(ctx.text).ast?, &[], &failure.path)
+        })
+        .unwrap_or(0..ctx.text.len());
+    let range = ctx.source_map.byte_range_to_lsp(span).unwrap_or_else(zero_range);
+    Some(diagnostic(
+        range,
+        DiagnosticSeverity::ERROR,
+        source::SCHEMA,
+        code::SCHEMA_INVALID_TYPE_DEFINITION,
+        failure.error.to_string(),
+    ))
 }
 
-/// The authored range of the token a standalone definition's grammar error
-/// names, or `None` when it cannot be recovered exactly.
-///
-/// The grammar error's span is relative to the decoded expression, which a
-/// folded or quoted scalar does not author verbatim, so it is projected
-/// through the offending scalar's decoded map. The offending scalar is the one
-/// whose own re-parse reproduces the error; the decoded text must also equal
-/// the YAML parser's value, or the map describes other text. `None` keeps the
-/// caller's whole-value fallback, and never yields an empty range.
-fn grammar_token_span(
+/// The value span of the deepest entry `ast` holds along `path`'s leading
+/// property keys (under `prefix`), for a failure whose own node could not be
+/// located. Keys are matched as whole segments, so a key containing `.` is
+/// never split.
+fn enclosing_entry_span(
     text: &str,
-    payload_key: &str,
-    key: &str,
-    value: &serde_yaml_ng::Value,
-    error: &SchemaError,
+    ast: &FrontmatterAst,
+    prefix: &[&str],
+    path: &SchemaSourcePath,
 ) -> Option<std::ops::Range<usize>> {
-    let SchemaError::Grammar { span, message: expected, .. } = error else {
-        return None;
-    };
-    let SchemaValueKind::Mapping(definitions) = standalone_payload_node(text, payload_key)?.kind
-    else {
-        return None;
-    };
-    let definition = definitions.into_iter().find(|entry| entry.key == key)?;
-    let mut scalars = Vec::new();
-    collect_string_scalars(
-        text,
-        key,
-        source_column(text, definition.key_span.start),
-        &definition.value,
-        value,
-        &mut scalars,
+    let mut keys: Vec<&str> = prefix.to_vec();
+    keys.extend(
+        path.segments()
+            .iter()
+            .map_while(|segment| match segment {
+                SchemaSourcePathSegment::Property(key) => Some(key.as_str()),
+                SchemaSourcePathSegment::UnionArm(_) => None,
+            }),
     );
-    scalars.into_iter().find_map(|(property, holder, node, semantic)| {
-        let reproduced = matches!(
-            parse_property_definition(&property, &serde_yaml_ng::Value::String(semantic.to_string())),
-            Err(SchemaError::Grammar { span: ref candidate, ref message, .. })
-                if candidate == span && *message == *expected
-        );
-        if !reproduced {
-            return None;
-        }
-        let (scalar, _) = decode_scalar_node(text, node.span.start, holder)?;
-        if scalar.decoded() != semantic {
-            return None;
-        }
-        scalar.project(span.clone()).filter(|range| !range.is_empty())
-    })
-}
-
-/// Pairs each located string scalar under a definition with its YAML value,
-/// as `(property, holder column, node, value)`. A sequence item inherits its
-/// property; a structural disagreement between the two trees contributes
-/// nothing below it.
-fn collect_string_scalars<'a>(
-    text: &str,
-    property: &str,
-    holder: usize,
-    node: &'a SchemaValueNode,
-    value: &'a serde_yaml_ng::Value,
-    out: &mut Vec<(String, usize, &'a SchemaValueNode, &'a str)>,
-) {
-    match (&node.kind, value) {
-        (SchemaValueKind::Scalar, serde_yaml_ng::Value::String(semantic)) => {
-            out.push((property.to_string(), holder, node, semantic));
-        }
-        (SchemaValueKind::Mapping(entries), serde_yaml_ng::Value::Mapping(mapping)) => {
-            for entry in entries {
-                if let Some(child) = mapping.get(entry.key.as_str()) {
-                    let holder = source_column(text, entry.key_span.start);
-                    collect_string_scalars(text, &entry.key, holder, &entry.value, child, out);
-                }
-            }
-        }
-        (SchemaValueKind::Sequence(items), serde_yaml_ng::Value::Sequence(values))
-            if items.len() == values.len() =>
-        {
-            for (item, child) in items.iter().zip(values) {
-                // An item's continuation lines must sit deeper than its `-`,
-                // which is the last indicator before the item on its line.
-                let line_start = text[..item.span.start].rfind('\n').map_or(0, |index| index + 1);
-                let holder = text[line_start..item.span.start]
-                    .rfind('-')
-                    .unwrap_or(holder);
-                collect_string_scalars(text, property, holder, item, child, out);
-            }
-        }
-        _ => {}
-    }
+    (1..=keys.len())
+        .rev()
+        .find_map(|length| ast.entry_by_key_path(&keys[..length]))
+        .map(|entry| complete_flow_value_span(text, entry.value_span.clone()))
 }
 
 /// An invalid **outer** standalone declaration, ranged at the smallest authored
@@ -2162,12 +2048,12 @@ mod tests {
             (
                 "---\n$schema:\n  definition: type-definition\ndefinition: string(nope)\n---\n\nbody\n",
                 "dm.schema.invalid_type_definition",
-                "string(nope)",
+                "nope",
             ),
             (
                 "---\n$schema:\n  definition: type-definition\ndefinition: 'string(nope)'\n---\n\nbody\n",
                 "dm.schema.invalid_type_definition",
-                "'string(nope)'",
+                "nope",
             ),
             (
                 "---\n$schema:\n  definition: type-definition\ndefinition: 42\n---\n\nbody\n",
@@ -2224,7 +2110,7 @@ mod tests {
                 let expected = source_map
                     .byte_range_to_lsp(start..start + authored_value.len())
                     .expect("authored value range");
-                assert_eq!(specialized[0].range, expected, "smallest authored value range");
+                assert_eq!(specialized[0].range, expected, "authored token, else the rejected value");
             });
         }
 

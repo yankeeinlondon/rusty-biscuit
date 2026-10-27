@@ -34,7 +34,8 @@ pub use definitions::{
 };
 pub use cursor::{
     SchemaCursor, SchemaCursorRole, is_union_arm_path, locate_schema_declaration_cursor,
-    locate_type_definition_cursor,
+    locate_schema_declaration_cursor_in_scalar, locate_type_definition_cursor,
+    locate_type_definition_cursor_in_scalar,
 };
 pub use lint::{SuggestionLintProblem, SuggestionLintReason, lint_suggestions};
 pub use query::{
@@ -47,6 +48,7 @@ pub use source::{
     SchemaConstraintParticipant, SchemaReferenceSite, SchemaSourceId,
     SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaUnionRejection,
     SchemaValueEntry, SchemaValueKind, SchemaValueNode, SourceAware, flow_collection_end, locate_schema_value,
+    locate_standalone_definition_failure,
     mapping_separator,
     parse_property_definition_with_source, parse_schema_declaration_with_source,
     parse_yaml_schema_with_source, project_suggestion_spans,
@@ -64,7 +66,7 @@ pub use types::{
 pub use yaml_scalar::alias_search_work;
 pub use yaml_scalar::{
     DecodedScalar, decode_alias_definition, decode_partial_scalar_at, decode_scalar,
-    decode_scalar_at, decode_scalar_node,
+    decode_plain_scalar_node, decode_scalar_at, decode_scalar_node,
 };
 
 use indexmap::IndexMap;
@@ -107,12 +109,6 @@ pub fn parse_schema_declaration(value: &YamlValue) -> Result<SchemaDeclaration, 
 /// points discard `path`, so their errors are unchanged.
 #[derive(Debug)]
 pub(crate) struct DefinitionFailure {
-    // `expect` rather than `allow`: it stops compiling once the source-aware
-    // projection reads the path, so this attribute cannot outlive its reason.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "read once source-aware parsing projects failures")
-    )]
     pub(crate) path: SchemaSourcePath,
     /// Boxed to keep `Result<_, DefinitionFailure>` within clippy's
     /// `result_large_err` budget.
@@ -247,8 +243,7 @@ pub(crate) fn parse_property_definition_located(
     property: &str,
     value: &YamlValue,
 ) -> Result<PropertyDef, DefinitionFailure> {
-    parse_property_definition_at_depth(property, value, 0)
-        .map_err(DefinitionFailure::at(&SchemaSourcePath::root()))
+    parse_property_definition_at_depth(property, value, 0, &SchemaSourcePath::root())
 }
 
 /// Parses one schema object whose structural path is `path`.
@@ -282,10 +277,11 @@ fn parse_schema_shape(
         // matching. It is reserved only inside authored schema objects, so it
         // imposes no restriction on user frontmatter data.
         if key_str == "$constraints" {
-            constraints.append(
-                &mut parse_dollar_constraints(context, val)
-                    .map_err(DefinitionFailure::at(&path.property(key_str)))?,
-            );
+            constraints.append(&mut parse_dollar_constraints(
+                context,
+                val,
+                &path.property(key_str),
+            )?);
             continue;
         }
         // Pattern / dictionary keys (`<string>`, `<starting::…>`, …) collect
@@ -299,13 +295,21 @@ fn parse_schema_shape(
                     span: 0..0,
                 })
             })?;
-            let def = parse_property_definition_at_depth(key_str, val, nested_object_depth)
-                .map_err(DefinitionFailure::at(&path.property(key_str)))?;
+            let def = parse_property_definition_at_depth(
+                key_str,
+                val,
+                nested_object_depth,
+                &path.property(key_str),
+            )?;
             pattern_keys.push(types::PatternKeyDef { key: pattern, def });
             continue;
         }
-        let def = parse_property_definition_at_depth(key_str, val, nested_object_depth)
-            .map_err(DefinitionFailure::at(&path.property(key_str)))?;
+        let def = parse_property_definition_at_depth(
+            key_str,
+            val,
+            nested_object_depth,
+            &path.property(key_str),
+        )?;
         properties.insert(key_str.to_string(), def);
     }
     Ok(SchemaShape {
@@ -319,59 +323,74 @@ fn parse_schema_shape(
 /// O-C3) into canonical [`Constraint`]s — the same variants the postfix
 /// `(min-keys(1); …)` form produces. Numeric entries carry an integer argument;
 /// flag entries are written `name: true`.
+///
+/// `path` is the `$constraints` value's own path; a failing entry is
+/// attributed to `path.property(key)`.
 fn parse_dollar_constraints(
     context: &str,
     value: &YamlValue,
-) -> Result<Vec<Constraint>, SchemaError> {
-    let map = value.as_mapping().ok_or_else(|| SchemaError::Grammar {
-        property: context.to_string(),
-        message: "`$constraints` must be a mapping of constraint keywords to values".into(),
-        span: 0..0,
+    path: &SchemaSourcePath,
+) -> Result<Vec<Constraint>, DefinitionFailure> {
+    let map = value.as_mapping().ok_or_else(|| {
+        DefinitionFailure::at(path)(SchemaError::Grammar {
+            property: context.to_string(),
+            message: "`$constraints` must be a mapping of constraint keywords to values".into(),
+            span: 0..0,
+        })
     })?;
     let mut out = Vec::with_capacity(map.len());
     for (k, v) in map {
-        let key = k.as_str().ok_or_else(|| SchemaError::Grammar {
-            property: context.to_string(),
-            message: "`$constraints` keys must be strings".into(),
-            span: 0..0,
+        let key = k.as_str().ok_or_else(|| {
+            DefinitionFailure::at(path)(SchemaError::Grammar {
+                property: context.to_string(),
+                message: "`$constraints` keys must be strings".into(),
+                span: 0..0,
+            })
         })?;
-        let constraint = match key {
-            "min-keys" => Constraint::MinKeys(constraints_usize(context, key, v)?),
-            "max-keys" => Constraint::MaxKeys(constraints_usize(context, key, v)?),
-            "uncounted-keys" => Constraint::UncountedKeys(constraints_keys(context, key, v)?),
-            "min-items" => Constraint::MinItems(constraints_usize(context, key, v)?),
-            "max-items" => Constraint::MaxItems(constraints_usize(context, key, v)?),
-            "required" => {
-                constraints_flag(context, key, v)?;
-                Constraint::Required
-            }
-            "not-empty" => {
-                constraints_flag(context, key, v)?;
-                Constraint::NotEmpty
-            }
-            "unique" => {
-                constraints_flag(context, key, v)?;
-                Constraint::Unique
-            }
-            "generated" => {
-                constraints_flag(context, key, v)?;
-                Constraint::Generated
-            }
-            "integer" => {
-                constraints_flag(context, key, v)?;
-                Constraint::Integer
-            }
-            other => {
-                return Err(SchemaError::Grammar {
-                    property: context.to_string(),
-                    message: format!("unknown `$constraints` key `{other}`"),
-                    span: 0..0,
-                });
-            }
-        };
-        out.push(constraint);
+        out.push(
+            parse_dollar_constraint(context, key, v).map_err(DefinitionFailure::at(&path.property(key)))?,
+        );
     }
     Ok(out)
+}
+
+/// One `$constraints` entry.
+fn parse_dollar_constraint(context: &str, key: &str, v: &YamlValue) -> Result<Constraint, SchemaError> {
+    let constraint = match key {
+        "min-keys" => Constraint::MinKeys(constraints_usize(context, key, v)?),
+        "max-keys" => Constraint::MaxKeys(constraints_usize(context, key, v)?),
+        "uncounted-keys" => Constraint::UncountedKeys(constraints_keys(context, key, v)?),
+        "min-items" => Constraint::MinItems(constraints_usize(context, key, v)?),
+        "max-items" => Constraint::MaxItems(constraints_usize(context, key, v)?),
+        "required" => {
+            constraints_flag(context, key, v)?;
+            Constraint::Required
+        }
+        "not-empty" => {
+            constraints_flag(context, key, v)?;
+            Constraint::NotEmpty
+        }
+        "unique" => {
+            constraints_flag(context, key, v)?;
+            Constraint::Unique
+        }
+        "generated" => {
+            constraints_flag(context, key, v)?;
+            Constraint::Generated
+        }
+        "integer" => {
+            constraints_flag(context, key, v)?;
+            Constraint::Integer
+        }
+        other => {
+            return Err(SchemaError::Grammar {
+                property: context.to_string(),
+                message: format!("unknown `$constraints` key `{other}`"),
+                span: 0..0,
+            });
+        }
+    };
+    Ok(constraint)
 }
 
 fn constraints_usize(context: &str, key: &str, value: &YamlValue) -> Result<usize, SchemaError> {
@@ -417,13 +436,20 @@ fn constraints_flag(context: &str, key: &str, value: &YamlValue) -> Result<(), S
     }
 }
 
+/// Parses one property definition whose structural path is `path`.
+///
+/// A failure names the rejected node: a nested mapping's key, the YAML index
+/// of a property-level union arm (each sequence item is exactly one arm), or
+/// `path` itself for a scalar definition or a structural failure of the
+/// whole value.
 fn parse_property_definition_at_depth(
     name: &str,
     value: &YamlValue,
     nested_object_depth: usize,
-) -> Result<PropertyDef, SchemaError> {
+    path: &SchemaSourcePath,
+) -> Result<PropertyDef, DefinitionFailure> {
     match value {
-        YamlValue::String(s) => grammar::parse_type_definition(name, s),
+        YamlValue::String(s) => grammar::parse_type_definition(name, s).map_err(DefinitionFailure::at(path)),
         // The YAML null scalar (`null`, `Null`, `NULL`, `~`, or an empty
         // value) at a type position is the `null` type, as is the string
         // `"null"`. A root `$schema` or root-union arm never reaches here.
@@ -434,29 +460,31 @@ fn parse_property_definition_at_depth(
         // string type expressions all work. A mapping without an explicit
         // `type:` key is an object shape, not a future long-form descriptor
         // (spec §"Nested Object Syntax Requirement" rule 6).
-        YamlValue::Mapping(_) => {
-            Ok(PropertyDef::Single(parse_mapping_atom(
-                name,
-                value,
-                nested_object_depth,
-            )?))
-        }
+        YamlValue::Mapping(_) => Ok(PropertyDef::Single(parse_mapping_atom(
+            name,
+            value,
+            nested_object_depth,
+            path,
+        )?)),
         YamlValue::Sequence(items) => {
             let mut arms = Vec::with_capacity(items.len());
             for (idx, item) in items.iter().enumerate() {
+                let arm_path = path.union_arm(idx);
                 match item {
                     // A list option is one type; `A | B` inside a list would
                     // be a second spelling of the same union.
-                    YamlValue::String(s) => match grammar::parse_type_definition(name, s)? {
+                    YamlValue::String(s) => match grammar::parse_type_definition(name, s)
+                        .map_err(DefinitionFailure::at(&arm_path))?
+                    {
                         PropertyDef::Single(atom) => arms.push(atom),
                         PropertyDef::Union(_) => {
-                            return Err(SchemaError::Grammar {
+                            return Err(DefinitionFailure::at(&arm_path)(SchemaError::Grammar {
                                 property: name.to_string(),
                                 message: format!(
                                     "property-level union arm[{idx}] is itself a `|` union; list each option separately"
                                 ),
                                 span: 0..s.len(),
-                            });
+                            }));
                         }
                     },
                     YamlValue::Null => arms.push(PropertyAtom::bare(SimplifiedType::Null)),
@@ -469,78 +497,80 @@ fn parse_property_definition_at_depth(
                             &label,
                             item,
                             nested_object_depth,
+                            &arm_path,
                         )?);
                     }
                     other => {
-                        return Err(SchemaError::Grammar {
+                        return Err(DefinitionFailure::at(&arm_path)(SchemaError::Grammar {
                             property: name.to_string(),
                             message: format!(
                                 "property-level union arm[{idx}] must be a string type expression, a nested mapping object, or null, got {}",
                                 describe_yaml(other)
                             ),
                             span: 0..0,
-                        });
+                        }));
                     }
                 }
             }
+            // `arms[i]` came from `items[i]`, so an index into `arms` is the
+            // YAML index of the arm that introduced a cross-arm violation.
             if arms.is_empty() {
-                return Err(SchemaError::Grammar {
+                return Err(DefinitionFailure::at(path)(SchemaError::Grammar {
                     property: name.to_string(),
                     message: "property-level union must have at least one arm".into(),
                     span: 0..0,
-                });
+                }));
             }
-            if let Some(span) = grammar::second_suggestion_span(&arms) {
-                return Err(SchemaError::Grammar {
+            if let Some((idx, span)) = grammar::second_suggestion_span(&arms) {
+                return Err(DefinitionFailure::at(&path.union_arm(idx))(SchemaError::Grammar {
                     property: name.to_string(),
                     message: "a property definition may contain at most one `suggest` constraint"
                         .into(),
                     span,
-                });
+                }));
             }
-            if let Some(message) = signature::duplicate_overload(&arms, None) {
-                return Err(SchemaError::Grammar {
+            if let Some((idx, message)) = signature::duplicate_overload_arm(&arms, None) {
+                return Err(DefinitionFailure::at(&path.union_arm(idx))(SchemaError::Grammar {
                     property: name.to_string(),
                     message,
                     span: 0..0,
-                });
+                }));
             }
             Ok(PropertyDef::Union(arms))
         }
-        other => Err(SchemaError::Grammar {
+        other => Err(DefinitionFailure::at(path)(SchemaError::Grammar {
             property: name.to_string(),
             message: format!(
                 "property value must be a string type expression, a nested mapping object, null, or a sequence of expressions, got {}",
                 describe_yaml(other)
             ),
             span: 0..0,
-        }),
+        })),
     }
 }
 
+/// Parses a mapping at a property or union-arm position, whose structural
+/// path is `path`, as an inline object atom.
+///
+/// A mapping nested deeper than [`grammar::MAX_INLINE_OBJECT_DEPTH`] is
+/// rejected at `path`.
 fn parse_mapping_atom(
     context: &str,
     value: &YamlValue,
     nested_object_depth: usize,
-) -> Result<PropertyAtom, SchemaError> {
+    path: &SchemaSourcePath,
+) -> Result<PropertyAtom, DefinitionFailure> {
     if nested_object_depth >= grammar::MAX_INLINE_OBJECT_DEPTH {
-        return Err(SchemaError::Grammar {
+        return Err(DefinitionFailure::at(path)(SchemaError::Grammar {
             property: context.to_string(),
             message: format!(
                 "schema objects may not nest more than {} levels deep",
                 grammar::MAX_INLINE_OBJECT_DEPTH,
             ),
             span: 0..0,
-        });
+        }));
     }
-    // The caller attributes a nested failure to this property's definition.
-    let mut shape = parse_schema_shape(
-        context,
-        value,
-        nested_object_depth + 1,
-        &SchemaSourcePath::root(),
-    )
-    .map_err(SchemaError::from)?;
+    let mut shape = parse_schema_shape(context, value, nested_object_depth + 1, path)?;
     // A block `required` / `generated` on a property's object means the same
     // as the postfix on that property, so it moves onto the atom where every
     // presence consumer (`is_required`, phase projection, lowering) reads it.
@@ -1089,8 +1119,21 @@ mod tests {
         let value = yaml(input);
         let failure = parse_schema_declaration_located(&value).expect_err("declaration must fail");
         let plain = parse_schema_declaration(&value).expect_err("declaration must fail");
-        assert_eq!(failure.error.to_string(), plain.to_string(), "source-free error drifted");
+        assert_eq!(format!("{:?}", failure.error), format!("{plain:?}"), "source-free error drifted");
         failure
+    }
+
+    /// [`declaration_failure`] for one property definition.
+    fn property_failure(input: &str) -> DefinitionFailure {
+        let value = yaml(input);
+        let failure = parse_property_definition_located("colour", &value).expect_err("must fail");
+        let plain = parse_property_definition("colour", &value).expect_err("must fail");
+        assert_eq!(format!("{:?}", failure.error), format!("{plain:?}"), "source-free error drifted");
+        failure
+    }
+
+    fn root() -> SchemaSourcePath {
+        SchemaSourcePath::root()
     }
 
     #[test]
@@ -1111,7 +1154,11 @@ mod tests {
     #[test]
     fn definition_failure_addresses_dollar_constraints_and_structural_roots() {
         let failure = declaration_failure("name: string\n$constraints:\n  min-keys: -1\n");
-        assert_eq!(failure.path, SchemaSourcePath::root().property("$constraints"));
+        assert_eq!(failure.path, root().property("$constraints").property("min-keys"));
+        let failure = declaration_failure("name: string\n$constraints: [1]\n");
+        assert_eq!(failure.path, root().property("$constraints"));
+        let failure = declaration_failure("tags:\n  a: string\n  $constraints:\n    nope: true\n");
+        assert_eq!(failure.path, root().property("tags").property("$constraints").property("nope"));
         // A structural failure without a scalar token names the value itself.
         assert_eq!(declaration_failure("[]").path, SchemaSourcePath::root());
         assert_eq!(declaration_failure("7").path, SchemaSourcePath::root());
@@ -1119,11 +1166,76 @@ mod tests {
 
     #[test]
     fn property_definition_failure_starts_at_the_definition() {
-        let value = yaml("[string(suggest(red)), string(suggest(blue))]");
-        let failure = parse_property_definition_located("colour", &value).expect_err("must fail");
-        let plain = parse_property_definition("colour", &value).expect_err("must fail");
-        assert_eq!(failure.error.to_string(), plain.to_string());
-        assert_eq!(failure.path, SchemaSourcePath::root());
+        assert_eq!(property_failure("string(min(").path, root());
+        assert_eq!(property_failure("7").path, root());
+        assert_eq!(property_failure("[string, \"number(max(\"]").path, root().union_arm(1));
+        assert_eq!(property_failure("[{a: \"x(\"}]").path, root().union_arm(0).property("a"));
+    }
+
+    #[test]
+    fn definition_failure_names_nested_literal_keys() {
+        let failure = declaration_failure("outer:\n  \"a.b\":\n    \"c[0]/ü\": \"string(min(\"\n");
+        assert_eq!(failure.path, root().property("outer").property("a.b").property("c[0]/ü"));
+        let failure = declaration_failure("outer:\n  \"x/y\": [string, {\"[z]\": 7}]\n");
+        assert_eq!(
+            failure.path,
+            root().property("outer").property("x/y").union_arm(1).property("[z]")
+        );
+    }
+
+    #[test]
+    fn definition_failure_indexes_property_union_members() {
+        let failure = declaration_failure("tags: [string, {x: \"bogus(\"}]\n");
+        assert_eq!(failure.path, root().property("tags").union_arm(1).property("x"));
+        // The second member shares the first member's prefix; only its index
+        // tells them apart.
+        let failure = declaration_failure("tags: [string, \"string(min(\"]\n");
+        assert_eq!(failure.path, root().property("tags").union_arm(1));
+        let failure = declaration_failure("tags: [string, 7]\n");
+        assert_eq!(failure.path, root().property("tags").union_arm(1));
+        let failure = declaration_failure("tags: [string, \"number | boolean\"]\n");
+        assert_eq!(failure.path, root().property("tags").union_arm(1));
+        // An empty union has no member to name.
+        assert_eq!(declaration_failure("tags: []\n").path, root().property("tags"));
+    }
+
+    #[test]
+    fn definition_failure_names_the_second_suggestion_arm() {
+        let source = "string(suggest(blue))";
+        let value = yaml(&format!("colour: [string(suggest(red)), \"{source}\"]\n"));
+        let failure = parse_schema_declaration_located(&value).expect_err("must fail");
+        let plain = parse_schema_declaration(&value).expect_err("must fail");
+        assert_eq!(format!("{:?}", failure.error), format!("{plain:?}"));
+        assert_eq!(failure.path, root().property("colour").union_arm(1));
+        let SchemaError::Grammar { span, .. } = *failure.error else {
+            panic!("expected a grammar error, got {:?}", failure.error);
+        };
+        assert_eq!(&source[span], "blue", "span is relative to arm 1's own scalar");
+    }
+
+    #[test]
+    fn definition_failure_names_the_later_duplicate_overload() {
+        let failure = declaration_failure(
+            "call:\n  - \"function(parameters(a: string); returns(string))\"\n  - \"function(parameters(a: number); returns(string))\"\n  - \"function(parameters(b: string); returns(number))\"\n",
+        );
+        assert_eq!(failure.path, root().property("call").union_arm(2));
+        assert!(failure.error.to_string().contains("overloads 1 and 3"), "{}", failure.error);
+    }
+
+    #[test]
+    fn definition_failure_names_nested_root_union_arm_keys() {
+        let failure = declaration_failure("- {a: {b: \"x(\"}}\n");
+        assert_eq!(failure.path, root().union_arm(0).property("a").property("b"));
+    }
+
+    #[test]
+    fn definition_failure_names_the_mapping_past_the_depth_limit() {
+        let levels = grammar::MAX_INLINE_OBJECT_DEPTH + 1;
+        let input = format!("{}x: string{}", "k: {".repeat(levels), "}".repeat(levels));
+        let failure = declaration_failure(&input);
+        let expected = (0..levels).fold(root(), |path, _| path.property("k"));
+        assert_eq!(failure.path, expected);
+        assert!(failure.error.to_string().contains("levels deep"), "{}", failure.error);
     }
 
     #[test]

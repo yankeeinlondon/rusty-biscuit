@@ -8,6 +8,7 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::resolve::{ResolvedSchema, expand_named_types, resolve_yaml_schema};
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, PropertyAtom, PropertyDef, SchemaConstraintConflictKind,
+    SchemaConstraintParticipant,
     SchemaError, SchemaPhase, SchemaSourceId, SchemaSourcePath, SimplifiedSchema,
     SuggestionLintReason, ValidationProblemCode, lint_suggestions,
     parse_standalone_schema_document,
@@ -934,4 +935,283 @@ fn reused_patterns_and_match_groups_stay_conjunctive_in_validation() {
     assert!(validate("guide-intro.md"), "both groups admit it");
     assert!(!validate("notes.md"), "only the inherited group admits it");
     assert!(!validate("guide.txt"), "only the use-site group admits it");
+}
+
+// ── Conflict participants carry their value ─────────────────────────────────
+
+/// The two-import fixture: each `*_mid` type in `near.yaml` re-exports a type
+/// from `far.yaml`, so a document reaching it through `near.yaml` inherits
+/// the far file's constraint across two imports.
+struct TwoImports {
+    dir: TempDir,
+    far: PathBuf,
+    far_text: String,
+    near: PathBuf,
+}
+
+impl TwoImports {
+    fn new() -> Self {
+        let dir = TempDir::new().expect("tempdir");
+        let far = write(
+            dir.path(),
+            "far.yaml",
+            "kind: schema\ntypes:\n  \
+             count: \"number(min(10))\"\n  \
+             label: \"string(min(10))\"\n  \
+             tags: \"string[](min(10))\"\n  \
+             card: \"{ a: string }(min-keys(10))\"\n  \
+             amount: \"number(default(3))\"\n  \
+             word: \"string(default('null'))\"\n  \
+             slug: alphanumeric\n  \
+             handle: \"alphanumeric(allow-dashes)\"\n  \
+             link: \"url(scheme(http, https))\"\n",
+        );
+        let near = write(
+            dir.path(),
+            "near.yaml",
+            "kind: schema\ntypes:\n  \
+             count_mid: count@./far.yaml\n  \
+             label_mid: label@./far.yaml\n  \
+             tags_mid: tags@./far.yaml\n  \
+             card_mid: card@./far.yaml\n  \
+             amount_mid: amount@./far.yaml\n  \
+             word_mid: word@./far.yaml\n  \
+             slug_mid: slug@./far.yaml\n  \
+             handle_mid: handle@./far.yaml\n  \
+             link_mid: link@./far.yaml\n  \
+             secure: \"link(scheme(https, ftp))@./far.yaml\"\n  \
+             stricter: \"count(min(12))@./far.yaml\"\n  \
+             equal: \"count(min(10))@./far.yaml\"\n  \
+             looser: \"count(min(1))@./far.yaml\"\n",
+        );
+        let far_text = std::fs::read_to_string(&far).expect("read fixture");
+        Self { dir, far, far_text, near }
+    }
+
+    fn far_source(&self) -> SchemaSourceId {
+        SchemaSourceId::File(canonical(&self.far))
+    }
+
+    fn far_display(&self) -> String {
+        self.far_source().to_string()
+    }
+
+    /// Resolves `x: <reference>` from an inline `$schema` and returns the
+    /// conflict it must raise, with its `Display` text.
+    fn conflict(&self, reference: &str) -> (String, SchemaConstraintConflictKind, Vec<SchemaConstraintParticipant>) {
+        let err = resolve_inline(self.dir.path(), &format!("x: \"{reference}\"\n"))
+            .expect_err("the reference must conflict");
+        let display = err.to_string();
+        let SchemaError::ConstraintConflict { kind, site, constraints, .. } = err else {
+            panic!("expected ConstraintConflict for {reference}, got {err:?}");
+        };
+        assert_eq!(site.source, SchemaSourceId::InlineDocument);
+        assert_eq!(site.path, path(&["x"]));
+        (display, kind, constraints)
+    }
+
+    /// Asserts a participant's value, source, path, keyword, occurrence, and
+    /// (for a far-file origin) the authored text at its span.
+    fn assert_far(&self, participant: &SchemaConstraintParticipant, value: &Constraint, at: &str, keyword: &str, authored: Option<&str>) {
+        assert_eq!(&participant.constraint, value);
+        assert_eq!(participant.origin.source, self.far_source());
+        assert_eq!(participant.origin.path, path(&[at]));
+        assert_eq!(participant.origin.keyword, keyword);
+        assert_eq!(participant.origin.occurrence, 0);
+        match authored {
+            Some(text) => {
+                let span = participant.origin.span.clone().expect("a far-file origin is located");
+                assert_eq!(&self.far_text[span], text);
+            }
+            None => assert_eq!(participant.origin.span, None),
+        }
+    }
+}
+
+fn assert_inline(participant: &SchemaConstraintParticipant, value: &Constraint, keyword: &str, occurrence: usize) {
+    assert_eq!(&participant.constraint, value);
+    assert_eq!(participant.origin.source, SchemaSourceId::InlineDocument);
+    assert_eq!(participant.origin.path, path(&["x"]));
+    assert_eq!(participant.origin.keyword, keyword);
+    assert_eq!(participant.origin.occurrence, occurrence);
+    assert_eq!(participant.origin.span, None, "inline origins are projected by the consumer");
+}
+
+#[test]
+fn bound_conflicts_through_two_imports_carry_each_surviving_bound() {
+    let fixture = TwoImports::new();
+    for (reference, name, lower, upper, lower_text, upper_text, lower_keyword, upper_keyword) in [
+        ("count_mid(max(5))@./near.yaml", "count_mid", Constraint::Min(10.0), Constraint::Max(5.0), "min(10)", "max(5)", "min", "max"),
+        ("label_mid(max(5))@./near.yaml", "label_mid", Constraint::MinLen(10), Constraint::MaxLen(5), "min(10)", "max(5)", "min", "max"),
+        ("tags_mid(max(5))@./near.yaml", "tags_mid", Constraint::MinItems(10), Constraint::MaxItems(5), "min(10)", "max(5)", "min", "max"),
+        ("card_mid(max-keys(5))@./near.yaml", "card_mid", Constraint::MinKeys(10), Constraint::MaxKeys(5), "min-keys(10)", "max-keys(5)", "min-keys", "max-keys"),
+    ] {
+        let (display, kind, constraints) = fixture.conflict(reference);
+        assert_eq!(kind, SchemaConstraintConflictKind::Bounds, "{reference}");
+        assert_eq!(constraints.len(), 2, "{reference}");
+        let at = name.trim_end_matches("_mid");
+        fixture.assert_far(&constraints[0], &lower, at, lower_keyword, Some(lower_text));
+        assert_inline(&constraints[1], &upper, upper_keyword, 0);
+        assert_eq!(
+            display,
+            format!(
+                "x: contradictory bounds on named type `{name}`: `{lower_text}` in {} and `{upper_text}` in \
+                 the inline `$schema`",
+                fixture.far_display()
+            )
+        );
+    }
+}
+
+#[test]
+fn a_stricter_bound_replaces_the_looser_one_and_an_equal_bound_keeps_the_first_origin() {
+    let fixture = TwoImports::new();
+    let near = SchemaSourceId::File(canonical(&fixture.near));
+
+    // `near.yaml`'s stricter `min(12)` replaced the far `min(10)` and took
+    // its origin.
+    let (display, _, constraints) = fixture.conflict("stricter(max(5))@./near.yaml");
+    assert_eq!(constraints[0].constraint, Constraint::Min(12.0));
+    assert_eq!(constraints[0].origin.source, near);
+    assert_eq!(constraints[0].origin.path, path(&["stricter"]));
+    assert_eq!(constraints[0].origin.keyword, "min");
+    assert!(display.contains(&format!("`min(12)` in {near}")), "{display}");
+
+    // An equal or looser bound leaves the far declaration in place.
+    for reference in ["equal(max(5))@./near.yaml", "looser(max(5))@./near.yaml"] {
+        let (display, _, constraints) = fixture.conflict(reference);
+        fixture.assert_far(&constraints[0], &Constraint::Min(10.0), "count", "min", Some("min(10)"));
+        assert!(display.contains(&format!("`min(10)` in {}", fixture.far_display())), "{display}");
+    }
+
+    // A use site repeating its own bound keeps the stricter occurrence.
+    let (_, _, constraints) = fixture.conflict("count_mid(max(8); max(5))@./near.yaml");
+    assert_inline(&constraints[1], &Constraint::Max(5.0), "max", 1);
+}
+
+#[test]
+fn scheme_conflicts_through_two_imports_carry_the_effective_inherited_list() {
+    let fixture = TwoImports::new();
+    let near = SchemaSourceId::File(canonical(&fixture.near));
+
+    // An immediate empty intersection.
+    let (display, kind, constraints) = fixture.conflict("link_mid(scheme(ftp))@./near.yaml");
+    assert_eq!(kind, SchemaConstraintConflictKind::Scheme);
+    fixture.assert_far(
+        &constraints[0],
+        &Constraint::Scheme(vec!["http".into(), "https".into()]),
+        "link",
+        "scheme",
+        Some("scheme(http, https)"),
+    );
+    assert_inline(&constraints[1], &Constraint::Scheme(vec!["ftp".into()]), "scheme", 0);
+    assert_eq!(
+        display,
+        format!(
+            "x: contradictory schemes on named type `link_mid`: `scheme(http,https)` in {} and \
+             `scheme(ftp)` in the inline `$schema`",
+            fixture.far_display()
+        )
+    );
+
+    // After `near.yaml` narrowed the list to `https`, the inherited
+    // participant is that effective list at the far origin that introduced
+    // the group.
+    let (display, _, constraints) = fixture.conflict("secure(scheme(ftp))@./near.yaml");
+    fixture.assert_far(
+        &constraints[0],
+        &Constraint::Scheme(vec!["https".into()]),
+        "link",
+        "scheme",
+        Some("scheme(http, https)"),
+    );
+    assert_ne!(constraints[0].origin.source, near);
+    assert!(display.contains("`scheme(https)` in"), "{display}");
+}
+
+#[test]
+fn default_conflicts_through_two_imports_keep_scalar_identity() {
+    let fixture = TwoImports::new();
+
+    let (display, kind, constraints) = fixture.conflict("amount_mid(default('3'))@./near.yaml");
+    assert_eq!(kind, SchemaConstraintConflictKind::Default);
+    fixture.assert_far(&constraints[0], &Constraint::Default(json!(3)), "amount", "default", Some("default(3)"));
+    assert_inline(&constraints[1], &Constraint::Default(json!("3")), "default", 0);
+    assert_eq!(
+        display,
+        format!(
+            "x: contradictory defaults on named type `amount_mid`: `default(3)` in {} and \
+             `default('3')` in the inline `$schema`",
+            fixture.far_display()
+        )
+    );
+
+    let (display, _, constraints) = fixture.conflict("word_mid(default(null))@./near.yaml");
+    fixture.assert_far(&constraints[0], &Constraint::Default(json!("null")), "word", "default", Some("default('null')"));
+    assert_inline(&constraints[1], &Constraint::Default(Value::Null), "default", 0);
+    assert!(display.contains("`default('null')` in") && display.contains("`default(null)` in the inline"), "{display}");
+
+    // Normalized numeric equality is still one default.
+    resolve_inline(fixture.dir.path(), "x: amount_mid(default(3.0))@./near.yaml\n")
+        .expect("3 and 3.0 are one default");
+}
+
+#[test]
+fn item_and_container_defaults_reconcile_with_their_values() {
+    let fixture = TwoImports::new();
+
+    let (display, kind, constraints) = fixture.conflict("amount_mid[](default('3'))@./near.yaml");
+    assert_eq!(kind, SchemaConstraintConflictKind::Default);
+    fixture.assert_far(&constraints[0], &Constraint::Default(json!(3)), "amount", "default", Some("default(3)"));
+    assert_inline(&constraints[1], &Constraint::Default(json!("3")), "default", 0);
+    assert!(display.contains("`default(3)` in") && display.contains("`default('3')` in the inline"), "{display}");
+
+    resolve_inline(fixture.dir.path(), "x: amount_mid[](default(3.0))@./near.yaml\n")
+        .expect("an equal container default reconciles");
+}
+
+#[test]
+fn option_conflicts_through_two_imports_carry_both_canonical_sets() {
+    let fixture = TwoImports::new();
+
+    // A bare `alphanumeric` type takes part as the empty set. With no option
+    // token to locate, its synthetic origin is the declaration of the named
+    // type the use site referenced (`near.yaml`'s `slug_mid`).
+    let (display, kind, constraints) = fixture.conflict("slug_mid(allow-dashes)@./near.yaml");
+    assert_eq!(kind, SchemaConstraintConflictKind::Options);
+    let near = SchemaSourceId::File(canonical(&fixture.near));
+    assert_eq!(constraints[0].constraint, Constraint::Options(vec![]));
+    assert_eq!(constraints[0].origin.source, near);
+    assert_eq!(constraints[0].origin.path, path(&["slug_mid"]));
+    assert_eq!(constraints[0].origin.keyword, "alphanumeric");
+    assert_eq!(constraints[0].origin.occurrence, 0);
+    assert_eq!(constraints[0].origin.span, None, "bare `alphanumeric` has no option token");
+    assert_inline(
+        &constraints[1],
+        &Constraint::Options(vec![darkmatter::markdown::schemas::AlphanumericOption::AllowDashes]),
+        "allow-dashes",
+        0,
+    );
+    assert_eq!(
+        display,
+        format!(
+            "x: contradictory `alphanumeric` options on named type `slug_mid`: `alphanumeric` in {near} and \
+             `alphanumeric(allow-dashes)` in the inline `$schema`"
+        )
+    );
+
+    // Two different nonempty sets.
+    let (display, _, constraints) = fixture.conflict("handle_mid(allow-periods, allow-dashes)@./near.yaml");
+    fixture.assert_far(
+        &constraints[0],
+        &Constraint::Options(vec![darkmatter::markdown::schemas::AlphanumericOption::AllowDashes]),
+        "handle",
+        "allow-dashes",
+        Some("allow-dashes"),
+    );
+    assert!(
+        display.contains("`alphanumeric(allow-dashes)` in")
+            && display.contains("`alphanumeric(allow-dashes,allow-periods)` in the inline"),
+        "{display}"
+    );
 }

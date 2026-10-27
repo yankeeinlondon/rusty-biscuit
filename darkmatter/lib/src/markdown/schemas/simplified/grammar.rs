@@ -771,7 +771,7 @@ impl<'a> Parser<'a> {
         if let Some(description) = self.parse_top_level_description()? {
             arms.last_mut().expect("a union has an option").description = Some(description);
         }
-        if let Some(span) = second_suggestion_span(&arms) {
+        if let Some((_, span)) = second_suggestion_span(&arms) {
             return self.err("a property definition may contain at most one `suggest` constraint", span);
         }
         if let Some(message) = duplicate_overload(&arms, None) {
@@ -1628,7 +1628,7 @@ impl<'a> Parser<'a> {
             let description = self.read_inline_object_description()?;
             arms.last_mut().expect("a union has an option").description = Some(description);
         }
-        if let Some(span) = second_suggestion_span(&arms) {
+        if let Some((_, span)) = second_suggestion_span(&arms) {
             return self.err("a property definition may contain at most one `suggest` constraint", span);
         }
         if let Some(message) = duplicate_overload(&arms, None) {
@@ -2768,17 +2768,21 @@ fn trim_span(src: &str, range: Range<usize>) -> Range<usize> {
     start..end.max(start)
 }
 
-/// The span of a second `suggest(...)` candidate list among `arms`, which a
-/// property definition may not hold.
-pub(crate) fn second_suggestion_span(arms: &[PropertyAtom]) -> Option<Range<usize>> {
+/// The index into `arms` and span of a second `suggest(...)` candidate list,
+/// which a property definition may not hold.
+///
+/// The span is the one recorded on that arm's first candidate, so it is
+/// relative to whatever text the arm was parsed from.
+pub(crate) fn second_suggestion_span(arms: &[PropertyAtom]) -> Option<(usize, Range<usize>)> {
     arms.iter()
-        .flat_map(|atom| atom.constraints.iter())
-        .filter_map(|constraint| match constraint {
-            Constraint::Suggest(candidates) => candidates.first(),
+        .enumerate()
+        .flat_map(|(index, atom)| atom.constraints.iter().map(move |constraint| (index, constraint)))
+        .filter_map(|(index, constraint)| match constraint {
+            Constraint::Suggest(candidates) => candidates.first().map(|candidate| (index, candidate)),
             _ => None,
         })
         .nth(1)
-        .map(|candidate| candidate.span.clone())
+        .map(|(index, candidate)| (index, candidate.span.clone()))
 }
 
 /// Converts the parsed result of an inline example to JSON. Only literals

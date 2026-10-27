@@ -4002,13 +4002,14 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
             .all(|diagnostic| diagnostic["code"] != json!("dm.schema.constraint")),
         "the generic keyword failure is replaced: {diagnostics:?}"
     );
+    // The unknown constraint token, not the whole value.
     assert_eq!(
         specialized[0]["range"]["start"],
-        json!({ "line": 3, "character": 12 })
+        json!({ "line": 3, "character": 19 })
     );
     assert_eq!(
         specialized[0]["range"]["end"],
-        json!({ "line": 3, "character": 24 })
+        json!({ "line": 3, "character": 23 })
     );
 
     fixture.shutdown();
@@ -4016,9 +4017,9 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
 
 /// A block-sequence `type-definition` value's span starts at its first `-`,
 /// partway into the line. The malformed arm after it is still ranged exactly,
-/// because the locator reads the slice from the start of that line with
-/// every item's authored column intact; read from the `-`, the first item
-/// would seem to continue onto the second.
+/// at its unknown constraint token, because the value is read from the start
+/// of that line with every item's authored column intact; read from the `-`,
+/// the first item would seem to continue onto the second.
 #[test]
 fn a_malformed_arm_after_the_first_block_sequence_item_is_ranged_exactly() {
     let workspace = LspWorkspace::new();
@@ -4048,8 +4049,8 @@ fn a_malformed_arm_after_the_first_block_sequence_item_is_ranged_exactly() {
     assert_eq!(
         definition_errors[0]["range"],
         json!({
-            "start": { "line": 5, "character": 4 },
-            "end": { "line": 5, "character": 21 }
+            "start": { "line": 5, "character": 12 },
+            "end": { "line": 5, "character": 17 }
         }),
         "{diagnostics:#?}"
     );
@@ -5425,12 +5426,16 @@ fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
         }),
     );
 
+    // The unsupported `description` key makes the envelope itself invalid, so
+    // the current buffer's diagnostic is the classifier's envelope error, not
+    // the definition inside it.
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition")),
-        "the current malformed definition owns diagnostics: {diagnostics:?}"
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.document_malformed")
+                && diagnostic["message"].as_str().is_some_and(|message| message.contains("description"))
+        }),
+        "the current malformed envelope owns diagnostics: {diagnostics:?}"
     );
 
     let labels = completion_labels(&mut fixture, uri.as_str(), 3, 9);

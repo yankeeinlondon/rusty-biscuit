@@ -18,7 +18,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use darkmatter::markdown::schemas::{
-    SchemaConstraintOrigin, SchemaError, SchemaReferenceSite, SchemaSourceId,
+    Constraint, SchemaConstraintConflictKind, SchemaConstraintParticipant, SchemaError,
+    SchemaReferenceSite, SchemaSourceId, SchemaSourceMap,
     SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, StandaloneSchemaDocument,
     parse_standalone_schema_document,
 };
@@ -133,11 +134,19 @@ impl<'a> NamedTypeScope<'a> {
                 }
                 self.site_span(site)
             }
-            SchemaError::ConstraintConflict { site, constraints, .. } => {
+            SchemaError::ConstraintConflict { site, kind, constraints, .. } => {
                 related.extend(constraints.iter().filter_map(|participant| {
+                    let excerpt = participant.constraint.diagnostic_excerpt();
+                    // A scheme participant is the intersection of every
+                    // earlier merge, which need not be the text at its origin.
+                    let message = if *kind == SchemaConstraintConflictKind::Scheme {
+                        format!("`{excerpt}` is the effective constraint from this declaration")
+                    } else {
+                        format!("`{excerpt}` is declared here")
+                    };
                     Some(DiagnosticRelatedInformation {
-                        location: self.origin_location(&participant.origin)?,
-                        message: format!("`{}` is declared here", participant.origin.keyword),
+                        location: self.participant_location(participant)?,
+                        message,
                     })
                 }));
                 self.site_span(site)
@@ -350,17 +359,26 @@ impl<'a> NamedTypeScope<'a> {
     }
 
     /// Where one conflicting constraint was authored.
-    fn origin_location(&self, origin: &SchemaConstraintOrigin) -> Option<Location> {
+    /// Where a conflict participant was declared: its constraint, or, for the
+    /// empty option set a bare `alphanumeric` declaration takes part with
+    /// (which authors no option token), that declaration's definition.
+    fn participant_location(&self, participant: &SchemaConstraintParticipant) -> Option<Location> {
+        let origin = &participant.origin;
+        let implicit_options = matches!(&participant.constraint, Constraint::Options(options) if options.is_empty());
+        let span_in = |source_map: &SchemaSourceMap, text: &str| {
+            source_map
+                .constraint_span(text, &origin.path, &origin.keyword, origin.occurrence)
+                .or_else(|| {
+                    implicit_options
+                        .then(|| source_map.spans(&origin.path, SchemaSpanKind::Definition).first().cloned())
+                        .flatten()
+                })
+        };
         if origin.source == self.this {
             // This document's buffer, not the resolver's span: a standalone
             // document's origins were located against the file on disk.
             let declaration = self.declaration.as_ref()?;
-            let span = declaration.source_map.constraint_span(
-                self.ctx.text,
-                &origin.path,
-                &origin.keyword,
-                origin.occurrence,
-            )?;
+            let span = span_in(&declaration.source_map, self.ctx.text)?;
             let range = self.ctx.source_map.byte_range_to_lsp(span)?;
             return Some(Location::new(self.ctx.uri.clone(), range));
         }
@@ -368,14 +386,10 @@ impl<'a> NamedTypeScope<'a> {
             return None;
         };
         let file = self.file(path)?;
-        let span = origin.span.clone().or_else(|| {
-            file.document.as_ref()?.source_map.constraint_span(
-                &file.text,
-                &origin.path,
-                &origin.keyword,
-                origin.occurrence,
-            )
-        })?;
+        let span = origin
+            .span
+            .clone()
+            .or_else(|| span_in(&file.document.as_ref()?.source_map, &file.text))?;
         self.file_location(path, &file.text, span)
     }
 

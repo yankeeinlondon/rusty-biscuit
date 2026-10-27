@@ -1,7 +1,9 @@
-//! Serialise a [`PropertyAtom`] back into a type-and-constraint string.
+//! Serialise a [`PropertyAtom`] back into a type-and-constraint string, and
+//! one [`Constraint`] into the text diagnostics show
+//! ([`Constraint::to_schema_text`], [`Constraint::diagnostic_excerpt`]).
 //!
-//! Used by tests (especially `proptest` round-trip tests) to verify that the
-//! parser and the AST agree. The output is canonical (deterministic key
+//! Round-trip tests use the atom form to verify that the parser and the AST
+//! agree. The output is canonical (deterministic key
 //! ordering, minimal whitespace) and re-parses to an equal [`PropertyAtom`]
 //! for every atom the passive parser produces, except that `alphanumeric`
 //! options are written in canonical form, which re-parses to the same type
@@ -16,7 +18,125 @@ use super::{
         PropertyDef, SimplifiedType, TupleType, TypeExpr,
     },
 };
-use crate::markdown::numeric::format_number;
+use crate::markdown::numeric::{NumberTextError, admit_number_spelling, format_number};
+
+/// The most Unicode scalar values a [`Constraint::diagnostic_excerpt`] holds,
+/// including the final `…` of a shortened excerpt.
+const DIAGNOSTIC_EXCERPT_LIMIT: usize = 160;
+
+impl Constraint {
+    /// This one constraint in canonical SimplifiedSchema spelling, as the
+    /// serializer writes it inside a constraint list.
+    ///
+    /// `ty` is the constrained type, `None` when it is unknown; it only
+    /// selects the canonical spelling of numeric `suggest(...)` candidates.
+    /// An [`Constraint::Options`] set is written as the type it names:
+    /// `alphanumeric(allow-dashes,allow-periods)` in canonical option order,
+    /// or bare `alphanumeric` for the empty set. A default keeps its JSON
+    /// type visible (`default(3)` versus `default('3')`, `default(null)`
+    /// versus `default('null')`); an object or array default, which only Rust
+    /// can construct, is written as `default(<compact JSON>)`, a diagnostic
+    /// spelling the grammar does not parse.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::schemas::simplified::Constraint;
+    ///
+    /// assert_eq!(Constraint::MinLen(10).to_schema_text(None), "min(10)");
+    /// assert_eq!(Constraint::Options(vec![]).to_schema_text(None), "alphanumeric");
+    /// assert_eq!(
+    ///     Constraint::Default(serde_json::json!("3")).to_schema_text(None),
+    ///     "default('3')"
+    /// );
+    /// ```
+    pub fn to_schema_text(&self, ty: Option<SimplifiedType>) -> String {
+        let mut out = String::new();
+        match self {
+            Constraint::Options(options) => {
+                out.push_str(SimplifiedType::Alphanumeric.as_keyword());
+                let keywords = options
+                    .iter()
+                    .copied()
+                    .collect::<AlphanumericOptions>()
+                    .canonical()
+                    .keywords()
+                    .collect::<Vec<_>>();
+                if !keywords.is_empty() {
+                    let _ = write!(out, "({})", keywords.join(","));
+                }
+            }
+            other => write_constraint(&mut out, other, ty),
+        }
+        out
+    }
+
+    /// The text every diagnostic shows for this constraint: the error's
+    /// `Display`, the terminal status block, and editor related information.
+    ///
+    /// It is [`Constraint::to_schema_text`] with no type, made safe for one
+    /// line of a message. Line feed, carriage return, and tab become `\n`,
+    /// `\r`, and `\t`; every other control character, and the Unicode line
+    /// and paragraph separators, become `\u{hex}` (ESC is `\u{1b}`). The
+    /// escaped text is then shortened to at most 160 Unicode scalar values,
+    /// the last of which is `…` when anything was cut; an escape is never
+    /// split, so a shortened excerpt can be slightly under the limit.
+    ///
+    /// The excerpt is for reading, not reparsing: a backslash already in the
+    /// text is not escaped. Markup escaping for a particular output (terminal
+    /// Prose, Markdown code spans) is that renderer's job.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::schemas::simplified::Constraint;
+    ///
+    /// let tab = Constraint::Default(serde_json::json!("a\tb"));
+    /// assert_eq!(tab.diagnostic_excerpt(), r"default('a\tb')");
+    ///
+    /// let long = Constraint::Default(serde_json::json!("é".repeat(300)));
+    /// let excerpt = long.diagnostic_excerpt();
+    /// assert_eq!(excerpt.chars().count(), 160);
+    /// assert!(excerpt.ends_with('…'));
+    /// ```
+    pub fn diagnostic_excerpt(&self) -> String {
+        let text = self.to_schema_text(None);
+        let mut escaped = String::with_capacity(text.len());
+        // Scalar count and byte length of `escaped` after each source char,
+        // so shortening cuts only between escapes.
+        let mut ends = Vec::with_capacity(text.len());
+        let mut scalars = 0;
+        for c in text.chars() {
+            let before = escaped.len();
+            push_excerpt_char(&mut escaped, c);
+            scalars += escaped[before..].chars().count();
+            ends.push((scalars, escaped.len()));
+        }
+        if scalars <= DIAGNOSTIC_EXCERPT_LIMIT {
+            return escaped;
+        }
+        let keep = ends
+            .iter()
+            .rev()
+            .find(|(count, _)| *count < DIAGNOSTIC_EXCERPT_LIMIT)
+            .map_or(0, |(_, bytes)| *bytes);
+        escaped.truncate(keep);
+        escaped.push('…');
+        escaped
+    }
+}
+
+fn push_excerpt_char(out: &mut String, c: char) {
+    match c {
+        '\n' => out.push_str("\\n"),
+        '\r' => out.push_str("\\r"),
+        '\t' => out.push_str("\\t"),
+        c if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') => {
+            let _ = write!(out, "\\u{{{:x}}}", u32::from(c));
+        }
+        c => out.push(c),
+    }
+}
 
 /// Serialise `atom` into a string suitable for re-parsing via
 /// [`grammar::parse_type_expr`].
@@ -425,12 +545,27 @@ fn write_default_value(out: &mut String, value: &serde_json::Value, _ty: Option<
         serde_json::Value::Number(n) => {
             let _ = write!(out, "{n}");
         }
-        serde_json::Value::String(s) => write_arg(out, s),
-        // Compound defaults are not supported by the v1 grammar.
+        serde_json::Value::String(s) => {
+            if needs_quoting(s) || !bare_default_round_trips_as_string(s) {
+                write_quoted(out, s);
+            } else {
+                out.push_str(s);
+            }
+        }
+        // The grammar has no compound default; only Rust can build one, and
+        // it is shown as compact JSON so diagnostics still carry the value.
         other => {
-            let _ = write!(out, "\"{other}\"");
+            let _ = write!(out, "{other}");
         }
     }
+}
+
+/// Whether bare `value` re-parses as the same string `default(...)`: not a
+/// `true`/`false`/`null` keyword and not any number spelling, which the
+/// grammar either reads as a number or rejects as inadmissible.
+fn bare_default_round_trips_as_string(value: &str) -> bool {
+    !matches!(value, "true" | "false" | "null")
+        && matches!(admit_number_spelling(value), Err(NumberTextError::NotANumber))
 }
 
 /// Write an argument, quoting it if it contains characters that would
@@ -937,6 +1072,106 @@ mod tests {
         assert!(parsed.is_array);
         let has_suggest = parsed.constraints.iter().any(|c| matches!(c, Constraint::Suggest(_)));
         assert!(has_suggest, "parsed atom must retain suggest constraint");
+    }
+
+    fn default_atom(ty: SimplifiedType, value: serde_json::Value) -> PropertyAtom {
+        PropertyAtom {
+            ty: TypeExpr::Primitive(ty),
+            is_array: false,
+            constraints: vec![Constraint::Default(value)],
+            array_constraints: vec![],
+            description: None,
+        }
+    }
+
+    #[test]
+    fn default_strings_that_look_like_other_scalars_are_quoted_and_round_trip() {
+        for (value, written) in [
+            (serde_json::json!("3"), "string(default('3'))"),
+            (serde_json::json!("-2.5"), "string(default('-2.5'))"),
+            (serde_json::json!("1e3"), "string(default('1e3'))"),
+            (serde_json::json!("1e999"), "string(default('1e999'))"),
+            (serde_json::json!("null"), "string(default('null'))"),
+            (serde_json::json!("true"), "string(default('true'))"),
+            (serde_json::json!("false"), "string(default('false'))"),
+            (serde_json::json!("draft"), "string(default(draft))"),
+            (serde_json::json!("v1.2"), "string(default(v1.2))"),
+        ] {
+            let atom = default_atom(SimplifiedType::String, value);
+            assert_eq!(serialize_property_atom(&atom), written);
+            round_trip(atom);
+        }
+        for (ty, value, written) in [
+            (SimplifiedType::Number, serde_json::json!(3), "number(default(3))"),
+            (SimplifiedType::Number, serde_json::json!(-2.5), "number(default(-2.5))"),
+            (SimplifiedType::Boolean, serde_json::json!(true), "boolean(default(true))"),
+            (SimplifiedType::Unknown, serde_json::Value::Null, "unknown(default(null))"),
+        ] {
+            let atom = default_atom(ty, value);
+            assert_eq!(serialize_property_atom(&atom), written);
+            round_trip(atom);
+        }
+    }
+
+    #[test]
+    fn to_schema_text_writes_one_constraint_canonically() {
+        use super::super::alphanumeric::AlphanumericOption::*;
+        for (constraint, expected) in [
+            (Constraint::Min(10.0), "min(10)"),
+            (Constraint::Max(2.5), "max(2.5)"),
+            (Constraint::MinLen(3), "min(3)"),
+            (Constraint::MaxItems(5), "max(5)"),
+            (Constraint::MinKeys(1), "min-keys(1)"),
+            (Constraint::MaxKeys(9), "max-keys(9)"),
+            (Constraint::Scheme(vec!["http".into(), "https".into()]), "scheme(http,https)"),
+            (Constraint::Scheme(vec![]), "scheme()"),
+            (Constraint::Default(serde_json::json!(3)), "default(3)"),
+            (Constraint::Default(serde_json::json!("3")), "default('3')"),
+            (Constraint::Default(serde_json::Value::Null), "default(null)"),
+            (Constraint::Default(serde_json::json!("null")), "default('null')"),
+            (Constraint::Default(serde_json::json!(false)), "default(false)"),
+            (Constraint::Default(serde_json::json!("false")), "default('false')"),
+            (Constraint::Default(serde_json::json!("a, b")), "default('a, b')"),
+            (Constraint::Default(serde_json::json!({"k": [1, "x"]})), r#"default({"k":[1,"x"]})"#),
+            (Constraint::Default(serde_json::json!([])), "default([])"),
+            (Constraint::Options(vec![]), "alphanumeric"),
+            (Constraint::Options(vec![AllowPeriods, AllowDashes]), "alphanumeric(allow-dashes,allow-periods)"),
+            // Canonical: a block whose character is not allowed is dropped.
+            (Constraint::Options(vec![BlockLeadingDash]), "alphanumeric"),
+            (Constraint::Required, "required"),
+        ] {
+            assert_eq!(constraint.to_schema_text(None), expected, "{constraint:?}");
+        }
+    }
+
+    #[test]
+    fn diagnostic_excerpt_escapes_controls_and_line_separators() {
+        let constraint = Constraint::Default(serde_json::json!("a\nb\r\tc\u{1b}d\u{7f}e\u{2028}f"));
+        assert_eq!(
+            constraint.diagnostic_excerpt(),
+            r"default('a\nb\r\tc\u{1b}d\u{7f}e\u{2028}f')"
+        );
+        assert_eq!(Constraint::Min(10.0).diagnostic_excerpt(), "min(10)");
+    }
+
+    #[test]
+    fn diagnostic_excerpt_keeps_at_most_160_scalars_and_never_splits_an_escape() {
+        let exact = Constraint::Default(serde_json::json!("é".repeat(151)));
+        assert_eq!(exact.diagnostic_excerpt().chars().count(), 160, "`default(` + 151 + `)` fits");
+        assert!(!exact.diagnostic_excerpt().contains('…'));
+
+        let over = Constraint::Default(serde_json::json!("é".repeat(152)));
+        let excerpt = over.diagnostic_excerpt();
+        assert_eq!(excerpt.chars().count(), 160);
+        assert!(excerpt.ends_with("é…"), "{excerpt}");
+
+        // `default('` is 9 scalars; 147 `x` and a space reach 157, and the
+        // next escape (`\u{1b}`, 6 scalars) would pass 159, so it is
+        // dropped whole.
+        let escapes = Constraint::Default(serde_json::json!(format!("{} \u{1b}{}", "x".repeat(147), "y".repeat(20))));
+        let excerpt = escapes.diagnostic_excerpt();
+        assert!(excerpt.chars().count() <= 160, "{excerpt}");
+        assert!(excerpt.ends_with(" …"), "the escape is not split: {excerpt}");
     }
 
     /// Serializes `source`, asserts the canonical spelling, and asserts that

@@ -20,7 +20,8 @@ use std::sync::Arc;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::resolve::named_type_reference_path;
 use darkmatter::markdown::schemas::{
-    PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaError, SchemaShape, SchemaSourceMap,
+    LocatedDefinitionFailure, PropertyAtom, PropertyDef, SchemaArm, SchemaDeclaration, SchemaError,
+    SchemaShape, SchemaSourceMap, SourceAware,
     SchemaSourcePath,
     SchemaSourcePathSegment, SchemaSpanKind, SimplifiedSchema, StandaloneSchemaDocument, TypeExpr, flow_collection_end,
     parse_property_definition, parse_schema_declaration_with_source, parse_standalone_schema_document,
@@ -48,6 +49,22 @@ fn frontmatter_value_span(text: &str, ast: &FrontmatterAst) -> Option<std::ops::
     Some(span)
 }
 
+/// The frontmatter `$schema` value of `text` through the source-aware
+/// declaration parser, re-parsed in place: the text before the value on its
+/// first line is replaced with spaces, so every column and byte offset matches
+/// the document and continuation lines keep their indentation.
+fn parse_frontmatter_declaration(
+    text: &str,
+    ast: &FrontmatterAst,
+) -> Option<Result<SourceAware<SchemaDeclaration>, LocatedDefinitionFailure>> {
+    let span = frontmatter_value_span(text, ast)?;
+    let line_start = text[..span.start].rfind('\n').map_or(0, |index| index + 1);
+    let mut source = " ".repeat(span.start - line_start);
+    source.push_str(text.get(span)?);
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).ok()?;
+    Some(parse_schema_declaration_with_source(&yaml, &source, line_start))
+}
+
 impl AuthoredDeclaration {
     /// The declaration a standalone schema document authors.
     pub fn standalone(model: &StandaloneSchemaDocument) -> Self {
@@ -58,22 +75,20 @@ impl AuthoredDeclaration {
     }
 
     /// The frontmatter `$schema` value of `text`, or `None` when the value is
-    /// absent or cannot be projected (for example a block scalar).
-    ///
-    /// The value is re-parsed in place: the text before the value on its first
-    /// line is replaced with spaces, so every column and byte offset matches
-    /// the document and continuation lines keep their indentation.
+    /// absent, invalid, or cannot be projected (for example a block scalar).
     pub fn frontmatter(text: &str, ast: &FrontmatterAst) -> Option<Self> {
-        let span = frontmatter_value_span(text, ast)?;
-        let line_start = text[..span.start].rfind('\n').map_or(0, |index| index + 1);
-        let mut source = " ".repeat(span.start - line_start);
-        source.push_str(text.get(span)?);
-        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).ok()?;
-        let parsed = parse_schema_declaration_with_source(&yaml, &source, line_start).ok()?;
+        let parsed = parse_frontmatter_declaration(text, ast)?.ok()?;
         Some(Self {
             declaration: parsed.value,
             source_map: parsed.source_map,
         })
+    }
+
+    /// Why the frontmatter `$schema` value of `text` is not a declaration,
+    /// located in `text`'s bytes; `None` when it parses, is absent, or is not
+    /// YAML on its own.
+    pub fn frontmatter_failure(text: &str, ast: &FrontmatterAst) -> Option<LocatedDefinitionFailure> {
+        parse_frontmatter_declaration(text, ast)?.err()
     }
 
     /// [`Self::frontmatter`] for a request at `offset`: `None`, without

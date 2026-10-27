@@ -716,9 +716,9 @@ completion, hover, and `dm.expression.*` diagnostics.
 
 Source spans come from one locator in `simplified/source.rs` with two
 grammars. Strict (schema documents) and tolerant (frontmatter) share
-indentless sequences and plain scalars continued onto more-indented lines;
-only tolerant follows tags, block scalars, quoted continuations, and empty
-values. Strict fails unless every non-comment line belongs to the value, and
+indentless sequences, plain scalars continued onto more-indented lines, and
+literal/folded block scalars; only tolerant follows tags, quoted
+continuations, and empty values. Strict fails unless every non-comment line belongs to the value, and
 checks each decoded scalar against `serde_yaml_ng` before projecting. A
 source-aware slice must start at a line boundary (indentation included) or be
 dedented, because indentation decides where a continuation ends; DMLS widens
@@ -726,6 +726,61 @@ mid-line value spans with `overlay::frontmatter::line_aligned_span`. Never add
 a third locator. The authored boundary is documented in
 `darkmatter/docs/topics/schemas/definition.md` (Source-Aware Presentation
 Boundary).
+
+Definition failures are located, never guessed. The shared parser
+(`simplified/mod.rs`, crate-private `DefinitionFailure`) records the
+`SchemaSourcePath` of the node it rejected: property keys literally, sequence
+members and root-union arms by index, `$constraints` entries by key, and
+cross-arm checks at the arm that introduced the violation
+(`second_suggestion_span` and `duplicate_overload_arm` return the arm index).
+`parse_property_definition_with_source` and
+`parse_schema_declaration_with_source` return `LocatedDefinitionFailure`
+(`path`, boxed `error`, `authored_span`, `value_span`, document bytes with
+`source_offset` applied once); `locate_standalone_definition_failure(source)`
+does the same for a standalone document, prefixing `types`/`$schema`, sharing
+`standalone::recognize_standalone` with the classifier, and returning `None`
+for outer envelope and declaration-shape failures (any failure path without a
+property segment). Projection follows the path through the strict located
+tree in lockstep with the parsed YAML and projects a grammar span only through
+a scalar whose decoded text equals the rejected string; a mismatch,
+unsupported presentation, or alias leaves the range `None` but always keeps
+the error. A projection-only failure after a successful parse is the
+projection error at the root path. Source-free parsers discard the path.
+
+`decode_plain_scalar_node` (`yaml_scalar.rs`) is `decode_scalar_node`
+restricted to plain scalars (same-line tags/anchors skipped; quoted, block,
+flow, alias, comment, empty, and later-line-property values are `None`, and
+so is a value whose start is a line break: content on later lines is another
+node); use it, not a prefix blacklist, to recognize a continuable plain
+holder. `locate_type_definition_cursor_in_scalar` /
+`locate_schema_declaration_cursor_in_scalar` (`cursor.rs`) read a completion
+cursor through that decoded map, so anchors and tags stay outside the edited
+token; a cursor is accepted inside the scalar, at its end, or after trailing
+spaces/tabs on its last line, and nowhere else.
+
+DMLS consumes located failures, never guesses (`dmls/src/diagnostics/frontmatter.rs`):
+standalone definitions use `locate_standalone_definition_failure`; inline
+`$schema` prepare errors and `schema`/`type-definition` meta-typed values use
+the source-aware parsers on the value re-parsed in place (first line padded
+with spaces, `source_offset` = line start). Range order: `authored_span`,
+`value_span`, the deepest frontmatter entry along the path's leading property
+keys, then the old fallback. Meta-type union acceptance stays with the
+source-free parsers; the source-aware call only locates the reported error
+(matched by message), and a `schema` failure with no property segment keeps
+the whole value. A referenced file's failure is never projected into the
+buffer. Conflict related information is `` `<excerpt>` is declared here ``
+(`` … is the effective constraint from this declaration `` for every scheme
+participant); an empty `Options` participant with no constraint span relates
+its origin's `Definition` span.
+
+Conflict messages render each participant with
+`Constraint::diagnostic_excerpt()` (`serialize.rs`): `to_schema_text(None)`
+with controls escaped (`\n`, `\t`, `\u{1b}`), then cut to 160 Unicode
+scalars including `…`. `Display` and `StatusBlock` both use it inside a code
+span; DMLS related information must use it too. Options render as canonical
+`alphanumeric(...)`/bare `alphanumeric`; string defaults that read as a
+number, `true`, `false`, or `null` are quoted; compound defaults render as
+compact JSON (diagnostic only, not grammar).
 
 ## Testing
 

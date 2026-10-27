@@ -1342,8 +1342,8 @@ fn schema_validate_multi_hop_bound_contradiction_names_both_origins() {
     let message = report["message"].as_str().unwrap();
     for fragment in [
         "heading: contradictory bounds on named type `title_base`".to_owned(),
-        format!("`min` in `{}`", resolved_display(&types)),
-        "`max` in the inline `$schema`".to_owned(),
+        format!("`min(10)` in `{}`", resolved_display(&types)),
+        "`max(5)` in the inline `$schema`".to_owned(),
     ] {
         assert!(
             message.contains(&fragment),

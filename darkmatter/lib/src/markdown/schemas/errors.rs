@@ -48,6 +48,12 @@ use super::simplified::{
 };
 
 
+/// A conflict participant's diagnostic excerpt as a Markdown code span,
+/// fenced so a backtick in the value cannot close it early.
+fn participant_code_span(participant: &SchemaConstraintParticipant) -> String {
+    renderable::markdown::code_span(&participant.constraint.diagnostic_excerpt())
+}
+
 /// Errors produced by the schemas subsystem.
 #[derive(Debug, Error)]
 pub enum SchemaError {
@@ -239,15 +245,18 @@ pub enum SchemaError {
     /// constraint taking part, in merge order (inherited first), each with
     /// the value that took part and its own source and span, so the conflict
     /// can point at all of them, including declarations reached through
-    /// multi-hop references.
+    /// multi-hop references. Messages show each value as its
+    /// [`Constraint::diagnostic_excerpt`](super::Constraint::diagnostic_excerpt)
+    /// in a code span; the structured `constraint` keeps the full value.
     #[error(
         "{}: contradictory {kind} on named type `{name}`: {}",
         site.path,
         constraints
             .iter()
             .map(|participant| format!(
-                "`{}` in {}",
-                participant.origin.keyword, participant.origin.source
+                "{} in {}",
+                participant_code_span(participant),
+                participant.origin.source
             ))
             .collect::<Vec<_>>()
             .join(" and ")
@@ -863,9 +872,11 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                         )))
                         .chain(constraints.iter().map(|participant| {
                             let origin = &participant.origin;
+                            // A code span's contents are literal Prose, so
+                            // the excerpt is fenced rather than escaped.
                             Prose::new(format!(
-                                "<cyan>{}</cyan> at {} in {}",
-                                Prose::escape_text(&origin.keyword),
+                                "{} at {} in {}",
+                                participant_code_span(participant),
                                 Prose::escape_text(&origin.path.to_string()),
                                 Prose::escape_text_outside_code_spans(&origin.source.to_string())
                             ))
@@ -1374,12 +1385,109 @@ mod tests {
         };
         assert_eq!(
             err.to_string(),
-            "title: contradictory bounds on named type `title_base`: `min` in `types.yaml` and \
-             `max` in the inline `$schema`"
+            "title: contradictory bounds on named type `title_base`: `min(10)` in `types.yaml` and \
+             `max(5)` in the inline `$schema`"
         );
         let out = render(&err);
         assert!(out.contains("contradictory constraints"), "missing summary: {out}");
-        assert!(out.contains("label") && out.contains("types.yaml"), "{out}");
+        assert!(out.contains("min(10) at label in types.yaml"), "{out}");
+        assert!(out.contains("max(5) at title in the inline $schema"), "{out}");
+    }
+
+    /// A bounds conflict between `participant` (inherited, from a file) and
+    /// a plain use-site `max(5)`.
+    fn conflict_with(participant: crate::markdown::schemas::Constraint) -> SchemaError {
+        let origin = |source: SchemaSourceId, path: &str| crate::markdown::schemas::SchemaConstraintOrigin {
+            source,
+            path: crate::markdown::schemas::SchemaSourcePath::root().property(path),
+            keyword: "default".into(),
+            occurrence: 0,
+            span: None,
+        };
+        SchemaError::ConstraintConflict {
+            name: "slug".into(),
+            kind: SchemaConstraintConflictKind::Default,
+            site: site("tags"),
+            constraints: vec![
+                SchemaConstraintParticipant {
+                    origin: origin(SchemaSourceId::File(PathBuf::from("types.yaml")), "slug"),
+                    constraint: participant,
+                },
+                SchemaConstraintParticipant {
+                    origin: origin(SchemaSourceId::InlineDocument, "tags"),
+                    constraint: crate::markdown::schemas::Constraint::Default(serde_json::json!(5)),
+                },
+            ],
+        }
+    }
+
+    /// Asserts `Display` and the terminal block both show `excerpt` for the
+    /// first participant, and that the structured value is `constraint`.
+    fn assert_excerpt_everywhere(constraint: crate::markdown::schemas::Constraint, excerpt: &str) {
+        let err = conflict_with(constraint.clone());
+        let fenced = renderable::markdown::code_span(excerpt);
+        let display = err.to_string();
+        assert!(
+            display.contains(&format!("{fenced} in `types.yaml` and `default(5)` in the inline")),
+            "Display lacks {fenced}: {display}"
+        );
+        let term = biscuit_terminal::terminal::Terminal::default();
+        let out = strip_escape_codes(err.status_block(&term).render_optimistic(Some(1000)));
+        assert!(out.contains(&format!("{excerpt} at slug in types.yaml")), "terminal lacks {excerpt}: {out}");
+        let SchemaError::ConstraintConflict { constraints, .. } = err else {
+            unreachable!("built as a conflict");
+        };
+        assert_eq!(constraints[0].constraint, constraint, "the structured value is the full constraint");
+    }
+
+    #[test]
+    fn conflict_excerpts_escape_control_characters_identically() {
+        let constraint = crate::markdown::schemas::Constraint::Default(serde_json::json!("a\nb\tc\u{1b}[31md"));
+        assert_excerpt_everywhere(constraint, r"default('a\nb\tc\u{1b}[31md')");
+    }
+
+    #[test]
+    fn conflict_excerpts_keep_terminal_markup_literal() {
+        let constraint = crate::markdown::schemas::Constraint::Default(serde_json::json!("<red>**x**</red>[y]"));
+        let excerpt = "default(<red>**x**</red>[y])";
+        assert_excerpt_everywhere(constraint.clone(), excerpt);
+        let term = biscuit_terminal::terminal::Terminal::default();
+        let raw = conflict_with(constraint).status_block(&term).render_optimistic(Some(1000));
+        assert!(!raw.contains("\u{1b}[31m"), "markup must not become color: {raw:?}");
+    }
+
+    #[test]
+    fn conflict_excerpts_shorten_long_unicode_values_to_160_scalars() {
+        let value = "é".repeat(200);
+        let constraint = crate::markdown::schemas::Constraint::Default(serde_json::json!(value));
+        let excerpt = constraint.diagnostic_excerpt();
+        assert_eq!(excerpt.chars().count(), 160);
+        assert!(excerpt.starts_with("default(é") && excerpt.ends_with("é…"), "{excerpt}");
+        assert_excerpt_everywhere(constraint, &excerpt);
+    }
+
+    #[test]
+    fn conflict_excerpts_render_option_sets_without_panicking() {
+        use crate::markdown::schemas::{AlphanumericOption, Constraint};
+        assert_excerpt_everywhere(Constraint::Options(vec![]), "alphanumeric");
+        assert_excerpt_everywhere(
+            Constraint::Options(vec![AlphanumericOption::AllowPeriods, AlphanumericOption::AllowDashes]),
+            "alphanumeric(allow-dashes,allow-periods)",
+        );
+    }
+
+    #[test]
+    fn conflict_excerpts_render_compound_defaults_as_compact_json() {
+        let compound = serde_json::json!({"tags": ["a`b", "c"], "n": 1});
+        let constraint = crate::markdown::schemas::Constraint::Default(compound);
+        assert_excerpt_everywhere(constraint, r#"default({"tags":["a`b","c"],"n":1})"#);
+
+        let long = serde_json::json!((0..100).collect::<Vec<_>>());
+        let constraint = crate::markdown::schemas::Constraint::Default(long.clone());
+        let excerpt = constraint.diagnostic_excerpt();
+        assert_eq!(excerpt.chars().count(), 160);
+        assert!(excerpt.starts_with("default([0,1,2,") && excerpt.ends_with('…'), "{excerpt}");
+        assert_excerpt_everywhere(constraint, &excerpt);
     }
 
     #[test]

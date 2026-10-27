@@ -390,17 +390,31 @@ fn a_multi_hop_contradiction_names_the_reference_and_both_declarations() {
     assert_eq!(named.len(), 1, "{diagnostics:?}");
     assert_eq!(named[0]["range"], range_of(&document.text, "title_base", 0));
     assert!(named[0]["message"].as_str().unwrap().contains("contradictory"), "{:?}", named[0]);
-    let related: Vec<(Value, Value)> = named[0]["relatedInformation"]
+    let related: Vec<(Value, Value, Value)> = named[0]["relatedInformation"]
         .as_array()
         .expect("related declarations")
         .iter()
-        .map(|related| (related["location"]["uri"].clone(), related["location"]["range"].clone()))
+        .map(|related| {
+            (
+                related["location"]["uri"].clone(),
+                related["location"]["range"].clone(),
+                related["message"].clone(),
+            )
+        })
         .collect();
     assert_eq!(
         related,
         vec![
-            (json!(canonical_uri(&types.path)), range_of(&types.text, "min(10)", 0)),
-            (json!(document.uri), range_of(&document.text, "max(5)", 0)),
+            (
+                json!(canonical_uri(&types.path)),
+                range_of(&types.text, "min(10)", 0),
+                json!("`min(10)` is declared here"),
+            ),
+            (
+                json!(document.uri),
+                range_of(&document.text, "max(5)", 0),
+                json!("`max(5)` is declared here"),
+            ),
         ]
     );
     fixture.shutdown();
@@ -557,6 +571,38 @@ fn editing_an_imported_definition_refreshes_every_assistance_without_reopening()
         "restoring the definition clears the cached failure: {diagnostics:?}"
     );
 
+    fixture.shutdown();
+}
+
+/// A conflict reported through a referenced schema still watches the file
+/// of every participant, including one the document never names: fixing the
+/// far declaration clears the document's diagnostic without reopening it.
+#[test]
+fn a_wrapped_conflict_watches_every_participant_file() {
+    let workspace = LspWorkspace::new();
+    let types = write(&workspace, "types.yaml", "kind: schema\ntypes:\n  label: number(min(10))\n");
+    write(&workspace, "outer.yaml", "kind: schema\ntypes:\n  title: 'label(max(5))@./types.yaml'\n");
+    let document = write(&workspace, "doc.md", "---\n$schema: ./outer.yaml\ntitle: 3\n---\n\nBody\n");
+    let conflicts = |diagnostics: &[Value]| {
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["message"].as_str().is_some_and(|message| message.contains("contradictory")))
+            .count()
+    };
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(workspace.path()));
+    open(&fixture, &document);
+    let diagnostics = fixture.wait_for_diagnostics(&document.uri);
+    assert_eq!(conflicts(&diagnostics), 1, "{diagnostics:?}");
+
+    std::fs::write(&types.path, "kind: schema\ntypes:\n  label: number(min(1))\n").unwrap();
+    fixture.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({ "changes": [{ "uri": types.uri, "type": 2 }] }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(&document.uri);
+    assert_eq!(conflicts(&diagnostics), 0, "editing the far participant refreshes: {diagnostics:?}");
     fixture.shutdown();
 }
 
