@@ -14,17 +14,6 @@ packages:
     - claudine
     - claudine-cli
 human_review: false
-message_to_agent: |-
-    Phase 3 landed all four Wave 3 lanes. The host function cache in
-    schemas/catalog.rs is now one HostFunctionEntry per path (host_function_cache());
-    tests are in schemas/catalog/host_function_cache_tests.rs and use the extended
-    discovery_probe (host_function_builds, cached_host_functions,
-    host_function_entries_under) plus the cfg(test) HostFunctionCatalog::owner_probe.
-    Generator stdout already diffed byte-identical to baselines/ this phase, and
-    md schema about / DMLS hover+completion now have exact-text pins. The darkmatter
-    just test (12610 passed) and just lint are green; Claudine's full just test/just lint
-    have NOT been run in this phase (only scoped claudine tests) - Phase 4 must run them.
-    signatures.rs tests live under lifecycle::actions::signatures::tests (declared from actions.rs).
 source_files_during_phase_2:
     - darkmatter/lib/src/catalog/mod.rs
     - darkmatter/lib/src/effects/catalog.rs
@@ -75,6 +64,55 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/expressions.md
     - .claude/skills/darkmatter/library-surfaces.md
+source_files_during_phase_4:
+    - claudine/lib/src/composition/lifecycle/prewarm/fakes.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker/tests.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_code:
+    - darkmatter/lib/src/catalog/mod.rs
+    - darkmatter/lib/src/effects/catalog.rs
+    - darkmatter/lib/src/effects/types.rs
+    - darkmatter/lib/src/lifecycle/schema_projection.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/capabilities.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/semantics.rs
+    - darkmatter/lib/tests/l1/function_catalog_parity.rs
+    - darkmatter/lib/tests/l1/function_dispatch.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+    - darkmatter/lib/tests/l1/predict_conflicts.rs
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - claudine/cli/src/commands/context/effects.rs
+    - claudine/cli/src/commands/context/expressions.rs
+    - claudine/cli/src/commands/context/format.rs
+    - claudine/cli/src/commands/context/mod.rs
+    - claudine/cli/src/commands/context/tests.rs
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/catalog/host_function_cache_tests.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/fakes.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker/tests.rs
+documentation:
+    - darkmatter/lib/src/catalog/README.md
+    - darkmatter/docs/topics/host-functions.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/library-surfaces.md
+completed_phase: 4
+implemented: true
+pipeline_refreshed: []
+decisions_for_author: []
 ---
 
 # Implementation Log for 2026-10-25-host-function-catalog-leak (4 phases)
@@ -686,3 +724,135 @@ stands.
   comparison); the new tests build paths from a `canonicalize_simplified`
   temp dir and use a byte fixture rather than permissions. CI's Linux/macOS
   legs and the nightly Windows/WSL2 legs cover it.
+
+## Phase 4
+
+Phase 4 is the plan's Wave 4 (combined validation) and Wave 5 (closure
+audit). The coordinator did all of it; no subagent ran.
+
+### Combined validation (Wave 4)
+
+- `just test` (darkmatter, incl. CLI and DMLS): 12610 passed, 10 skipped,
+  0 failed, 0 slow, 97 s.
+- `just lint` (darkmatter, incl. the zed-dmls wasm check): exit 0.
+- `just lint` (claudine): exit 0.
+- `just test` (claudine), first run: stopped at one failure,
+  `composition::lifecycle::prewarm::worker::tests::a_successful_or_no_op_preparation_counts_as_done`
+  (`left: []`, `right: ["done"]`). It passed 5 of 5 runs alone, but the cause
+  is a real race in the test, not just load: `FakePreparer::wait_for_calls`
+  returns once `prepare` is *invoked*, while `completed` is recorded only when
+  the returned future runs to the end, and the test then drops the worker,
+  which cancels an unfinished preparation. `failures_warn_once_without_the_phrase_and_later_candidates_still_run`
+  had the same shape (`wait_for_calls(3)`, drop, assert `completed()` of
+  three). Fixed in the test fake: `FakePreparer::wait_for_completed(count)`
+  (a second `watch` counter bumped after `completed` is pushed), used by those
+  two tests. The other `wait_for_calls` sites either use the blocking fake or
+  rely on serial execution (a second call means the first completed), so they
+  are unchanged. Unrelated to the host-function catalog; fixed because it
+  blocked the required Claudine gate and would flake in CI.
+  `cargo nextest run -p claudine -E 'test(/prewarm/)'` → 57 passed.
+- `just test` (claudine), rerun: 11654 passed, 10 skipped, 0 failed (3 slow,
+  all pre-existing `claudine-cli` L1 process tests unrelated to this fix:
+  `research_sequence_artifacts::shipped_research_fleet_runs_row_freshness_and_success_through_normal_cli`,
+  `sequence_task_providers::empty_hint_nested_sequence_list_fails_its_body_step_before_any_task_launches`,
+  `wrap_compose_validation::predicates_operands_and_proxy_with_values_are_rejected_before_launch`).
+  Claudine's `just test` includes the context-command, `claudine_schemas`, and
+  shipped lifecycle-artifact tests, so the Claudine artifact checks pass.
+- `cargo check --color=never -p darkmatter --example expression_doc_generator --example lifecycle_schema_generator`:
+  passes.
+- `cargo run --quiet --color=never -p darkmatter --example expression_doc_generator`
+  and `... --example lifecycle_schema_generator`: both exit 0, and `cmp`
+  against `baselines/expression_doc_generator.stdout` and
+  `baselines/lifecycle_schema_generator.stdout` reports byte-identical. No
+  write mode used, no baseline changed.
+- Generated-region and facts tests in the darkmatter run:
+  `lifecycle_schema_generation::the_generated_regions_are_byte_identical_to_a_regeneration`
+  (0.08 s), `expression::catalog::tests::narrative_doc_function_table_matches_catalog`
+  (exact expression-table text, 0.05 s), `host_functions::the_committed_facts_artifact_is_fresh_and_deterministic`
+  (0.06 s) all pass, so no extra direct table comparison was needed.
+- New-test durations (from this run): the six `host_function_cache_tests`
+  0.056–0.063 s; `host_functions` additions 0.026–0.093 s; signature, CLI,
+  and DMLS pins 0.04–0.17 s; the spawned `schema_about_verbose_prints_context_and_expression_sections`
+  0.46 s. None is near the 5 s budget, so nothing was split.
+- Portability: nothing this phase added touches paths or platform behavior.
+  Evidence is from macOS only. Linux, Windows, and WSL2 were not run here; CI
+  and the nightly cover them.
+
+### Closure audit (Wave 5)
+
+- Leak search over every `.rs` file in `26d72d2a3` (Phases 2–3):
+  `Box::leak`/`.leak()`/`mem::forget`/`unsafe`/`transmute`/`String::leak`.
+  Remaining hits are only the sites the spec excludes:
+  `markdown/compose/context/catalog.rs::leak` (the bounded one-time projection
+  behind a `LazyLock`), the test fixture in `lifecycle/signatures.rs` tests,
+  and the test-only leaks in `claudine/lib/tests/l1/claudine_schemas.rs`.
+  `predict_conflicts.rs`'s hits are the word "unsafe" in a git fixture. The
+  expression catalog has no `leak` helper left.
+- Ownership: `ExpressionFunctionDescriptor` and `FunctionParameterDescriptor`
+  own every field (`Box<str>`, `Box<[..]>`); `HostFunctionCatalog` is
+  `Arc<CatalogData>` with an owned `PathBuf`, `String` version, and
+  `FunctionCatalog`; `&'static` views come only from the static
+  `expression_function_catalog()` accessors. Categories, aliases,
+  parameters, compiled types, examples, and reasons all trace to that one
+  owner.
+- Cache (`schemas/catalog.rs::host_function_set`): one `HostFunctionEntry`
+  per path. Lookup, build, and replacement run under one lock; an unchanged
+  revision (catalog BLAKE3 hash and full `ArtifactKey`) returns the cached
+  result, error included; any change overwrites the entry, so neither an
+  earlier success nor the old artifact text survives a failure. `result` is
+  built before `artifact` moves into the entry, so the compiler proves the
+  set does not borrow the artifact text (no self-reference). The reclamation
+  tests check `Weak` owners through `HostFunctionCatalog::owner_probe` and
+  hold the set and guard explicitly.
+- Docs and skills: `docs/topics/host-functions.md`, `lib/src/catalog/README.md`,
+  and the two darkmatter skill pages match the code. None names this fix or a
+  date, and no stale "lives for the rest of the process" claim remains in the
+  changed loading paths.
+- Departures from the spec: none beyond those already recorded in Phases 2–3.
+
+### Design Decisions
+
+1. **Fix the Claudine prewarm test race in the fake, not by rerunning**
+   - **decision:** Add `FakePreparer::wait_for_completed` and use it in the
+     two tests that assert `completed()` after dropping the worker.
+   - **alternatives considered:** record the failure as load-sensitive and
+     move on; make the recording fake complete synchronously inside `prepare`.
+   - **why:** the failure is a real ordering race (completion is recorded
+     after the call is counted), so it would recur under CI load. Completing
+     inside `prepare` would break the fake's documented contract that an
+     unpolled, dropped call is never completed.
+   - **downsides:** a test-only change in Claudine, outside this fix's
+     catalog scope; the fake grows one more counter.
+
+### Requirement-to-test mapping (final)
+
+The mapping is unchanged from Phase 3's "Requirement-to-test summary".
+Phase 4 adds no catalog behavior. Acceptance 6 (scoped checks) is the gate
+list above.
+
+### Gates
+
+- Scope check, run after all edits from the repository root:
+  `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [claudine, test-toolkit, darkmatter]`, `change_class: package`,
+  so the gates ran (listed above). `test-toolkit` was not run: the only
+  Phase 4 source change is Claudine's crate-private `FakePreparer` and its
+  tests, which nothing outside `claudine` can name.
+- Dependents: Claudine (`claudine`, `claudine-cli`, `claudine-gen`) ran in
+  full via its `just test`. The only Phase 4 source change is in Claudine's
+  own tests, so no further dependents apply.
+- Cross-OS check: not run. Phase 4 changed only a test fake and two tests,
+  with no path or platform code.
+
+## Pipeline Refresh
+
+- `2026-10-25-schema-diagnostic-provenance` (this spec's `next_spec`, plan
+  not started): checked and unchanged. It concerns schema diagnostic
+  provenance in `simplified/*`, `schemas/mod.rs`, and DMLS named-type
+  overlays. It names no host-function catalog, descriptor, or cache symbol
+  this fix changed, and none of its files overlap this fix's files.
+- `2026-10-25-pipeline-work-reduction` (lists this fix in its chain):
+  checked and unchanged. Its process-wide cache rule ("keep the latest
+  revision per path … never use `Box::leak` on a path that loads data at
+  runtime") is exactly what this fix implemented, and its decided items
+  (C*, D*, P1, X*) do not include the host-function cache.

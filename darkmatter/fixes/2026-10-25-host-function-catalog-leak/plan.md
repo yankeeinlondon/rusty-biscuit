@@ -67,6 +67,53 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/expressions.md
     - .claude/skills/darkmatter/library-surfaces.md
+source_files_during_phase_4:
+    - claudine/lib/src/composition/lifecycle/prewarm/fakes.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker/tests.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_code:
+    - darkmatter/lib/src/catalog/mod.rs
+    - darkmatter/lib/src/effects/catalog.rs
+    - darkmatter/lib/src/effects/types.rs
+    - darkmatter/lib/src/lifecycle/schema_projection.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/capabilities.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/semantics.rs
+    - darkmatter/lib/tests/l1/function_catalog_parity.rs
+    - darkmatter/lib/tests/l1/function_dispatch.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+    - darkmatter/lib/tests/l1/predict_conflicts.rs
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - claudine/cli/src/commands/context/effects.rs
+    - claudine/cli/src/commands/context/expressions.rs
+    - claudine/cli/src/commands/context/format.rs
+    - claudine/cli/src/commands/context/mod.rs
+    - claudine/cli/src/commands/context/tests.rs
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/catalog/host_function_cache_tests.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/fakes.rs
+    - claudine/lib/src/composition/lifecycle/prewarm/worker/tests.rs
+documentation:
+    - darkmatter/lib/src/catalog/README.md
+    - darkmatter/docs/topics/host-functions.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/library-surfaces.md
+completed_phase: 4
+implemented: true
 ---
 
 # Host function catalog ownership plan
@@ -405,7 +452,7 @@ shared-cache reset, and require no terminal or browser focus.
 
 ### Wave 4 — Combined validation
 
-- [ ] **Verify scoped checks**
+- [x] **Verify scoped checks**
   - Prerequisite: all Wave 3 lanes integrated. Run `just test` and `just lint`
     in `darkmatter/` and in `claudine/`. Use the recipes' nextest execution;
     Darkmatter includes DMLS. Run any newly added targeted tests first while
@@ -435,7 +482,7 @@ shared-cache reset, and require no terminal or browser focus.
 
 ### Wave 5 — Closure audit
 
-- [ ] **Audit final ownership**
+- [x] **Audit final ownership**
   - Prerequisite: Wave 4 passes. Trace every dynamically projected category,
     descriptor, alias, parameter, compiled type, example text, and reason to its
     owner. Check success and partial-failure paths for leaks, global retention,

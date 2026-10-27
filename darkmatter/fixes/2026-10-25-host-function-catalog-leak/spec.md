@@ -28,13 +28,16 @@ next_spec: 2026-10-25-schema-diagnostic-provenance
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-26
-review_iterations: 1
+review_iterations: 3
 human_review: false
 needs_rulings: false
 related:
     - 2026-10-25-fix-now
     - 2026-10-25-pipeline-improvements
     - 2026-10-27-darkmatter-lifecycle-ownership
+completed: true
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Host function catalogs are owned, not leaked
