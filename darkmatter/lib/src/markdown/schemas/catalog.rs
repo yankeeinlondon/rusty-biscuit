@@ -795,10 +795,11 @@ fn observe_candidate(
 
 /// Test-only observation of schema-root discovery on the current thread:
 /// which lifecycle catalog and artifact files it reads, how many lifecycle
-/// profiles and host function sets it builds, read failures to inject, and
-/// what the process caches hold for a path.
+/// profiles it builds, read failures to inject, and what the profile cache
+/// holds for a path.
 /// Compiled for this crate's tests and with the test-only `work-counters`
-/// feature; production builds read the disk directly.
+/// feature; production builds read the disk directly. The host function
+/// cache's inspection items are crate-private and compiled for tests only.
 #[cfg(any(test, feature = "work-counters"))]
 pub mod discovery_probe {
     use std::cell::RefCell;
@@ -808,6 +809,7 @@ pub mod discovery_probe {
     #[derive(Default)]
     struct State {
         builds: usize,
+        #[cfg(test)]
         host_function_builds: usize,
         reads: Vec<PathBuf>,
         failures: HashMap<PathBuf, String>,
@@ -855,7 +857,8 @@ pub mod discovery_probe {
 
         /// The host function sets `host_function_catalogs` loaded (successfully
         /// or not) so far; a cached result is not counted.
-        pub fn host_function_builds(&self) -> usize {
+        #[cfg(test)]
+        pub(super) fn host_function_builds(&self) -> usize {
             with_state(|state| state.host_function_builds)
         }
 
@@ -896,25 +899,28 @@ pub mod discovery_probe {
     }
 
     /// The facts artifact as the host function cache recorded it.
+    #[cfg(test)]
     #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum CachedArtifact {
+    pub(super) enum CachedArtifact {
         Absent,
         Unreadable(String),
         Text(String),
     }
 
     /// The host function cache's entry for one catalog path.
+    #[cfg(test)]
     #[derive(Debug, Clone)]
-    pub struct CachedHostFunctions {
-        pub catalog_hash: String,
-        pub artifact: CachedArtifact,
+    pub(super) struct CachedHostFunctions {
+        pub(super) catalog_hash: String,
+        pub(super) artifact: CachedArtifact,
         /// The cached set's function names, or the cached load error.
-        pub result: Result<Vec<String>, super::HostFunctionCatalogError>,
+        pub(super) result: Result<Vec<String>, super::HostFunctionCatalogError>,
     }
 
     /// The host function cache's entry for `path`, if it holds one. Holds
     /// nothing of the cached set alive.
-    pub fn cached_host_functions(path: &Path) -> Option<CachedHostFunctions> {
+    #[cfg(test)]
+    pub(super) fn cached_host_functions(path: &Path) -> Option<CachedHostFunctions> {
         super::host_function_cache().get(path).map(|cached| CachedHostFunctions {
             catalog_hash: cached.catalog_hash.clone(),
             artifact: match &cached.artifact {
@@ -931,7 +937,8 @@ pub mod discovery_probe {
     }
 
     /// How many host function cache entries are for paths under `dir`.
-    pub fn host_function_entries_under(dir: &Path) -> usize {
+    #[cfg(test)]
+    pub(super) fn host_function_entries_under(dir: &Path) -> usize {
         super::host_function_cache().keys().filter(|path| path.starts_with(dir)).count()
     }
 
@@ -956,6 +963,7 @@ pub mod discovery_probe {
     }
 
     pub(super) fn note_host_function_build() {
+        #[cfg(test)]
         STATE.with_borrow_mut(|state| {
             if let Some(state) = state {
                 state.host_function_builds += 1;
