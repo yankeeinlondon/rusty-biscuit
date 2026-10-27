@@ -444,8 +444,10 @@ A sequence has no single planned target. Preflight predicts each `prompt:`
 task's provider from its own `agent` (`PreflightTask.provider`, computed in
 `composition/sequence/preflight/providers.rs` without running or composing
 anything; a literal hint is classified before any state is built, so only a
-document hint that reads an expression builds `PredictionStateBuild` state)
-and keys every task by its graph `TaskIdentity`. The CLI
+document hint that reads an expression builds `PredictionStateBuild` state;
+`ProviderPrediction.dependencies` is per task, so `defer_runtime_written`
+moves both `agent` and `model` to launch when either reads a runtime-written
+key) and keys every task by its graph `TaskIdentity`. The CLI
 (`wrap/sequence/providers.rs`) turns predictions into per-task targets
 (own / enclosing-document fallback / decided at launch / unresolved), fails an
 unusable static hint with `SequenceTaskProviderSelection` before any task

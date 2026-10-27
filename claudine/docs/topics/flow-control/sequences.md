@@ -971,6 +971,21 @@ hundred legs holds at most two branches at a time; the results and writes
 of finished legs are all that accumulate. A retried group builds fresh
 branches for its legs from the retry's starting state.
 
+Each of the group's slots (`max_parallel` of them, or one per leg without a
+cap) runs this loop. A leg that is never admitted, because `fail_fast`
+stopped admission or the run was interrupted, never builds a branch:
+
+```mermaid
+flowchart TD
+    seed["group starts: take the group-start state once"] --> admit{"a leg not yet admitted,<br/>and admission still open?"}
+    admit -- "yes: take the next leg in declaration order" --> build["build the leg's branch<br/>as a copy of the group-start state"]
+    build --> run["run the leg against its branch"]
+    run --> collect["keep the leg's result and writes"]
+    collect --> drop["drop the branch"]
+    drop --> admit
+    admit -- "no" --> merge["every slot done: fold results and writes<br/>in declaration order"]
+```
+
 ### What a leg sees
 
 Every leg starts from the state as it was when its group started, and keeps

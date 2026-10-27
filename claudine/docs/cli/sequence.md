@@ -184,14 +184,18 @@ only against what is known before the run: the prompt document's
 frontmatter under the task's evaluated `with:` and the caller's setters. A
 plain value is still decided at launch when a lifecycle `set` writes that
 key, and a hint that reads a plain-text key a lifecycle `set` writes is
-decided at launch too, whatever that key holds now:
+decided at launch too, whatever that key holds now. That second rule covers
+the task as a whole: once either hint reads a key a lifecycle `set` writes,
+both `agent` and `model` are decided at launch, plain values included:
 
 ```yaml
 # prompts/review.md
 pick: codex
 agent: "{{ pick }}"   # decided at launch if any lifecycle `set` writes `pick`
-model: big            # predicted as written
-``` A graph of only `shell:` and `side_effect:` tasks needs no
+model: big            # predicted as written, unless `agent` is decided at launch
+```
+
+A graph of only `shell:` and `side_effect:` tasks needs no
 provider at all.
 
 A body step composes the sequence document itself, so its `agent` is the

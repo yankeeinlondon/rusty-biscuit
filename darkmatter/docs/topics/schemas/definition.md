@@ -615,7 +615,9 @@ In a union, the target is the property's effective type at the place the candida
 $schema:
     # `large` is kept: the second arm accepts it. `huge` is linted.
     size: ["string(pattern(^small$); suggest(small, large, huge))", "string(pattern(^large$))"]
-``` Applicable number constraints include `min`, `max`, and `integer`; applicable string constraints include `minLength`, `maxLength`, `not-empty`, and `pattern`. `required`, `default`, `generated`, and `example(...)` do not constrain a candidate.
+```
+
+Applicable number constraints include `min`, `max`, and `integer`; applicable string constraints include `minLength`, `maxLength`, `not-empty`, and `pattern`. `required`, `default`, `generated`, and `example(...)` do not constrain a candidate.
 
 Invalid candidates produce structured lint problems (not schema-load errors) with decoded text, interpreted value, failure reason, and exact source span. Schema resolution, validator construction, frontmatter validation, and composition all continue uninterrupted. See `SuggestionLintProblem` and `SuggestionLintReason` in the library API.
 

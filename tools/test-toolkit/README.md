@@ -270,7 +270,11 @@ cannot pass. `darkmatter/lib/tests/l1/test_layout.rs` is the reference use.
 `CountingAllocator` wraps the system allocator and keeps process-wide totals,
 so work done on other threads is counted. Only a final binary can declare a
 global allocator, so a bench target that measures allocations declares it
-itself; a library never does:
+itself. A library's normal build never declares it. The one exception is the
+library's own unit-test binary, which is also a final binary, when a scenario
+needs crate-private functions: Claudine's lib declares it there under
+`cfg(all(test, feature = "work-counters"))`. Either way the declaration and
+measurement look like this:
 
 ```rust
 #[global_allocator]
