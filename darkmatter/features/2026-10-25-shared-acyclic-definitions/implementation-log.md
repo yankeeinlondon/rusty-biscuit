@@ -17,32 +17,6 @@ packages:
     - dmls
     - claudine-cli
 human_review: false
-message_to_agent: |-
-    Phase 3 landed consumer, editor and Claudine evidence plus three fixes
-    to defects that sharing introduced. Darkmatter just test passes
-    (12,721), lint is clean, and the Claudine schema subsets pass. Points
-    for Phase 4:
-    (1) Fixes: a type holding file(match(...)) is never shared
-    (recursive.rs is_shareable/holds_file_match), because root-union arms
-    enforce match inside definitions; subtype.rs identity opens references;
-    a DMLS stored union hovers as its alternatives
-    (frontmatter.rs stored_union_type_line). a3_lifecycle_key_hovers.json is
-    back to its pre-feature bytes. Phase 2's note (1) is settled.
-    (2) Docs owed by "Document shared behavior": dmls/docs/hover.md
-    ("Recursive types") and docs/topics/schemas/dmls-schema-support.md call
-    the named "defined as" hover recursive-only, but it now also covers
-    shared acyclic objects, and the union section holds for stored unions
-    too. The schema docs should state that file(match(...)) types are never
-    shared. claudine/docs/topics/schemas.md should state the trigger merge
-    order: embedded triggers come after disk files, so a later layer's
-    declarations replace an earlier one's.
-    (3) Still yours from Phase 2: the golden entry-by-entry review, the
-    recursive_schema_golden.rs comments and corpus README, the budget
-    constant (re-measure; 1,000,000 was the Phase 2 figure), and the DMLS
-    bench (compare hover bytes with Phase 1 first). The DMLS hover change
-    opens only the top-level references of the hovered type, but recheck
-    the verb-hover bytes.
-    Use absolute paths in shell commands (CDPATH trap).
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/schemas/resolve.rs
     - darkmatter/lib/src/markdown/schemas/resolve/graph.rs
@@ -121,6 +95,112 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/schema.md
     - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_4:
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - darkmatter/lib/tests/l1/recursive_schema_golden.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/discriminant.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/scope.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/schema-triggers.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/hover.md
+    - claudine/docs/topics/schemas.md
+    - claudine/schemas/README.md
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-commands.md
+source_code:
+    - darkmatter/lib/tests/l1/shared_acyclic_definitions.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/resolve/graph.rs
+    - darkmatter/lib/src/markdown/schemas/resolve/recursive.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/definitions.rs
+    - darkmatter/lib/tests/l1/shared_acyclic_selection.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_union_typed_consumers.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-action.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-claudine.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-lifecycle.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence-types.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-md-lifecycle.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-sequence.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-inline-compose.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-with-document-schema.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-claudine.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-lifecycle.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence-types.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-md-lifecycle.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-sequence.digest
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_key_hovers.json
+    - claudine/schemas/document.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/inline-compose.yaml
+    - claudine/lib/src/composition/schema/bundle.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/compose_prompt_tiers.rs
+    - claudine/cli/tests/l1/entry_point_parity.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/sequence_magic_reference.rs
+    - claudine/cli/tests/l1/sequence_overlay_pty.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/tests/l1/shared_acyclic_consumers.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/recursive_schema_editor.rs
+    - darkmatter/lib/tests/l1/recursive_schema_golden.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/discriminant.rs
+    - darkmatter/lib/src/markdown/schemas/scope.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+documentation:
+    - claudine/docs/topics/schemas.md
+    - claudine/schemas/README.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/darkmatter/dmls.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/schema-triggers.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/README.md
+    - .claude/skills/claudine/SKILL.md
+completed_phase: 4
+implemented: true
+pipeline_refreshed:
+    - 2026-10-25-pipeline-work-reduction
+decisions_for_author: []
 ---
 
 # Implementation Log for 2026-10-25-shared-acyclic-definitions (4 phases)
@@ -978,3 +1058,288 @@ Phase 2's uncommitted work and the earlier feature's edits.
   comparison, hover text, and tests that use temp dirs. They add no path
   comparison, platform conditional, or process change, and CI covers the
   other OSes.
+
+## Phase 4
+
+Phase 4 is Waves 5 and 6 of the plan. Two subagents ran in parallel with
+separate files. The first did the snapshot review, the budget measurement,
+and the DMLS bench. The second wrote the docs and skills. The orchestrator
+reconciled one contradiction between them (below) and then ran the gates
+alone.
+
+### Measurements (after, matched to Phase 1)
+
+Same host (macOS, Apple silicon), nextest `test` profile, and the Phase 1
+`zz_measure` scaffolding pasted in verbatim. Each case ran once in a fresh
+nextest process. The scaffolding was then removed: `grep -c zz_measure` is 0.
+
+| Case | Bytes before | Bytes after | discover ms | resolve ms (before → after) | compile ms (before → after) | validate ms |
+| ---- | ------------ | ----------- | ----------- | --------------------------- | --------------------------- | ----------- |
+| `claudine.yaml` (`start: []`) | 1,403,266 | 572,195 | 7.8 | 387.7 → 254.9 | 275.5 → 102.0 | 0.6 |
+| `sequence.yaml` (`sequence: []`) | 1,618,148 | 569,111 | 8.4 | 392.1 → 245.8 | 270.1 → 102.5 | 0.1 |
+| `both` | 1,844,516 | 768,262 | 8.9 | 529.1 → 304.4 | 444.4 → 167.7 | 0.7 |
+
+The bytes equal Phase 2's figures exactly. `$defs` holds 93 entries in
+`both` (13 before), 88 in `claudine`, and 93 in `sequence`.
+
+**Budget.** `M = 768,262`. `1.25 × M = 960,327.5`, and
+`ceil(5 × 768,262 / 400,000) = ceil(3,841,310 / 400,000) = 10`, so the budget
+is `100_000 × 10 = 1_000_000`, below 2,000,000. `PAYLOAD_LIMIT_BYTES` is now
+`1_000_000`. The test was renamed
+`embedded_trigger_payloads_resolve_within_one_megabyte`, and its doc and the
+constant's doc describe the fixed limit. All three cases, the family
+assertions, and embedded-only resolution are unchanged.
+
+Largest remaining repeated helpers in `both` (compact subtrees over 2,000
+bytes, maximal only):
+
+| Copies × bytes | Wasted bytes | What it is |
+| -------------- | ------------ | ---------- |
+| 2 × 156,061 | 156,061 | the `loop` bundle arm: one copy in the Claudine payload's `$defs/loop`, one in the Darkmatter baseline layer's `properties/loop` (catalog declarations are not shared) |
+| 2 × 34,753 | 34,753 | the `loop` single arm, same two layers |
+| 2 × 33,753 | 33,753 | `bundle@./action.yaml`, copied in `stack` and `item` |
+| 2 × 33,575 | 33,575 | `initialize-bundle`, in `initialize-stack` and `initialize-item` |
+| 2 × 31,949 | 31,949 | `cancelled-bundle`, in `cancelled-stack` and `cancelled-item` |
+| 3 × 5,028 / 3 × 4,236 / 3 × 2,017 | 10,056 / 8,472 / 4,034 | `ping`, `ping_under`, `code_link` short forms (baseline `loop`, payload `loop`, `expression`) |
+
+Each bundle has one authored site, inside the `entry` union. `entry` is
+used as an arm of `stack` and `item`, and a union named as a union arm is
+always copied, so the bundles are copied with it. That follows the
+selection rules; it is not a defect.
+
+### DMLS edit-loop allocation bench (after)
+
+`cargo bench -p dmls --bench pipeline_work_a3` from the worktree root, on the
+same host and release `bench` profile as Phase 1. `bytes_allocated`, Phase 1 → Phase 4:
+
+| Case | overlay | diagnostics | completion | hover_verb | hover_expression | total |
+| ---- | ------- | ----------- | ---------- | ---------- | ---------------- | ----- |
+| a3x1-warm | 364,669,022 → 14,960,338 | 437,126,085 → 37,084,307 | 2,142,462 → 654,291 | 58,763 → 66,277 | 69,943 → 69,943 | 804,066,275 → 52,835,156 |
+| a3x1-cold | 474,658,916 → 25,085,641 | 840,007,880 → 318,554,816 | 2,142,462 → 654,291 | 58,763 → 66,277 | 69,943 → 69,943 | 1,316,937,964 → 344,430,968 |
+| a3x10-warm | 373,749,976 → 24,041,292 | 472,403,672 → 73,175,112 | 2,146,494 → 658,323 | 58,763 → 66,277 | 69,943 → 69,943 | 848,428,848 → 98,010,947 |
+| a3x10-cold | 483,739,870 → 34,166,595 | 875,285,467 → 354,642,989 | 2,146,494 → 658,323 | 58,763 → 66,277 | 69,943 → 69,943 | 1,361,300,537 → 389,604,127 |
+
+The verb hover rose by 7,514 bytes (+12.8%). We looked into it and changed no code:
+
+- It is not a fingerprint miss. A miss costs about 16.8 MB (Decision 10), and
+  warm diagnostics show `AlternativeMatcherPrepare=6` in both runs.
+- With `A3_PROVIDER_BREAKDOWN=1`, the frontmatter provider answers the verb
+  hover with 64,793 bytes in 992 allocations. The hovered `ensure_file` key is
+  now a reference to the stored `ensure_file-short` union. Phase 3's
+  `stored_union_type_line` opens only that union's top-level alternatives,
+  so the list matches the inlined hover. That is a fixed cost per hover. It
+  does not rebuild expanded trees.
+- No baseline provider breakdown was captured, so this attribution is
+  reasoned rather than measured side by side.
+
+No timing threshold was added.
+
+### Snapshot review (entry by entry against `391569fc6`)
+
+- **Frozen inputs unchanged.** `git diff --name-only 391569fc6 HEAD` lists
+  nothing under `inputs/` or in `manifest.yaml`. Before this phase, the
+  README and the test file were unchanged too.
+- **Unaffected entries unchanged.** 93 of the 104 goldens are byte-identical
+  to the baseline, and the corpus test passes without blessing.
+- **Method for changed entries.** The baseline tree was exported to `/tmp`
+  (not a worktree), and its full outputs were dumped. Each dump reproduces its
+  stored Phase 1 digest. A script then inlined every local `$ref` of each new
+  output from `$defs` and compared the result with the old output. No entry
+  has a cyclic definition, because the frozen inputs predate the recursive
+  families.
+
+| Entry | Form (P1 → now) | `$defs` | After inlining every `$ref` |
+| ----- | --------------- | ------- | --------------------------- |
+| `claudine-schemas-action` | json → json | 1 | byte-identical to the old golden |
+| `darkmatter-schemas-partials-md-lifecycle` | digest → json | 8 | byte-identical (same BLAKE3) |
+| `claudine-schemas-{claudine,lifecycle,sequence-types,sequence}` | digest → json | 16 / 15 / 16 / 16 | equal once nested `anyOf` is flattened |
+| `effective-trigger-sequence` | digest → json | 16 | equal once flattened |
+| `darkmatter-schemas-darkmatter-schema-body` | digest → json | 10 | equal once flattened |
+| `darkmatter-schemas-partials-fm` | digest → json | 9 | equal once flattened |
+| `effective-trigger-inline-compose` | digest → digest (3,038,355 → 165,884 B) | 16 | equal once flattened |
+| `effective-trigger-with-document-schema` | digest → digest (3,038,408 → 165,937 B) | 16 | equal once flattened |
+
+**Cause, the same for every entry:** structured named types with two or more
+authored sites are stored in `$defs` and referenced. The only other difference
+is at optional union-alias uses (for example `composed`, `gate`, `else`, and
+`group/initialize`). These now lower to `anyOf: [null, {anyOf: […]}]` where
+the old output had one flat list. Both accept the same values, and
+`description` comes before `anyOf` there, which carries no meaning.
+
+`recursive_schema_golden.rs` (module docs) and the corpus `README.md` now
+describe the current promise. Output from frozen inputs stays byte-for-byte
+unless resolver code intentionally changes the representation. Repeated
+structured types are stored once, and the behavior tests prove the meaning
+is preserved. A bless is legitimate only for an intentional representation
+change, with its cause recorded. The universal acyclic byte-stability claim
+and the feature-name reference are gone.
+
+### Documentation
+
+- `darkmatter/docs/topics/schemas/definition.md`: a new "Shared Named Types"
+  section covers:
+  - a two-property `contact` object stored once, beside a narrowed `slug`
+    alias that is copied;
+  - which types are eligible and which are never shared, including
+    `file(match(...))` and catalog declarations;
+  - counting rules;
+  - per-use fallback, with the key-exclusion example and its
+    accept/reject table;
+  - a Mermaid flow of selection and per-use compatibility;
+  - output and merge behavior.
+
+  The "always inlined" promises (imports, expansion rule, cycle diagram,
+  merges, completion lookup, limitations) were corrected.
+- `local-type-references.md` and `schema-triggers.md` now cover local
+  sharing, namespace identity, separately counted layers, equal-body reuse,
+  and rekeying. `authoring-schemas.md` made the same recursive-only claim,
+  which is corrected.
+- `darkmatter/dmls/docs/hover.md` and `dmls-schema-support.md`: a stored
+  non-union type hovers as "`X` is defined as", and a stored union, recursive
+  or shared, lists its alternatives.
+- `claudine/docs/topics/schemas.md` now covers:
+  - the eight files: three triggers and five libraries;
+  - the import table for `document.yaml`;
+  - complete disk-bundle instructions: a disk trigger imports only from disk,
+    and a lone disk trigger missing its library is skipped but still shadows
+    the embedded copy;
+  - the merge order: embedded triggers come after disk files, so a later
+    layer's declarations replace an earlier one's;
+  - the new budget.
+
+  `claudine/schemas/README.md` stays an overview and links to those
+  instructions.
+- Comment-only Rust edits removed claims that `$ref` or definitions are
+  cyclic-only: `simplified/types.rs` (`TypeExpr::Ref`), `scope.rs`,
+  `discriminant.rs`, `completion.rs`, and `frontmatter_shape.rs`.
+- **Contradiction reconciled.** The docs subagent wrote, in the Claudine
+  skill and `claudine/docs/topics/schemas.md`, that the bundles are stored.
+  It took this from the frozen goldens, whose older inputs give `bundle` two
+  sites. The measured effective schema of the shipped bundle copies them
+  (see the table above). The orchestrator corrected both passages to say
+  the bundles are copied because `entry` is copied into `stack` and `item`.
+
+### Design Decisions
+
+- **The budget is 1,000,000 bytes.**
+  - decision: `PAYLOAD_LIMIT_BYTES = 1_000_000`, from the formula with the
+    re-measured `M = 768,262`. The test was renamed
+    `embedded_trigger_payloads_resolve_within_one_megabyte`.
+  - alternatives considered: keep 2,000,000 (the spec forbids it once a
+    lower constant is reachable); derive the limit at test time (Decision 8
+    forbids it).
+  - why: this is the spec's formula applied to the measured maximum, and
+    the measurement matches Phase 2's byte for byte.
+  - downsides: a shipped-schema growth of more than about 30% now fails the
+    test, and the limit has to be raised deliberately.
+- **The verb-hover rise of 7.5 kB is accepted.**
+  - decision: keep `stored_union_type_line` as it is. It costs 66,277
+    bytes against 58,763 per verb hover.
+  - alternatives considered: cache the opened alternatives per definition
+    (a new cache for a fixed 7.5 kB per hover); revert to the
+    "defined as" hover for unions (breaks the documented union hover that
+    Phase 3 restored).
+  - why: the plan asks to fix a rise caused by rebuilding expanded trees.
+    This one is not that: it is a bounded open of top-level alternatives,
+    and Decision 10's fingerprint reuse is confirmed hitting (a miss would
+    be about 16.8 MB). Every other A3 phase fell by 2.6 to 24 times.
+  - downsides: the hover is 12.8% larger than its pre-feature figure.
+- **Copied bundles are documented, not shared.**
+  - decision: the docs and the Claudine skill say the three bundles are
+    copied into each family's `stack` and `item`, because each has one
+    authored site inside a union that is copied as an arm.
+  - alternatives considered: describe them as stored, as the frozen
+    goldens suggest; extend sharing to union-arm splices (out of scope
+    under the spec's stop rule and Phase 2's arm decision).
+  - why: the measured effective schema of the shipped bundle copies them,
+    and the docs describe shipped behavior.
+  - downsides: about 100 kB of copied bundle bodies remain in `both`.
+
+### Requirement-to-test mapping (all seven acceptance groups)
+
+| Spec acceptance group | Owning tests | Result (this phase) |
+| --------------------- | ------------ | ------------------- |
+| 1. Selection and counting | `shared_acyclic_selection` (Phase 2 table) | pass, in darkmatter `just test` |
+| 2. Constraints and fallback | `shared_acyclic_selection` (`min-keys(1)`, key exclusion, all-fallback, conflicts, defaults, suggestions, optional file, callable, depth) | pass |
+| 3. Acceptance and diagnostics unchanged | Phase 1 `shared_acyclic_definitions` probes; `shared_acyclic_consumers::invalid_values_are_located_*`; Claudine lifecycle/profile corpus owners (Phase 3 list); CLI `schema_validate_*shared*` | pass |
+| 4. Consumer and merge parity | `shared_acyclic_consumers` (Phase 3 table); DMLS `recursive_schema_editor` shared tests | pass |
+| 5. Claudine metadata | `claudine_schemas::shared_payload_properties_have_identical_types`, `hash_imported_twice_*`; `claudine_schemas_embedded::document_metadata_verdicts_*`, shadowing, inventory and export tests | pass, in claudine `just test` |
+| 6. Representation and headroom | `recursive_schema_golden` (17, no bless; review above); `claudine_schemas_embedded::embedded_trigger_payloads_resolve_within_one_megabyte` (1,000,000) | pass |
+| 7. Final checks | the gates below; shipped-artifact `shipped_schema_corpus::loadable_shipped_schemas_resolve_and_lower`; CLI and DMLS request-path tests at both uses | pass |
+
+No new test was added in this phase: it changed a constant, a test name, and
+comments, and the behavior tests from Phases 1–3 cover every group. The
+Input Robustness Matrix does not apply (plan Decision 9).
+
+### Gates
+
+Scope calculator over the uncommitted tree: `packages: [claudine, darkmatter,
+test-toolkit, claudine-cli, darkmatter-cli]`, `change_class: package`, so no
+gate was skipped. All gates ran once, serially, with no subagent running.
+
+- `darkmatter/`: `just test` passed 12,721 (10 skipped) in 72.7 s, with no
+  failure or timeout. `just lint` exited 0. `just test-l2` passed 18 + 69 + 3
+  (darkmatter, darkmatter-cli, dmls). `just check-tier-coverage darkmatter`:
+  nothing stranded.
+- `claudine/`: `just test` passed 11,663 (10 skipped) in 185.6 s. `just lint`
+  exited 0; its only warning is the existing linker `__eh_frame` notice on
+  `claudine-cli`. `just test-l2` passed 289 + 3. `just check-tier-coverage
+  claudine`: nothing stranded. Claudine is the dependent of darkmatter, so
+  its full run also covers the dependent-package step.
+- Scoped runs during the phase: `recursive_schema_golden` (17, no bless) and
+  `embedded_trigger_payloads` (1).
+- No load-sensitive failures.
+- No cross-OS check was run. This phase changed a constant, comments, and
+  docs, with no path, platform conditional, or process change.
+
+### Diff review (Wave 6)
+
+- No snapshot moved without an explanation: no golden changed in this phase,
+  and every earlier change is explained above.
+- Frozen inputs, lifecycle profiles, syntax, and flags are unchanged.
+- No callable failure is hidden, and no error is caught to fall back:
+  fallback is the pass-2 predicate.
+- `publish_definitions` prunes unused definitions.
+- The stale docs and comments listed under Documentation were fixed.
+
+### Skills updated
+
+- `.claude/skills/darkmatter/schema.md`: points to the "Shared Named Types"
+  section. The root-union `match()` entry no longer claims byte-identical
+  acyclic lowering.
+- `.claude/skills/claudine/SKILL.md`: the budget test name, the measured
+  sizes, and stored versus copied helpers (the bundles are copied).
+- `.claude/skills/claudine/cli-commands.md`: the 1,000,000-byte budget.
+
+## Pipeline Refresh
+
+- `2026-10-25-pipeline-work-reduction` (claudine; `depends-on` names this
+  spec, not implemented, no plan): **changed.** Added the design decision
+  "Re-baseline A2 and A3 after shared acyclic definitions". It records the
+  1.84 MB → 768 kB payload, the A3 allocation drop, and the new hover
+  figures (verb 66,277 and expression 69,943, replacing 58,763 and 105,025).
+  It also states that phase 2 compares only against its post-merge
+  re-measurement. No outcome was dropped or narrowed.
+
+
+## Review 1
+
+### Design Decisions
+
+- **Automatic sharing still applies to compatible catalog and file-match uses.**
+  - decision: treat the catalog-wide sharing switch and the context-free
+    file-match exclusion as incomplete requested scope, recorded together as
+    `R1-F1`. Keep the existing semantics-preserving fallback for uses that
+    cannot retain a reference. No author decision is needed.
+  - alternatives considered: accept both exclusions as permanent scope
+    reductions; ask the author to choose; allow sharing everywhere without
+    preserving catalog or root-union behavior.
+  - why: the spec selects repeated structured acyclic definitions automatically,
+    requires consumers to understand them, and authorizes fallback per use.
+    Public-API probes found compatible ordinary uses excluded solely because of
+    their loader or a nested file-match constraint. The documented consumer
+    limitations explain the implementation choices but do not remove requested
+    scope. The review instructions require narrowed scope to be a high finding.
+  - downsides: catalog definition-table propagation and file-match context
+    handling require more work than the blanket exclusions. Existing public
+    convenience APIs and root-union validation behavior must remain compatible.

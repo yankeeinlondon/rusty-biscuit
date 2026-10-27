@@ -97,6 +97,109 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/schema.md
     - .claude/skills/darkmatter/dmls.md
+source_files_during_phase_4:
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - darkmatter/lib/tests/l1/recursive_schema_golden.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/discriminant.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/scope.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/schema-triggers.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/hover.md
+    - claudine/docs/topics/schemas.md
+    - claudine/schemas/README.md
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-commands.md
+source_code:
+    - darkmatter/lib/tests/l1/shared_acyclic_definitions.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/resolve/graph.rs
+    - darkmatter/lib/src/markdown/schemas/resolve/recursive.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/definitions.rs
+    - darkmatter/lib/tests/l1/shared_acyclic_selection.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_union_typed_consumers.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-action.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-claudine.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-lifecycle.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence-types.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-md-lifecycle.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-sequence.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-inline-compose.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-with-document-schema.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-claudine.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-lifecycle.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence-types.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-md-lifecycle.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-sequence.digest
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_key_hovers.json
+    - claudine/schemas/document.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/inline-compose.yaml
+    - claudine/lib/src/composition/schema/bundle.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/compose_prompt_tiers.rs
+    - claudine/cli/tests/l1/entry_point_parity.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/sequence_magic_reference.rs
+    - claudine/cli/tests/l1/sequence_overlay_pty.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/tests/l1/shared_acyclic_consumers.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/recursive_schema_editor.rs
+    - darkmatter/lib/tests/l1/recursive_schema_golden.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/discriminant.rs
+    - darkmatter/lib/src/markdown/schemas/scope.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+documentation:
+    - claudine/docs/topics/schemas.md
+    - claudine/schemas/README.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/claudine/cli-commands.md
+    - .claude/skills/darkmatter/dmls.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/local-type-references.md
+    - darkmatter/docs/topics/schemas/schema-triggers.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/README.md
+    - .claude/skills/claudine/SKILL.md
+completed_phase: 4
+implemented: true
 ---
 
 # Shared acyclic definitions implementation plan
@@ -480,7 +583,7 @@ behavior still pass before any output snapshots are regenerated.
 Depends on Phase 3. The three tasks below may run concurrently: assign frozen
 snapshots, Claudine budget/measurement, and docs/skills to separate owners.
 
-- [ ] **Refresh affected snapshots**
+- [x] **Refresh affected snapshots**
   - Review the frozen corpus entry by entry against Phase 1. Use the existing
     `DARKMATTER_BLESS_RECURSIVE_GOLDEN=1` mechanism only for affected outputs after
     semantic probes pass. Review JSON and digest-backed changes, record the cause
@@ -491,7 +594,7 @@ snapshots, Claudine budget/measurement, and docs/skills to separate owners.
     frozen-input semantic preservation and intentional shared-definition output,
     removing the superseded universal acyclic byte-stability claim.
 
-- [ ] **Enforce measured headroom**
+- [x] **Enforce measured headroom**
   - Repeat the three compact-size measurements and quick cold samples with exactly
     the Phase 1 inputs, host, build mode, and stage boundaries. Record before/after
     resolution/compilation times, bytes, remaining repeated helpers, maximum `M`,
@@ -512,7 +615,7 @@ snapshots, Claudine budget/measurement, and docs/skills to separate owners.
   - Remove temporary measurement scaffolding after preserving reproducible
     invocation details and results in the implementation log.
 
-- [ ] **Document shared behavior**
+- [x] **Document shared behavior**
   - Update all acyclic-inlining promises in
     `darkmatter/docs/topics/schemas/definition.md`, including named imports, cycle
     flow, consumer lookup, and limitations. Add a compact two-property object
@@ -535,7 +638,7 @@ snapshots, Claudine budget/measurement, and docs/skills to separate owners.
 Depends on all Wave 5 tasks. One integration owner runs the required commands
 after all edits are combined; do not run competing full suites in subagents.
 
-- [ ] **Run acceptance gates**
+- [x] **Run acceptance gates**
   - In each of `darkmatter/` and `claudine/`, run `just test`, `just test-l2`, and
     `just lint`. Use nextest through these recipes, keep each new L1 test below
     five seconds, and use the repository terminal harness without activating
@@ -553,7 +656,7 @@ after all edits are combined; do not run competing full suites in subagents.
     defect in scope and rerun only affected checks, followed by any gate whose
     result the fix invalidated.
 
-- [ ] **Record implementation outcome**
+- [x] **Record implementation outcome**
   - Map the specification's seven acceptance groups to concrete tests and passing
     results in `implementation-log.md`. Include before/after measurements, chosen
     budget, DMLS benchmark responsibility/results, representation changes,
