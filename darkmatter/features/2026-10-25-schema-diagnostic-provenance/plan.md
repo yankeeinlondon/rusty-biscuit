@@ -6,6 +6,25 @@ phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
 human_review: false
+source_files_during_phase_1:
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/lib/tests/l1/recursive_schema_types.rs
+    - darkmatter/lib/tests/l1/schemas_core_type_grammar.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_union_postfix.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1:
+    - .claude/skills/darkmatter/schema.md
+packages:
+    - darkmatter
+    - dmls
 ---
 
 # Schema diagnostic provenance implementation plan
@@ -130,7 +149,7 @@ consolidated test registration belong to the integration task named in that wave
 
 ### Wave 1 — Contract integration
 
-- [ ] **Define provenance contracts**
+- [x] **Define provenance contracts**
   - Own `simplified/source.rs`, `simplified/mod.rs`, `schemas/mod.rs`, and the
     contract-facing changes in `errors.rs`. Introduce the participant and located
     failure types and document their field semantics and UTF-8 byte coordinates.
