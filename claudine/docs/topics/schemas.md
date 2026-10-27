@@ -108,8 +108,33 @@ but a document they accept can still be rejected by the parser (see
 | [`inline-compose.yaml`](../../schemas/inline-compose.yaml) | trigger (`kind: schema-trigger`) | inline-compose's document metadata (`prompt`, `hash`, `last_updated`), applied to a document with a non-null `prompt` and no non-null `sequence` |
 | [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: schema-trigger`) | the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` |
 
-A library reaches a document only through a trigger's imports, so the eight
-files work as one bundle. Copy all of them together. For editor analysis of
+Three of the eight are triggers; the other five are libraries. A library
+reaches a document only through a trigger's imports, so the eight files work
+as one bundle:
+
+| Trigger | Imports, directly or through another library |
+|---|---|
+| `claudine.yaml` | `document.yaml`, `lifecycle.yaml` (and through it `action.yaml`), `linking.yaml` |
+| `inline-compose.yaml` | `document.yaml` |
+| `sequence.yaml` | `sequence-types.yaml` (and through it `lifecycle.yaml` and `action.yaml`) |
+
+The document metadata is declared once, in `document.yaml`, and both
+metadata triggers import it by name:
+
+```yaml
+# claudine.yaml and inline-compose.yaml
+$schema:
+    prompt: prompt@./document.yaml
+    hash: hash@./document.yaml
+    last_updated: last_updated@./document.yaml
+```
+
+So `prompt`, `hash` (shorthand string or longhand mapping), and
+`last_updated` have the same type and description whichever trigger applies.
+The library is not a trigger: the two triggers still match, apply, and are
+shadowed independently.
+
+Copy all eight files together (see [On disk](#on-disk)). For editor analysis of
 Claudine's host globals and lifecycle events, also copy `globals.yaml` and
 `globals.lifecycle.json`; these describe the host rather than adding document
 properties. The bundle does not need Darkmatter's schema files beside it (see
@@ -562,16 +587,24 @@ For schema maintainers, recursive references serve two purposes: they keep
 the same rules at every nesting level, and they avoid copying each recursive
 family into every place that uses it. The resolver stores recursive types in
 JSON Schema's `$defs` section and points to them with local `$ref` values.
-Non-recursive named types still expand at each use, so adding another
-reference to a large action bundle can increase the final schema noticeably.
-Reuse the recursive families rather than adding a fixed number of copied
-container or conditional levels.
+It stores the repeated structured helpers there too, such as the action
+categories, the loop helpers, and the verb short forms, because each is used
+from two or more places in one trigger payload (see
+[Shared Named Types](../../../darkmatter/docs/topics/schemas/definition.md#shared-named-types)).
+Some uses are still copied: a union named as an arm of another union (such as
+`entry` inside `item` in `lifecycle.yaml`) and any type used only once. The
+bundles are copied for that reason: each is written once, inside `entry`,
+and `entry` is copied into both `stack` and `item`. The Darkmatter baseline
+layer stores its own repeated types in its own definitions, which are never
+pooled with the payload's, and a baseline definition only overridden
+properties reached is dropped from the merged schema. Reuse the recursive families rather
+than adding a fixed number of copied container or conditional levels.
 
 The embedded-bundle regression test
-`embedded_trigger_payloads_resolve_within_two_megabytes` in
+`embedded_trigger_payloads_resolve_within_one_megabyte` in
 `lib/tests/l1/claudine_schemas_embedded.rs` checks three cases: the
 `claudine.yaml` trigger, the `sequence.yaml` trigger, and both together. Each
-resolved effective schema must fit within **2,000,000 UTF-8 bytes** of compact
+resolved effective schema must fit within **1,000,000 UTF-8 bytes** of compact
 JSON, including `$defs` and the built-in baseline. The test resolves the
 embedded bundle in isolation, with no user schemas or disk bundle, so its
 result describes the shipped schemas. This is a deterministic size check,
@@ -966,21 +999,38 @@ is `claudine/` therefore reaches `claudine/schemas/` with no setup. `md schema
 triggers <file>` lists the locations, the shadowed files, and which triggers
 matched.
 
-Anywhere else, install a **complete** bundle of regular files (every file in
-`claudine/schemas/`, so the relative imports resolve) in one of the locations
-below. Darkmatter's own schema files need not be copied: the
-`@darkmatter:lifecycle` references resolve from the copy built into `md`, DMLS,
-and `claudine`.
+Anywhere else, install a **complete** bundle of regular files in one of
+these locations:
 
 - the repository root's `schemas/` folder (a real directory, not a symlink)
 - the folder an absolute `SCHEMAS_DIR` names, such as
   `SCHEMAS_DIR=/opt/team/claudine-schemas`
 - `~/schemas`
 
+Complete means all eight bundle files side by side, so the relative imports
+(`@./document.yaml`, `@./lifecycle.yaml`, …) resolve:
+
+- the triggers `claudine.yaml`, `inline-compose.yaml`, and `sequence.yaml`;
+- the libraries `action.yaml`, `document.yaml`, `lifecycle.yaml`,
+  `linking.yaml`, and `sequence-types.yaml`.
+
+Darkmatter's own schema files need not be copied: the
+`@darkmatter:lifecycle` references resolve from the copy built into `md`, DMLS,
+and `claudine`. This command copies the bundle together with the host files
+`globals.yaml` and `globals.lifecycle.json`:
+
 ```sh
 mkdir -p ~/schemas
 cp claudine/schemas/*.yaml claudine/schemas/globals.lifecycle.json ~/schemas/
 ```
+
+A disk trigger imports only from disk, never from the `claudine` binary's
+embedded files. This matters most when you place one trigger on disk to
+replace the embedded one: copy the libraries it imports (see the table under
+[The eight files](#the-eight-files)) into the same folder. A lone
+`inline-compose.yaml` without `document.yaml` cannot resolve its imports, so
+it is skipped with a warning and, because a skipped file still shadows, the
+embedded `inline-compose.yaml` does not apply either.
 
 These routes do **not** work:
 
@@ -1007,6 +1057,11 @@ bundle. The embedded copy is the **last** location:
   never stands in for it.
 - Each winning file resolves its imports from its own origin: a disk trigger
   imports from disk, never from the embedded files.
+- Embedded triggers come after disk files in the merge, and a later layer's
+  declaration of a property replaces an earlier one's. So a disk copy of
+  `inline-compose.yaml` types `prompt`, `hash`, and `last_updated` only where
+  it applies alone: when the embedded `claudine.yaml` matches too, its
+  declarations of those three properties win.
 
 `md` and DMLS register no embedded bundle. They see Claudine's schemas only
 when a disk bundle is reachable.

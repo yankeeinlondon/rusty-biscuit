@@ -46,8 +46,12 @@ A **library** (`kind: schema`) holds named types only and reaches a document
 only when a trigger or a document's `$schema` imports it
 (`stack@./lifecycle.yaml`). A **trigger** (`kind: schema-trigger`) applies its
 payload to every document its `match:` selects; it is never named by a
-`$schema`. The trigger and library files above are used together: copy all of
-them (`*.yaml`), as regular files, when placing the bundle elsewhere.
+`$schema`. The three triggers and five libraries above are used together: a
+disk trigger imports its libraries from disk, never from the binary's
+embedded copy, so copy all eight, as regular files, when placing the bundle
+elsewhere. See
+[Schemas → On disk](../docs/topics/schemas.md#on-disk) for the complete
+instructions.
 
 The lifecycle parser in `claudine/lib/src/composition/lifecycle/` remains the
 authority on what can run. Tests in `claudine/lib/tests/l1/claudine_schemas.rs`
