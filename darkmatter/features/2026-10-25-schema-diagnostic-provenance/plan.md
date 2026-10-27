@@ -25,6 +25,42 @@ skills_files_updated_during_phase_1:
 packages:
     - darkmatter
     - dmls
+    - darkmatter-cli
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/schemas/simplified/yaml_scalar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/signature.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/standalone.rs
+    - darkmatter/lib/src/markdown/schemas/errors.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/schema.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/schemas/simplified/cursor.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/yaml_scalar.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/named_types.rs
+    - darkmatter/dmls/src/overlay/named_types.rs
+    - darkmatter/dmls/tests/l1/schema_yaml_spellings.rs
+    - darkmatter/dmls/tests/l1/core_schema_types.rs
+    - darkmatter/dmls/tests/l1/named_type_references.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/schema.md
+---
 ---
 
 # Schema diagnostic provenance implementation plan
@@ -167,7 +203,7 @@ consolidated test registration belong to the integration task named in that wave
 
 ### Wave 2 — Independent value and scalar work
 
-- [ ] **Retain conflict values**
+- [x] **Retain conflict values**
   - Own `schemas/resolve.rs`, `schemas/resolve/recursive.rs` as needed,
     `simplified/serialize.rs`, constraint methods, and conflict rendering in
     `schemas/errors.rs`; include resolver and serializer tests.
@@ -186,7 +222,7 @@ consolidated test registration belong to the integration task named in that wave
   - Compare Display and StatusBlock excerpts for controls, terminal markup, long
     Unicode, options, and compound defaults; assert the full structured value survives.
 
-- [ ] **Share plain decoding**
+- [x] **Share plain decoding**
   - Concurrent with conflict work; own `simplified/yaml_scalar.rs` and its tests.
     Implement `decode_plain_scalar_node` by sharing node-property skipping and
     plain decoding, returning the existing decoded map and consumed-end shape.
@@ -199,7 +235,7 @@ consolidated test registration belong to the integration task named in that wave
 
 ### Wave 3 — Located semantic failures
 
-- [ ] **Thread failure paths**
+- [x] **Thread failure paths**
   - Own `simplified/mod.rs` and `simplified/grammar.rs`. Carry structural paths
     through mappings, property unions, root unions, nested objects, and
     `$constraints`, while preserving parser traversal and source-free error text.
@@ -215,7 +251,7 @@ consolidated test registration belong to the integration task named in that wave
 
 ### Wave 4 — Projection and library integration
 
-- [ ] **Project definition failures**
+- [x] **Project definition failures**
   - Own `simplified/source.rs`, `simplified/standalone.rs`, both schema export
     modules, and library source-projection test registration. Depends on Waves 2–3.
   - Implement `LocatedDefinitionFailure` results for property and declaration
@@ -270,7 +306,7 @@ Exceptions preserving current behavior:
   none. Preserve the existing category validator and its error behavior, including
   present null, wrong whole-field types, wrong members, and duplicate/name rules.
 
-- [ ] **Verify input boundaries**
+- [x] **Verify input boundaries**
   - Complete the touched-validator matrix in existing loader/projection tests:
     absent, explicit null, wrong whole type, mixed valid/invalid elements, all-invalid
     elements, and empty values wherever that validator's accepted type admits them.
@@ -294,7 +330,7 @@ Exceptions preserving current behavior:
 
 ### Wave 5 — Independent diagnostic and completion integration
 
-- [ ] **Publish typed diagnostics**
+- [x] **Publish typed diagnostics**
   - Own `dmls/src/diagnostics/frontmatter.rs`, `diagnostics/named_types.rs`,
     `overlay/named_types.rs`, `overlay/mod.rs`, and their diagnostic tests.
   - Replace standalone scalar search with the library helper; delete
@@ -313,7 +349,7 @@ Exceptions preserving current behavior:
     LF/CRLF, non-ASCII prefixes, and negotiated UTF-8/UTF-16 at publication; retain
     the existing outer-shape and meta-type union tests.
 
-- [ ] **Complete anchored continuations**
+- [x] **Complete anchored continuations**
   - Concurrent with diagnostics; own `dmls/src/providers/frontmatter.rs` and
     separate completion tests. Coordinate any shared `schema_yaml_spellings.rs`
     registration or fixture edits through the diagnostics task to avoid collisions.
