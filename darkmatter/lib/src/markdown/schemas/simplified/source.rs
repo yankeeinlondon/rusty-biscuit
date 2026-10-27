@@ -4,15 +4,15 @@
 //!
 //! The locator covers the SimplifiedSchema authoring presentations exercised by
 //! the shipped schema corpus: plain, single-quoted, and double-quoted scalars,
-//! with a plain scalar allowed to continue onto more-indented lines; block
-//! sequences, including one aligned with its parent key, and flow sequences;
-//! implicit scalar-key block and flow mappings; explicit scalar-key block
-//! mapping pairs in mapping roots or compact sequence items; and the
-//! mapping-value anchors and scalar aliases used by that corpus. This is not a
-//! general YAML concrete-syntax tree. Other YAML presentations accepted by
-//! `serde_yaml_ng` (tags, block scalars, quoted scalars continued across lines)
-//! are outside the v1 source-map contract and return a projection error even
-//! when semantic parsing succeeds.
+//! with a plain scalar allowed to continue onto more-indented lines; literal
+//! and folded block scalars; block sequences, including one aligned with its
+//! parent key, and flow sequences; implicit scalar-key block and flow
+//! mappings; explicit scalar-key block mapping pairs in mapping roots or
+//! compact sequence items; and the mapping-value anchors and scalar aliases
+//! used by that corpus. This is not a general YAML concrete-syntax tree. Other
+//! YAML presentations accepted by `serde_yaml_ng` (tags, quoted scalars
+//! continued across lines) are outside the v1 source-map contract and return a
+//! projection error even when semantic parsing succeeds.
 
 use std::{collections::BTreeMap, ops::Range};
 
@@ -64,6 +64,15 @@ impl SchemaSourcePath {
     /// Borrows the structural segments in this path.
     pub fn segments(&self) -> &[SchemaSourcePathSegment] {
         &self.0
+    }
+
+    /// Returns `suffix` addressed from this path: a failure path recorded
+    /// relative to a definition becomes a path relative to its envelope by
+    /// prefixing (`root().property("types").join(&failure_path)`).
+    pub fn join(&self, suffix: &SchemaSourcePath) -> Self {
+        let mut path = self.clone();
+        path.0.extend(suffix.0.iter().cloned());
+        path
     }
 }
 
@@ -138,6 +147,70 @@ pub struct SchemaConstraintOrigin {
     /// Byte range of the complete constraint in `source`, when the producer
     /// held that source's text.
     pub span: Option<Range<usize>>,
+}
+
+/// One constraint taking part in a
+/// [`SchemaError::ConstraintConflict`]: where it was declared, and the value
+/// that took part in the failing merge.
+///
+/// `constraint` is the effective value at the merge, which need not be the
+/// text at `origin`: an inherited `scheme(...)` list is the intersection of
+/// every earlier successful merge, and a named type declared as bare
+/// `alphanumeric` takes part as `Constraint::Options(vec![])` at a synthetic
+/// origin naming its declaration (no constraint span).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SchemaConstraintParticipant {
+    /// Where the constraint was declared.
+    pub origin: SchemaConstraintOrigin,
+    /// The complete constraint that took part in the conflict.
+    pub constraint: Constraint,
+}
+
+/// A semantic definition failure together with the authored location of the
+/// node it rejected.
+///
+/// `path` addresses the rejected node (or, for a structural failure with no
+/// scalar token, the nearest containing value) from the root of the supplied
+/// YAML: a property-definition call starts at that definition, a declaration
+/// call at the declaration, and a standalone schema document at its envelope,
+/// so its paths begin with `types` or `$schema`. Union arms, including
+/// root-union arms, are addressed by zero-based index.
+///
+/// Both ranges are UTF-8 byte offsets into the caller's document, with the
+/// caller's `source_offset` applied once. `authored_span` is the rejected
+/// scalar token; `value_span` is the whole rejected value, for fallback.
+/// Either is `None` when it cannot be projected trustworthily; `error` is
+/// returned regardless.
+#[derive(Debug)]
+pub struct LocatedDefinitionFailure {
+    /// Structural path of the rejected node.
+    pub path: SchemaSourcePath,
+    /// The semantic error the source-free parser returns for the same input.
+    /// Boxed to keep `Result<_, LocatedDefinitionFailure>` within clippy's
+    /// `result_large_err` budget.
+    pub error: Box<SchemaError>,
+    /// The rejected scalar token's byte range, when projectable.
+    pub authored_span: Option<Range<usize>>,
+    /// The rejected value's byte range, when locatable.
+    pub value_span: Option<Range<usize>>,
+}
+
+impl std::fmt::Display for LocatedDefinitionFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&*self.error, f)
+    }
+}
+
+impl std::error::Error for LocatedDefinitionFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&*self.error)
+    }
+}
+
+impl From<LocatedDefinitionFailure> for SchemaError {
+    fn from(failure: LocatedDefinitionFailure) -> Self {
+        *failure.error
+    }
 }
 
 /// The consuming named-type reference a resolution diagnostic belongs to.

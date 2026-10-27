@@ -11,7 +11,7 @@ use darkmatter::markdown::schemas::resolve::{ResolvedSchema, resolve_yaml_schema
 use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
 use darkmatter::markdown::schemas::simplified::serialize_property_atom;
 use darkmatter::markdown::schemas::{
-    AlphanumericOption, AlphanumericOptions, DarkmatterSchemas, PropertyAtom, PropertyDef,
+    AlphanumericOption, AlphanumericOptions, Constraint, DarkmatterSchemas, PropertyAtom, PropertyDef,
     SchemaConstraintConflictKind, SchemaError, SchemaSourceId, SchemaSourcePath, SchemaSpanKind,
     SimplifiedSchema, SimplifiedType, TypeExpr, parse_property_definition,
     parse_property_definition_with_source, parse_yaml_schema,
@@ -376,15 +376,15 @@ fn a_different_option_set_at_a_use_site_is_a_conflict_with_both_locations() {
     assert_eq!(constraints.len(), 2);
     let definition = &constraints[0];
     assert_eq!(
-        definition.source,
+        definition.origin.source,
         SchemaSourceId::File(biscuit_file::canonicalize_simplified(&types).expect("canonical"))
     );
-    assert_eq!(definition.path, path(&["slug"]));
-    let span = definition.span.clone().expect("the definition's options are located");
+    assert_eq!(definition.origin.path, path(&["slug"]));
+    let span = definition.origin.span.clone().expect("the definition's options are located");
     assert_eq!(&types_text[span], "allow-dashes, allow-periods");
-    assert_eq!(constraints[1].source, SchemaSourceId::InlineDocument);
-    assert_eq!(constraints[1].path, path(&["c"]));
-    assert_eq!(constraints[1].keyword, "allow-periods");
+    assert_eq!(constraints[1].origin.source, SchemaSourceId::InlineDocument);
+    assert_eq!(constraints[1].origin.path, path(&["c"]));
+    assert_eq!(constraints[1].origin.keyword, "allow-periods");
 }
 
 #[test]
@@ -397,8 +397,14 @@ fn a_conflict_against_a_base_type_without_options_names_its_declaration() {
         panic!("expected ConstraintConflict, got {err:?}");
     };
     assert_eq!(kind, SchemaConstraintConflictKind::Options);
-    assert_eq!(constraints[0].path, path(&["code"]));
-    assert_eq!(constraints[0].keyword, "alphanumeric");
+    assert_eq!(constraints[0].origin.path, path(&["code"]));
+    assert_eq!(constraints[0].origin.keyword, "alphanumeric");
+    assert_eq!(constraints[0].origin.span, None, "bare `alphanumeric` has no option token");
+    assert_eq!(constraints[0].constraint, Constraint::Options(vec![]));
+    assert_eq!(
+        constraints[1].constraint,
+        Constraint::Options(vec![AlphanumericOption::AllowDashes])
+    );
 }
 
 #[test]

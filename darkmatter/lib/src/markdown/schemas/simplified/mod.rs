@@ -43,7 +43,8 @@ pub use query::{
 };
 pub use serialize::{serialize_property_atom, serialize_property_def};
 pub use source::{
-    SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaReferenceSite, SchemaSourceId,
+    LocatedDefinitionFailure, SchemaConstraintConflictKind, SchemaConstraintOrigin,
+    SchemaConstraintParticipant, SchemaReferenceSite, SchemaSourceId,
     SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaUnionRejection,
     SchemaValueEntry, SchemaValueKind, SchemaValueNode, SourceAware, flow_collection_end, locate_schema_value,
     mapping_separator,
@@ -92,14 +93,60 @@ pub enum SchemaDeclaration {
 /// malformed local references, remote references, or invalid inline schema
 /// grammar.
 pub fn parse_schema_declaration(value: &YamlValue) -> Result<SchemaDeclaration, SchemaError> {
-    if let YamlValue::String(reference) = value {
-        return Ok(SchemaDeclaration::Reference(classify_schema_reference(reference)?));
+    parse_schema_declaration_located(value).map_err(SchemaError::from)
+}
+
+/// A semantic failure from the shared schema parser together with the
+/// structural path of the node it rejected.
+///
+/// `path` is relative to the root of the value handed to the parse call (a
+/// declaration, or one property definition); a caller that parsed a value
+/// nested in a larger document prefixes it with [`SchemaSourcePath::join`].
+/// Where the parser has not attributed a failure to a deeper node, `path`
+/// names the nearest containing value, never a sibling. Source-free entry
+/// points discard `path`, so their errors are unchanged.
+#[derive(Debug)]
+pub(crate) struct DefinitionFailure {
+    // `expect` rather than `allow`: it stops compiling once the source-aware
+    // projection reads the path, so this attribute cannot outlive its reason.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "read once source-aware parsing projects failures")
+    )]
+    pub(crate) path: SchemaSourcePath,
+    /// Boxed to keep `Result<_, DefinitionFailure>` within clippy's
+    /// `result_large_err` budget.
+    pub(crate) error: Box<SchemaError>,
+}
+
+impl DefinitionFailure {
+    fn at(path: &SchemaSourcePath) -> impl FnOnce(SchemaError) -> Self + '_ {
+        move |error| Self { path: path.clone(), error: Box::new(error) }
     }
-    let schema = parse_yaml_schema(value)?;
+}
+
+impl From<DefinitionFailure> for SchemaError {
+    fn from(failure: DefinitionFailure) -> Self {
+        *failure.error
+    }
+}
+
+/// [`parse_schema_declaration`], keeping the rejected node's path.
+pub(crate) fn parse_schema_declaration_located(
+    value: &YamlValue,
+) -> Result<SchemaDeclaration, DefinitionFailure> {
+    let root = SchemaSourcePath::root();
+    if let YamlValue::String(reference) = value {
+        return classify_schema_reference(reference)
+            .map(SchemaDeclaration::Reference)
+            .map_err(DefinitionFailure::at(&root));
+    }
+    let schema = parse_yaml_schema_located(value)?;
     if let SimplifiedSchema::Union(arms) = &schema {
-        for arm in arms {
+        for (index, arm) in arms.iter().enumerate() {
             if let SchemaArm::FileRef(reference) = arm {
-                classify_schema_reference(reference)?;
+                classify_schema_reference(reference)
+                    .map_err(DefinitionFailure::at(&root.union_arm(index)))?;
             }
         }
     }
@@ -123,49 +170,58 @@ pub fn parse_schema_declaration(value: &YamlValue) -> Result<SchemaDeclaration, 
 /// without validation — the resolution layer (Phase 3) is responsible for
 /// loading them.
 pub fn parse_yaml_schema(value: &YamlValue) -> Result<SimplifiedSchema, SchemaError> {
+    parse_yaml_schema_located(value).map_err(SchemaError::from)
+}
+
+/// [`parse_yaml_schema`], keeping the rejected node's path.
+pub(crate) fn parse_yaml_schema_located(
+    value: &YamlValue,
+) -> Result<SimplifiedSchema, DefinitionFailure> {
+    let root = SchemaSourcePath::root();
     match value {
         YamlValue::Mapping(_) => Ok(SimplifiedSchema::Single(parse_schema_shape(
-            "<root>", value, 0,
+            "<root>", value, 0, &root,
         )?)),
         YamlValue::Sequence(items) => {
             let mut arms = Vec::with_capacity(items.len());
             for (idx, item) in items.iter().enumerate() {
                 let label = format!("<arm[{idx}]>");
+                let arm_path = root.union_arm(idx);
                 let arm = match item {
                     YamlValue::Mapping(_) => {
-                        SchemaArm::Inline(parse_schema_shape(&label, item, 0)?)
+                        SchemaArm::Inline(parse_schema_shape(&label, item, 0, &arm_path)?)
                     }
                     YamlValue::String(s) => SchemaArm::FileRef(s.clone()),
                     other => {
-                        return Err(SchemaError::Grammar {
+                        return Err(DefinitionFailure::at(&arm_path)(SchemaError::Grammar {
                             property: label,
                             message: format!(
                                 "root union arms must be a mapping or a file-reference string, got {}",
                                 describe_yaml(other)
                             ),
                             span: 0..0,
-                        });
+                        }));
                     }
                 };
                 arms.push(arm);
             }
             if arms.is_empty() {
-                return Err(SchemaError::Grammar {
+                return Err(DefinitionFailure::at(&root)(SchemaError::Grammar {
                     property: "<root>".into(),
                     message: "root union must have at least one arm".into(),
                     span: 0..0,
-                });
+                }));
             }
             Ok(SimplifiedSchema::Union(arms))
         }
-        other => Err(SchemaError::Grammar {
+        other => Err(DefinitionFailure::at(&root)(SchemaError::Grammar {
             property: "<root>".into(),
             message: format!(
                 "$schema must be a mapping or a sequence, got {}",
                 describe_yaml(other)
             ),
             span: 0..0,
-        }),
+        })),
     }
 }
 
@@ -183,52 +239,73 @@ pub fn parse_property_definition(
     property: &str,
     value: &YamlValue,
 ) -> Result<PropertyDef, SchemaError> {
-    parse_property_definition_at_depth(property, value, 0)
+    parse_property_definition_located(property, value).map_err(SchemaError::from)
 }
 
+/// [`parse_property_definition`], keeping the rejected node's path.
+pub(crate) fn parse_property_definition_located(
+    property: &str,
+    value: &YamlValue,
+) -> Result<PropertyDef, DefinitionFailure> {
+    parse_property_definition_at_depth(property, value, 0)
+        .map_err(DefinitionFailure::at(&SchemaSourcePath::root()))
+}
+
+/// Parses one schema object whose structural path is `path`.
 fn parse_schema_shape(
     context: &str,
     value: &YamlValue,
     nested_object_depth: usize,
-) -> Result<SchemaShape, SchemaError> {
-    let map = value.as_mapping().ok_or_else(|| SchemaError::Grammar {
-        property: context.to_string(),
-        message: "expected a mapping of property names to type expressions".into(),
-        span: 0..0,
+    path: &SchemaSourcePath,
+) -> Result<SchemaShape, DefinitionFailure> {
+    let map = value.as_mapping().ok_or_else(|| {
+        DefinitionFailure::at(path)(SchemaError::Grammar {
+            property: context.to_string(),
+            message: "expected a mapping of property names to type expressions".into(),
+            span: 0..0,
+        })
     })?;
 
     let mut properties: IndexMap<String, PropertyDef> = IndexMap::with_capacity(map.len());
     let mut pattern_keys: Vec<types::PatternKeyDef> = Vec::new();
     let mut constraints: Vec<Constraint> = Vec::new();
     for (key, val) in map {
-        let key_str = key.as_str().ok_or_else(|| SchemaError::Grammar {
-            property: context.to_string(),
-            message: "property names must be strings".into(),
-            span: 0..0,
+        let key_str = key.as_str().ok_or_else(|| {
+            DefinitionFailure::at(path)(SchemaError::Grammar {
+                property: context.to_string(),
+                message: "property names must be strings".into(),
+                span: 0..0,
+            })
         })?;
         // `$constraints` is reserved schema metadata (object arity, O-C3): it is
         // stripped before shape assembly and never participates in property
         // matching. It is reserved only inside authored schema objects, so it
         // imposes no restriction on user frontmatter data.
         if key_str == "$constraints" {
-            constraints.append(&mut parse_dollar_constraints(context, val)?);
+            constraints.append(
+                &mut parse_dollar_constraints(context, val)
+                    .map_err(DefinitionFailure::at(&path.property(key_str)))?,
+            );
             continue;
         }
         // Pattern / dictionary keys (`<string>`, `<starting::…>`, …) collect
         // separately from literal properties (Feature C).
         if types::PatternKey::is_pattern_key(key_str) {
+            // A malformed key is attributed to the object holding it.
             let pattern = types::PatternKey::parse(key_str).map_err(|message| {
-                SchemaError::Grammar {
+                DefinitionFailure::at(path)(SchemaError::Grammar {
                     property: context.to_string(),
                     message,
                     span: 0..0,
-                }
+                })
             })?;
-            let def = parse_property_definition_at_depth(key_str, val, nested_object_depth)?;
+            let def = parse_property_definition_at_depth(key_str, val, nested_object_depth)
+                .map_err(DefinitionFailure::at(&path.property(key_str)))?;
             pattern_keys.push(types::PatternKeyDef { key: pattern, def });
             continue;
         }
-        let def = parse_property_definition_at_depth(key_str, val, nested_object_depth)?;
+        let def = parse_property_definition_at_depth(key_str, val, nested_object_depth)
+            .map_err(DefinitionFailure::at(&path.property(key_str)))?;
         properties.insert(key_str.to_string(), def);
     }
     Ok(SchemaShape {
@@ -456,7 +533,14 @@ fn parse_mapping_atom(
             span: 0..0,
         });
     }
-    let mut shape = parse_schema_shape(context, value, nested_object_depth + 1)?;
+    // The caller attributes a nested failure to this property's definition.
+    let mut shape = parse_schema_shape(
+        context,
+        value,
+        nested_object_depth + 1,
+        &SchemaSourcePath::root(),
+    )
+    .map_err(SchemaError::from)?;
     // A block `required` / `generated` on a property's object means the same
     // as the postfix on that property, so it moves onto the atom where every
     // presence consumer (`is_required`, phase projection, lowering) reads it.
@@ -997,6 +1081,60 @@ mod tests {
             "custom user ctx keys are not part of the generated context schema",
         );
         assert_invalid(&validator, json!({ "ctx": "hello" }), "ctx must remain an object");
+    }
+
+    /// The located parse returns the source-free parser's error unchanged,
+    /// plus the structural path of the value it rejected.
+    fn declaration_failure(input: &str) -> DefinitionFailure {
+        let value = yaml(input);
+        let failure = parse_schema_declaration_located(&value).expect_err("declaration must fail");
+        let plain = parse_schema_declaration(&value).expect_err("declaration must fail");
+        assert_eq!(failure.error.to_string(), plain.to_string(), "source-free error drifted");
+        failure
+    }
+
+    #[test]
+    fn definition_failure_names_a_literal_key_as_one_segment() {
+        let failure = declaration_failure("ok: string\n\"a.b[0]/ü\": string(min(\n");
+        assert_eq!(failure.path, SchemaSourcePath::root().property("a.b[0]/ü"));
+        assert!(matches!(*failure.error, SchemaError::Grammar { .. }), "{:?}", failure.error);
+    }
+
+    #[test]
+    fn definition_failure_indexes_root_union_arms() {
+        let failure = declaration_failure("- name: string\n- 7\n");
+        assert_eq!(failure.path, SchemaSourcePath::root().union_arm(1));
+        let failure = declaration_failure("- name: string\n- title: nope(\n");
+        assert_eq!(failure.path, SchemaSourcePath::root().union_arm(1).property("title"));
+    }
+
+    #[test]
+    fn definition_failure_addresses_dollar_constraints_and_structural_roots() {
+        let failure = declaration_failure("name: string\n$constraints:\n  min-keys: -1\n");
+        assert_eq!(failure.path, SchemaSourcePath::root().property("$constraints"));
+        // A structural failure without a scalar token names the value itself.
+        assert_eq!(declaration_failure("[]").path, SchemaSourcePath::root());
+        assert_eq!(declaration_failure("7").path, SchemaSourcePath::root());
+    }
+
+    #[test]
+    fn property_definition_failure_starts_at_the_definition() {
+        let value = yaml("[string(suggest(red)), string(suggest(blue))]");
+        let failure = parse_property_definition_located("colour", &value).expect_err("must fail");
+        let plain = parse_property_definition("colour", &value).expect_err("must fail");
+        assert_eq!(failure.error.to_string(), plain.to_string());
+        assert_eq!(failure.path, SchemaSourcePath::root());
+    }
+
+    #[test]
+    fn failure_paths_join_under_an_envelope_prefix() {
+        let failure = declaration_failure("inner.key: string(min(\n");
+        let envelope = SchemaSourcePath::root().property("types").property("slug");
+        assert_eq!(
+            envelope.join(&failure.path),
+            SchemaSourcePath::root().property("types").property("slug").property("inner.key")
+        );
+        assert_eq!(envelope.join(&SchemaSourcePath::root()), envelope);
     }
 }
 

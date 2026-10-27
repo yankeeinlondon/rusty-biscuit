@@ -479,7 +479,7 @@ fn contradictory_container_bounds_fail_with_their_origins() {
     assert_eq!(kind, SchemaConstraintConflictKind::Bounds);
     assert_eq!(site.path, SchemaSourcePath::root().property("p"));
     assert_eq!(
-        constraints.iter().map(|origin| origin.keyword.as_str()).collect::<Vec<_>>(),
+        constraints.iter().map(|participant| participant.origin.keyword.as_str()).collect::<Vec<_>>(),
         ["min", "max"]
     );
 }
@@ -582,9 +582,9 @@ fn conflicting_inherited_array_defaults_report_the_definition_arm_and_use_site()
     assert_eq!(kind, SchemaConstraintConflictKind::Default);
     assert_eq!(site.path, SchemaSourcePath::root().property("p"));
     assert_eq!(constraints.len(), 2);
-    assert_eq!(constraints[0].path, SchemaSourcePath::root().property("choice").union_arm(0));
-    assert_eq!(constraints[1].path, SchemaSourcePath::root().property("p"));
-    assert!(constraints.iter().all(|origin| origin.keyword == "default"));
+    assert_eq!(constraints[0].origin.path, SchemaSourcePath::root().property("choice").union_arm(0));
+    assert_eq!(constraints[1].origin.path, SchemaSourcePath::root().property("p"));
+    assert!(constraints.iter().all(|participant| participant.origin.keyword == "default"));
 }
 
 // ── AC 2 and AC 7: rejected operations and their provenance ──────────────

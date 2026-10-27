@@ -334,8 +334,12 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
 - `apply_import_postfix` (`resolve.rs`) merges use-site constraints: stricter
   bound wins per kind (string length, number, item count, keys), lower > upper
   is `SchemaError::ConstraintConflict` (`Bounds`/`Scheme`/`Default`, each
-  origin a `SchemaConstraintOrigin` with source, path, keyword, occurrence,
-  span), flags dedupe, every `pattern` and `match` group is kept, schemes
+  entry a `SchemaConstraintParticipant`: the `origin`
+  (`SchemaConstraintOrigin` with source, path, keyword, occurrence, span) and
+  the `constraint` value that took part — the strict surviving bound, the
+  inherited scheme list snapshotted before the failing intersection, each
+  default, or each canonical option set, `Options([])` for bare
+  `alphanumeric`), flags dedupe, every `pattern` and `match` group is kept, schemes
   intersect, defaults compare after number normalization, one `suggest` per
   property (checked after union flattening), examples keep their defining
   file. Bounds are read against the resolved target (`label(max(80))` is a

@@ -361,7 +361,7 @@ fn key_bounds_from_constraints_blocks_and_postfixes_are_one_scope() {
         panic!("expected ConstraintConflict, got {err:?}");
     };
     assert_eq!(kind, SchemaConstraintConflictKind::Bounds);
-    let paths: Vec<_> = constraints.iter().map(|origin| origin.path.clone()).collect();
+    let paths: Vec<_> = constraints.iter().map(|participant| participant.origin.path.clone()).collect();
     assert_eq!(paths, [path(&["card", "$constraints", "min-keys"]), path(&["box"])]);
 }
 
@@ -399,17 +399,19 @@ fn a_multi_hop_bound_conflict_names_both_origins_with_the_defining_span() {
     assert_eq!(constraints.len(), 2);
 
     let inherited = &constraints[0];
-    assert_eq!(inherited.source, SchemaSourceId::File(canonical(&types)));
-    assert_eq!(inherited.path, path(&["label"]), "the declaration that introduced `min`");
-    assert_eq!(inherited.keyword, "min");
-    let span = inherited.span.clone().expect("a file origin carries its span");
+    assert_eq!(inherited.origin.source, SchemaSourceId::File(canonical(&types)));
+    assert_eq!(inherited.origin.path, path(&["label"]), "the declaration that introduced `min`");
+    assert_eq!(inherited.origin.keyword, "min");
+    let span = inherited.origin.span.clone().expect("a file origin carries its span");
     assert_eq!(&types_text[span], "min(10)");
+    assert_eq!(inherited.constraint, Constraint::Min(10.0));
 
     let use_site = &constraints[1];
-    assert_eq!(use_site.source, SchemaSourceId::InlineDocument);
-    assert_eq!(use_site.path, path(&["title"]));
-    assert_eq!(use_site.keyword, "max");
-    assert_eq!(use_site.span, None, "inline origins are projected by the consumer");
+    assert_eq!(use_site.origin.source, SchemaSourceId::InlineDocument);
+    assert_eq!(use_site.origin.path, path(&["title"]));
+    assert_eq!(use_site.origin.keyword, "max");
+    assert_eq!(use_site.origin.span, None, "inline origins are projected by the consumer");
+    assert_eq!(use_site.constraint, Constraint::Max(5.0));
 }
 
 #[test]
@@ -429,12 +431,12 @@ fn a_constraints_block_conflict_points_at_the_block_entry() {
         panic!("expected ConstraintConflict, got {err:?}");
     };
     assert_eq!(name, "card");
-    assert_eq!(constraints[0].path, path(&["card", "$constraints", "min-keys"]));
-    assert_eq!(constraints[0].keyword, "min-keys");
-    let span = constraints[0].span.clone().expect("file origin span");
+    assert_eq!(constraints[0].origin.path, path(&["card", "$constraints", "min-keys"]));
+    assert_eq!(constraints[0].origin.keyword, "min-keys");
+    let span = constraints[0].origin.span.clone().expect("file origin span");
     assert_eq!(&types_text[span], "min-keys: 3");
-    assert_eq!(constraints[1].path, path(&["box"]));
-    assert_eq!(constraints[1].keyword, "max-keys");
+    assert_eq!(constraints[1].origin.path, path(&["box"]));
+    assert_eq!(constraints[1].origin.keyword, "max-keys");
 }
 
 #[test]
@@ -474,8 +476,27 @@ fn schemes_intersect_and_an_empty_intersection_is_a_conflict() {
         panic!("expected ConstraintConflict, got {err:?}");
     };
     assert_eq!(kind, SchemaConstraintConflictKind::Scheme);
-    assert_eq!(constraints[0].path, path(&["link"]));
-    assert_eq!(constraints[1].path, path(&["ftp"]));
+    assert_eq!(constraints[0].origin.path, path(&["link"]));
+    assert_eq!(constraints[1].origin.path, path(&["ftp"]));
+    assert_eq!(constraints[0].constraint, Constraint::Scheme(vec!["http".into(), "https".into()]));
+    assert_eq!(constraints[1].constraint, Constraint::Scheme(vec!["ftp".into()]));
+
+    // After a successful narrowing, the inherited participant is the
+    // effective list before the failing intersection, at the origin that
+    // introduced the group.
+    let err = resolve_inline(
+        dir.path(),
+        "link: url(scheme(http, https))
+narrow: link(scheme(https, ftp); scheme(ftp))
+",
+    )
+    .expect_err("https and then ftp leave nothing");
+    let SchemaError::ConstraintConflict { kind, constraints, .. } = err else {
+        panic!("expected ConstraintConflict, got {err:?}");
+    };
+    assert_eq!(kind, SchemaConstraintConflictKind::Scheme);
+    assert_eq!(constraints[0].origin.path, path(&["link"]));
+    assert_eq!(constraints[0].constraint, Constraint::Scheme(vec!["https".into()]));
 }
 
 #[test]

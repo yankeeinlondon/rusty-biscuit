@@ -50,7 +50,7 @@ use super::{
     errors::SchemaError,
     simplified::{
         AlphanumericOptions, DefKey, DefNamespace, DefinitionTable, SchemaConstraintConflictKind,
-        SchemaConstraintOrigin, SchemaDeclaration, SchemaReferenceSite, SchemaSourceId, SchemaSourceMap,
+        SchemaConstraintOrigin, SchemaConstraintParticipant, SchemaDeclaration, SchemaReferenceSite, SchemaSourceId, SchemaSourceMap,
         SchemaSourcePath, SchemaUnionRejection, parse_standalone_schema_document, parse_yaml_schema,
         to_json_schema, to_json_schema_with_definitions,
         types::{
@@ -2647,9 +2647,13 @@ impl MergeSite<'_> {
     fn conflict(
         &self,
         kind: SchemaConstraintConflictKind,
-        mut constraints: Vec<SchemaConstraintOrigin>,
+        constraints: Vec<Tagged>,
     ) -> SchemaError {
-        locate_origin_spans(&mut constraints);
+        let mut constraints = constraints
+            .into_iter()
+            .map(|(constraint, origin)| SchemaConstraintParticipant { origin, constraint })
+            .collect::<Vec<_>>();
+        locate_origin_spans(constraints.iter_mut().map(|participant| &mut participant.origin));
         SchemaError::ConstraintConflict {
             name: self.name.to_string(),
             kind,
@@ -2663,9 +2667,9 @@ impl MergeSite<'_> {
 /// re-projecting that file. Runs only on the error path. A file that can no
 /// longer be read or projected leaves its spans `None`; the error being built
 /// still names the file, path, and keyword.
-fn locate_origin_spans(origins: &mut [SchemaConstraintOrigin]) {
+fn locate_origin_spans<'a>(origins: impl Iterator<Item = &'a mut SchemaConstraintOrigin>) {
     let mut documents: HashMap<PathBuf, Option<(String, SchemaSourceMap)>> = HashMap::new();
-    for origin in origins.iter_mut() {
+    for origin in origins {
         let SchemaSourceId::File(path) = &origin.source else {
             continue;
         };
@@ -3318,6 +3322,8 @@ fn check_use_site_options(
         .map(|(_, origin)| origin)
         .next()
         .expect("caller passes at least one option list");
+    let canonical_set =
+        |set: AlphanumericOptions| Constraint::Options(set.canonical().options().collect());
     let base_origin = base
         .constraints
         .iter()
@@ -3333,7 +3339,10 @@ fn check_use_site_options(
             occurrence: 0,
             span: None,
         });
-    Err(merge_site.conflict(SchemaConstraintConflictKind::Options, vec![base_origin, use_origin]))
+    Err(merge_site.conflict(
+        SchemaConstraintConflictKind::Options,
+        vec![(canonical_set(target), base_origin), (canonical_set(written), use_origin)],
+    ))
 }
 
 /// Merges `inherited` and then `use_site` constraints of one level (value or
@@ -3370,11 +3379,17 @@ fn merge_constraints(
                     .iter_mut()
                     .find(|(c, ..)| matches!(c, Constraint::Scheme(_)))
                 {
+                    // The inherited participant is the effective list before
+                    // this intersection, not the empty list it narrows to.
+                    let effective = existing.clone();
                     existing.retain(|scheme| schemes.contains(scheme));
                     if existing.is_empty() {
                         return Err(merge_site.conflict(
                             SchemaConstraintConflictKind::Scheme,
-                            vec![existing_origin.clone(), origin],
+                            vec![
+                                (Constraint::Scheme(effective), existing_origin.clone()),
+                                (constraint, origin),
+                            ],
                         ));
                     }
                     continue;
@@ -3390,7 +3405,10 @@ fn merge_constraints(
                     }
                     return Err(merge_site.conflict(
                         SchemaConstraintConflictKind::Default,
-                        vec![existing_origin.clone(), origin],
+                        vec![
+                            (Constraint::Default(existing.clone()), existing_origin.clone()),
+                            (constraint, origin),
+                        ],
                     ));
                 }
             }
@@ -3410,17 +3428,20 @@ fn merge_constraints(
             merged.iter().find_map(|(constraint, origin, sequence)| {
                 Bound::of(constraint)
                     .filter(|bound| bound.kind == kind && bound.lower == lower)
-                    .map(|bound| (bound.value, origin, *sequence))
+                    .map(|bound| (bound.value, constraint, origin, *sequence))
             })
         };
         if let (Some(lower), Some(upper)) = (find(true), find(false))
             && lower.0 > upper.0
         {
             let mut ordered = [lower, upper];
-            ordered.sort_by_key(|(_, _, sequence)| *sequence);
+            ordered.sort_by_key(|(.., sequence)| *sequence);
             return Err(merge_site.conflict(
                 SchemaConstraintConflictKind::Bounds,
-                ordered.iter().map(|(_, origin, _)| (*origin).clone()).collect(),
+                ordered
+                    .iter()
+                    .map(|(_, constraint, origin, _)| ((*constraint).clone(), (*origin).clone()))
+                    .collect(),
             ));
         }
     }
@@ -3443,12 +3464,15 @@ fn reconcile_property_defaults(
         _ => None,
     });
     if let Some((item_default, item_origin)) = item_default {
-        if let Some((_, container_origin)) = array.iter().find(|(constraint, _)| {
+        if let Some(container) = array.iter().find(|(constraint, _)| {
             matches!(constraint, Constraint::Default(default) if !defaults_equal(default, item_default))
         }) {
             return Err(merge_site.conflict(
                 SchemaConstraintConflictKind::Default,
-                vec![item_origin.clone(), container_origin.clone()],
+                vec![
+                    (Constraint::Default(item_default.clone()), item_origin.clone()),
+                    container.clone(),
+                ],
             ));
         }
         array.retain(|(constraint, _)| !matches!(constraint, Constraint::Default(_)));

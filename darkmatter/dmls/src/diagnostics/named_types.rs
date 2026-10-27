@@ -134,10 +134,10 @@ impl<'a> NamedTypeScope<'a> {
                 self.site_span(site)
             }
             SchemaError::ConstraintConflict { site, constraints, .. } => {
-                related.extend(constraints.iter().filter_map(|origin| {
+                related.extend(constraints.iter().filter_map(|participant| {
                     Some(DiagnosticRelatedInformation {
-                        location: self.origin_location(origin)?,
-                        message: format!("`{}` is declared here", origin.keyword),
+                        location: self.origin_location(&participant.origin)?,
+                        message: format!("`{}` is declared here", participant.origin.keyword),
                     })
                 }));
                 self.site_span(site)

@@ -43,8 +43,8 @@ pub struct CycleReference {
 }
 
 use super::simplified::{
-    SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaReferenceSite, SchemaSourceId,
-    SchemaUnionRejection,
+    SchemaConstraintConflictKind, SchemaConstraintParticipant, SchemaReferenceSite,
+    SchemaSourceId, SchemaUnionRejection,
 };
 
 
@@ -235,16 +235,20 @@ pub enum SchemaError {
 
     /// Constraints merged onto one reused named type contradict each other.
     ///
-    /// `site` is the consuming reference; `constraints` lists every authored
+    /// `site` is the consuming reference; `constraints` lists every
     /// constraint taking part, in merge order (inherited first), each with
-    /// its own source and span so the conflict can point at all of them,
-    /// including declarations reached through multi-hop references.
+    /// the value that took part and its own source and span, so the conflict
+    /// can point at all of them, including declarations reached through
+    /// multi-hop references.
     #[error(
         "{}: contradictory {kind} on named type `{name}`: {}",
         site.path,
         constraints
             .iter()
-            .map(|origin| format!("`{}` in {}", origin.keyword, origin.source))
+            .map(|participant| format!(
+                "`{}` in {}",
+                participant.origin.keyword, participant.origin.source
+            ))
             .collect::<Vec<_>>()
             .join(" and ")
     )]
@@ -252,7 +256,7 @@ pub enum SchemaError {
         name: String,
         kind: SchemaConstraintConflictKind,
         site: SchemaReferenceSite,
-        constraints: Vec<SchemaConstraintOrigin>,
+        constraints: Vec<SchemaConstraintParticipant>,
     },
 
     /// A use-site postfix asks for an operation a union-typed named type
@@ -857,7 +861,8 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                             Prose::escape_text(&site.path.to_string()),
                             Prose::escape_text(name)
                         )))
-                        .chain(constraints.iter().map(|origin| {
+                        .chain(constraints.iter().map(|participant| {
+                            let origin = &participant.origin;
                             Prose::new(format!(
                                 "<cyan>{}</cyan> at {} in {}",
                                 Prose::escape_text(&origin.keyword),
@@ -1345,7 +1350,7 @@ mod tests {
 
     #[test]
     fn constraint_conflict_lists_every_origin_in_merge_order() {
-        let origin = |source: SchemaSourceId, path: &str, keyword: &str| SchemaConstraintOrigin {
+        let origin = |source: SchemaSourceId, path: &str, keyword: &str| crate::markdown::schemas::SchemaConstraintOrigin {
             source,
             path: crate::markdown::schemas::SchemaSourcePath::root().property(path),
             keyword: keyword.into(),
@@ -1357,8 +1362,14 @@ mod tests {
             kind: SchemaConstraintConflictKind::Bounds,
             site: site("title"),
             constraints: vec![
-                origin(SchemaSourceId::File(PathBuf::from("types.yaml")), "label", "min"),
-                origin(SchemaSourceId::InlineDocument, "title", "max"),
+                SchemaConstraintParticipant {
+                    origin: origin(SchemaSourceId::File(PathBuf::from("types.yaml")), "label", "min"),
+                    constraint: crate::markdown::schemas::Constraint::MinLen(10),
+                },
+                SchemaConstraintParticipant {
+                    origin: origin(SchemaSourceId::InlineDocument, "title", "max"),
+                    constraint: crate::markdown::schemas::Constraint::MaxLen(5),
+                },
             ],
         };
         assert_eq!(
