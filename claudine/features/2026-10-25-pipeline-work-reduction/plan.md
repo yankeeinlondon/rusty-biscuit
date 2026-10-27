@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-10-26
 total_phases: 5
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: true
 human_review: false
@@ -22,6 +22,87 @@ packages:
 - claudine
 - darkmatter
 - darkmatter-cli
+- claudine-cli
+- content-policy
+source_files_during_phase_2:
+- claudine/cli/src/commands/wrap/sequence/container.rs
+- claudine/cli/src/commands/wrap/sequence/task_run.rs
+- claudine/lib/src/composition/lifecycle/executor.rs
+- claudine/lib/src/composition/looping/container.rs
+- claudine/lib/src/composition/looping/expression.rs
+- claudine/lib/src/composition/looping/expression/tests.rs
+- claudine/lib/src/composition/looping/expression/tests/loop_leaf_reads.rs
+- claudine/lib/src/composition/runtime_state.rs
+- claudine/lib/src/composition/runtime_state/tests.rs
+- claudine/lib/src/composition/sequence/task/group.rs
+- claudine/lib/src/composition/sequence/task/mod.rs
+- claudine/lib/src/composition/sequence/task/sequence.rs
+- claudine/lib/src/composition/sequence/task/templates.rs
+- claudine/lib/src/composition/sequence/task/tests.rs
+- claudine/lib/src/composition/sequence/task/tests/runtime_projections.rs
+- claudine/lib/src/dispatch/expression.rs
+- claudine/lib/src/dispatch/expression/tests.rs
+- claudine/lib/src/dispatch/expression/tests/hook_leaf_reads.rs
+- claudine/lib/src/work_counters.rs
+- darkmatter/justfile
+- darkmatter/lib/Cargo.toml
+- darkmatter/lib/benches/pipeline_work_support/mod.rs
+- darkmatter/lib/src/markdown/schemas/resolve.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/content_policy_duration_parity.rs
+- darkmatter/lib/tests/l1/schemas_named_import_errors.rs
+- darkmatter/lib/tests/l1/schemas_named_type_memo.rs
+docs_updated_during_phase_2:
+- claudine/docs/topics/configuring-actions.md
+- claudine/docs/topics/flow-control/looping.md
+- claudine/docs/topics/flow-control/sequences.md
+- content-policy/docs/topics/policy-lifecycle.md
+- darkmatter/docs/topics/schemas/definition.md
+docs_created_during_phase_2:
+- claudine/features/2026-10-25-pipeline-work-reduction/completion-walk-design.md
+skills_files_updated_during_phase_2:
+- .claude/skills/claudine/SKILL.md
+source_files_during_phase_3:
+- claudine/cli/tests/l1/group_branch_lifetime.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/preflight/providers.rs
+- claudine/lib/src/composition/sequence/preflight/providers/tests.rs
+- claudine/lib/src/composition/sequence/preflight/providers/tests/literal_hints.rs
+- claudine/lib/src/composition/sequence/task/container_regressions.rs
+- claudine/lib/src/composition/sequence/task/group.rs
+- claudine/lib/src/composition/sequence/task/group/branch.rs
+- claudine/lib/src/composition/sequence/task/tests.rs
+- claudine/lib/src/composition/sequence/task/tests/branch_admission.rs
+- claudine/lib/src/composition/sequence/task/tests/pipeline_spike.rs
+- claudine/lib/src/pipeline_spike/tests.rs
+- claudine/lib/src/work_counters.rs
+- claudine/lib/tests/l1/context_construction_guard.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/schema_validate_summary.rs
+- darkmatter/lib/src/markdown/schemas/bound_operands.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/positions.rs
+- darkmatter/lib/src/markdown/schemas/rewrite.rs
+- darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+- darkmatter/lib/src/markdown/schemas/tests/lazy_positions.rs
+- darkmatter/lib/src/markdown/schemas/tests/mod.rs
+- darkmatter/lib/src/markdown/schemas/validate.rs
+- darkmatter/lib/src/work_counters.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/schemas_alphanumeric_check_cache.rs
+- darkmatter/lib/tests/l1/schemas_rewrite_arm_validators.rs
+- darkmatter/lib/tests/l1/schemas_validation_summary.rs
+docs_updated_during_phase_3:
+- claudine/docs/cli/sequence.md
+- claudine/docs/topics/flow-control/sequences.md
+- darkmatter/docs/inline/schema-validation.md
+- darkmatter/docs/topics/schemas/definition.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/darkmatter/schema.md
 ---
 
 # Pipeline work reduction implementation plan
@@ -276,7 +357,7 @@ just _bench claudine --bench pipeline_work -- --save-baseline pipeline-work-pre
 
 ### Wave 3 — Parallel foundations
 
-- [ ] **Project runtime state** — C3
+- [x] **Project runtime state** — C3
   - Own `claudine/lib/src/composition/runtime_state.rs` and snapshot-read
     callers in library/CLI task, leg, and container execution. Add only the
     narrow owned projections callers need; clone related requested fields
@@ -288,7 +369,7 @@ just _bench claudine --bench pipeline_work -- --save-baseline pipeline-work-pre
     unrelated output history; test concurrent coherent reads and behavior.
     Update the runtime-state lifetime guidance and sequence topic docs.
 
-- [ ] **Resolve ambient leaves** — C2 and C4
+- [x] **Resolve ambient leaves** — C2 and C4
   - Own `claudine/lib/src/dispatch/expression.rs` and
     `claudine/lib/src/composition/looping/expression.rs`. Implement C2 and C4
     as separate focused changes, using closed member dispatch before whole-root
@@ -301,7 +382,7 @@ just _bench claudine --bench pipeline_work -- --save-baseline pipeline-work-pre
     regardless of large sibling size, while whole-root reads still materialize.
     Update lifecycle/hook and loop lookup documentation.
 
-- [ ] **Retain latest tables** — D12
+- [x] **Retain latest tables** — D12
   - Own the named-table memo section of
     `darkmatter/lib/src/markdown/schemas/resolve.rs`. Replace revision-keyed
     accumulation/256-entry clearing with Decision 8's path entry. Preserve
@@ -314,7 +395,7 @@ just _bench claudine --bench pipeline_work -- --save-baseline pipeline-work-pre
     still describe a bounded revision memo. Consult `biscuit-hash` for hashing
     changes and `os` before changing any path comparison or Windows handling.
 
-- [ ] **Test duration parity** — P1
+- [x] **Test duration parity** — P1
   - Own a dedicated Darkmatter L1 test module and its registration. Use one
     roster covering every production rule and `d`, `wk`, `mo`, `yr`, in
     default-baseline, property-baseline, and inline-date forms.
@@ -326,7 +407,7 @@ just _bench claudine --bench pipeline_work -- --save-baseline pipeline-work-pre
     counter or grammar generator. Document the tested grammar contract and
     intentional differences in the appropriate current topic pages.
 
-- [ ] **Design shared enumeration** — X2
+- [x] **Design shared enumeration** — X2
   - Own `completion-walk-design.md` beside this plan; inspect
     `claudine/cli/src/completion/schema_completion/candidates.rs` and the walker.
     Deliver a candidate design, not production completion changes.
@@ -350,7 +431,7 @@ shared documentation edits through the coordinator, not concurrent rewrites.
 
 ### Wave 4 — Parallel integration
 
-- [ ] **Admit private branches** — C1; requires C3
+- [x] **Admit private branches** — C1; requires C3
   - Own library `composition/sequence/task/group.rs` and CLI group scheduling
     in `commands/wrap/sequence/`, including `task_run.rs`. Move mutable runtime
     and live-frontmatter creation to admission from the immutable start seed.
@@ -375,7 +456,7 @@ shared documentation edits through the coordinator, not concurrent rewrites.
     per attempt; never assert constant total constructions. Use synchronization,
     not sleeps, to expose admission/release boundaries.
 
-- [ ] **Classify provider hints** — C7
+- [x] **Classify provider hints** — C7
   - Own `composition/sequence/preflight/providers.rs` and its preflight callers.
     Classify effective agent/model hints before constructing expression state
     (`PredictionStateBuild`, two per task, about 231 KB each at C7's shape).
@@ -391,7 +472,7 @@ shared documentation edits through the coordinator, not concurrent rewrites.
     expression-state constructions/copies on the safe literal path and fresh
     state on the expression path. Update provider-selection/preflight docs.
 
-- [ ] **Reuse arm validators** — D1
+- [x] **Reuse arm validators** — D1
   - Own schema `rewrite.rs`, its compose caller, and necessary `validate.rs`
     cache integration. Compile complete eligible arms with reachable shared
     definitions through the context-aware cache; retain handles for the rewrite
@@ -404,7 +485,7 @@ shared documentation edits through the coordinator, not concurrent rewrites.
   - Keep validation-only read-only, ordinary eager-file existence checks,
     compose-only normalization, and existing diagnostic provenance unchanged.
 
-- [ ] **Return preparation summary** — D2
+- [x] **Return preparation summary** — D2
   - Own `darkmatter/lib/src/markdown/schemas/mod.rs` validation orchestration
     and `darkmatter/cli/src/commands/schema/validate.rs`. Introduce the shared
     report/summary operation and delegate existing public validation entry
@@ -422,7 +503,7 @@ no conflicts remain in runtime or schema files before the next wave.
 
 ### Wave 5 — Parallel schema refinements
 
-- [ ] **Defer source positions** — D4; requires D2
+- [x] **Defer source positions** — D4; requires D2
   - Own validation orchestration in `schemas/mod.rs`, position consumers in
     `validate.rs`/`positions.rs`, and affected compose/DMLS adapters. Thread a
     request-local lazy mapping provider through report production while keeping
@@ -435,7 +516,7 @@ no conflicts remain in runtime or schema files before the next wave.
   - Exercise normal CLI and DMLS diagnostic paths, not just the provider
     helper. Update validation/diagnostic lifetime docs and relevant skill guidance.
 
-- [ ] **Cache annotation checks** — D13; requires D12 and D1
+- [x] **Cache annotation checks** — D13; requires D12 and D1
   - Own alphanumeric default/suggestion validation in `schemas/resolve.rs` and
     focused tests. Use `ValidatorCache::structural_validator_for` with complete
     constraints; reuse its public API without editing the cache implementation
