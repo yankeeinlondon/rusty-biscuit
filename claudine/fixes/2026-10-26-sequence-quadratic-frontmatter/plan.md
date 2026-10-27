@@ -23,6 +23,113 @@ packages:
     - claudine
     - darkmatter
     - dmls
+    - claudine-cli
+    - darkmatter-cli
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/compose/context/shared_frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/context/mod.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+    - darkmatter/lib/src/lifecycle/executor.rs
+    - darkmatter/lib/src/lifecycle/executor/host.rs
+    - darkmatter/lib/src/lifecycle/executor/shell.rs
+    - darkmatter/lib/src/lifecycle/executor/tests.rs
+    - darkmatter/lib/src/lifecycle/md_host.rs
+    - darkmatter/lib/src/lifecycle/md_host/tests.rs
+    - darkmatter/lib/tests/l1/lifecycle_event_binding.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/binding_contract.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mutation_visibility.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/templates.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/frontmatter.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/compose/context/shared_frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+    - darkmatter/lib/src/lifecycle/preflight/shell_walk.rs
+    - darkmatter/lib/src/lifecycle/executor.rs
+    - darkmatter/lib/src/lifecycle/executor/tests.rs
+    - darkmatter/lib/src/lifecycle/md_host.rs
+    - darkmatter/lib/src/lifecycle/md_host/tests.rs
+    - darkmatter/lib/tests/l1/lifecycle_event_binding.rs
+    - darkmatter/lib/tests/l1/shell_result_values.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - claudine/lib/Cargo.toml
+    - claudine/lib/src/work_counters.rs
+    - claudine/lib/src/pipeline_spike/tests.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/sequence/expr.rs
+    - claudine/lib/src/composition/sequence/source.rs
+    - claudine/lib/src/composition/sequence/formal.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/reapproval.rs
+    - claudine/lib/src/composition/sequence/preflight/providers.rs
+    - claudine/lib/src/composition/sequence/preflight/runtime_fixture.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests/scaling.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+    - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+    - claudine/lib/src/composition/lifecycle/tests/break_prep.rs
+    - claudine/lib/src/composition/lifecycle/tests/container_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+    - claudine/lib/src/composition/looping/container.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/task/tests/leg_views.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline/tests.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/composition/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/justfile
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/frontmatter.md
+    - .claude/skills/darkmatter/compose.md
 ---
 
 # Remove quadratic sequence frontmatter work
@@ -184,7 +291,7 @@ do not introduce a new loader to implement shared state.
 Depends on Wave 1. Keep this wave serial because it establishes interfaces
 used by all three repair tasks.
 
-- [ ] **Introduce shared views**
+- [x] **Introduce shared views**
   - Introduce the smallest internal view needed to hold an immutable shared
     seed and owned overrides. Avoid a generic persistence framework or a new
     dependency. Share nested immutable values; an `Arc` around a map followed
@@ -201,7 +308,7 @@ used by all three repair tasks.
     possible and preserve other consumers; expand validation to the changed
     Darkmatter surface.
 
-- [ ] **Verify view semantics**
+- [x] **Verify view semantics**
   - Add focused tests for shared seed reads, private delta writes, null
     overrides, nested lookup and whole-value shadowing, and readable authored
     `sequence` data. Demonstrate that two views cannot observe each other's
@@ -225,7 +332,7 @@ tests. Any newly discovered shared adapter is changed by one designated owner
 before dependent tasks resume. Every subagent receives the session's
 non-interactive restrictions and runs only its targeted checks.
 
-- [ ] **Isolate group views**
+- [x] **Isolate group views**
   - Replace `run_parallel`'s `Mutex::new(seed.clone())` live cells in
     `sequence/task/group.rs` with private deltas over one group-start seed.
     Update the other measured container/scope paths that duplicate definitions.
@@ -241,7 +348,7 @@ non-interactive restrictions and runs only its targeted checks.
   - Validate 10/100-leg work counts and focused sibling-isolation,
     declaration-order merge, retry, and atomic-group tests.
 
-- [ ] **Linearize shell analysis**
+- [x] **Linearize shell analysis**
   - Repair every shell-path multiplier confirmed in Wave 1, starting with
     loader per-step state and repeated deferred-root/type/guard analysis.
     Prepare source facts once and overlay each step's own facts without
@@ -254,7 +361,7 @@ non-interactive restrictions and runs only its targeted checks.
     per step, asserting equal `ExpressionParse` count per step and actual
     graph/approval results so omitted analysis cannot pass the test.
 
-- [ ] **Linearize prompt preflight**
+- [x] **Linearize prompt preflight**
   - Repair all attributed prompt-path multipliers, including caller-side
     frontmatter copying and provider state construction where their size
     grows with the enclosing sequence. Use shared state and dependency facts;
