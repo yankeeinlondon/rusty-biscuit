@@ -15,15 +15,22 @@ use darkmatter::markdown::compose::shell_expansion::template::{
 };
 use darkmatter::markdown::compose::shell_expansion::tokenize::{ShellToken, tokenize};
 use darkmatter::markdown::compose::shell_expansion::{
-    ShellApprovalDecision, ShellApprovalHandler, ShellExpansionError, ShellExpansionOptions,
-    ShellPolicyPaths, ShellRuleSet, check_builtin_blacklist, check_template_blacklist,
-    check_user_blacklist, check_whitelist, normalize_command, resolve_policy_paths, store,
+    ShellApprovalDecision, ShellApprovalHandler, ShellExpansionError,
+    ShellPolicyPaths, check_builtin_blacklist, check_template_blacklist,
+    check_user_blacklist, check_whitelist, normalize_command, store,
 };
 
 use tracing::{debug, info_span};
 
 use crate::harness::error::{HarnessError, ShellExecCause};
 use crate::harness::model::ApprovedRuntimeCommand;
+
+mod policy;
+
+#[cfg(test)]
+pub(crate) use policy::policy_reads;
+use policy::SessionPolicy;
+pub use policy::user_blacklist;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CachedApprovalDecision {
@@ -122,25 +129,6 @@ pub(crate) fn tokenize_words_strict(raw: &str) -> Result<Vec<String>, ShellExpan
         }
     }
     Ok(words)
-}
-
-/// The shell policy files under `policy_root`.
-///
-/// Darkmatter reads an explicit policy root directly; the context it is
-/// handed is anchored there and never consulted.
-fn policy_paths_at(
-    policy_root: &Path,
-) -> Option<darkmatter::markdown::compose::shell_expansion::ShellPolicyPaths> {
-    let shell_opts = ShellExpansionOptions {
-        policy_root: Some(policy_root.to_path_buf()),
-        ..Default::default()
-    };
-    let context = darkmatter::markdown::compose::build_resolution_context_with_catalog(
-        &darkmatter::markdown::compose::RequestSnapshot::new(policy_root),
-        None,
-    )
-    .ok()?;
-    resolve_policy_paths(&shell_opts, &ComposeSource::File(policy_root.join("dummy")), &context).ok()
 }
 
 /// Validate an already-tokenized command against shell policies.
@@ -580,47 +568,6 @@ pub fn check_command_blacklists(parts: &[String], options: &ShellApprovalOptions
     Ok(())
 }
 
-/// The user blacklist under `policy_root`, which a template-mode command's
-/// filled arguments are checked against before it starts. Empty without a
-/// policy root, or when the file cannot be read; the built-in blacklist still
-/// applies.
-pub fn user_blacklist(policy_root: Option<&Path>) -> ShellRuleSet {
-    let options = ShellApprovalOptions {
-        policy_root: policy_root.map(Path::to_path_buf),
-        ..ShellApprovalOptions::default()
-    };
-    SessionPolicy::load(&options, "").map(|policy| policy.blacklist).unwrap_or_default()
-}
-
-/// The user policy one approval reads: the rule files under the policy root,
-/// or none when there is no root.
-struct SessionPolicy {
-    paths: Option<ShellPolicyPaths>,
-    whitelist: ShellRuleSet,
-    blacklist: ShellRuleSet,
-}
-
-impl SessionPolicy {
-    /// Without a policy root there are no user policy files to consult: the
-    /// built-in blacklist, the session cache, and the approval handler decide.
-    fn load(options: &ShellApprovalOptions, command: &str) -> Result<Self, HarnessError> {
-        let paths = match &options.policy_root {
-            Some(policy_root) => Some(policy_paths_at(policy_root).ok_or_else(|| {
-                HarnessError::ShellCommandDenied {
-                    command: command.to_string(),
-                }
-            })?),
-            None => None,
-        };
-        let load = |path: Option<&Path>| path.and_then(|path| store::load_ruleset(path).ok()).unwrap_or_default();
-        Ok(Self {
-            whitelist: load(paths.as_ref().map(|paths| paths.whitelist.as_path())),
-            blacklist: load(paths.as_ref().map(|paths| paths.blacklist.as_path())),
-            paths,
-        })
-    }
-}
-
 /// Display source for approval prompts — real provenance when available.
 fn display_source(options: &ShellApprovalOptions, source_file: Option<&Path>) -> ComposeSource {
     match (source_file, &options.policy_root) {
@@ -791,285 +738,4 @@ pub async fn execute_approved_command(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use darkmatter::markdown::compose::shell_expansion::{
-        ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
-    };
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    struct CapturingHandler {
-        captured: Arc<Mutex<Option<ShellApprovalRequest>>>,
-    }
-
-    impl CapturingHandler {
-        fn new() -> Self {
-            Self {
-                captured: Arc::new(Mutex::new(None)),
-            }
-        }
-
-        fn captured_request(&self) -> ShellApprovalRequest {
-            self.captured
-                .lock()
-                .unwrap()
-                .clone()
-                .expect("handler was never called")
-        }
-    }
-
-    impl ShellApprovalHandler for CapturingHandler {
-        fn approve(
-            &self,
-            request: ShellApprovalRequest,
-        ) -> Result<ShellApprovalDecision, ShellExpansionError> {
-            *self.captured.lock().unwrap() = Some(request);
-            Ok(ShellApprovalDecision::AllowOnce)
-        }
-    }
-
-    struct CountingApprovalHandler {
-        approvals: AtomicUsize,
-    }
-
-    impl CountingApprovalHandler {
-        fn approvals(&self) -> usize {
-            self.approvals.load(Ordering::SeqCst)
-        }
-    }
-
-    impl ShellApprovalHandler for CountingApprovalHandler {
-        fn approve(
-            &self,
-            _request: ShellApprovalRequest,
-        ) -> Result<ShellApprovalDecision, ShellExpansionError> {
-            self.approvals.fetch_add(1, Ordering::SeqCst);
-            Ok(ShellApprovalDecision::AllowOnce)
-        }
-    }
-
-    #[test]
-    fn unknown_command_denied_without_approval_handler() {
-        // Use an isolated directory with no policy files and no approval handler.
-        let dir = tempfile::TempDir::new().unwrap();
-        let options = ShellApprovalOptions {
-            policy_root: Some(dir.path().to_path_buf()),
-            approval_handler: None,
-            ..Default::default()
-        };
-        let result = validate_and_approve_command("echo hello", &options);
-        // Without whitelist or approval handler, this should be denied
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn blacklisted_command_rejected() {
-        let options = ShellApprovalOptions::default();
-        let result = validate_and_approve_command("rm -rf /", &options);
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            HarnessError::ShellCommandBlacklisted { .. }
-        ));
-    }
-
-    #[test]
-    fn empty_command_rejected() {
-        let options = ShellApprovalOptions::default();
-        let result = validate_and_approve_command("", &options);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn shell_metacharacters_rejected() {
-        let options = ShellApprovalOptions::default();
-        let result = validate_and_approve_command("echo hello | cat", &options);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn chain_operators_rejected_at_single_command_slot() {
-        // Chains are split per-command upstream by Darkmatter discovery; a
-        // raw chain reaching this validator means a misuse and must error.
-        let options = ShellApprovalOptions::default();
-        for raw in [
-            "git status && git push",
-            "make build || echo failed",
-            "ls > /dev/null",
-            "cmd 2>&1",
-        ] {
-            let result = validate_and_approve_command(raw, &options);
-            assert!(
-                matches!(result, Err(HarnessError::ShellCommandDenied { .. })),
-                "expected denial for {raw:?}, got {result:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn approval_cache_avoids_prompting_for_same_command_twice() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let handler = Arc::new(CountingApprovalHandler {
-            approvals: AtomicUsize::new(0),
-        });
-        let options = ShellApprovalOptions {
-            policy_root: Some(dir.path().to_path_buf()),
-            approval_handler: Some(handler.clone()),
-            ..Default::default()
-        };
-
-        let first = validate_and_approve_command("echo hello", &options);
-        let second = validate_and_approve_command("echo hello", &options);
-
-        assert!(first.is_ok());
-        assert!(second.is_ok());
-        assert_eq!(handler.approvals(), 1);
-    }
-
-    #[tokio::test]
-    async fn execute_echo_command() {
-        let cmd = ApprovedRuntimeCommand {
-            raw: "echo hello".to_string(),
-            executable: "echo".to_string(),
-            args: vec!["hello".to_string()],
-        };
-        let result = execute_approved_command(&cmd, None, std::time::Duration::from_secs(5)).await;
-        assert!(result.is_ok());
-        let (exit_code, stdout, _stderr) = result.unwrap();
-        assert_eq!(exit_code, 0);
-        assert!(stdout.trim() == "hello");
-    }
-
-    #[tokio::test]
-    async fn execute_failing_command() {
-        let cmd = ApprovedRuntimeCommand {
-            raw: "false".to_string(),
-            executable: "false".to_string(),
-            args: vec![],
-        };
-        let result = execute_approved_command(&cmd, None, std::time::Duration::from_secs(5)).await;
-        assert!(result.is_ok());
-        let (exit_code, _, _) = result.unwrap();
-        assert_ne!(exit_code, 0);
-    }
-
-    #[tokio::test]
-    async fn approved_command_observes_agent_cwd() {
-        let expected = crate::child_environment::initialize_process_launch_directory(
-            crate::child_environment::LaunchDirectoryMode::Ordinary,
-        )
-        .unwrap()
-        .to_string_lossy()
-        .into_owned();
-        let cmd = agent_cwd_command();
-        let (exit_code, stdout, _) = execute_approved_command(
-            &cmd,
-            None,
-            std::time::Duration::from_secs(5),
-        )
-        .await
-        .unwrap();
-        assert_eq!(exit_code, 0);
-        assert_eq!(stdout.trim(), expected);
-    }
-
-    #[cfg(windows)]
-    fn agent_cwd_command() -> ApprovedRuntimeCommand {
-        ApprovedRuntimeCommand {
-            raw: "echo %AGENT_CWD%".to_string(),
-            executable: "cmd.exe".to_string(),
-            args: vec!["/D".to_string(), "/C".to_string(), "echo %AGENT_CWD%".to_string()],
-        }
-    }
-
-    #[cfg(not(windows))]
-    fn agent_cwd_command() -> ApprovedRuntimeCommand {
-        ApprovedRuntimeCommand {
-            raw: "printf %s \"$AGENT_CWD\"".to_string(),
-            executable: "sh".to_string(),
-            args: vec!["-c".to_string(), "printf %s \"$AGENT_CWD\"".to_string()],
-        }
-    }
-
-    #[test]
-    fn provenance_is_passed_through_to_approval_request() {
-        use darkmatter::markdown::compose::ComposeSource;
-
-        let dir = tempfile::TempDir::new().unwrap();
-        let handler = Arc::new(CapturingHandler::new());
-        let options = ShellApprovalOptions {
-            policy_root: Some(dir.path().to_path_buf()),
-            approval_handler: Some(handler.clone()),
-            ..Default::default()
-        };
-
-        let source_file = PathBuf::from("/home/user/project/template.md");
-        let source_line = 42usize;
-
-        let _ = validate_and_approve_command_parts(
-            &["echo".to_string(), "hello".to_string()],
-            &options,
-            Some(&source_file),
-            Some(source_line),
-        );
-
-        let captured = handler.captured_request();
-        assert_eq!(
-            captured.source,
-            ComposeSource::File(source_file),
-            "request should carry the real source file, not a dummy path"
-        );
-        assert_eq!(
-            captured.origin,
-            darkmatter::markdown::compose::ShellCommandOrigin::Body { line: 42 },
-            "request should carry the real line number"
-        );
-    }
-
-    #[test]
-    fn frozen_options_deny_new_commands_after_cache_populated() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let handler = Arc::new(CountingApprovalHandler {
-            approvals: AtomicUsize::new(0),
-        });
-        let mut options = ShellApprovalOptions {
-            policy_root: Some(dir.path().to_path_buf()),
-            approval_handler: Some(handler.clone()),
-            ..Default::default()
-        };
-
-        // Approve a command while the handler is active — populates the cache.
-        let first = validate_and_approve_command("echo hello", &options);
-        assert!(first.is_ok(), "should approve with active handler");
-        assert_eq!(handler.approvals(), 1);
-
-        // Freeze: strip the handler (simulates CachedHarnessLoopContext::freeze_shell_approvals).
-        options.approval_handler = None;
-
-        // Previously-approved command still passes via cache.
-        let cached = validate_and_approve_command("echo hello", &options);
-        assert!(
-            cached.is_ok(),
-            "cached command should still pass after freeze"
-        );
-
-        // A NEW command that was never approved is denied — no handler to prompt.
-        let new_cmd = validate_and_approve_command("curl https://example.com", &options);
-        assert!(
-            new_cmd.is_err(),
-            "new command must be denied after freeze — no handler available"
-        );
-        assert!(matches!(
-            new_cmd.unwrap_err(),
-            HarnessError::ShellCommandDenied { .. }
-        ));
-
-        // Handler was only called once (for the original "echo hello"), never for "curl".
-        assert_eq!(
-            handler.approvals(),
-            1,
-            "handler must not be called after freeze"
-        );
-    }
-}
+mod tests;

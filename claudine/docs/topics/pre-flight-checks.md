@@ -203,6 +203,15 @@ Each command is checked against Claudine's shell policy:
 
 Commands that match the whitelist are marked as approved. Commands that match a blacklist are rejected immediately with a clear error. Everything else is presented to the user.
 
+The two user files are read at different moments, and neither is cached between reads:
+
+| Moment | Files read | When a file cannot be used |
+| --- | --- | --- |
+| An approval decision (pre-flight, or a re-audit) | the blacklist and the whitelist under the policy root | a missing or unreadable file has no rules; a policy root whose file locations cannot be worked out denies the command |
+| A template-mode command about to start (dispatch) | the blacklist only | a missing or unreadable blacklist, no policy root, or an underivable root gives no user rules; the built-in blacklist still applies |
+
+Dispatch never opens the whitelist, because a command that reaches dispatch is already approved; only the blacklist can still refuse it. The blacklist is read again for every dispatched command, so a rule added while a session runs refuses the next matching command. In both cases a malformed line is warned about and skipped, and the file's valid rules still apply. The policy root is the one captured for the session; neither read looks up the home directory, the working directory, or the repository again.
+
 A document command with a placeholder is also matched by its shape. When no `exact` rule covers its bytes but a `template` rule covers its shape, the command is approved by that shape: an `exact` rule wins, then a `template` rule, then a `prefix` rule. Its bytes are still checked against both blacklists. A document command (`::shell`, `::shell-block`, or a frontmatter `$( … )`) approved by its shape runs as a template: each placeholder is checked against its declared type and fills exactly one argument, the filled command meets both blacklists again before it starts, and its program must run without a shell. See Darkmatter's [Running a command as a template](../../../darkmatter/docs/inline/preflight-checks.md#running-a-command-as-a-template). A lifecycle `shell` action or `set` value approved by its shape runs as a template the same way (see [Phase 2](#phase-2-lifecycle-shell-commands)). Sequence task commands and container lifecycle commands use the same template validation. Late holes are checked at task entry and retained for dispatch, while ordinary holes read current task state at command entry. Structured task dispatch retains process-tree ownership, output capture, timeout, cancellation, and runaway guards.
 
 A command whose value is produced later in the run has no bytes at pre-flight and is approved only by its shape: a `template` rule, `prefix` rules for each of its programs, or a decision for that shape. An `exact` rule or an earlier exact decision never covers it. Discovery reports such a command when its host declares the late root to Darkmatter (`ComposeOptions::with_deferred_shell_roots`); a sequence declares `seq.outputs`, `loop`, and `group` this way (see [Sequence Execution](#sequence-execution)).

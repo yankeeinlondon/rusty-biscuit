@@ -107,7 +107,7 @@ fn every_binding_view_declares_exactly_the_catalog_globals() {
         }
     }
     for global in claudine_registry().host_globals() {
-        assert!(catalog.contains(*global) || ["err", "timing"].contains(global), "{global}");
+        assert!(catalog.contains(global.as_ref()) || ["err", "timing"].contains(&global.as_ref()), "{global}");
     }
 }
 
