@@ -727,7 +727,9 @@ a third locator. The authored boundary is documented in
 `darkmatter/docs/topics/schemas/definition.md` (Source-Aware Presentation
 Boundary).
 
-Definition failures are located, never guessed. The shared parser
+Definition failures are located, never guessed (user-facing reference:
+`darkmatter/docs/topics/schemas/definition.md` § Source-Aware Parsing and
+Located Failures, and `dmls/docs/diagnostics.md` § Ranging). The shared parser
 (`simplified/mod.rs`, crate-private `DefinitionFailure`) records the
 `SchemaSourcePath` of the node it rejected: property keys literally, sequence
 members and root-union arms by index, `$constraints` entries by key, and

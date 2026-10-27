@@ -1547,11 +1547,65 @@ The rules in detail:
   type does not accept is rejected, as on any property.
 
 A `ConstraintConflict` names the property, the kind of conflict (`Bounds`,
-`Scheme`, or `Default`), and every declaration involved as a
-`SchemaConstraintOrigin`: its source (a file or the inline document), path,
-keyword, and, for a file, the byte span of the constraint. In a multi-hop
-chain each origin points at the declaration that introduced the value. When
-the conflict arises inside a schema the document references,
+`Scheme`, `Default`, or `Options`), and every declaration involved as a
+`SchemaConstraintParticipant`, in merge order (inherited first). Each
+participant has two fields:
+
+- `origin: SchemaConstraintOrigin`: where the constraint was declared: its
+  source (a file or the inline document), path, keyword, occurrence, and, for
+  a file, the byte span of the constraint. In a multi-hop chain the origin
+  points at the declaration that introduced the value.
+- `constraint: Constraint`: the complete value that took part in the conflict.
+
+With `label: string(min(10))` in `./types.yaml` and
+`title: label(max(5))@./types.yaml` in the document, the error reads:
+
+```text
+title: contradictory bounds on named type `label`: `min(10)` in `./types.yaml` and `max(5)` in the inline `$schema`
+```
+
+The terminal status block lists the same values, one line per participant
+(`` `min(10)` at label in ./types.yaml ``), and DMLS relates each declaration
+as `` `max(5)` is declared here `` (see
+[DMLS Schema Support](./dmls-schema-support.md#named-type-references)).
+
+Which value a participant holds depends on the kind:
+
+| Kind | Participant values |
+|---|---|
+| `Bounds` | the surviving (strictest) bound of each side, such as `min(10)` and `max(5)`; equal bounds keep the first origin |
+| `Default` | each `default(…)` as declared, keeping its JSON type: `default('3')` and `default(3)` are different values, as are `default('null')` and `default(null)` |
+| `Options` | the named type's option set and the use site's, such as `alphanumeric(allow-dashes)` and `alphanumeric(allow-periods)` |
+| `Scheme` | the inherited scheme list as it stood just before the failing intersection, and the use site's list |
+
+Two values need care when you read them:
+
+- **Effective schemes.** An inherited scheme list can already have been
+  narrowed by earlier, successful merges. With `link: url(scheme(http, https))`
+  and the use `narrow: link(scheme(https, ftp); scheme(ftp))`, the first
+  intersection leaves `https` and the second is empty. The inherited
+  participant is `scheme(https)`, even though its origin still points at the
+  `scheme(http, https)` declaration that introduced the group.
+  The value is the effective constraint at the failing merge, not the
+  authored text, and DMLS words every scheme participant that way.
+- **Empty options.** A named type declared as bare `alphanumeric` takes part
+  as `Constraint::Options` with an empty set, rendered `alphanumeric`. It
+  has no option token, so its origin has no span and points at the type's
+  declaration instead.
+
+Messages never format values by hand. Each one is
+`Constraint::diagnostic_excerpt()`: the constraint's canonical schema text
+(`Constraint::to_schema_text(None)`), with line breaks, tabs, and other
+control characters escaped (`\n`, `\t`, `\u{1b}`), shortened to at most 160
+Unicode scalar values including a final `…`. The same excerpt appears in
+`Display`, the terminal block, and DMLS, always inside a code span, so schema
+text cannot become terminal markup. Paths and sources are not part of the
+limit, and the structured `constraint` keeps the full value. A compound
+default that only Rust code can build, such as an object, is rendered as
+compact JSON (`default({"a":1})`); that is a diagnostic spelling, not schema
+grammar.
+
+When the conflict arises inside a schema the document references,
 `SchemaError::ReferencedSchema` wraps it.
 
 The same contradictions on a single atom, with no reuse involved, are errors
@@ -3640,6 +3694,91 @@ Detection is passive: it derives the supplied context to each document and never
 Use `DarkmatterSchemas::with_darkmatter_baseline_json_schema()` when configuring
 the built-in baseline; each configured instance shares the cached JSON Schema.
 
+### Source-Aware Parsing and Located Failures
+
+An editor or linter that underlines a schema error needs to know *where* the
+rejected text was written, not just what was wrong. Three passive functions
+return that location along with the semantic error. None of them reads a
+file, resolves an import, or evaluates anything.
+
+| Function | Input | Success | Failure |
+|---|---|---|---|
+| `parse_property_definition_with_source(property, &value, yaml_source, source_offset)` | one property definition | `SourceAware<PropertyDef>` | `LocatedDefinitionFailure` |
+| `parse_schema_declaration_with_source(&value, yaml_source, source_offset)` | one whole declaration, such as a frontmatter `$schema` value | `SourceAware<SchemaDeclaration>` | `LocatedDefinitionFailure` |
+| `locate_standalone_definition_failure(source)` | a whole standalone schema file | — | `Option<LocatedDefinitionFailure>` |
+
+A successful `SourceAware<T>` holds the same `value` the source-free parser
+returns and a `source_map` of authored byte ranges. The source-free parsers
+(`parse_property_definition`, `parse_schema_declaration`, `parse_yaml_schema`)
+still return `Result<_, SchemaError>` with the same variants and messages.
+
+A failure carries four fields:
+
+```rust
+pub struct LocatedDefinitionFailure {
+    pub path: SchemaSourcePath,              // the rejected node
+    pub error: Box<SchemaError>,             // what the source-free parser reports
+    pub authored_span: Option<Range<usize>>, // the rejected token
+    pub value_span: Option<Range<usize>>,    // the whole rejected value
+}
+```
+
+For example:
+
+```rust
+let source = "tags:\n  - string\n  - string(min(nope))\n";
+let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(source)?;
+let failure = parse_schema_declaration_with_source(&value, source, 0).unwrap_err();
+assert_eq!(failure.path, SchemaSourcePath::root().property("tags").union_arm(1));
+assert_eq!(&source[failure.authored_span.unwrap()], "nope");
+```
+
+- **`path`** is structural, never rebuilt from a message. Mapping keys are
+  literal (`"a.b"` is one key), and sequence members, including root-union
+  arms, are zero-based `union_arm` indexes. A property call starts at that
+  definition, a declaration call at the declaration, and the standalone
+  helper at the envelope, so its paths begin with `types` or `$schema`.
+- **The node that introduced the violation is the one reported.** In
+  `color: [string(suggest(red)), string(suggest(blue))]` each arm is valid
+  alone, but a property allows one `suggest`; the failure is
+  `color[1]` with its token at `blue`.
+- **Ranges are UTF-8 byte offsets into the caller's document**, with
+  `source_offset` added once. A DMLS client converts them to its negotiated
+  position encoding.
+- **`authored_span` is `None`** when the failure has no token (an empty union
+  `tags: []`, a wrong-type arm `tags: [string, 7]`, an aliased value), when
+  the presentation is outside the
+  [source-aware boundary](#source-aware-presentation-boundary) (such as a
+  quoted scalar continued across lines anywhere in the document), or when the
+  authored text does not decode to the parsed value. `value_span` is then the
+  rejected value when that can still be located, and `None` otherwise. The
+  `error` is always returned; a missing location never hides it.
+- **A successful semantic parse whose source cannot be projected** returns
+  the projection error at the root path with no ranges.
+
+`locate_standalone_definition_failure` recognizes a file exactly as
+`parse_standalone_schema_document` does (a pure `$schema` envelope or a
+`kind: schema` document with `types`). It returns the first definition
+failure in parser order, including one inside a pure root-union mapping arm
+(`$schema[1].b`). It returns `None` for a valid file, ordinary YAML, invalid
+YAML, a global catalog, and every envelope or declaration-shape error, which
+`parse_standalone_schema_document` reports as before inside
+`SchemaError::SchemaDocument`.
+
+For partial input, where no document parses yet, two helpers read a plain
+scalar the way YAML folds it:
+
+- `decode_plain_scalar_node(source, start, parent_indent)` decodes the plain
+  scalar whose node starts at `start`, after any same-line anchor or tag,
+  and returns its decoded map and end offset. It returns `None` for a quoted
+  or block scalar, a collection, an alias, a comment, an empty value, and an
+  anchor whose scalar starts on a later line.
+- `locate_type_definition_cursor_in_scalar(source, &scalar, cursor)` and
+  `locate_schema_declaration_cursor_in_scalar(source, &scalar, cursor)` are
+  the cursor parsers over that decoded scalar. An anchor or tag never enters
+  the reported token. The cursor must sit inside the scalar, at its end, or
+  after trailing spaces or tabs on its last line.
+
 ### Span-Aware Validation and Normalization
 
 `EffectiveSchema::validate_with_options(frontmatter, positions, &ValidationOptions { .. })` mirrors the compose deferral rules as data: it populates `ValidationReport.pending` for top-level values that are a whole-value `$(...)` shell expression or still hold an unresolved `{{ }}` template and (under `PendingPolicy::Defer`) drops their problems — **without executing anything**. A malformed template (`n: "{{ 1 + }}"`) is never dropped: no rendering can settle it, so its problem is reported as written. `$(...)` text compose never expands (inside a list or mapping, or after other text) is not pending and is judged as written. A whole-value literal token (`{{!data:v1:…}}`) is data: it is never pending, and it is validated as the text it holds. That text is never deferred as a template, at a place marked `deferred` or in a lifecycle verb's operand. `EffectiveSchema::validate_stored(stored, positions, phase)` judges a stored instance the same way, unphased or at a `SchemaPhase`, for a caller that does not want the pending rules. The plain `validate` / `validate_with_positions` entry points are unchanged and always return an empty `pending`. `EffectiveSchema::normalize_frontmatter` performs the eager-`file` value rewrite described in [Files](#files); the validation-only APIs stay read-only.
@@ -3828,7 +3967,7 @@ All failure modes are variants of `SchemaError`:
 | `UnresolvedReference`   | A local `$ref` names no definition in the schema it was written in, or a chain of references never reaches a schema. Carries the schema's label, the reference, and its JSON Pointer location. |
 | `UnsupportedMergeReference` | A schema joined at a merge (a baseline or a root-union arm; a trigger payload reports it inside `TriggerPayloadNotMergeable`) uses a reference form whose meaning would change at the merged root (`$id`, an anchor, a dynamic or external reference, or a local reference outside `#/$defs/…`). See [JSON Schema Baseline Restrictions](#json-schema-baseline-restrictions). |
 | `UnknownNamedType`      | A named-type reference names a type its schema does not define. Carries the name, the schema searched (`SchemaSourceId`), and the reference site (`SchemaReferenceSite`). |
-| `ConstraintConflict`    | Constraints merged onto a reused named type contradict each other (`Bounds`, `Scheme`, `Default`, or `Options` for a different `alphanumeric` option set). Carries every conflicting declaration as a `SchemaConstraintOrigin`. See [Merging use-site constraints](#merging-use-site-constraints). |
+| `ConstraintConflict`    | Constraints merged onto a reused named type contradict each other (`Bounds`, `Scheme`, `Default`, or `Options` for a different `alphanumeric` option set). Carries every conflicting declaration as a `SchemaConstraintParticipant`: its `origin` (a `SchemaConstraintOrigin`) and the `constraint` value that took part. See [Merging use-site constraints](#merging-use-site-constraints). |
 | `UnionReference`        | A reference to a union-typed named type adds something it cannot take. Carries the name, the `SchemaUnionRejection` (`Constraint`, `ArrayArm`, or `ScalarDefault`), the reference site, and the union's definition site. See [Named Union References](#named-union-references). |
 | `InvalidExample`        | An `example(...)` file is malformed or fails validation against the example envelope or inherited target shape. |
 | `BuildValidator`        | `jsonschema` could not build a validator from the produced schema.                                        |

@@ -452,7 +452,10 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   hover and go-to-definition on bare, `@this`, and cross-file spellings;
   `UnknownNamedType`/`ConstraintConflict`/`NonDescendingCycle`/`ImportCycle`
   publish as `dm.schema.invalid_type_definition` on the reference's
-  `ImportName` span with conflict origins as `relatedInformation` (a
+  `ImportName` span with each conflict participant as `relatedInformation`
+  carrying its value (`` `max(5)` is declared here ``; see
+  [schema.md](schema.md) for the scheme wording and located grammar
+  failures, never re-derived by reparsing) (a
   non-descending cycle is ranged on the first cycle reference this document
   wrote; the others are related information). Standalone schema files
   resolve their references through `resolve::expand_named_types`. Imported

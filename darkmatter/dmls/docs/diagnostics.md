@@ -213,7 +213,7 @@ list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 | Code | Meaning |
 |------|---------|
 | `dm.frontmatter.yaml_parse` | The frontmatter YAML could not be parsed. |
-| `dm.schema.invalid_schema_shape` | The `$schema` value is not a valid schema shape. In a standalone schema document this also covers a rejected **outer** declaration — an empty root union, an illegal union arm, or an invalid whole-file reference — ranged at that value or arm. |
+| `dm.schema.invalid_schema_shape` | The `$schema` value is not a valid schema shape. In a standalone schema document this also covers a rejected **outer** declaration — an empty root union, an arm of the wrong type, or an invalid whole-file reference — ranged at that value or arm. An invalid definition *inside* a root-union mapping arm (`count: number(bogus(1))` in `$schema: [{…}]`) is a `dm.schema.invalid_type_definition` at its token instead, like any other definition. |
 | `dm.schema.prepare` | The schema could not be resolved, merged, or compiled. |
 | `dm.schema.invalid_trigger` | **Warning**, on a schema-trigger file. Discovery skipped the trigger because its envelope or payload failed to load; the other triggers still apply. See below. |
 | `dm.schema.type_mismatch` | A value did not match its declared type. |
@@ -223,7 +223,7 @@ list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 | `dm.schema.deprecated_key` | A deprecated key is present. |
 | `dm.schema.invalid_file_reference` | A `file(...)`-typed value failed to parse, resolve, or match a file. |
 | `dm.schema.invalid_suggestion` | A `suggest(...)` candidate is invalid metadata for its target schema (type, range, integer, length, not-empty, or pattern violation, or unrepresentable number syntax). **Warning.** |
-| `dm.schema.document_malformed` | A recognized standalone SimplifiedSchema envelope is malformed (missing or non-mapping `types`, unsupported tagged-envelope keys, or an invalid payload) and no more precise declaration or definition diagnostic claims the failure. Ranged over the whole schema document. |
+| `dm.schema.document_malformed` | A recognized standalone SimplifiedSchema envelope is malformed (missing or non-mapping `types`, unsupported tagged-envelope keys, or an invalid payload) and no more precise declaration or definition diagnostic claims the failure. Ranged over the whole schema document. An envelope error comes first: a tagged envelope with an unsupported key reports this code even when a definition inside it is also invalid, matching `md schema validate`. |
 | `dm.schema.host_catalog` | **Warning.** A host global catalog in the document's schema roots (a `kind: schema` file with a `$schema` mapping of globals and no `types`, such as Claudine's `globals.yaml`) failed to load. The message names the file, the field, and the reason; it is placed at the top of the document. The globals that catalog declares are unknown to this document, so expressions reading them are checked as document properties; every catalog that did load keeps working. The same warning reports a host **function** catalog in those roots (a `kind: schema` file with `categories:` and `function(...)` `types:`) that fails to load or declares a function a built-in already names; its functions stay unknown to this document. Source `darkmatter.schema`. |
 | `dm.lifecycle.incomplete_analysis` | **Warning**, under both `expressions.strict` settings. No host catalog in the document's schema roots has a usable [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md) (`<catalog stem>.lifecycle.json` beside it): the artifact is absent, unreadable, invalid, written for another version of the catalog, or records a registration the registry refuses. The document's lifecycle stacks are analyzed as the `md` host's, so a host-only event is plain frontmatter, checked unguarded, and a host-only verb's operand is checked on its own. One per host catalog, at the top of a document with frontmatter; the message names the artifact and the reason. Regenerating the artifact clears it. Source `darkmatter.schema`. |
 | `dm.style.unknown_key` | A `style:` key the style schema does not recognize. |
@@ -507,10 +507,9 @@ Ranges come from the concrete syntax tree, never from parsing the message text:
   (a visible, non-zero-width range).
 - A YAML parse error ranges the parser's reported position; the last-good tree
   keeps completion and hover alive meanwhile.
-- In a standalone schema document, a `dm.schema.invalid_type_definition`
-  grammar error ranges the **offending token** inside the definition, even
-  when the value continues onto later lines. Here `bogus` is underlined on
-  line 4, rather than across the whole value starting on line 3:
+- A schema grammar error ranges the **offending token** inside the
+  definition, even when the value continues onto later lines. Here `bogus` is
+  underlined on line 4, rather than across the whole value starting on line 3:
 
   ```yaml
   kind: schema
@@ -519,10 +518,35 @@ Ranges come from the concrete syntax tree, never from parsing the message text:
       bogus(2))
   ```
 
-  When the token cannot be placed exactly — for example, a sibling uses a
-  presentation the schema grammar does not support, such as a tagged value —
-  the diagnostic falls back to the definition's whole value. It is never given
-  an empty or guessed range.
+  The same holds wherever a definition is written:
+
+  - a standalone schema file (`kind: schema` with `types`, or a pure
+    `$schema` envelope, including a root-union mapping arm), as
+    `dm.schema.invalid_type_definition`;
+  - a Markdown document's inline frontmatter `$schema`, including a nested
+    mapping (a `"a.b": string(min(nope))` entry under `page:` underlines
+    `nope`; the dotted key is one key) and a
+    member of a block or flow sequence;
+  - a value typed `schema` or `type-definition` by the document's schema.
+
+  The location comes from the library's parser, which reports the path of
+  the node it rejected; DMLS never searches for a scalar that reproduces the
+  message. When a definition is rejected because of an earlier arm, the
+  later arm is the one ranged: in
+  `color: [string(suggest(red)), string(suggest(blue))]` the second
+  `suggest` is the error, so `blue` is underlined.
+
+  A failure with no token keeps the whole rejected value: an empty union
+  (`tags: []`), an arm of the wrong type (`7` in `tags: [string, 7]`), or a
+  `schema`-typed value whose failure names no property. When the token cannot
+  be placed exactly, for example because a sibling definition is a quoted
+  value continued across lines, which the schema grammar's locator does not
+  read, the diagnostic falls back to the rejected value, then to the
+  definition's frontmatter entry, then to the whole document. It is never
+  given an empty or guessed range. A failure inside a schema file the
+  document references stays on the document's reference, with the other
+  file as related information; its offsets are never applied to the current
+  buffer.
 - `dm.transclusion.nullable_target` ranges the complete `{{ ... }}` target
   expression. DMLS suppresses it when an enclosing `::block when` proves the
   same property present, using the same guard rules as compose: truthy `x`,
@@ -561,6 +585,16 @@ Some diagnostics attach secondary locations:
 
 - `dm.links.duplicate_heading` links each duplicate heading to its twin(s).
 - Schema problems whose origin is a referenced schema file point at that file.
+- A `ConstraintConflict` on a reused named type relates every declaration
+  that took part, each in its own file, with the value it contributed:
+  `` `max(5)` is declared here ``. A scheme participant says
+  `` `scheme(https)` is the effective constraint from this declaration ``,
+  because an inherited scheme list may already have been narrowed by earlier
+  merges, so the value need not be the text written there. A named type
+  declared as bare `alphanumeric` has no option token, so its related
+  location is the type's definition. The values use the same excerpt as the
+  library's message (see
+  [Merging use-site constraints](../../docs/topics/schemas/definition.md#merging-use-site-constraints)).
 - `dm.transclusion.cycle` lists the transclusion ancestry that forms the cycle.
 
 ## Configuration
