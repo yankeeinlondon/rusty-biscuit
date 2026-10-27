@@ -78,6 +78,10 @@ mod entry_point_parity;
 mod error_guards;
 mod errors_command;
 mod exit_site_guard;
+// Reads the `CLAUDINE_TEST_GROUP_BRANCHES` seam, which only `test-fixtures`
+// builds compile into the binary.
+#[cfg(feature = "test-fixtures")]
+mod group_branch_lifetime;
 #[cfg(unix)]
 mod handle_blocking_output;
 mod handle_deadline;

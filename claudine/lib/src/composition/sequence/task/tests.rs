@@ -6756,6 +6756,14 @@ mod leg_views;
 mod container_state;
 
 #[cfg(feature = "work-counters")]
+#[path = "tests/runtime_projections.rs"]
+mod runtime_projections;
+
+#[cfg(feature = "work-counters")]
+#[path = "tests/branch_admission.rs"]
+mod branch_admission;
+
+#[cfg(feature = "work-counters")]
 #[path = "tests/nested_source.rs"]
 mod nested_source;
 

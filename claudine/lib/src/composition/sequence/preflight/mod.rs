@@ -2361,6 +2361,10 @@ impl<'a> Loader<'a> {
     /// Predict a prompt task's provider from its document, its `with`, and the
     /// caller's setters (see [`providers`]). Read-only: a document value is
     /// evaluated against early-binding state, and nothing else runs.
+    ///
+    /// The document's frontmatter and the step state are borrowed, not
+    /// copied; [`providers::predict`] builds state only for a hint that reads
+    /// an expression.
     fn predict_provider(
         &mut self,
         document: &Path,
@@ -2369,22 +2373,18 @@ impl<'a> Loader<'a> {
         origin: &Path,
         task_property: &str,
     ) -> Result<providers::ProviderPrediction, CompositionError> {
-        let frontmatter: Map<String, Value> = self
-            .graph
-            .prompt_document(document)
-            .map(|loaded| {
-                loaded.markdown.frontmatter().as_map().iter()
-                    .map(|(key, value)| (key.clone(), value.clone())).collect()
-            })
-            .unwrap_or_default();
         let file_resolution_context = self
             .source_context_for(document)
             .map(|context| context.file_resolution_context().clone())
             .unwrap_or_else(|| self.file_resolution_context.clone());
-        let context = self.context.clone();
-        let step_frontmatter = self.step_frontmatter.clone();
+        let no_frontmatter = darkmatter::markdown::FrontmatterMap::new();
+        let frontmatter = self
+            .graph
+            .prompt_document(document)
+            .map_or(&no_frontmatter, |loaded| loaded.markdown.frontmatter().as_map());
+        let context = &self.context;
         let layers = providers::HintLayers {
-            document: &frontmatter,
+            document: frontmatter,
             document_path: document,
             with,
             with_evaluated: &prepared.evaluated,
@@ -2392,7 +2392,7 @@ impl<'a> Loader<'a> {
             with_failed: &prepared.failed,
             with_origin: origin,
             task_property,
-            step_frontmatter: &step_frontmatter,
+            step_frontmatter: &self.step_frontmatter,
             caller_setters: &self.caller_setters,
             sequence_path: &self.source.resolved_path,
         };
@@ -2401,7 +2401,7 @@ impl<'a> Loader<'a> {
             // the sequence.
             crate::note_work!(EarlyBindingStateNodes, crate::work_counters::value_nodes(values.iter()));
             let state = reapproval::early_binding_state(&values.clone().into(), context.clone())?;
-            Ok(reapproval::compose_approval_value(value, document, &state, &context, &file_resolution_context)?
+            Ok(reapproval::compose_approval_value(value, document, &state, context, &file_resolution_context)?
                 .map_err(|error| crate::composition::lifecycle_context::LifecycleCause::new(Box::new(error).into())))
         };
         providers::predict(&layers, &mut evaluate)

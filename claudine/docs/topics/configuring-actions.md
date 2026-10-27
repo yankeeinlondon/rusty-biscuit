@@ -310,6 +310,11 @@ above read the same fields, so `tool_name` and `hook.tool_name` agree.
 - `hook` does not contain the environment: `hook.env.HOME` is absent. Read
   environment variables through `env.*`.
 - `hook.extra.doc` reaches an `extra` field named `doc`.
+- `hook.<path>` reads that one field straight from the event and copies only
+  its value, so `hook.tool_name` stays cheap beside a megabyte of
+  `tool_response`. Only bare `hook` builds the whole payload object. Every
+  evaluation reads the event being dispatched; nothing is kept from an
+  earlier event.
 - `hook` exists only in hook actions. A hook expression has no frontmatter, so
   Darkmatter's document root `fm` does not apply here.
 

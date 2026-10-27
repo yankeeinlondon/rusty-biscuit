@@ -62,7 +62,8 @@ mod prewarm {
 }
 
 mod prediction {
-    //! C7: provider prediction copies the prompt frontmatter for a literal hint.
+    //! C7: what provider prediction builds for a literal hint, beside a
+    //! hintless document. The caller borrows the prompt frontmatter.
 
     use std::collections::HashMap;
     use std::path::Path;
@@ -76,7 +77,7 @@ mod prediction {
     #[ignore = "measurement spike; run explicitly"]
     fn pipeline_spike_c7_literal_hint_prediction() {
         for (shape, hint) in [("literal-agent", Some("codex")), ("hintless", None)] {
-            let mut document = frontmatter_of(100 * 1024);
+            let mut document: darkmatter::markdown::FrontmatterMap = frontmatter_of(100 * 1024).into_iter().collect();
             if let Some(hint) = hint {
                 document.insert("agent".into(), Value::String(hint.into()));
             }
@@ -107,14 +108,6 @@ mod prediction {
                 matches!(prediction.agent, HintState::Static { .. })
             });
             report("C7", &format!("{shape}/fm=100KB/per-task"), &measured);
-            // The caller copies the document's frontmatter before predicting.
-            let caller_copy = measure(9, || {
-                document
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect::<Map<_, _>>()
-            });
-            report("C7", &format!("{shape}/fm=100KB/caller-copy"), &caller_copy);
         }
     }
 }

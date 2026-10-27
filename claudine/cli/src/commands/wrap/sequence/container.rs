@@ -53,9 +53,8 @@ impl<'a> RootRun<'a> {
     /// outputs, before the pass's terminal event reads it.
     pub(super) fn record_pass(&mut self, exit_code: i32) {
         let Some(frame) = self.frame.as_mut() else { return };
-        let outputs = self.runtime.snapshot().outputs;
-        let start = self.checkpoint.as_ref().map_or(0, PassCheckpoint::outputs).min(outputs.len());
-        frame.record_pass(serde_json::Value::Array(outputs[start..].to_vec()), exit_code);
+        let start = self.checkpoint.as_ref().map_or(0, PassCheckpoint::outputs);
+        frame.record_pass(serde_json::Value::Array(self.runtime.outputs_from(start)), exit_code);
     }
 
     /// The process exit code of a root loop a `break` ended, with its
@@ -121,7 +120,7 @@ impl<'a> RootRun<'a> {
         loop {
             if let Some(live) = self.stack.live_frontmatter {
                 let mut live = live.lock().expect("root frontmatter poisoned");
-                live.extend(self.runtime.snapshot().mutations);
+                live.extend(self.runtime.mutations());
             }
             let disabled = claudine::composition::lifecycle::executor::DisabledShellRunner;
             let ambient = self.loop_values();

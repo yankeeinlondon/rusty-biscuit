@@ -39,7 +39,7 @@ use super::super::lifecycle::{
     LifecycleSignal, parse_single_action_with_order, parse_task_action_stack_with_order,
 };
 use super::super::runtime_state::{
-    LayeredOverrides, RuntimeState, layered_set_overrides, trim_transport_newline,
+    LayeredOverrides, RuntimeState, layered_set_overrides, sequence_value_of, trim_transport_newline,
 };
 use darkmatter::markdown::compose::OverrideOrigin;
 use super::model::RuntimeMutation;
@@ -542,6 +542,8 @@ impl TaskExecution<'_> {
             self.dry_run_note(&format!("`{name}` runs when `{condition}` (not evaluated in a dry run)"));
             return Ok(true);
         }
+        // An unguarded task reads no `seq`, so it copies no outputs.
+        if self.task.when.is_none() { return Ok(true); }
         let seq = self.sequence_binding();
         let context = StackExecutionContext { frontmatter: self.state.data(), seq: Some(&seq), ..self.stack.with_signal(self.stack.signal) };
         evaluate_task_guard(self.task, &context)
@@ -1278,7 +1280,7 @@ impl TaskExecution<'_> {
     fn verify_preflight_approvals(&self) -> Option<TaskDiagnostic> {
         let document = self.document?;
         let environment = document.document_environment();
-        let writes = self.runtime.map(|runtime| runtime.snapshot().mutations).unwrap_or_default();
+        let writes = self.runtime.map(|runtime| runtime.mutations()).unwrap_or_default();
         // In the order the stages would run, so the refusal names the first
         // command that would have run changed.
         for stage in [TaskStage::Setup, TaskStage::Primary, TaskStage::Teardown] {
@@ -1291,6 +1293,19 @@ impl TaskExecution<'_> {
         None
     }
 
+    /// The task's `seq` value as it stands now: the runtime's position (else
+    /// the overlay's) with the committed outputs.
+    fn sequence_binding(&self) -> Value {
+        let overlay_seq = || self.overlay.and_then(|overlay| overlay.get("seq")).cloned();
+        // In-process callers may supply an already frozen sequence value.
+        let Some(runtime) = self.runtime else {
+            return overlay_seq().unwrap_or_else(||
+                crate::composition::lifecycle::bindings::SequenceBinding::standalone(Vec::new()).to_value());
+        };
+        let (seq, outputs) = runtime.sequence_scope();
+        sequence_value_of(seq.or_else(overlay_seq), outputs)
+    }
+
     /// Read and validate every late value this task's command sites read
     /// ([`super::preflight::resolve_task_late_values`]), against the task's
     /// state as it stands now: `outputs` and the step's values from
@@ -1298,19 +1313,6 @@ impl TaskExecution<'_> {
     /// innermost looping container around the task.
     ///
     /// [`Self::state`]: TaskExecution::state
-    fn sequence_binding(&self) -> Value {
-        let mut snapshot = self.runtime.map_or_else(Default::default, |runtime| runtime.snapshot());
-        if snapshot.seq.is_none() {
-            snapshot.seq = self.overlay.and_then(|overlay| overlay.get("seq")).cloned();
-        }
-        // In-process callers may supply an already frozen sequence value.
-        if self.runtime.is_none() {
-            return snapshot.seq.unwrap_or_else(||
-                crate::composition::lifecycle::bindings::SequenceBinding::standalone(Vec::new()).to_value());
-        }
-        snapshot.sequence_value()
-    }
-
     fn late_values(
         &self,
     ) -> Result<darkmatter::markdown::compose::shell_expansion::template::LateValues, CompositionError>
@@ -1548,7 +1550,7 @@ impl TaskExecution<'_> {
     /// The runtime mutation map as it stands right now.
     fn mutation_snapshot(&self) -> Map<String, Value> {
         self.runtime
-            .map(|runtime| runtime.snapshot().mutations.into_iter().collect())
+            .map(|runtime| runtime.mutations().into_iter().collect())
             .unwrap_or_default()
     }
 
@@ -1558,8 +1560,7 @@ impl TaskExecution<'_> {
             return Vec::new();
         };
         runtime
-            .snapshot()
-            .mutations
+            .mutations()
             .into_iter()
             .filter(|(key, value)| before.get(key) != Some(value))
             .map(|(key, value)| RuntimeMutation {

@@ -443,7 +443,9 @@ coerced to the string arm (schema valid; the parser rejects it).
 A sequence has no single planned target. Preflight predicts each `prompt:`
 task's provider from its own `agent` (`PreflightTask.provider`, computed in
 `composition/sequence/preflight/providers.rs` without running or composing
-anything) and keys every task by its graph `TaskIdentity`. The CLI
+anything; a literal hint is classified before any state is built, so only a
+document hint that reads an expression builds `PredictionStateBuild` state)
+and keys every task by its graph `TaskIdentity`. The CLI
 (`wrap/sequence/providers.rs`) turns predictions into per-task targets
 (own / enclosing-document fallback / decided at launch / unresolved), fails an
 unusable static hint with `SequenceTaskProviderSelection` before any task
@@ -486,9 +488,26 @@ root fallback for reads introduced by transclusion; Darkmatter's explicit
 `seq.previous`, and `seq.next`; typed expression evaluation retains objects.
 Sequence task templates defer `seq`/`group`/`loop`, including the first task.
 Container runners use complete lexical roots for their own events and restore
-the enclosing roots on exit. `RuntimeState::replace_sequence_scope` restores
-position and outputs while keeping mutations; group workers clone the snapshot
-so in-memory writes and proxy ancestry remain isolated across branches.
+the enclosing roots on exit. `RuntimeState::replace_sequence_scope` swaps
+position and outputs while keeping mutations and returns the replaced pair, so
+a nested sequence moves the enclosing outputs out and back instead of copying
+them; group workers clone the snapshot so in-memory writes and proxy ancestry
+remain isolated across branches. A leg's branch (`task/group/branch.rs::LegBranch`)
+is built from the group-start seed only at admission and dropped before its
+worker admits the next leg; `work_counters::Gauge::RuntimeStateBranch` (live
+and peak) and the `test-fixtures` seam `CLAUDINE_TEST_GROUP_BRANCHES` pin
+peak ≤ cap (`sequence/task/tests/branch_admission.rs`,
+`cli/tests/l1/group_branch_lifetime.rs`). Read runtime state through the narrow
+projections (`mutations`, `mutation_keys`, `mutations_and_outputs`,
+`mutations_and_output_count`, `outputs_from`, `sequence_scope`); a full
+`snapshot()` is only for seeding a branch or `layered_set_overrides`.
+`Work::RuntimeSnapshot`/`RuntimeOutputsCopy` pin this
+(`sequence/task/tests/runtime_projections.rs`). Dotted `hook.<path>`
+(`dispatch/expression.rs::hook_member`) and loop-condition `loop.<member>`
+(`LoopAmbient::member_named`) resolve the member without building the whole
+root; only a bare `hook`/`loop` read materializes it
+(`HookPayloadMaterialize`/`LoopAmbientMaterialize`). Lifecycle and body
+`loop.*` reads still come from the eager `EnclosingLoop::value` binding.
 
 ## Structured shell authorization
 

@@ -220,7 +220,7 @@ fn prediction_calls_the_evaluator_only_for_an_evaluable_template() {
     });
     let document = document.as_object().unwrap();
     for key in ["literal", "late", "circular", "shell", "current"] {
-        let mut frontmatter = serde_json::Map::new();
+        let mut frontmatter = darkmatter::markdown::FrontmatterMap::new();
         frontmatter.insert("agent".into(), document[key].clone());
         let empty = serde_json::Map::new();
         let layers = super::HintLayers {
@@ -486,3 +486,5 @@ fn a_hint_reading_a_key_only_a_runtime_write_creates_is_decided_at_launch() {
     let graph = build(&path, json!({}));
     assert!(!matches!(prediction(&graph, 0).agent, HintState::DecidedAtLaunch { .. }), "{:?}", prediction(&graph, 0));
 }
+
+mod literal_hints;

@@ -508,9 +508,8 @@ impl LifecycleHost for StackExecutionContext<'_> {
     /// The binding catalog's view for [`Self::binding_scope`], with the
     /// runtime state's sequence outputs under `seq`.
     fn bindings(&self) -> (Arc<BindingView>, HashMap<String, RuntimeBinding<'static>>) {
-        let mut snapshot = self.runtime_state.map_or_else(Default::default, |runtime| runtime.snapshot());
-        if let Some(seq) = self.seq { snapshot.seq = Some(seq.clone()); }
-        let seq = snapshot.sequence_value();
+        let (position, outputs) = self.runtime_state.map(super::super::runtime_state::RuntimeState::sequence_scope).unwrap_or_default();
+        let seq = super::super::runtime_state::sequence_value_of(self.seq.cloned().or(position), outputs);
         runtime_bindings_in_loop(
             self.binding_scope(),
             LifecycleValues {

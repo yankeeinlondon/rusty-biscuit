@@ -88,6 +88,16 @@ impl LoopAmbient {
         Value::Object(object)
     }
 
+    /// The `loop.<name>` member, copying only that value: `name` is one
+    /// member's exact name, so a dotted remainder names no member and is
+    /// absent, just as it is in [`Self::to_value`]'s object.
+    fn member_named(&self, name: &str) -> Option<Value> {
+        AmbientVariable::ALL
+            .into_iter()
+            .find(|member| member.as_str() == name)
+            .map(|member| self.member(member))
+    }
+
     fn member(&self, member: AmbientVariable) -> Value {
         match member {
             AmbientVariable::Iteration => Value::Number(self.iteration.into()),
@@ -110,8 +120,9 @@ impl LoopAmbient {
 /// 2. Prepared `ctx.NAME` and `env.NAME` from the document epoch, when supplied
 /// 3. Ambient `env.NAME` compatibility lookup
 /// 4. The `loop` global: bare `loop` is [`LoopAmbient::to_value`], and
-///    `loop.<member>` one of its members. A missing member is `null`; it
-///    never falls through to frontmatter.
+///    `loop.<member>` one of its members, read without building the object.
+///    A missing member is absent (`null` in an expression); it never falls
+///    through to frontmatter.
 /// 5. Frontmatter properties, including nested object paths via `.`
 ///
 /// The lookup resolves file references through the request's
@@ -239,10 +250,10 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
         }
 
         if let Some(member) = loop_member(path) {
-            return member.map_or_else(
-                || Some(self.ambient.to_value()),
-                |member| self.ambient.to_value().get(member).cloned(),
-            );
+            return match member {
+                None => Some(self.ambient.to_value()),
+                Some(name) => self.ambient.member_named(name),
+            };
         }
 
         if let Some(value) = resolve_boolean_literal(path) {
