@@ -11,6 +11,8 @@ use serde_json::{Map, Value, json};
 use super::*;
 use crate::composition::looping::LoopAmbient;
 
+mod loop_member_reads;
+
 /// A document whose properties share the globals' names, so any fall-through
 /// from a global to the document is visible.
 struct Document(Map<String, Value>);

@@ -299,10 +299,21 @@ impl<'a> EnclosingLoop<'a> {
         }
     }
 
-    fn value(self) -> Value {
+    /// The `loop` entry: an iteration's values resolve `loop.<member>`
+    /// without building the whole object, which only a whole-root read
+    /// builds ([`RuntimeBinding::members`]). The binding owns a clone of the
+    /// ambient, whose previous result is shared rather than copied.
+    fn binding(self) -> RuntimeBinding<'static> {
         match self {
-            Self::Iteration(ambient) => ambient.to_value(),
-            Self::Pending | Self::Outside => Value::Null,
+            Self::Iteration(ambient) => {
+                let members = Arc::new(ambient.clone());
+                let whole = Arc::clone(&members);
+                RuntimeBinding::members(
+                    move |name| members.member_named(name),
+                    move || whole.to_value(),
+                )
+            }
+            Self::Pending | Self::Outside => RuntimeBinding::eager(Value::Null),
         }
     }
 }
@@ -324,6 +335,9 @@ pub fn runtime_bindings_enclosed(
         .map(|global| {
             let entry = match global.availability() {
                 Availability::Unavailable(reason) => RuntimeBinding::unavailable(reason.clone()),
+                Availability::Available | Availability::ExecutionDependent if global.root() == LOOP_ROOT => {
+                    enclosing.binding()
+                }
                 Availability::Available | Availability::ExecutionDependent => {
                     RuntimeBinding::eager(match global.root() {
                         "seq" => values.seq.cloned().unwrap_or_else(|| SequenceBinding::standalone(Vec::new()).to_value()),
@@ -332,7 +346,6 @@ pub fn runtime_bindings_enclosed(
                         "group" => values
                             .group
                             .map_or(Value::Null, |group| Value::Object(group.clone())),
-                        LOOP_ROOT => enclosing.value(),
                         other => unreachable!("undeclared lifecycle global `{other}`"),
                     })
                 }
@@ -363,7 +376,7 @@ pub(crate) fn composition_host_globals(
             Availability::Unavailable(reason(OUTSIDE_LOOP)),
             RuntimeBinding::unavailable(reason(OUTSIDE_LOOP)),
         ),
-        EnclosingLoop::Iteration(_) => (Availability::Available, RuntimeBinding::eager(enclosing.value())),
+        EnclosingLoop::Iteration(_) => (Availability::Available, enclosing.binding()),
         EnclosingLoop::Pending => (Availability::ExecutionDependent, RuntimeBinding::eager(Value::Null)),
     };
     let retired_reason = |member: &str| {

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use darkmatter::markdown::compose::expression::{
     EvaluationLookup, ExpressionError, ResolutionContext, ResolvedBinding, evaluate,
@@ -29,8 +30,9 @@ pub struct LoopAmbient {
     pub is_last: bool,
     /// The result of the previous pass, or of the pass that just finished
     /// once it reports: text for a document, an array for a sequence, a
-    /// dictionary for a group.
-    pub last_output: Value,
+    /// dictionary for a group. Shared, so cloning the ambient (as a binding
+    /// that outlives the borrow does) never copies a large result.
+    pub last_output: Arc<Value>,
     /// Exit code from the previous iteration.
     pub last_exit_code: i32,
     /// Where a `break` that ends this loop is recorded. Every page whose
@@ -63,7 +65,7 @@ impl LoopAmbient {
             iteration,
             is_first,
             is_last,
-            last_output: last_output.into(),
+            last_output: Arc::new(last_output.into()),
             last_exit_code,
             breaks: LoopBreakSlot::default(),
         }
@@ -91,7 +93,7 @@ impl LoopAmbient {
     /// The `loop.<name>` member, copying only that value: `name` is one
     /// member's exact name, so a dotted remainder names no member and is
     /// absent, just as it is in [`Self::to_value`]'s object.
-    fn member_named(&self, name: &str) -> Option<Value> {
+    pub(crate) fn member_named(&self, name: &str) -> Option<Value> {
         AmbientVariable::ALL
             .into_iter()
             .find(|member| member.as_str() == name)
@@ -103,7 +105,7 @@ impl LoopAmbient {
             AmbientVariable::Iteration => Value::Number(self.iteration.into()),
             AmbientVariable::IsFirst => Value::Bool(self.is_first),
             AmbientVariable::IsLast => Value::Bool(self.is_last),
-            AmbientVariable::LastOutput => self.last_output.clone(),
+            AmbientVariable::LastOutput => Value::clone(&self.last_output),
             AmbientVariable::LastExitCode => Value::Number(self.last_exit_code.into()),
         }
     }

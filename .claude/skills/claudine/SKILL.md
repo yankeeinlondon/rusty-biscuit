@@ -508,8 +508,12 @@ projections (`mutations`, `mutation_keys`, `mutations_and_outputs`,
 (`dispatch/expression.rs::hook_member`) and loop-condition `loop.<member>`
 (`LoopAmbient::member_named`) resolve the member without building the whole
 root; only a bare `hook`/`loop` read materializes it
-(`HookPayloadMaterialize`/`LoopAmbientMaterialize`). Lifecycle and body
-`loop.*` reads still come from the eager `EnclosingLoop::value` binding.
+(`HookPayloadMaterialize`/`LoopAmbientMaterialize`). Lifecycle, body, and
+frontmatter `loop.*` reads do the same through Darkmatter's member-aware
+`RuntimeBinding::members` (`EnclosingLoop::binding`, used by
+`runtime_bindings_enclosed` and `composition_host_globals`); bracket access
+builds the whole root once per session. `LoopAmbient.last_output` is an
+`Arc<Value>`, so the `'static` binding clones the ambient without copying it.
 
 ## Structured shell authorization
 

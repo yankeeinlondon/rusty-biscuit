@@ -145,3 +145,60 @@ fn a_retired_read_a_transcluded_document_introduces_is_removed_grammar() {
         other => panic!("expected RemovedGrammar, got {other:?}"),
     }
 }
+
+#[cfg(feature = "work-counters")]
+mod work_counts {
+    use super::*;
+    use crate::work_counters::{Work, snapshot};
+
+    fn materializations(read: impl FnOnce()) -> u64 {
+        let before = snapshot();
+        read();
+        snapshot().since(&before).get(Work::LoopAmbientMaterialize)
+    }
+
+    fn large_pass() -> LoopAmbient {
+        LoopAmbient::new(2, false, true, "x".repeat(1024 * 1024), 3)
+    }
+
+    /// A body and compose-time frontmatter that read only loop scalars never
+    /// build the `loop` object beside a one-megabyte previous result.
+    #[test]
+    fn scalar_loop_reads_in_body_and_frontmatter_build_no_loop_object() {
+        let (_dir, source) = source_in_dir(
+            "---\nlabel: \"pass {{ loop.count }}\"\nloop:\n  max: 5\n---\n\
+             count={{ loop.count }} last={{ loop.is_last }} code={{ loop.last_exit_code }} \
+             label={{ label }} missing=[{{ loop.missing }}]\n",
+            &[],
+        );
+        let options = options(Some(large_pass()));
+
+        let mut prepared = None;
+        assert_eq!(
+            materializations(|| prepared = Some(prepare_direct(&source, options).unwrap())),
+            0
+        );
+        let prepared = prepared.unwrap();
+        assert_eq!(prepared.prompt.trim(), "count=2 last=true code=3 label=pass 2 missing=[]");
+    }
+
+    /// A bare `loop` read is the whole object, built for that read.
+    #[test]
+    fn a_bare_loop_read_in_the_body_builds_the_object() {
+        let (_dir, source) = source_in_dir(
+            "---\nwhole: \"{{ loop }}\"\nloop:\n  max: 5\n---\ncount={{ loop.count }}\n",
+            &[],
+        );
+        let options = options(Some(second_pass()));
+
+        let mut prepared = None;
+        let built = materializations(|| prepared = Some(prepare_direct(&source, options).unwrap()));
+        let prepared = prepared.unwrap();
+        assert_eq!(built, 1, "one whole-root read builds the object once");
+        assert_eq!(
+            prepared.effective_frontmatter.get("whole"),
+            Some(&second_pass().to_value())
+        );
+        assert_eq!(prepared.prompt.trim(), "count=2");
+    }
+}
