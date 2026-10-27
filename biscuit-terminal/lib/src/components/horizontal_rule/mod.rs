@@ -2739,9 +2739,10 @@ mod tests {
         };
         let hr = HorizontalRule::new().with_layout(layout);
         let result = hr.render_html_fragment().render();
-        assert!(
-            result.contains("margin-top:2%"),
-            "expected 2% top margin on the outer wrapper: {result}"
+        assert_eq!(
+            wrapper_decls(&result).iter().filter(|d| **d == "margin-top:2%").count(),
+            1,
+            "expected 2% top margin once on the outer wrapper: {result}"
         );
     }
 
@@ -2751,6 +2752,19 @@ mod tests {
 
     fn fragment_html(hr: &HorizontalRule) -> String {
         hr.render_html_fragment().render()
+    }
+
+    /// The `style` attribute of the outer layout wrapper, so outer-layout
+    /// assertions cannot be satisfied by the SVG's own markup.
+    fn wrapper_style(html: &str) -> &str {
+        let start = html.find("<div style=\"").expect("outer wrapper present") + "<div style=\"".len();
+        let len = html[start..].find('"').expect("wrapper style closes");
+        &html[start..start + len]
+    }
+
+    /// The wrapper's style declarations, split so each can be counted exactly.
+    fn wrapper_decls(html: &str) -> Vec<&str> {
+        wrapper_style(html).split(';').map(str::trim).filter(|d| !d.is_empty()).collect()
     }
 
     #[test]
@@ -2828,10 +2842,26 @@ mod tests {
         });
         let html = fragment_html(&margins);
         assert_eq!(html.matches("<div style=\"").count(), 1, "one wrapper: {html}");
-        assert_eq!(html.matches("margin-left:5ch").count(), 1, "{html}");
         assert!(!html.contains("margin-left:2ch"), "terminal value leaked: {html}");
         // Vertical `ch` lowers to `lh` in the tree renderer.
-        assert!(html.contains("margin-top:2lh"), "{html}");
+        let decls = wrapper_decls(&html);
+        for expected in ["margin-top:2lh", "margin-bottom:1lh", "margin-left:5ch"] {
+            assert_eq!(
+                decls.iter().filter(|d| **d == expected).count(),
+                1,
+                "`{expected}` exactly once on the wrapper: {html}"
+            );
+            assert_eq!(html.matches(expected).count(), 1, "`{expected}` applied once: {html}");
+        }
+        // The unauthored right edge stays zero; each edge is declared once.
+        assert!(decls.contains(&"margin-right:0"), "{html}");
+        for edge in ["margin-top:", "margin-bottom:", "margin-left:", "margin-right:"] {
+            assert_eq!(
+                decls.iter().filter(|d| d.starts_with(edge)).count(),
+                1,
+                "one `{edge}` declaration on the wrapper: {html}"
+            );
+        }
         let wrapper_open = html.find("<div style=\"").unwrap();
         let svg_open = html.find("<svg").expect("svg present");
         let wrapper_close = html.rfind("</div>").expect("wrapper closes");
@@ -2849,9 +2879,14 @@ mod tests {
         });
         let html = fragment_html(&sized);
         assert_eq!(html.matches("<div style=\"").count(), 1, "one wrapper: {html}");
-        assert!(html.contains("width:50%"), "{html}");
-        assert!(html.contains("max-width:40ch"), "{html}");
-        assert!(html.contains("margin-left:auto;margin-right:auto"), "{html}");
+        let decls = wrapper_decls(&html);
+        for expected in ["width:50%", "max-width:40ch", "margin-left:auto", "margin-right:auto"] {
+            assert_eq!(
+                decls.iter().filter(|d| **d == expected).count(),
+                1,
+                "`{expected}` exactly once on the wrapper: {html}"
+            );
+        }
     }
 
     #[test]
