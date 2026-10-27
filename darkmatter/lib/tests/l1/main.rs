@@ -209,6 +209,7 @@ mod recursive_schema_rewrite;
 mod recursive_schema_completion;
 mod recursive_schema_typed_consumers;
 mod recursive_schema_frozen_fixture;
+mod shared_acyclic_definitions;
 mod shipped_schema_corpus;
 mod set_overlay_integration;
 mod shell_block_integration;

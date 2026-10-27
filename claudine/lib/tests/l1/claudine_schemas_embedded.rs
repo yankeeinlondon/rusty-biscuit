@@ -12,6 +12,8 @@
 //! - The strict policy for Claudine controls at the library boundary.
 //! - Passive parity: for the AC5 fixtures, the launch verdict and the DMLS
 //!   path agree.
+//! - Each failing use of a lifecycle helper reached from several places keeps
+//!   its problem code, instance path, position, and declaring trigger.
 //!
 //! Every context is built from a `RequestSnapshot` with a fixture home and an
 //! explicit environment inside a temporary directory; neither the checkout,
@@ -1219,4 +1221,65 @@ passive_parity_tests! {
 fn passive_parity_tests_cover_every_ac5_fixture() {
     let ac5: Vec<&str> = AC5_GROUPS.iter().flat_map(|group| group.iter().copied()).collect();
     assert_eq!(PARITY_FIXTURES, &ac5[..], "one parity test per AC5 fixture, in table order");
+}
+
+/// The lifecycle helpers (`entry`, the action categories, the short-form
+/// bundle) are reached from several events, list items, and conditional
+/// bodies. Each failing use keeps the problem code, full instance path,
+/// line and column, the union explanation it reports, and its declaring
+/// trigger, whatever way the resolver stores those helpers. Recorded while
+/// every acyclic helper was inlined at each use.
+#[test]
+fn a_shared_lifecycle_helper_reports_each_failing_use_where_it_is_written() {
+    use darkmatter::markdown::schemas::ValidationProblemCode::ConstraintViolation;
+    use darkmatter::markdown::schemas::validate::build_position_map;
+
+    const BARE_VERB: &str = "a zero-argument verb written as a bare list item";
+    let bare = Bare::new();
+    let schemas = bare.schemas(claudine_schema_bundle());
+    /// `(instance path, line, column, explanation)` of each expected problem.
+    type Expected = &'static [(&'static str, u32, u32, &'static str)];
+    let cases: [(&str, Expected); 5] = [
+        (
+            "start:\n  - inf0: hi\nfinalize:\n  - say: hi\n  - inf0: hi\n",
+            &[("/start/0", 2, 5, BARE_VERB), ("/finalize/1", 5, 5, BARE_VERB)],
+        ),
+        (
+            "success:\n  - when: \"{{ ready }}\"\n    then:\n      - say: hi\n      - inf0: hi\n",
+            &[("/success/0/then/1", 5, 9, BARE_VERB)],
+        ),
+        ("start:\n  - say: hi\n    inf0: hi\n", &[("/start/0", 2, 5, BARE_VERB)]),
+        // `cancelled` admits a shell; `initialize` never does.
+        ("initialize:\n  - shell: ls\ncancelled:\n  - shell: ls\n", &[("/initialize/0", 2, 5, BARE_VERB)]),
+        // A loop action missing its required `prop`.
+        ("loop:\n  action:\n    op: set\n", &[("/loop/action", 3, 5, "an iteration action such as increment(iteration)")]),
+    ];
+    for (frontmatter, expected) in cases {
+        let markdown = memory_document(frontmatter);
+        let effective = schemas.effective_for(&markdown).expect("resolves").expect("a trigger applies");
+        let instance = crate::claudine_schemas::frontmatter_json(&markdown);
+        let report = effective.validate_with_positions(&instance, &build_position_map(frontmatter));
+        let found: Vec<_> = report
+            .problems
+            .iter()
+            .map(|problem| (problem.code, problem.path.as_str(), problem.line, problem.column, problem.description.as_deref()))
+            .collect();
+        let expected: Vec<_> = expected
+            .iter()
+            .map(|(path, line, column, description)| (ConstraintViolation, *path, Some(*line), Some(*column), Some(*description)))
+            .collect();
+        assert_eq!(found, expected, "`{frontmatter}`");
+        for property in instance.as_object().expect("a mapping").keys() {
+            let origin = effective.origins.get(property).unwrap_or_else(|| panic!("`{property}` has an origin"));
+            assert_eq!(
+                origin.trigger_source(),
+                Some(TriggerSource::Embedded {
+                    bundle: CLAUDINE_SCHEMA_BUNDLE_NAME.to_string(),
+                    name: "claudine.yaml".to_string()
+                }),
+                "`{property}` in `{frontmatter}`"
+            );
+        }
+    }
+    bare.assert_untouched();
 }
