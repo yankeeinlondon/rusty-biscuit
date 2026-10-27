@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-10-27
-phase: 2
+phase: 4
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: 'true'
 source_files_during_phase_1:
@@ -14,6 +14,17 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages:
 - biscuit-terminal
+source_files_during_phase_2:
+- biscuit-terminal/lib/src/components/horizontal_rule/mod.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+- biscuit-terminal/lib/Cargo.toml
+- biscuit-terminal/justfile
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Plan: HorizontalRule browser parity — remove the legacy SVG, revive the hidden tests
@@ -88,7 +99,7 @@ Tasks:
   - `test_snapshot_render_to_browser_all_styles` (1903) and the browser halves of `test_snapshot_render_with_custom_attributes` (2007): switch to the fragment; keep snapshot names; terminal halves and their snapshots unchanged.
 - [x] **Regenerate snapshots**
   - Run `cargo insta accept` scoped to this package after running the two snapshot tests; verify `git status` shows exactly the 23 expected browser snapshot files changed (21 `browser_{style}_{weight}` + `browser_custom_attributes` + `browser_custom_attributes_2`) under `lib/src/components/horizontal_rule/snapshots/` and no terminal snapshot touched. Inspect at least the `browser_dashes_medium` and `browser_custom_attributes_2` diffs: Full rules show `margin: 0 0 0 0`; the Right/50ch rule shows `margin: 0 0 0 auto` and `width="50ch"`.
-- [ ] **Add fragment contract tests** (new; names as below)
+- [x] **Add fragment contract tests** (new; names as below)
   - `test_fragment_routes_through_tree_adapter`: a rule setting all fields plus a nondefault outer layout renders byte-identical HTML via `render_html_fragment().render()` and via `BrowserTreeComponent::new(rule.clone()).render_html_fragment().render()` (`use crate::render_tree::BrowserTreeComponent;`). This is the routing check.
   - `test_fragment_alignment_controls_svg_margins`: for `Left`, `Right`, `Centered` at `width("50%")`: assert `width="50%"` plus the SVG style margin — `Left` → `margin: 0 auto 0 0`, `Right` → `margin: 0 0 0 auto`, `Centered` → `margin: 0 auto 0 auto` (shorthand order top/right/bottom/left, `graphics.rs:91-96`).
   - `test_fragment_full_alignment_forces_full_width`: `Full` with `width("50%")` → `width="100%"`, `--hr-width: 100%`, and `margin: 0 0 0 0` in the SVG style.
@@ -107,13 +118,13 @@ Tasks:
 
 Tasks:
 
-- [ ] **Enable serde for L1 in Cargo metadata**
+- [x] **Enable serde for L1 in Cargo metadata**
   - `lib/Cargo.toml` `[package.metadata.ci.tests]` (line 149): `features = ["image", "serde", "terminal-tests", "browser-tests"]`, `local-features = ["image", "serde"]`. Update the adjacent policy comment's first sentence (line 145) to "CI policy: L1 runs with the `image` and `serde` features; …" leaving the rest of that comment intact.
   - Evidence this is safe: the `serde` feature is a pure cfg switch (`serde = []`, Cargo.toml:24) — `serde`/`serde_json` are already unconditional dependencies (Cargo.toml:44-45) — so no dependency graph or `--no-default-features` build changes.
-- [ ] **Enable serde in justfile recipes**
+- [x] **Enable serde in justfile recipes**
   - In `biscuit-terminal/justfile`, change the library entries of `sanity` (line 73), `test` (77), `coverage` (108), and `doctest` (113) from `--features image` to `--features image,serde`. Leave `test-l2` (`terminal-tests`) and `test-browser` (`browser-tests`) untouched; the CLI entries get no features.
   - Rewrite the comment block (lines 60-69): remove the entire "NOT `--all-features`" paragraph; correct the `image` claim so it no longer says `image` gates the "horizontal-rule parity suites" — new text states that `image` gates the resvg rasterization tests and `serde` gates the horizontal-rule serialization tests, without per-feature test counts (they drift; the old "137 of 3004" figure is already stale).
-- [ ] **No CI workflow changes.** Existing tiers, gates, and feature gates (`terminal-tests`, `browser-tests`) are preserved; no job, environment, or duplicate suite is added. The metadata change alone re-scopes L1 feature selection.
+- [x] **No CI workflow changes.** Existing tiers, gates, and feature gates (`terminal-tests`, `browser-tests`) are preserved; no job, environment, or duplicate suite is added. The metadata change alone re-scopes L1 feature selection.
 
 **Checkpoint:** `just test` (from the package area) runs and its listing includes the four serialization tests and the relocated terminal test; `cargo check -p biscuit-terminal --tests --all-features` still compiles (both features and all-features paths).
 
