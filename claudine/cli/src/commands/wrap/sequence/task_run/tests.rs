@@ -276,6 +276,7 @@ fn group_variables_and_member_tasks_are_scanned_for_ctx_references() {
             tasks: vec![member],
             origin_path: fixture.origin_path(),
             loop_config: None,
+            sources: Vec::new(),
         },
     );
 

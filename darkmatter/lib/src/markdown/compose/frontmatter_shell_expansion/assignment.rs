@@ -14,7 +14,6 @@
 //! is read when the value executes, from the state the caller supplies then,
 //! and fills exactly one argument; its resolved bytes never run.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use biscuit_terminal::errors::SourceContext;
@@ -39,7 +38,7 @@ use crate::markdown::compose::shell_expansion::tokenize::{parse_pipeline, tokeni
 use crate::markdown::compose::shell_expansion::types::{
     ShellExpansionError, ShellExpansionRuntime, ShellPipeline,
 };
-use crate::markdown::compose::ComposeContext;
+use crate::markdown::compose::{ComposeContext, SharedFrontmatter};
 use crate::markdown::compose::shell_expansion::site::{SiteFrame, TemplateSite, prepare_site};
 use crate::markdown::compose::shell_expansion::template::{
     CommandSite, CommandTemplate, HoleEvaluator, LookupEvaluator, ModeRequirement, ShellCandidate, SiteValues,
@@ -113,20 +112,21 @@ impl ResolvedShellValue {
     /// `resolved` is `authored` with its `{{ … }}` spans already interpolated
     /// by the caller; it supplies a plain command's bytes. A ternary's command
     /// branches are interpolated here from their authored text against the
-    /// map `state` returns, so interpolation cannot move a branch boundary.
-    /// `state` is called only for a ternary, so a plain command never
-    /// materializes the document. Structure is always taken from `authored`,
+    /// state `state` returns, so interpolation cannot move a branch boundary.
+    /// `state` is called only for a ternary. A [`SharedFrontmatter`] view is
+    /// read in place, its shared base never copied; a plain map is moved into
+    /// one. Structure is always taken from `authored`,
     /// so interpolation also cannot change an executable or add a chained
     /// command.
     ///
     /// ## Errors
     ///
     /// Any parse, shape, or interpolation error the value raises.
-    pub fn resolve(
+    pub fn resolve<S: Into<SharedFrontmatter>>(
         key: &str,
         authored: &str,
         resolved: &str,
-        state: impl FnOnce() -> HashMap<String, Value>,
+        state: impl FnOnce() -> S,
         context: &ComposeContext,
         resolution: ResolutionContext,
     ) -> Result<Self, ShellExpansionError> {
@@ -269,7 +269,8 @@ impl ResolvedShellValue {
 /// Executes resolved values against `state` and returns each value's result,
 /// in order.
 ///
-/// All values read the same `state`; none sees another's result. The values
+/// All values read the same `state`, a [`SharedFrontmatter`] view read in
+/// place (a plain map is moved into one); none sees another's result. The values
 /// share one command cache created for this call, so a command two of them
 /// name runs once, and nothing is reused from an earlier call. Commands run
 /// under the request's shell settings and must be in its pre-approved set when it
@@ -284,7 +285,7 @@ impl ResolvedShellValue {
 /// or, for a value without a result suffix, a non-zero exit.
 pub fn execute_resolved_shell_values(
     values: &[&ResolvedShellValue],
-    state: HashMap<String, Value>,
+    state: impl Into<SharedFrontmatter>,
     request: &crate::markdown::compose::ComposeRequest,
 ) -> Result<Vec<(String, Value)>, ShellExpansionError> {
     execute_shell_values_with(values, state, request, None)
@@ -306,7 +307,7 @@ pub fn execute_resolved_shell_values(
 /// suppressed by a result suffix.
 pub fn execute_shell_values_with(
     values: &[&ResolvedShellValue],
-    state: HashMap<String, Value>,
+    state: impl Into<SharedFrontmatter>,
     request: &crate::markdown::compose::ComposeRequest,
     holes: Option<&dyn HoleEvaluator>,
 ) -> Result<Vec<(String, Value)>, ShellExpansionError> {

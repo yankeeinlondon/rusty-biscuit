@@ -755,6 +755,42 @@ mod resolved_values {
         assert_eq!(results[0].1, json!(true));
     }
 
+    /// A ternary resolves and executes against a shared frontmatter view in
+    /// place: its branch reads a key from the view's shared base and one the
+    /// view wrote over its base, and the write wins, for both the branch
+    /// bytes fixed at resolution and the condition read at execution.
+    #[test]
+    fn a_ternary_reads_a_shared_view_base_and_its_overlay_write() {
+        use darkmatter::markdown::compose::SharedFrontmatter;
+        let repo = Repo::new();
+        let mut view = SharedFrontmatter::from(serde_json::Map::from_iter([
+            ("flag".to_string(), json!(false)),
+            ("verb".to_string(), json!("rev-parse")),
+            ("target".to_string(), json!("base")),
+            ("sequence".to_string(), json!([{ "name": "one" }, { "name": "two" }])),
+        ]));
+        view.insert("target".to_string(), json!("HEAD"));
+        let authored = format!("$( flag ? git {{{{ verb }}}} --verify {{{{ target }}}} : {FAILS} )::ok");
+        let value = ResolvedShellValue::resolve(
+            "v",
+            &authored,
+            &authored,
+            || view.clone(),
+            &ComposeContext::capture_for_content(repo.path(), ""),
+            ResolutionContext::new(biscuit_file::FileResolutionContext::new(repo.path())),
+        )
+        .unwrap();
+        assert_eq!(value.commands(), ["git rev-parse --verify HEAD", FAILS]);
+
+        let options = options(&repo, &[&value]);
+        let base = view.clone();
+        view.insert("flag".to_string(), json!(true));
+        for (state, ok) in [(base, false), (view, true)] {
+            let results = execute_resolved_shell_values(&[&value], state, &crate::request_support::request(options.clone())).unwrap();
+            assert_eq!(results[0].1, json!(ok));
+        }
+    }
+
     #[test]
     fn checking_an_authored_value_applies_the_frontmatter_grammar() {
         assert!(check_frontmatter_shell_value("v", "$(git rev-parse {{ ref }})::result").is_ok());

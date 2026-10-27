@@ -41,8 +41,14 @@ fn group_fixture(legs: usize, max_parallel: usize, frontmatter_bytes: usize) -> 
     Fixture::build(dir, &source).unwrap()
 }
 
-/// C1: a capped group builds a private runtime and live-frontmatter copy for
-/// every declared leg before any leg is admitted.
+/// The live document view a group starts from, as [`Fixture::execute_step`]
+/// seeds it; each leg's cell is a clone of it (`group.rs`).
+fn group_start_view(fixture: &Fixture) -> darkmatter::markdown::compose::SharedFrontmatter {
+    darkmatter::markdown::compose::SharedFrontmatter::from(fixture.frontmatter.clone())
+}
+
+/// C1: a capped group builds a private runtime branch and live-frontmatter
+/// view for every declared leg before any leg is admitted.
 #[test]
 #[ignore = "measurement spike; run explicitly"]
 fn pipeline_spike_c1_group_leg_state() {
@@ -69,16 +75,18 @@ fn pipeline_spike_c1_group_leg_state() {
             ),
             &measured,
         );
-        // One leg's live-frontmatter copy: the sequence document's frontmatter,
-        // which holds the inline group definition itself.
-        let seed = measure(3, || fixture.frontmatter.clone());
+        // One leg's live-frontmatter cell, built as the group builds it: a
+        // clone of the group-start view, whose document holds the inline
+        // group definition itself.
+        let view = group_start_view(&fixture);
+        let cell = measure(3, || std::sync::Mutex::new(view.clone()));
         report(
             "C1",
             &format!(
-                "legs={legs}/fm-payload={}KB/one-live-frontmatter-copy",
+                "legs={legs}/fm-payload={}KB/one-live-frontmatter-view",
                 frontmatter_bytes / 1024
             ),
-            &seed,
+            &cell,
         );
         let runtime = seeded_runtime(0, 0, 100 * 1024);
         let branch = measure(3, || RuntimeState::from_snapshot(runtime.snapshot()));
@@ -159,10 +167,11 @@ fn pipeline_spike_a4_group_step() {
         "group-step/one-mutations-only-copy",
         &measure(9, || mutations.clone()),
     );
+    let view = group_start_view(&fixture);
     report(
         "A4",
-        "group-step/one-live-frontmatter-copy",
-        &measure(9, || fixture.frontmatter.clone()),
+        "group-step/one-live-frontmatter-view",
+        &measure(9, || std::sync::Mutex::new(view.clone())),
     );
     let base = seeded_runtime(0, 0, 100 * 1024);
     report(

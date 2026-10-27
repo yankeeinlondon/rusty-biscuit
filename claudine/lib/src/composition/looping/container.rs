@@ -64,10 +64,11 @@ pub fn finish_container_pass(
     if let Some(broken) = frame.pending_break() {
         return Ok(ContainerPassEnd::Broken(broken));
     }
-    // The loop's expressions and actions read an owned map, once per pass.
-    let frontmatter = gate.frontmatter.to_map();
+    // The gate's view is read in place: a pass copies only what its action
+    // writes, never the container's definitions.
+    let frontmatter = gate.frontmatter;
     let lookup = LoopExpressionLookup::new(
-        &frontmatter,
+        frontmatter,
         ambient,
         gate.file_resolution_context,
         gate.source_path,
@@ -79,14 +80,19 @@ pub fn finish_container_pass(
         LoopDecision::Complete => Ok(ContainerPassEnd::Complete),
         LoopDecision::Exhausted(error) => Err(error),
         LoopDecision::Continue => {
-            let staged = frame.stage_actions(&frontmatter, &lookup)?;
+            let staged = frame.stage_actions(frontmatter, &lookup)?;
+            crate::note_work!(ContainerStateNodes, crate::work_counters::value_nodes(staged.owned()));
+            // The keys the action wrote, in document order.
             let changed: IndexMap<String, Value> = staged
-                .into_iter()
-                .filter(|(key, value)| frontmatter.get(key) != Some(value))
+                .iter()
+                .filter(|(key, value)| {
+                    staged.owned().any(|(owned, _)| owned == *key) && frontmatter.get(key) != Some(*value)
+                })
+                .map(|(key, value)| (key.clone(), value.clone()))
                 .collect();
             if !changed.is_empty() {
                 runtime
-                    .set_batch(gate.effect_engine, &changed, &frontmatter)
+                    .set_batch(gate.effect_engine, &changed, frontmatter)
                     .map_err(|source| CompositionError::LoopActionWriteRefused {
                         source_path: gate.source_path.to_path_buf(),
                         property: frame.action_property(),

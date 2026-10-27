@@ -70,6 +70,10 @@ pub enum Work {
     /// late root (`derived_deferred_keys`); also counted as a
     /// [`Work::ExpressionParse`].
     DeferredRootScanParse,
+    /// JSON nodes ([`value_nodes`]) copied into the state a lifecycle `set`
+    /// action's shell values execute against: the values the frontmatter view
+    /// owns, never its shared base.
+    ShellValueStateNodes,
 }
 
 impl Work {
@@ -96,6 +100,7 @@ impl Work {
         Work::PositionKeyComparison,
         Work::LifecycleConfigParse,
         Work::DeferredRootScanParse,
+        Work::ShellValueStateNodes,
     ];
 }
 
@@ -143,4 +148,18 @@ impl WorkSnapshot {
 /// The counters' current values.
 pub fn snapshot() -> WorkSnapshot {
     WorkSnapshot { counts: COUNTS.iter().map(|count| count.load(Ordering::Relaxed)).collect() }
+}
+
+/// The JSON values in `entries`' values, counting every nested value once: a
+/// size measure for a frontmatter-shaped map that grows with an embedded
+/// `sequence:` list.
+pub fn value_nodes<'a>(entries: impl IntoIterator<Item = (&'a String, &'a serde_json::Value)>) -> u64 {
+    fn nodes(value: &serde_json::Value) -> u64 {
+        1 + match value {
+            serde_json::Value::Array(items) => items.iter().map(nodes).sum(),
+            serde_json::Value::Object(map) => map.values().map(nodes).sum(),
+            _ => 0,
+        }
+    }
+    entries.into_iter().map(|(_, value)| nodes(value)).sum()
 }

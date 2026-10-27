@@ -399,6 +399,11 @@ pub struct PreflightGroup {
     /// [`Self::lifecycle`]'s `loop` stack. Boxed so a group stays the size
     /// of the other task actions.
     pub loop_config: Option<Box<PreflightLoop>>,
+    /// The files the group's preparation reads, as the invocation's audit
+    /// walk referenced them: its authoring document and every file its own
+    /// subtree references, first reference first. A group start re-prepares
+    /// the group only when one of them changed; empty means always.
+    pub sources: Vec<PathBuf>,
 }
 
 /// A container's `loop:` controls, frozen at preflight for the invocation,

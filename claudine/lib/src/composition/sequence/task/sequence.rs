@@ -78,7 +78,7 @@ impl TaskExecution<'_> {
                 supplied.extend(runtime.snapshot().mutations);
                 match crate::composition::sequence::preflight::prepare_nested_sequence(
                     self.task, sequence, self.state, supplied, context, self.stack.file_resolution_context,
-                    self.stack.group.is_some(),
+                    self.stack.group.is_some(), self.graph.nested_sources(),
                 ).and_then(|(fresh, graph)| {
                     self.verify_nested_graph(&graph)?;
                     Ok(fresh)
@@ -415,8 +415,7 @@ impl TaskExecution<'_> {
     }
 
     pub(super) fn verify_nested_graph(&self, fresh: &crate::composition::sequence::preflight::PreflightGraph) -> Result<(), CompositionError> {
-        let unapproved = fresh.shell_commands.iter().find(|command| !self.graph.shell_commands.iter()
-            .any(|approved| approved.command == command.command));
+        let unapproved = fresh.shell_commands.iter().find(|command| !self.graph.contains_shell_command(&command.command));
         if let Some(command) = unapproved {
             return Err(CompositionError::SequenceShellResolution {
                 command: command.command.clone(), task: self.label(),
@@ -424,7 +423,7 @@ impl TaskExecution<'_> {
             });
         }
         for candidate in &fresh.template_candidates {
-            if !self.graph.template_candidates.iter().any(|approved| approved.authored() == candidate.authored())
+            if self.graph.candidates_authored(candidate.authored()).next().is_none()
                 || self.graph.shell_authorization().is_some_and(|(approved, _)| !candidate.authorized_by(&approved)) {
                 return Err(CompositionError::SequenceShellResolution {
                     command: candidate.authored().unwrap_or("").into(), task: self.label(),

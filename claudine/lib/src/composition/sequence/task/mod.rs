@@ -490,8 +490,9 @@ struct ValidatedTask {
 }
 
 impl TaskExecution<'_> {
-    /// Submit `lifecycle`'s pre-warm phrases. `frontmatter` is materialized
-    /// only when a phrase needs the event state.
+    /// Submit `lifecycle`'s pre-warm phrases, classified against a clone of
+    /// `frontmatter` that shares its base: a container start never copies
+    /// the definitions its state holds.
     pub(super) fn prewarm_container(&self, lifecycle: &crate::composition::LifecycleConfig, frontmatter: &SharedFrontmatter) {
         let Some(document) = self.document else { return };
         let handle = document.prewarm().with_injected_keys(
@@ -499,8 +500,8 @@ impl TaskExecution<'_> {
                 .chain(self.user_setters.and_then(Value::as_object).into_iter().flat_map(|map| map.keys().cloned())),
         );
         crate::composition::lifecycle::prewarm::collect_and_submit(&handle, self.stack.settings, lifecycle, || {
-            crate::composition::lifecycle::prewarm::PrewarmInputs::captured(
-                &Value::Object(frontmatter.to_map()),
+            crate::composition::lifecycle::prewarm::PrewarmInputs::shared(
+                frontmatter.clone(),
                 self.stack.prepared_context.unwrap_or_else(|| self.state.context()).clone(),
             )
         });
@@ -907,8 +908,8 @@ impl TaskExecution<'_> {
     ) -> Result<Option<crate::composition::looping::LoopFrame>, CompositionError> {
         let Some(preflight) = preflight else { return Ok(None) };
         let mut config = preflight.config.clone();
-        let mut values = state.to_map();
-        values.extend(runtime.snapshot().mutations);
+        let values = crate::composition::looping::container_state(state, runtime);
+        crate::note_work!(ContainerStateNodes, crate::work_counters::value_nodes(values.owned()));
         let ambient = crate::composition::LoopAmbient::new(1, true, false, kind.empty(), 0);
         let lookup = crate::composition::LoopExpressionLookup::new(
             &values, &ambient, self.stack.file_resolution_context, &preflight.location.source_path,

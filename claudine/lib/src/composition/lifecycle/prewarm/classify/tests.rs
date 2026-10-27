@@ -64,7 +64,7 @@ fn captured_context() -> ComposeContext {
 
 fn inputs() -> PrewarmInputs {
     PrewarmInputs {
-        frontmatter: frontmatter(),
+        frontmatter: frontmatter().into(),
         context: DocumentContext::Captured(captured_context()),
         sequence_injected_keys: BTreeSet::new(),
     }

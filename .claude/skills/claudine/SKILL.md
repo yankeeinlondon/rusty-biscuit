@@ -328,7 +328,10 @@ original invocation's approval, never by prompting. Root retries pass the same
 closed membership into graph approval; rebuilding the graph cannot reopen approval,
 and the retry runs the first attempt's graph (`RootRun::graph`). Nested preparation
 (`prepare_nested_sequence`/`prepare_nested_group`) rereads container events and
-`variables` but keeps the frozen node's children and order. Preserve normalized exact
+`variables` but keeps the frozen node's children and order; an unchanged source
+is parsed once per invocation (`PreflightGraph::nested_sources`, compared by text), and so is each referenced
+group/catalog/task/sequence file, shared by `Arc` rather than cloned per reference. A group start rereads only
+its own files (`PreflightGroup::sources`) to decide whether to re-prepare. Preserve normalized exact
 command keys, including multiple shell-value commands. Catalog cycle identity
 includes the selected group name, so distinct entries in one catalog are legal;
 diagnostics retain each entry as `catalog#name`. First position propagates to

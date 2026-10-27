@@ -12,23 +12,63 @@ use darkmatter::markdown::compose::expression::{
     BindingView, EvaluationLookup, ExpressionError, ExpressionFinder, ResolutionContext,
     ResolvedBinding, evaluate, parse, scalar_string,
 };
+use darkmatter::markdown::compose::SharedFrontmatter;
 use serde_json::{Map, Number, Value};
 
 use super::super::error::{CompositionError, LoopExpressionCause};
 use super::super::json_util::json_type_name;
 use super::super::types::LoopAction;
 
+/// The top-level frontmatter a loop action writes: an owned map, or a shared
+/// view whose writes stay in its private overlay.
+pub trait ActionTarget: Clone {
+    fn get(&self, key: &str) -> Option<&Value>;
+    fn get_mut(&mut self, key: &str) -> Option<&mut Value>;
+    fn insert(&mut self, key: String, value: Value);
+}
+
+impl ActionTarget for Map<String, Value> {
+    fn get(&self, key: &str) -> Option<&Value> {
+        Map::get(self, key)
+    }
+
+    fn get_mut(&mut self, key: &str) -> Option<&mut Value> {
+        Map::get_mut(self, key)
+    }
+
+    fn insert(&mut self, key: String, value: Value) {
+        Map::insert(self, key, value);
+    }
+}
+
+/// Staging over a view copies only the view's overlay; a write copies only
+/// the value it changes.
+impl ActionTarget for SharedFrontmatter {
+    fn get(&self, key: &str) -> Option<&Value> {
+        SharedFrontmatter::get(self, key)
+    }
+
+    fn get_mut(&mut self, key: &str) -> Option<&mut Value> {
+        SharedFrontmatter::get_mut(self, key)
+    }
+
+    fn insert(&mut self, key: String, value: Value) {
+        SharedFrontmatter::insert(self, key, value);
+    }
+}
+
 /// Staged frontmatter mutations for one loop iteration.
 #[derive(Debug, Clone)]
-pub struct ActionStaging {
-    frontmatter: Map<String, Value>,
+pub struct ActionStaging<F: ActionTarget = Map<String, Value>> {
+    frontmatter: F,
     iteration: usize,
     total_actions: usize,
 }
 
-impl ActionStaging {
-    /// Create a staged copy of the current frontmatter.
-    pub fn new(frontmatter: &Map<String, Value>, iteration: usize, total_actions: usize) -> Self {
+impl<F: ActionTarget> ActionStaging<F> {
+    /// Stage over a clone of `frontmatter`: a whole copy of a map, or a view
+    /// that shares its base.
+    pub fn new(frontmatter: &F, iteration: usize, total_actions: usize) -> Self {
         Self {
             frontmatter: frontmatter.clone(),
             iteration,
@@ -64,6 +104,13 @@ impl ActionStaging {
         apply_action_with_context(&mut self.frontmatter, action, context, lookup)
     }
 
+    /// The staged frontmatter.
+    pub fn into_staged(self) -> F {
+        self.frontmatter
+    }
+}
+
+impl ActionStaging {
     /// Commit the staged frontmatter copy.
     pub fn commit(self) -> Value {
         Value::Object(self.frontmatter)
@@ -119,8 +166,8 @@ pub fn apply_decrement(fm: &mut Map<String, Value>, prop: &str) -> Result<(), Co
     apply_decrement_with_context(fm, prop, ActionContext::default())
 }
 
-fn apply_action_with_context(
-    fm: &mut Map<String, Value>,
+fn apply_action_with_context<F: ActionTarget>(
+    fm: &mut F,
     action: &LoopAction,
     context: ActionContext,
     lookup: Option<&dyn EvaluationLookup>,
@@ -293,8 +340,8 @@ impl<'a> EvaluationLookup for SizedLookup<'a> {
     }
 }
 
-fn apply_increment_with_context(
-    fm: &mut Map<String, Value>,
+fn apply_increment_with_context<F: ActionTarget>(
+    fm: &mut F,
     prop: &str,
     context: ActionContext,
 ) -> Result<(), CompositionError> {
@@ -315,8 +362,8 @@ fn apply_increment_with_context(
     Ok(())
 }
 
-fn apply_decrement_with_context(
-    fm: &mut Map<String, Value>,
+fn apply_decrement_with_context<F: ActionTarget>(
+    fm: &mut F,
     prop: &str,
     context: ActionContext,
 ) -> Result<(), CompositionError> {
@@ -400,8 +447,8 @@ fn number_from_f64(value: f64) -> Option<Value> {
     Number::from_f64(value).map(Value::Number)
 }
 
-fn apply_set(
-    fm: &mut Map<String, Value>,
+fn apply_set<F: ActionTarget>(
+    fm: &mut F,
     prop: &str,
     value: &Value,
     context: ActionContext,
@@ -411,8 +458,8 @@ fn apply_set(
     Ok(())
 }
 
-fn apply_append(
-    fm: &mut Map<String, Value>,
+fn apply_append<F: ActionTarget>(
+    fm: &mut F,
     prop: &str,
     value: &Value,
 ) -> Result<(), CompositionError> {
@@ -425,8 +472,8 @@ fn apply_append(
     Ok(())
 }
 
-fn apply_prepend(
-    fm: &mut Map<String, Value>,
+fn apply_prepend<F: ActionTarget>(
+    fm: &mut F,
     prop: &str,
     value: &Value,
 ) -> Result<(), CompositionError> {
@@ -439,8 +486,8 @@ fn apply_prepend(
     Ok(())
 }
 
-fn apply_merge(
-    fm: &mut Map<String, Value>,
+fn apply_merge<F: ActionTarget>(
+    fm: &mut F,
     prop: &str,
     value: &Value,
     context: ActionContext,

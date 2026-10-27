@@ -451,3 +451,59 @@ async fn task_stacks_resolve_with_the_tasks_captured_inputs() {
     expected.sort();
     assert_eq!(sorted(fake.texts()), expected);
 }
+
+/// The walk reads the sequence document's frontmatter through one shared
+/// view: each container's submission copies none of the sibling definitions
+/// that frontmatter holds, so the copied nodes grow linearly with the
+/// container count (the walk's one decode of the document). A value still
+/// holding a template stays late, and an `fm` read is still early.
+#[cfg(feature = "work-counters")]
+#[test]
+fn nested_container_submissions_share_the_sequence_frontmatter() {
+    use crate::work_counters::{Work, snapshot};
+
+    let mut copied = Vec::new();
+    for containers in [10usize, 55, 100] {
+        let dir = TempDir::new().unwrap();
+        // No template inside the definitions, so the `sequence:` list is
+        // readable state that a per-container copy would include.
+        let children: Vec<Value> = (0..containers)
+            .map(|index| json!({
+                "name": format!("c{index}"),
+                "start": [{ "say": "container starts" }],
+                "sequence": [{ "name": "work", "shell": format!("echo {index}") }],
+            }))
+            .collect();
+        let sequence = write_source(
+            dir.path(),
+            "seq.md",
+            &json!({
+                "title": "Release",
+                "pending": "{{ title }} later",
+                "success": [{ "say": "{{ pending }} pending" }],
+                "finalize": [{ "say": "{{ title }} done" }],
+                "sequence": [{ "name": "outer", "sequence": children }],
+            }),
+            "Body.\n",
+        );
+        let (source, graph) = graph_for(&sequence);
+        let fake = FakePreparer::recording();
+        let worker = PrewarmWorker::start_with(Arc::new(fake.clone()));
+
+        let before = snapshot();
+        let queued = submit(&worker.handle(), &source, &graph);
+        let work = snapshot().since(&before);
+
+        assert_eq!(queued, 2, "each early text is queued once; the templated value stays late");
+        assert_eq!(work.get(Work::PrewarmStateBuild), containers as u64 + 1, "one resolution per container and the root's");
+        copied.push(work.get(Work::PrewarmStateNodes));
+        let prepared = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap()
+            .block_on(async { tokio::time::timeout(std::time::Duration::from_secs(5), fake.wait_for_calls(2)).await });
+        assert!(prepared.is_ok(), "the queued phrases were never prepared");
+        drop(worker);
+        assert_eq!(sorted(fake.texts()), strings(&["Release done", "container starts"]));
+    }
+    let [small, middle, large] = copied[..] else { unreachable!() };
+    assert!(small > 0, "the walk's decode of the document is counted");
+    assert_eq!(middle - small, large - middle, "{small} → {middle} → {large}");
+}

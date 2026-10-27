@@ -409,6 +409,98 @@ mod loading {
         );
         assert_eq!(graph.steps.len(), 2);
     }
+
+    /// The by-path lookup returns each reached document, in the graph's own
+    /// first-encounter order, and nothing for a path the graph never reached.
+    #[test]
+    fn prompt_document_finds_every_reached_document_by_path() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        for name in ["a", "b", "c"] {
+            write_legacy_source(root, &format!("{name}.md"), &[("title", json!(name))], "x\n");
+        }
+        write_legacy_source(root, "unreached.md", &[("title", json!("unreached"))], "x\n");
+        let source = write_legacy_source(
+            root,
+            "seq.md",
+            &[(
+                "sequence",
+                json!([
+                    { "name": "one", "prompt": "c.md" },
+                    { "name": "two", "prompt": "a.md" },
+                    { "name": "three", "prompt": "c.md" },
+                    { "name": "four", "prompt": "b.md" },
+                ]),
+            )],
+            "Body.\n",
+        );
+
+        let graph = legacy_graph_for(&source).unwrap();
+
+        let order: Vec<String> = graph.prompt_documents.iter()
+            .map(|document| document.path.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(order, ["c.md", "a.md", "b.md"]);
+        for name in ["a", "b", "c"] {
+            let path = dunce::canonicalize(root.join(format!("{name}.md"))).unwrap();
+            let document = graph.prompt_document(&path).unwrap_or_else(|| panic!("{name}.md was reached"));
+            assert_eq!(document.path, path);
+            assert_eq!(document.markdown.frontmatter().as_map().get("title"), Some(&json!(name)));
+        }
+        let unreached = dunce::canonicalize(root.join("unreached.md")).unwrap();
+        assert!(graph.prompt_document(&unreached).is_none());
+        assert!(graph.prompt_document(&root.join("missing.md")).is_none());
+    }
+}
+
+// -- invocation parse memo --------------------------------------------------
+
+/// A memo entry's key is the text its parse read, so a file that changes
+/// between the walk's read and the parse, then reverts, can never be served
+/// a parse of other bytes.
+mod parse_memo {
+    use super::*;
+
+    #[test]
+    fn a_referenced_data_document_parses_the_bytes_the_walk_read() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("g.yaml");
+        fs::write(&path, "version: disk\n").unwrap();
+        let sources = NestedSources::default();
+
+        let held = sources.document(&path, Some(b"version: held\n")).unwrap();
+        let again = sources.document(&path, Some(b"version: held\n")).unwrap();
+        let disk = sources.document(&path, Some(b"version: disk\n")).unwrap();
+
+        assert_eq!(held.value, json!({"version": "held"}));
+        assert_eq!(held.text, b"version: held\n");
+        assert!(Arc::ptr_eq(&held, &again), "the same bytes reuse the entry");
+        assert_eq!(disk.value, json!({"version": "disk"}));
+    }
+
+    #[test]
+    fn a_referenced_markdown_document_is_keyed_by_the_text_its_parse_read() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("g.md");
+        fs::write(&path, "---\nversion: disk\n---\n").unwrap();
+        let sources = NestedSources::default();
+
+        let parsed = sources.document(&path, Some(b"---\nversion: held\n---\n")).unwrap();
+
+        assert_eq!(parsed.value, json!({"version": "disk"}));
+        assert_eq!(parsed.text, b"---\nversion: disk\n---\n");
+    }
+
+    #[test]
+    fn a_data_container_source_parses_the_text_it_was_given() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("s.yaml");
+        fs::write(&path, "label: disk\nsequence: []\n").unwrap();
+
+        let parsed = parse_nested_source(&path, "label: held\nsequence: []\n".into()).unwrap();
+
+        assert_eq!(parsed.document["label"], json!("held"));
+        assert_eq!(parsed.source.original_text, "label: held\nsequence: []\n");
+    }
 }
 
 // -- group catalogs --------------------------------------------------------

@@ -190,11 +190,10 @@ pub fn execute_set_shell_values(
     }
     let compose_request = compose_request(options, request.file_resolution_context.clone())
         .map_err(|source| ShellRunError::Context { source })?;
-    let state = request
-        .state
-        .iter()
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
+    // Cloning the view shares its base (an inline `sequence:` list included)
+    // and copies only the values it owns.
+    crate::note_work!(ShellValueStateNodes, crate::work_counters::value_nodes(request.state.owned()));
+    let state = request.state.clone();
     execute_shell_values_with(request.values, state, &compose_request, request.holes)
         .map_err(|source| ShellRunError::Value { source })
 }

@@ -467,3 +467,40 @@ sequence:
     assert_eq!(fs::read_to_string(&task).unwrap(), changed);
     assert!(!fixture.audio_spool().exists());
 }
+
+/// A leg's `set_frontmatter` on the sequence document reaches disk, and the
+/// next root step rereads the file and sees it; the sibling that runs after
+/// the write, inside the same group, still reads the group-start value.
+#[test]
+fn a_leg_write_reaches_disk_for_the_next_step_but_not_its_sibling() {
+    let fixture = CliProcessFixture::named("container-leg-disk-write");
+    let source = fixture.cwd().join("sequence.md");
+    fs::write(&source, r#"---
+value: initial
+success: [{ stdout: "sibling={{ sibling_saw }};next={{ next_saw }}" }]
+sequence:
+  - name: legs
+    group:
+      name: legs
+      max_parallel: 1
+      tasks:
+        - name: writer
+          side_effect: { set_frontmatter: [sequence.md, value, written] }
+        - name: reader
+          side_effect: { set: { sibling_saw: "{{ value }}" } }
+  - name: after
+    side_effect: { set: { next_saw: "{{ value }}" } }
+---
+"#).unwrap();
+    let output = fixture.command().args(["sequence", "--goose", "--yolo", "--silent"])
+        .arg(&source).assert().get_output().clone();
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.status.code(), Some(0), "{stderr}\n{stdout}");
+    assert_eq!(stdout.trim(), "sibling=initial;next=written",
+        "the sibling reads the group-start view; the next step rereads the file");
+    let written = fs::read_to_string(&source).unwrap();
+    assert!(written.contains("value: written"), "{written}");
+    assert!(written.contains("max_parallel: 1"), "the definition survives the write: {written}");
+    assert!(!fixture.audio_spool().exists());
+}

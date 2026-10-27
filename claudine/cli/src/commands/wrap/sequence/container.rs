@@ -130,8 +130,8 @@ impl<'a> RootRun<'a> {
             if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start) {
                 claudine::composition::lifecycle::prewarm::collect_and_submit(
                     &self.prewarm, stack.settings, self.runner.guard_mut().config(), || {
-                        claudine::composition::lifecycle::prewarm::PrewarmInputs::captured(
-                            &serde_json::Value::Object(stack.live_frontmatter_snapshot().map_or_else(|| stack.frontmatter.to_map(), |live| live.to_map())),
+                        claudine::composition::lifecycle::prewarm::PrewarmInputs::shared(
+                            stack.live_frontmatter_snapshot().unwrap_or_else(|| stack.frontmatter.clone()),
                             stack.prepared_context.expect("root sequence has a captured context").clone(),
                         )
                     },

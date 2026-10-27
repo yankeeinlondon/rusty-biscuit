@@ -135,17 +135,31 @@ pub struct PreflightGraph {
     pub root_lifecycle: Option<crate::composition::LifecycleConfig>,
     /// Authorization granted by the graph audit, separate from discovery.
     shell_authorization: std::sync::Arc<std::sync::Mutex<GraphShellAuthorization>>,
+    /// The invocation's parses of container sources and referenced data
+    /// documents, shared by every nested preparation that runs under this
+    /// graph.
+    nested_sources: NestedSources,
     /// One node per step, in sequence order.
     pub steps: Vec<PreflightStep>,
     /// Every prompt document reachable from the graph, deduplicated by
-    /// canonical path in first-encounter order.
+    /// canonical path in first-encounter order. Only the walk appends to it,
+    /// so [`Self::prompt_document`]'s index stays in step with it.
     pub prompt_documents: Vec<PromptDocument>,
     /// Every task command reachable from the graph that is approved as
-    /// resolved bytes, in discovery order.
+    /// resolved bytes, in discovery order. Only the walk appends to it.
     pub shell_commands: Vec<DiscoveredCommand>,
     /// Every task command with placeholders, including resolved-byte sites
     /// without a valid template shape, in discovery order: one per site, never merged.
+    /// Only the walk appends to it.
     pub template_candidates: Vec<ShellCandidate>,
+    /// [`Self::prompt_documents`] positions by path.
+    prompt_index: HashMap<PathBuf, usize>,
+    /// The command text of every [`Self::shell_commands`] entry.
+    command_index: HashSet<String>,
+    /// [`Self::template_candidates`] positions, in discovery order, by
+    /// [`ShellCandidate::authored`] (`None` for a site whose template grammar
+    /// failed).
+    candidate_index: HashMap<Option<String>, Vec<usize>>,
     /// Every reference to a prompt document, with what its discovery needs:
     /// the referencing task's position and its parameters. A document
     /// referenced from two positions is discovered once for each.
@@ -267,15 +281,51 @@ impl PreflightGraph {
         self.authored_sources.entry(path.to_path_buf()).or_insert_with(|| std::fs::read(path).ok());
     }
 
-    /// Unchanged source bytes retain their audited nodes; live variables still
+    /// Whether every file in `paths` still holds the bytes this graph's walk
+    /// captured: a container whose own sources ([`PreflightGroup::sources`])
+    /// are unchanged retains its audited node, and live variables still
     /// resolve at each container preparation boundary.
-    pub(crate) fn sources_unchanged(&self) -> bool {
-        !self.authored_sources.is_empty() && self.authored_sources.iter().all(|(path, original)| {
-            match (original, std::fs::read(path)) {
-                (Some(original), Ok(current)) => original == &current,
-                _ => false,
-            }
+    ///
+    /// Reads only `paths`. `false` when `paths` is empty, or when one of them
+    /// was never captured, was unreadable when captured, or cannot be read now.
+    pub(crate) fn sources_unchanged(&self, paths: &[PathBuf]) -> bool {
+        !paths.is_empty() && paths.iter().all(|path| {
+            let Some(Some(original)) = self.authored_sources.get(path) else { return false };
+            crate::note_work!(FreshnessSourceReads, 1);
+            std::fs::read(path).is_ok_and(|current| original == &current)
         })
+    }
+
+    fn push_prompt_document(&mut self, document: PromptDocument) {
+        self.prompt_index.insert(document.path.clone(), self.prompt_documents.len());
+        self.prompt_documents.push(document);
+    }
+
+    fn push_shell_command(&mut self, command: DiscoveredCommand) {
+        self.command_index.insert(command.command.clone());
+        self.shell_commands.push(command);
+    }
+
+    fn push_template_candidate(&mut self, candidate: ShellCandidate) {
+        self.candidate_index.entry(candidate.authored().map(str::to_owned)).or_default()
+            .push(self.template_candidates.len());
+        self.template_candidates.push(candidate);
+    }
+
+    /// Whether some [`Self::shell_commands`] entry is exactly `command`.
+    pub(crate) fn contains_shell_command(&self, command: &str) -> bool {
+        self.command_index.contains(command)
+    }
+
+    /// The [`Self::template_candidates`] whose [`ShellCandidate::authored`]
+    /// is `authored`, in discovery order.
+    pub(crate) fn candidates_authored(&self, authored: Option<&str>) -> impl Iterator<Item = &ShellCandidate> {
+        self.candidate_index.get(&authored.map(str::to_owned)).into_iter().flatten()
+            .map(|&index| &self.template_candidates[index])
+    }
+
+    pub(crate) fn nested_sources(&self) -> &NestedSources {
+        &self.nested_sources
     }
 
     pub(crate) fn settle_container_events(
@@ -316,10 +366,9 @@ impl PreflightGraph {
         let Some((approved, _)) = authorization.as_ref() else { return };
         for site in &mut task.shell_sites {
             if site.mode == SiteMode::Template { continue; }
-            let candidate = self.template_candidates.iter().find(|candidate| {
+            let candidate = self.candidates_authored(Some(site.authored.as_str())).find(|candidate| {
                 candidate.site.source_file == site.source_file
                     && candidate.site.origin == site_origin(&site.property)
-                    && candidate.authored() == Some(site.authored.as_str())
             });
             let Some(candidate) = candidate else { continue };
             let exact = candidate.resolved.as_ref().is_some_and(|keys| {
@@ -340,7 +389,7 @@ impl PreflightGraph {
 
     /// The prompt document at `path`, if the graph reached one.
     pub fn prompt_document(&self, path: &Path) -> Option<&PromptDocument> {
-        self.prompt_documents.iter().find(|d| d.path == path)
+        self.prompt_index.get(path).map(|&index| &self.prompt_documents[index])
     }
 
     /// Reject a nested `{{ … }}` span inside a single-pass lifecycle literal in
@@ -473,29 +522,158 @@ pub fn build_preflight_graph_with_invocation(
     Ok(loader.finish())
 }
 
-fn load_preparation_source(path: &Path) -> Result<ResolvedCompositionSource, CompositionError> {
-    let original_text = std::fs::read_to_string(path).map_err(|source| CompositionError::MarkdownLoad {
-        path: path.to_path_buf(), source: super::super::error::MarkdownLoadCause::Read(source),
-    })?;
-    let markdown = if path.extension().and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown"))
-    {
-        Markdown::try_from(path).map_err(|source| CompositionError::MarkdownLoad {
+/// A container's authoring document as one nested preparation read it: the
+/// Markdown view its reread [`Loader`] walks, and the same parse in the common
+/// value model, where the container's pointer finds its authored task.
+#[derive(Debug)]
+pub(crate) struct NestedSource {
+    source: ResolvedCompositionSource,
+    document: Value,
+}
+
+/// The latest parse of each authoring document nested preparation has read
+/// during one invocation, and of each referenced data document any walk has
+/// read, by canonical path. Clones share the entries.
+///
+/// Every preparation still reads the file; an entry is reused only when its
+/// text equals what was just read, so a document a task changed on disk is
+/// parsed again and seen exactly as a fresh read would see it. Only a
+/// successful parse is kept, so a broken document fails again with its own
+/// error at every preparation that reads it.
+#[derive(Clone, Default)]
+pub(crate) struct NestedSources {
+    sources: Arc<std::sync::Mutex<HashMap<PathBuf, Arc<NestedSource>>>>,
+    documents: Arc<std::sync::Mutex<HashMap<PathBuf, Arc<ReferencedDocument>>>>,
+}
+
+impl std::fmt::Debug for NestedSources {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("NestedSources").finish_non_exhaustive()
+    }
+}
+
+impl NestedSources {
+    fn load(&self, path: &Path) -> Result<Arc<NestedSource>, CompositionError> {
+        let text = std::fs::read_to_string(path).map_err(|source| CompositionError::MarkdownLoad {
+            path: path.to_path_buf(), source: super::super::error::MarkdownLoadCause::Read(source),
+        })?;
+        let key = canonical(path);
+        let cached = self.sources.lock().ok()
+            .and_then(|entries| entries.get(&key).filter(|entry| entry.source.original_text == text).cloned());
+        if let Some(cached) = cached {
+            return Ok(cached);
+        }
+        let parsed = Arc::new(parse_nested_source(path, text)?);
+        if let Ok(mut entries) = self.sources.lock() {
+            entries.insert(key, Arc::clone(&parsed));
+        }
+        Ok(parsed)
+    }
+
+    /// The parse of the referenced data document at `path` whose bytes are
+    /// `read`, the walk's own read of the file.
+    ///
+    /// A data format parses `read` itself, so the entry's key is exactly the
+    /// bytes it parsed. A Markdown document is parsed by Darkmatter's own
+    /// read and keyed by the text that read parsed. An unreadable or
+    /// non-UTF-8 data file (`read` is `None`, or not text) is handed to
+    /// [`super::data::load_document`] unmemoized, so its error is exactly the
+    /// one a parse reports.
+    fn document(&self, path: &Path, read: Option<&[u8]>) -> Result<Arc<ReferencedDocument>, CompositionError> {
+        let key = canonical(path);
+        if let Some(read) = read {
+            let cached = self.documents.lock().ok()
+                .and_then(|entries| entries.get(&key).filter(|entry| entry.text == read).cloned());
+            if let Some(cached) = cached {
+                return Ok(cached);
+            }
+        }
+        let (loaded, parsed) = if super::data::is_markdown(path) {
+            let (loaded, parsed) = super::data::load_markdown_document(path)?;
+            (loaded, parsed.map(String::into_bytes))
+        } else if let Some(text) = read.and_then(|read| std::str::from_utf8(read).ok()) {
+            (super::data::load_document_from_text(path, text)?, Some(text.as_bytes().to_vec()))
+        } else {
+            (super::data::load_document(path)?, None)
+        };
+        crate::note_work!(ReferencedDocumentParse, 1);
+        crate::note_work!(ReferencedDocumentNodes, crate::work_counters::nodes(&loaded.value));
+        let memoized = parsed.is_some();
+        let document = Arc::new(ReferencedDocument {
+            text: parsed.unwrap_or_default(),
+            value: loaded.value,
+            orders: Arc::new(loaded.orders),
+            checked: std::sync::Mutex::new(Vec::new()),
+            catalog_index: std::sync::OnceLock::new(),
+        });
+        if memoized && let Ok(mut entries) = self.documents.lock() {
+            entries.insert(key, Arc::clone(&document));
+        }
+        Ok(document)
+    }
+}
+
+/// A referenced data document (`kind: task`/`group`/`group-catalog`, or a
+/// referenced sequence file) as one parse read it. Every reference borrows
+/// it; a reference takes only the entry it names.
+#[derive(Debug)]
+pub(crate) struct ReferencedDocument {
+    /// The bytes the parse was keyed by.
+    text: Vec<u8>,
+    value: Value,
+    orders: Arc<darkmatter::markdown::MappingOrders>,
+    /// The retired-name presence sets
+    /// ([`retired_names_present`](crate::composition::lifecycle::bindings::retired_names_present))
+    /// of caller values the document's retired-read check has passed under:
+    /// the check reads nothing else, so it cannot fail under one of them.
+    checked: std::sync::Mutex<Vec<u16>>,
+    /// A catalog's `groups:` positions by entry name, built on first
+    /// selection, so selecting one entry does not scan the others.
+    catalog_index: std::sync::OnceLock<HashMap<String, Vec<usize>>>,
+}
+
+impl ReferencedDocument {
+    fn checked_under(&self, present: u16) -> bool {
+        self.checked.lock().is_ok_and(|checked| checked.contains(&present))
+    }
+
+    fn record_checked(&self, present: u16) {
+        if let Ok(mut checked) = self.checked.lock() && !checked.contains(&present) {
+            checked.push(present);
+        }
+    }
+}
+
+/// Parse a container's authoring document once for both views
+/// [`NestedSource`] holds. `text` is what the caller read, and a data format
+/// parses exactly it; a Markdown document keeps the text its own parse read
+/// instead. Either way the memo key is the parsed revision.
+fn parse_nested_source(path: &Path, text: String) -> Result<NestedSource, CompositionError> {
+    crate::note_work!(NestedSourceParse, 1);
+    let (markdown, original_text, document) = if super::data::is_markdown(path) {
+        let markdown = Markdown::try_from(path).map_err(|source| CompositionError::MarkdownLoad {
             path: path.to_path_buf(), source: super::super::error::MarkdownLoadCause::Parse(Box::new(source)),
-        })?
+        })?;
+        let original_text = markdown.loaded_text().map_or(text, str::to_owned);
+        let document = crate::composition::prepare::frontmatter_to_value(markdown.frontmatter());
+        (markdown, original_text, document)
     } else {
-        let loaded = super::data::load_document(path)?;
+        let loaded = super::data::load_document_from_text(path, &text)?;
         let root = expect_object(&loaded.value, "container source", path)?;
         let mut frontmatter = darkmatter::markdown::Frontmatter::new();
         for (key, value) in root {
-            frontmatter.insert(&key, value).map_err(|source| CompositionError::MarkdownLoad {
+            frontmatter.insert(key, value).map_err(|source| CompositionError::MarkdownLoad {
                 path: path.to_path_buf(), source: super::super::error::MarkdownLoadCause::Parse(Box::new(source)),
             })?;
         }
-        Markdown::with_frontmatter(frontmatter.with_mapping_orders(loaded.orders), "")
+        let markdown = Markdown::with_frontmatter(frontmatter.with_mapping_orders(loaded.orders), "");
+        (markdown, text, loaded.value)
     };
-    Ok(ResolvedCompositionSource {
-        original_ref: path.to_string_lossy().into_owned(), resolved_path: path.to_path_buf(), original_text, markdown,
+    Ok(NestedSource {
+        source: ResolvedCompositionSource {
+            original_ref: path.to_string_lossy().into_owned(), resolved_path: path.to_path_buf(), original_text, markdown,
+        },
+        document,
     })
 }
 
@@ -511,19 +689,27 @@ fn load_preparation_source(path: &Path) -> Result<ResolvedCompositionSource, Com
 /// `supplied` holds the invocation setters and runtime mutations: a
 /// referenced document's events and children read them above its own
 /// authored properties, where an inline list reads `state`.
+///
+/// The source is read from disk every time, and parsed only when its text
+/// differs from the last parse `sources` holds for it (the invocation graph's
+/// [`PreflightGraph::nested_sources`]), so sibling containers authored in one
+/// unchanged file share one parse. Referenced data documents (a group file or
+/// catalog, a `kind: task` file, a referenced sequence file) are reread the
+/// same way and share that memo.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare_nested_sequence(
     task: &PreflightTask, frozen: &PreflightSequence, state: &EffectiveState, supplied: Map<String, Value>,
     context: ComposeContext, resolution: &biscuit_file::FileResolutionContext, in_group: bool,
+    sources: &NestedSources,
 ) -> Result<(PreflightSequence, PreflightGraph), CompositionError> {
-    let source = load_preparation_source(&task.origin_path)?;
-    let document = super::data::load_document(&task.origin_path)?.value;
-    let raw_task = document.pointer(task.authored.pointer()).and_then(Value::as_object)
+    let nested = sources.load(&task.origin_path)?;
+    let raw_task = nested.document.pointer(task.authored.pointer()).and_then(Value::as_object)
         .ok_or_else(|| CompositionError::SequenceInvalid("nested sequence disappeared before preparation".into()))?;
     let value = raw_task.get("sequence").ok_or_else(|| CompositionError::SequenceInvalid(
         "nested `sequence:` executable changed before preparation".into(),
     ))?;
-    let mut loader = Loader::new(&source, context, resolution.clone());
+    let mut loader = Loader::new(&nested.source, context, resolution.clone());
+    loader.graph.nested_sources = sources.clone();
     loader.step_frontmatter = state.data().clone();
     crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(loader.step_frontmatter.owned()));
     loader.caller_setters = supplied;
@@ -547,16 +733,16 @@ pub(crate) fn prepare_nested_sequence(
 /// everything else, including events and `variables`, comes from the reread.
 pub(crate) fn prepare_nested_group(
     task: &PreflightTask, frozen: &PreflightGroup, state: &EffectiveState, context: ComposeContext,
-    resolution: &biscuit_file::FileResolutionContext,
+    resolution: &biscuit_file::FileResolutionContext, sources: &NestedSources,
 ) -> Result<(PreflightGroup, PreflightGraph), CompositionError> {
-    let source = load_preparation_source(&task.origin_path)?;
-    let document = super::data::load_document(&task.origin_path)?.value;
-    let raw_task = document.pointer(task.authored.pointer()).and_then(Value::as_object)
+    let nested = sources.load(&task.origin_path)?;
+    let raw_task = nested.document.pointer(task.authored.pointer()).and_then(Value::as_object)
         .ok_or_else(|| CompositionError::SequenceInvalid("group disappeared before preparation".into()))?;
     let value = raw_task.get("group").ok_or_else(|| CompositionError::SequenceInvalid(
         "group executable changed before preparation".into(),
     ))?;
-    let mut loader = Loader::new(&source, context, resolution.clone());
+    let mut loader = Loader::new(&nested.source, context, resolution.clone());
+    loader.graph.nested_sources = sources.clone();
     loader.step_frontmatter = state.data().clone();
     crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(loader.step_frontmatter.owned()));
     loader.ancestry.push((canonical(&task.origin_path), None));
@@ -566,6 +752,7 @@ pub(crate) fn prepare_nested_group(
     )?;
     group.tasks = frozen.tasks.clone();
     group.loop_config = frozen.loop_config.clone();
+    group.sources = frozen.sources.clone();
     Ok((group, loader.graph))
 }
 
@@ -578,8 +765,9 @@ struct Loader<'a> {
     /// Immutable parsed data files and their authored key order, reusable
     /// across independent branches (spec → *Task Resolution*: sharing parsed
     /// data is allowed; effective parameters and runtime state stay
-    /// invocation-local).
-    documents: HashMap<PathBuf, (Value, Arc<darkmatter::markdown::MappingOrders>)>,
+    /// invocation-local). The first read of a file in this walk decides its
+    /// revision for the rest of the walk.
+    documents: HashMap<PathBuf, Arc<ReferencedDocument>>,
     source: &'a ResolvedCompositionSource,
     /// The invoking document's canonical path, used for write-back collisions.
     source_path: PathBuf,
@@ -626,6 +814,10 @@ struct Loader<'a> {
     /// the task its file declares: the reference's guard decides whether that
     /// task runs, above one the file declares. Taken by the next task loaded.
     guard_override: Option<(String, String)>,
+    /// Every path this walk referenced, in order, one entry per reference:
+    /// a group takes the slice its own load appended as its
+    /// [`PreflightGroup::sources`].
+    capture_log: Vec<PathBuf>,
 }
 
 /// Where in the sequence a task being loaded sits.
@@ -663,6 +855,7 @@ impl<'a> Loader<'a> {
             caller_setters: Map::new(),
             written_keys: HashSet::new(),
             guard_override: None,
+            capture_log: Vec::new(),
         }
     }
 
@@ -693,12 +886,13 @@ impl<'a> Loader<'a> {
             caller_setters: Map::new(),
             written_keys: HashSet::new(),
             guard_override: None,
+            capture_log: Vec::new(),
         }
     }
 
     fn walk_plan(&mut self, plan: &SequencePlan) -> Result<(), CompositionError> {
         let source_path = self.source.resolved_path.clone();
-        self.graph.capture_source(&source_path);
+        self.capture_source(&source_path);
         let mut authored = crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter());
         if let Value::Object(values) = &mut authored {
             // The plan owns the already-resolved sequence configuration.
@@ -1002,18 +1196,20 @@ impl<'a> Loader<'a> {
                 let context = self.source_context_for(origin);
                 let resolution = context.as_ref().map(SourceContext::file_resolution_context)
                     .unwrap_or(&self.file_resolution_context);
-                let plan = source_resolution::load_referenced_sequence(
-                    &reference, &path, origin, &self.step_frontmatter, true, resolution,
+                let plan = source_resolution::plan_referenced_sequence(
+                    &reference, &path, &document.value, Arc::clone(&document.orders),
+                    origin, &self.step_frontmatter, true, resolution,
                 )?;
                 // A reference to a whole sequence document brings the
                 // document's events and its authored properties; an offset or
                 // operator selects a list of steps, which has neither.
                 let frontmatter = (reference.offset.is_none() && reference.operator.is_none())
-                    .then(|| document.as_object().cloned()).flatten();
+                    .then(|| document.value.as_object().cloned()).flatten();
+                crate::note_work!(ReferencedDocumentNodes, frontmatter.as_ref().map_or(0, crate::work_counters::value_nodes));
                 let events = frontmatter.clone().unwrap_or_default();
                 let child_authored = if let Some(offset) = &reference.offset {
                     offset.split('.').fold(order, |cursor, segment| cursor.child(segment))
-                } else if document.is_array() { order } else { order.child("sequence") };
+                } else if document.value.is_array() { order } else { order.child("sequence") };
                 (plan, path, child_authored, events, true, frontmatter)
             }
             _ => return Err(CompositionError::SequenceInvalid(
@@ -1110,10 +1306,10 @@ impl<'a> Loader<'a> {
     ) -> Result<PreflightTask, CompositionError> {
         let path = self.resolve_reference(reference, origin)?;
         let (document, authored) = self.load_data_document(&path)?;
-        let root = expect_object(&document, "task file", &path)?;
+        let root = expect_object(&document.value, "task file", &path)?;
 
-        expect_kind(&root, "task", &path)?;
-        let (field, value, options) = parse_task_object(&root, &path, "")?;
+        expect_kind(root, "task", &path)?;
+        let (field, value, options) = parse_task_object(root, &path, "")?;
 
         let nested_label = format!(
             "{label} → task `{}`",
@@ -1136,9 +1332,40 @@ impl<'a> Loader<'a> {
         result
     }
 
-    /// Resolve a `group:` value into a group node.
+    /// Capture `path`'s bytes for the graph (first reference only) and log
+    /// the reference for the groups being loaded.
+    fn capture_source(&mut self, path: &Path) {
+        self.graph.capture_source(path);
+        self.capture_log.push(path.to_path_buf());
+    }
+
+    /// Resolve a `group:` value authored in `origin` into a group node, recording the files
+    /// its preparation reads ([`PreflightGroup::sources`]): `origin` and every
+    /// file the group's own load referenced.
     #[allow(clippy::too_many_arguments)]
     fn load_group(
+        &mut self,
+        value: &Value,
+        origin: &Path,
+        label: &str,
+        property: &str,
+        authored: &AuthoredOrder,
+        state: &EffectiveState,
+        position: TaskPosition,
+    ) -> Result<PreflightGroup, CompositionError> {
+        let start = self.capture_log.len();
+        // Logged, not captured: the walk captured the authoring document
+        // before it reached the group, and a reread must not read it again.
+        self.capture_log.push(origin.to_path_buf());
+        let mut group = self.load_group_unrecorded(value, origin, label, property, authored, state, position)?;
+        let mut seen = HashSet::new();
+        group.sources = self.capture_log[start..].iter()
+            .filter(|path| seen.insert(path.as_path())).cloned().collect();
+        Ok(group)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn load_group_unrecorded(
         &mut self,
         value: &Value,
         origin: &Path,
@@ -1156,19 +1383,19 @@ impl<'a> Loader<'a> {
                 let (name, reference) = split_catalog_reference(raw);
                 let path = self.resolve_reference(&reference, origin)?;
                 let (document, document_authored) = self.load_data_document(&path)?;
-                let root = expect_object(&document, "group file", &path)?;
+                let root = expect_object(&document.value, "group file", &path)?;
 
                 // A catalog selects one named entry, so the group's authored
                 // root is that entry's pointer, not the file root.
                 let selected_entry = name.clone();
                 let (group_map, group_authored, group_property) = match name {
                     Some(name) => {
-                        let (index, map) = select_catalog_group(&root, &name, &path)?;
+                        let (index, map) = select_catalog_group(&document, root, &name, &path)?;
                         (map, document_authored.child("groups").at(index), format!("groups[{index}]"))
                     }
                     None => {
-                        expect_kind(&root, "group", &path)?;
-                        (root.clone(), document_authored, String::new())
+                        expect_kind(root, "group", &path)?;
+                        (root, document_authored, String::new())
                     }
                 };
 
@@ -1178,7 +1405,7 @@ impl<'a> Loader<'a> {
                 );
                 self.enter_reference(&path, selected_entry)?;
                 let result = self.build_group(
-                    &group_map,
+                    group_map,
                     &path,
                     &nested_label,
                     &group_property,
@@ -1249,8 +1476,9 @@ impl<'a> Loader<'a> {
             });
         self.prepare_container_events(&mut lifecycle, origin, label, state, Placement { position, in_group: true })?;
         let source_owner;
-        let owner = match self.documents.get(origin) {
-            Some((value, _)) => value,
+        let referenced_owner = self.documents.get(origin).cloned();
+        let owner = match &referenced_owner {
+            Some(document) => &document.value,
             None => {
                 source_owner = crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter());
                 &source_owner
@@ -1358,6 +1586,7 @@ impl<'a> Loader<'a> {
             tasks,
             origin_path: origin.to_path_buf(),
             loop_config,
+            sources: Vec::new(),
         };
 
         if group.execution == GroupExecution::Parallel {
@@ -1396,7 +1625,7 @@ impl<'a> Loader<'a> {
                         pending.extend(nested.steps.iter().filter_map(|step| step.task.as_ref()));
                         if nested.steps.iter().any(|step| step.task.is_none()) {
                             let inline = self.documents.get(&nested.origin_path)
-                                .is_some_and(|(document, _)| document.get("prompt").is_some_and(Value::is_string))
+                                .is_some_and(|document| document.value.get("prompt").is_some_and(Value::is_string))
                                 || (nested.origin_path == self.source_path && self.source_inline_compose());
                             if inline { targets.insert(nested.origin_path.clone()); }
                         }
@@ -1430,7 +1659,7 @@ impl<'a> Loader<'a> {
     /// the explicit `sequence:` executable so its container owns the lifecycle.
     fn load_prompt(&mut self, reference: &str, origin: &Path) -> Result<PathBuf, CompositionError> {
         let path = self.resolve_reference(reference, origin)?;
-        self.graph.capture_source(&path);
+        self.capture_source(&path);
         if let Some(existing) = self.graph.prompt_document(&path) {
             let _ = existing;
             return Ok(path);
@@ -1457,7 +1686,7 @@ impl<'a> Loader<'a> {
         let inline_compose = matches!(frontmatter.as_map().get("prompt"), Some(Value::String(_)));
         let has_schema = frontmatter.as_map().contains_key("$schema");
 
-        self.graph.prompt_documents.push(PromptDocument {
+        self.graph.push_prompt_document(PromptDocument {
             path: path.clone(),
             markdown,
             inline_compose,
@@ -1744,7 +1973,7 @@ impl<'a> Loader<'a> {
             let bytes = resolved.bytes.expect("a site with no late value resolves its bytes");
             let command_start = self.graph.shell_commands.len();
             let (bytes, set_value) = self.record_resolved_bytes(raw, &bytes, &kind, scope)?;
-            self.graph.template_candidates.push(ShellCandidate {
+            self.graph.push_template_candidate(ShellCandidate {
                 authored_command: authored.clone(),
                 site: CommandSite {
                     source_file: origin.to_path_buf(),
@@ -1765,7 +1994,7 @@ impl<'a> Loader<'a> {
         }
 
         let template = parsed.expect("a template-required site parsed or failed above");
-        self.graph.template_candidates.push(ShellCandidate {
+        self.graph.push_template_candidate(ShellCandidate {
             authored_command: authored.clone(),
             site: CommandSite {
                 source_file: origin.to_path_buf(),
@@ -1917,7 +2146,7 @@ impl<'a> Loader<'a> {
         scope: &SiteScope<'_>,
     ) -> Result<(String, Option<darkmatter::markdown::compose::ResolvedShellValue>), CompositionError> {
         let ShellSiteKind::SetValue { key } = kind else {
-            self.graph.shell_commands.push(DiscoveredCommand {
+            self.graph.push_shell_command(DiscoveredCommand {
                 command: resolved.to_string(),
                 source_file: scope.origin.to_path_buf(),
                 origin: scope.label.to_string(),
@@ -1943,8 +2172,8 @@ impl<'a> Loader<'a> {
             raw,
             resolved,
             || {
-                crate::note_work!(ShellValueStateNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
-                self.step_frontmatter.to_hash_map()
+                crate::note_work!(ShellValueStateNodes, crate::work_counters::value_nodes(self.step_frontmatter.owned()));
+                self.step_frontmatter.clone()
             },
             &self.context,
             resolution,
@@ -1956,7 +2185,7 @@ impl<'a> Loader<'a> {
             source: Some(Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error)))),
         })?;
         for command in value.commands() {
-            self.graph.shell_commands.push(DiscoveredCommand {
+            self.graph.push_shell_command(DiscoveredCommand {
                 command,
                 source_file: scope.origin.to_path_buf(),
                 origin: format!("{} `set.{key}`", scope.label),
@@ -2264,7 +2493,15 @@ impl<'a> Loader<'a> {
         Some(context)
     }
 
-    /// Load and cache a data document (`kind: task`/`group`/`group-catalog`).
+    /// Load and cache a data document (`kind: task`/`group`/`group-catalog`,
+    /// or a referenced sequence file), shared rather than copied: a reference
+    /// borrows the document and takes only what it names.
+    ///
+    /// The first load in a walk reads the file and reuses the invocation's
+    /// parse ([`NestedSources`]) when the bytes are unchanged, so a nested
+    /// preparation sees a rewritten file but does not parse an unchanged one
+    /// again. The retired-read check runs once per document and distinct
+    /// set of retired names the caller values declare.
     ///
     /// The returned cursor is rooted at that document, not at the referencing
     /// one: crossing a file boundary replaces both the order source and the
@@ -2272,21 +2509,29 @@ impl<'a> Loader<'a> {
     fn load_data_document(
         &mut self,
         path: &Path,
-    ) -> Result<(Value, AuthoredOrder), CompositionError> {
-        self.graph.capture_source(path);
-        if let Some((value, orders)) = self.documents.get(path) {
-            return Ok((value.clone(), AuthoredOrder::at_root(Arc::clone(orders))));
+    ) -> Result<(Arc<ReferencedDocument>, AuthoredOrder), CompositionError> {
+        self.capture_source(path);
+        if let Some(document) = self.documents.get(path) {
+            return Ok((Arc::clone(document), AuthoredOrder::at_root(Arc::clone(&document.orders))));
         }
-        let loaded = super::data::load_document(path)?;
-        crate::composition::lifecycle::bindings::reject_removed_sequence_reads(
-            path, crate::composition::lifecycle::bindings::AuthoredDocument {
-                frontmatter: &loaded.value, body: "", body_line_offset: 0,
-            }, Some(&Value::Object(self.caller_setters.clone())), None,
-        )?;
-        let orders = Arc::new(loaded.orders);
-        self.documents
-            .insert(path.to_path_buf(), (loaded.value.clone(), Arc::clone(&orders)));
-        Ok((loaded.value, AuthoredOrder::at_root(orders)))
+        let read = self.graph.authored_sources.get(path).and_then(Option::as_deref);
+        let document = self.graph.nested_sources.document(path, read)?;
+        let present = crate::composition::lifecycle::bindings::retired_names_present(&self.caller_setters);
+        if !document.checked_under(present) {
+            crate::note_work!(ReferencedDocumentNodes, crate::work_counters::nodes(&document.value));
+            crate::composition::lifecycle::bindings::reject_removed_sequence_reads(
+                path, crate::composition::lifecycle::bindings::AuthoredDocument {
+                    frontmatter: &document.value, body: "", body_line_offset: 0,
+                }, Some(&Value::Object(self.caller_setters.clone())), None,
+            )?;
+            document.record_checked(present);
+        }
+        // That check is the frontmatter half of a group owner's check
+        // (`build_group`), under the same caller values.
+        self.checked_group_owners.insert(canonical(path));
+        self.documents.insert(path.to_path_buf(), Arc::clone(&document));
+        let orders = Arc::clone(&document.orders);
+        Ok((document, AuthoredOrder::at_root(orders)))
     }
 
     fn check_cycle(&self, path: &Path) -> Result<(), CompositionError> {
@@ -2476,12 +2721,14 @@ fn split_catalog_reference(raw: &str) -> (Option<String>, String) {
 /// ## Returns
 ///
 /// The group's position in the catalog's `groups:` list — which is what anchors
-/// its authored-order pointer — and the group itself.
-fn select_catalog_group(
-    root: &Map<String, Value>,
+/// its authored-order pointer — and the group itself, borrowed from `root`,
+/// which is `document`'s root object.
+fn select_catalog_group<'a>(
+    document: &ReferencedDocument,
+    root: &'a Map<String, Value>,
     name: &str,
     path: &Path,
-) -> Result<(usize, Map<String, Value>), CompositionError> {
+) -> Result<(usize, &'a Map<String, Value>), CompositionError> {
     expect_kind(root, "group-catalog", path)?;
 
     let groups = match root.get("groups") {
@@ -2498,30 +2745,31 @@ fn select_catalog_group(
         }
     };
 
-    let available: Vec<String> = groups
-        .iter()
-        .filter_map(|g| g.get("name").and_then(Value::as_str))
-        .map(str::to_string)
-        .collect();
-
-    let matches: Vec<(usize, &Value)> = groups
-        .iter()
-        .enumerate()
-        .filter(|(_, g)| g.get("name").and_then(Value::as_str) == Some(name))
-        .collect();
+    let index = document.catalog_index.get_or_init(|| {
+        let mut index: HashMap<String, Vec<usize>> = HashMap::new();
+        for (position, group) in groups.iter().enumerate() {
+            if let Some(name) = group.get("name").and_then(Value::as_str) {
+                index.entry(name.to_string()).or_default().push(position);
+            }
+        }
+        index
+    });
 
     let lookup_failure = |problem: &str| CompositionError::SequenceGroupCatalogLookup {
         name: name.to_string(),
         path: path.to_path_buf(),
         problem: problem.to_string(),
-        available: available.clone(),
+        available: groups
+            .iter()
+            .filter_map(|g| g.get("name").and_then(Value::as_str))
+            .map(str::to_string)
+            .collect(),
     };
 
-    match matches.as_slice() {
-        [(index, only)] => only
+    match index.get(name).map(Vec::as_slice).unwrap_or_default() {
+        [only] => groups[*only]
             .as_object()
-            .cloned()
-            .map(|group| (*index, group))
+            .map(|group| (*only, group))
             .ok_or_else(|| lookup_failure("is not an object")),
         [] => Err(lookup_failure("is not defined")),
         _ => Err(lookup_failure("is defined more than once")),
@@ -2607,14 +2855,13 @@ fn expect_kind(
     }
 }
 
-fn expect_object(
-    document: &Value,
+fn expect_object<'a>(
+    document: &'a Value,
     context: &str,
     path: &Path,
-) -> Result<Map<String, Value>, CompositionError> {
+) -> Result<&'a Map<String, Value>, CompositionError> {
     document
         .as_object()
-        .cloned()
         .ok_or_else(|| CompositionError::SequenceReferenceInvalid {
             context: context.to_string(),
             path: path.to_path_buf(),

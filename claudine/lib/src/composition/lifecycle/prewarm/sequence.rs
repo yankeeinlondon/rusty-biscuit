@@ -21,7 +21,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use darkmatter::markdown::compose::ComposeContext;
+use darkmatter::markdown::compose::{ComposeContext, SharedFrontmatter};
 use serde_json::{Map, Value};
 
 use super::super::bindings::LifecycleScope;
@@ -59,7 +59,7 @@ pub fn submit_sequence_preflight(
         user: settings,
         task_playback: task_playback_settings(),
         graph,
-        sequence: authored_frontmatter(sequence),
+        sequence: Readable::new(authored_frontmatter(sequence)),
         injected: ROOT_OVERLAY_KEYS
             .iter()
             .map(|key| (*key).to_string())
@@ -86,14 +86,15 @@ struct Walk<'a> {
     /// Playback settings for retained internal task stacks.
     task_playback: GlobalSettings,
     graph: &'a PreflightGraph,
-    /// The sequence document's authored frontmatter for internal task stacks.
-    sequence: Map<String, Value>,
+    /// The sequence document's authored frontmatter, as its root and nested
+    /// containers and internal task stacks read it.
+    sequence: Readable,
     injected: BTreeSet<String>,
     context: &'a ComposeContext,
 }
 
 impl Walk<'_> {
-    fn task(&self, task: &PreflightTask, frontmatter: &Map<String, Value>) -> usize {
+    fn task(&self, task: &PreflightTask, frontmatter: &Readable) -> usize {
         let mut queued = 0;
         for (scope, nodes) in parsed_task_stacks(task) {
             queued += self.submit(
@@ -108,14 +109,14 @@ impl Walk<'_> {
                 if let Some(document) = self.graph.prompt_document(path) {
                     let mut injected = self.injected.clone();
                     injected.extend(task.with.keys().cloned());
-                    let frontmatter = document
+                    let frontmatter: Map<String, Value> = document
                         .markdown
                         .frontmatter()
                         .as_map()
                         .iter()
                         .map(|(key, value)| (key.clone(), value.clone()))
                         .collect();
-                    queued += self.document(&frontmatter, &document.path, &injected);
+                    queued += self.document(&Readable::new(frontmatter), &document.path, &injected);
                 }
             }
             PreflightAction::Group(group) => {
@@ -123,7 +124,10 @@ impl Walk<'_> {
                 queued += group.tasks.iter().map(|member| self.task(member, frontmatter)).sum::<usize>();
             }
             PreflightAction::Sequence(sequence) => {
-                let frontmatter = sequence.frontmatter.as_ref().unwrap_or(frontmatter);
+                // A referenced document's root properties replace the
+                // enclosing state; it is copied once, here, for its subtree.
+                let own = sequence.frontmatter.clone().map(Readable::new);
+                let frontmatter = own.as_ref().unwrap_or(frontmatter);
                 queued += self.submit(self.user, lifecycle_phrases(&sequence.lifecycle), frontmatter, &self.injected);
                 queued += sequence.steps.iter().filter_map(|step| step.task.as_ref())
                     .map(|child| self.task(child, frontmatter)).sum::<usize>();
@@ -133,9 +137,9 @@ impl Walk<'_> {
         queued
     }
 
-    fn document(&self, frontmatter: &Map<String, Value>, path: &Path, injected: &BTreeSet<String>) -> usize {
+    fn document(&self, frontmatter: &Readable, path: &Path, injected: &BTreeSet<String>) -> usize {
         // A lifecycle that does not parse is reported when its document runs.
-        match parse_lifecycle_config(&Value::Object(frontmatter.clone()), path) {
+        match parse_lifecycle_config(&Value::Object(frontmatter.whole.as_ref().clone()), path) {
             Ok(lifecycle) => self.submit(self.user, lifecycle_phrases(&lifecycle), frontmatter, injected),
             Err(_) => 0,
         }
@@ -146,26 +150,16 @@ impl Walk<'_> {
         &self,
         playback: &GlobalSettings,
         phrases: Vec<Phrase<'_>>,
-        frontmatter: &Map<String, Value>,
+        frontmatter: &Readable,
         injected: &BTreeSet<String>,
     ) -> usize {
         if phrases.is_empty() {
             return 0;
         }
         let mut late = injected.clone();
-        let resolved = frontmatter
-            .iter()
-            .filter(|(key, value)| {
-                let unresolved = holds_expansion(value);
-                if unresolved {
-                    late.insert((*key).clone());
-                }
-                !unresolved
-            })
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
+        late.extend(frontmatter.late.iter().cloned());
         let inputs = PrewarmInputs {
-            frontmatter: resolved,
+            frontmatter: frontmatter.view.clone(),
             context: DocumentContext::Pending(self.context.clone()),
             sequence_injected_keys: late,
         };
@@ -211,7 +205,7 @@ pub fn submit_task_stacks(
         return 0;
     }
     let inputs = PrewarmInputs {
-        frontmatter: frontmatter.clone(),
+        frontmatter: frontmatter.clone().into(),
         context: DocumentContext::Captured(context.clone()),
         sequence_injected_keys: ROOT_OVERLAY_KEYS.iter().map(|key| (*key).to_string()).collect(),
     };
@@ -233,6 +227,35 @@ fn parsed_task_stacks(task: &PreflightTask) -> Vec<(LifecycleScope, Vec<Lifecycl
         Some((scope, nodes))
     })
     .collect()
+}
+
+/// A frontmatter as preflight may read it, built once per document and
+/// shared by every container and task that reads it.
+struct Readable {
+    /// The whole authored mapping.
+    whole: std::sync::Arc<Map<String, Value>>,
+    /// `whole` without the values that still hold a template or a shell
+    /// expansion, sharing its allocation.
+    view: SharedFrontmatter,
+    /// The keys `view` hides: they stay late.
+    late: BTreeSet<String>,
+}
+
+impl Readable {
+    fn new(frontmatter: Map<String, Value>) -> Self {
+        crate::note_work!(PrewarmStateNodes, crate::work_counters::value_nodes(&frontmatter));
+        let late: BTreeSet<String> = frontmatter
+            .iter()
+            .filter(|(_, value)| holds_expansion(value))
+            .map(|(key, _)| key.clone())
+            .collect();
+        let whole = std::sync::Arc::new(frontmatter);
+        let mut view = SharedFrontmatter::new(std::sync::Arc::clone(&whole));
+        for key in &late {
+            view.remove(key);
+        }
+        Self { whole, view, late }
+    }
 }
 
 fn authored_frontmatter(source: &ResolvedCompositionSource) -> Map<String, Value> {

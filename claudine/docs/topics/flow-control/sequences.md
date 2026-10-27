@@ -703,6 +703,12 @@ Claudine walks the **entire task graph**:
   changed), and nothing in the task runs. Approving `deploy {{ env.TARGET }}`
   as `deploy staging` never authorizes `deploy prod`. See
   [Composition — Approval under a later document's map](../composition.md#approval-under-a-later-documents-map).
+- **The document's definitions are read once per walk.** The walk decodes
+  the sequence document's frontmatter, including its `sequence:` list, once.
+  Each step is checked against that shared state plus its own `seq` row, and
+  reads only its own definitions and the values they reach, so checking step
+  *k* never re-analyzes the other steps. Results are the same as checking
+  each step against a full copy of the document.
 - **Git working state is observed once for the whole walk.** Static preflight
   is one discovery run: every referenced document (and every file it includes)
   that names a Git fact such as `ctx.staged_files` reads the same observation.
@@ -788,7 +794,21 @@ sequence:
 When a nested container prepares, its source is still read again: its own
 lifecycle events and a group's `variables` take the current file's values, and
 a command, template, or prompt document the reread introduces is refused
-because approval has closed. To let a later step observe a file an earlier
+because approval has closed. The file is read at every container start, but
+parsed only when its text differs from the last parse in this invocation: many
+containers authored in one unchanged file share one parse, and a file an
+earlier task rewrote is parsed again, so its new events are always seen.
+Referenced files follow the same rule: a group file or catalog, a `kind: task`
+file, or a referenced sequence file is parsed once per distinct text in an
+invocation, however many steps name it. A hundred steps that each name a
+different entry of one hundred-entry catalog (`g7@catalog.yaml`) parse the
+catalog once, and each step reads only its own entry.
+A group decides at its start whether to prepare again by rereading only its
+own files: the document it is authored in and every file it references. A
+group whose files are unchanged keeps the node the audit built, even when an
+earlier task rewrote some other group's file; only that other group prepares
+again at its own start.
+To let a later step observe a file an earlier
 step wrote, read the file when the step runs, through a prompt document or an
 expression such as `{{ frontmatter('state.md', 'status') }}`.
 
@@ -940,6 +960,62 @@ or `variables` scoping around one task.
 
 A group leg may itself declare a group or a sequence task. Each leg receives
 a private in-memory runtime branch; siblings share the filesystem.
+
+### What a leg sees
+
+Every leg starts from the state as it was when its group started, and keeps
+its own in-memory writes to itself. Files are the one thing legs share.
+
+- **Private, in memory.** A runtime `set`, and a `set_frontmatter` (or another
+  frontmatter effect) on the running document, update the leg's own view.
+  The leg's later stages and its nested steps read the new value; a sibling
+  never does, even one admitted later under `max_parallel`. When the group
+  succeeds, the legs' `set` values merge into the sequence in declaration
+  order; the legs' views of the document are dropped with the group.
+- **Shared, on disk.** A frontmatter effect also writes the file. A sibling's
+  `{{ key }}` still reads the group-start value, because legs never reread
+  the sequence document. A read of the file itself, such as
+  `{{ frontmatter('state.md', 'status') }}`, sees whatever is on disk when it
+  runs, in any leg or nested step. The next root step rereads the source and
+  sees the write ([Phase 2](#phase-2--just-in-time-composition)).
+
+```mermaid
+flowchart LR
+    start["group-start state"] --> a["leg writer: start + its own writes"]
+    start --> b["leg reader: start only"]
+    a -- "set_frontmatter" --> disk[("sequence.md on disk")]
+    disk -- "reread" --> next["next root step"]
+```
+
+Here the reader runs after the writer, yet prints the old value; the next
+step prints the new one:
+
+```yaml
+value: initial
+success: [{ stdout: "sibling={{ sibling_saw }};next={{ next_saw }}" }]
+sequence:
+  - name: legs
+    group:
+      name: legs
+      max_parallel: 1
+      tasks:
+        - name: writer
+          side_effect: { set_frontmatter: [sequence.md, value, written] }
+        - name: reader
+          side_effect: { set: { sibling_saw: "{{ value }}" } }
+  - name: after
+    side_effect: { set: { next_saw: "{{ value }}" } }
+# prints: sibling=initial;next=written
+```
+
+A leg's view is not a copy of the document. Every leg reads the one
+group-start state, which still holds the authored `sequence:` list, and
+holds only the keys it has written itself. Starting a leg costs the same
+whether the document declares ten steps or a thousand. The same holds for
+any container: starting it, preparing its spoken phrases ahead of time,
+resolving a templated `loop.max`, and judging and staging each loop pass all
+read the current state in place, so their cost does not grow with how many
+other containers the document declares.
 
 A group object's `loop:` repeats the whole group: every pass admits its legs
 again, rebuilds `group.legs` and the outcome lists, and exposes the pass's

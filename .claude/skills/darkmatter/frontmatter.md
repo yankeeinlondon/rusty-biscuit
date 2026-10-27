@@ -88,6 +88,13 @@ deep-copy and belong only at a boundary that needs an owned document.
   expression's state share their base, so no event or guard copies the
   document. `owned()` iterates the values a view owns, which is what a clone
   copies (Claudine's work counters read it).
+- A host-run whole-value `$( … )` reads a view in place: the state of
+  `ResolvedShellValue::resolve`, `execute_resolved_shell_values`, and
+  `execute_shell_values_with` is `impl Into<SharedFrontmatter>`, and the
+  frontmatter seed state those use holds the view, so a ternary's branches and
+  condition never copy the base. The lifecycle adapter
+  (`execute_set_shell_values`) counts what its clone copies as the
+  `ShellValueStateNodes` work counter.
 - Iteration order: base keys in base order (a written value in its place),
   then new keys in first-write order.
 

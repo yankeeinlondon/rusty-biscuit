@@ -2730,4 +2730,52 @@ mod json_duplicate_keys {
         assert!(text.contains("d.jsonl"), "{text}");
         assert_eq!(cause, "line 1: duplicate key `a` at `<root>`; each key may appear once per object");
     }
+
+    /// The text loader is what the path loader parses after its read, so a
+    /// caller that holds the bytes gets the same value, key order, and error.
+    #[test]
+    fn the_text_loader_matches_the_path_loader_for_every_data_format() {
+        let cases = [
+            ("d.json", r#"{"z": 1, "a": {"y": [1, 2], "b": null}}"#),
+            ("d.json", r#"{"sequence": [{"group": {"name": "g", "name": "h"}}]}"#),
+            ("d.json", r#"{"a": "#),
+            ("d.json5", "// lead\n{ z: 1, a: { y: 2, b: 3 }, }\n"),
+            ("d.yaml", "z: 1\na:\n  y: [1, 2]\n  b: ~\n"),
+            ("d.yaml", "a: 1\na: 2\n"),
+            ("d.yaml", "a: [\n"),
+            ("d.jsonl", "{\"name\": \"a\"}\n{\"k\": 1, \"k\": 2}\n"),
+        ];
+        for (file, contents) in cases {
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join(file);
+            fs::write(&path, contents).unwrap();
+            let from_path = data::load_document(&path);
+            let from_text = data::load_document_from_text(&path, contents);
+            match (from_path, from_text) {
+                (Ok(by_path), Ok(by_text)) => {
+                    assert_eq!(by_text.value, by_path.value, "{file}: {contents}");
+                    assert_eq!(by_text.orders, by_path.orders, "{file}: {contents}");
+                }
+                (Err(by_path), Err(by_text)) => {
+                    assert_eq!(by_text.to_string(), by_path.to_string(), "{file}: {contents}");
+                    let cause = |error: &CompositionError| std::error::Error::source(error).map(ToString::to_string);
+                    assert_eq!(cause(&by_text), cause(&by_path), "{file}: {contents}");
+                }
+                (by_path, by_text) => panic!("{file}: path {by_path:?}, text {by_text:?}"),
+            }
+        }
+        let duplicate_json = data::load_document_from_text(Path::new("d.json"), r#"{"a": 1, "a": 2}"#).unwrap_err();
+        assert_eq!(duplicate(duplicate_json), ("a".into(), "<root>".into(), None));
+    }
+
+    /// The text loader parses the text it is given, never the file's current
+    /// content.
+    #[test]
+    fn the_text_loader_does_not_read_the_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("d.yaml");
+        fs::write(&path, "version: disk\n").unwrap();
+        let loaded = data::load_document_from_text(&path, "version: held\n").unwrap();
+        assert_eq!(loaded.value, json!({"version": "held"}));
+    }
 }

@@ -116,11 +116,12 @@ impl TaskExecution<'_> {
                 let preparation = execution.member_state().and_then(|state| {
                     let context = self.stack.prepared_context.cloned()
                         .unwrap_or_else(|| state.context().clone());
-                    let fresh = if self.graph.sources_unchanged() {
+                    let fresh = if self.graph.sources_unchanged(&group.sources) {
                         group.clone()
                     } else {
                         let (fresh, graph) = super::super::preflight::prepare_nested_group(
                             self.task, group, &state, context, self.stack.file_resolution_context,
+                            self.graph.nested_sources(),
                         )?;
                         self.verify_nested_graph(&graph)?;
                         fresh
@@ -515,8 +516,7 @@ impl TaskExecution<'_> {
         let cancellable: Vec<_> = group.tasks.iter().map(|task| match &task.action {
             super::super::preflight::PreflightAction::Sequence(sequence) => sequence.lifecycle.cancelled_declared,
             super::super::preflight::PreflightAction::Group(group) => group.lifecycle.cancelled_declared,
-            super::super::preflight::PreflightAction::Prompt { path, .. } => self.graph.prompt_documents.iter()
-                .find(|document| &document.path == path)
+            super::super::preflight::PreflightAction::Prompt { path, .. } => self.graph.prompt_document(path)
                 .is_some_and(|document| document.markdown.frontmatter().as_map().contains_key("cancelled")),
             _ => false,
         }).collect();

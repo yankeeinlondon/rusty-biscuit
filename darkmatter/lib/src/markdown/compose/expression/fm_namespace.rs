@@ -15,7 +15,6 @@
 //! `ctx.fm`.
 
 use serde_json::{Map, Value};
-use std::collections::HashMap;
 
 use super::ast::Expr;
 
@@ -81,15 +80,15 @@ pub(crate) fn resolve_fm_namespace(path: &str, root: &Value) -> Option<Value> {
     }
 }
 
-/// Map-based variant of [`resolve_fm_namespace`] that resolves against the
-/// effective-state `data` map directly.
+/// Variant of [`resolve_fm_namespace`] that resolves against a frontmatter
+/// view directly.
 ///
-/// A `fm.<path>` traversal borrows into the map and clones only the resolved
+/// A `fm.<path>` traversal borrows into the view and clones only the resolved
 /// leaf instead of deep-cloning the entire state per lookup (F30). Bare `fm`
 /// still materializes the whole object snapshot.
 pub(crate) fn resolve_fm_namespace_in_map(
     path: &str,
-    data: &HashMap<String, Value>,
+    data: &crate::markdown::compose::SharedFrontmatter,
 ) -> Option<Value> {
     match fm_namespace_path(path)? {
         FmPath::Member(rest) => {
@@ -97,7 +96,7 @@ pub(crate) fn resolve_fm_namespace_in_map(
             let first = data.get(segments.next()?)?;
             descend(first, segments)
         }
-        FmPath::Whole => Some(Value::Object(data.clone().into_iter().collect())),
+        FmPath::Whole => Some(Value::Object(data.to_map())),
     }
 }
 
@@ -187,7 +186,7 @@ mod tests {
     #[test]
     fn object_and_map_variants_agree_with_value_variant() {
         let object = root().as_object().cloned().unwrap();
-        let map: HashMap<String, Value> = object.clone().into_iter().collect();
+        let map = crate::markdown::compose::SharedFrontmatter::from(object.clone());
         for path in ["fm", "fm.build", "fm.config.retries", "fm.fm.child", "fm.missing", "fm.build.nope"] {
             let expected = resolve_fm_namespace(path, &root());
             assert_eq!(resolve_fm_namespace_in_object(path, &object), expected, "{path}");

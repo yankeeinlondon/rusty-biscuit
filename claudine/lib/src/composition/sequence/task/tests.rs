@@ -429,6 +429,16 @@ impl Fixture {
         self
     }
 
+    /// Let lifecycle file effects write the fixture's own documents, so a
+    /// `set_frontmatter` can target the sequence document itself.
+    fn mutating_its_directory(mut self) -> Self {
+        self.engine = EffectEngine::builder()
+            .mutation_root(self._dir.path())
+            .auto_rehash(false)
+            .build();
+        self
+    }
+
     fn task(&self) -> &PreflightTask {
         self.graph.steps[0]
             .task
@@ -6740,3 +6750,17 @@ mod pipeline_spike;
 #[cfg(feature = "work-counters")]
 #[path = "tests/leg_views.rs"]
 mod leg_views;
+
+#[cfg(feature = "work-counters")]
+#[path = "tests/container_state.rs"]
+mod container_state;
+
+#[cfg(feature = "work-counters")]
+#[path = "tests/nested_source.rs"]
+mod nested_source;
+
+#[path = "tests/referenced_documents.rs"]
+mod referenced_documents;
+
+#[path = "tests/group_freshness.rs"]
+mod group_freshness;

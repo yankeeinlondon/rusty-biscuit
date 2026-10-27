@@ -41,7 +41,7 @@ use super::interpolation::{
 };
 use super::interpolation::rewrite::reborrow;
 use super::expression::absence::MissingRoot;
-use super::{ComposeContext, ComposeWarning};
+use super::{ComposeContext, ComposeWarning, SharedFrontmatter};
 use super::value_origin::{DataPaths, FrontmatterProvenance};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::literal_token::{self, TokenError};
@@ -69,7 +69,9 @@ pub(crate) fn contains_interpolation(value: &Value) -> bool {
 /// frontmatter interpolation; it is `None` for context-free callers.
 pub(crate) struct FrontmatterSeedState {
     declared_properties: HashSet<String>,
-    data: HashMap<String, Value>,
+    /// Read through its shared base and private overlay; resolved keys are
+    /// written to the overlay, so the base is never copied.
+    data: SharedFrontmatter,
     context: ComposeContext,
     resolution_context: Option<ResolutionContext>,
     name_coercion_keys: Vec<String>,
@@ -78,7 +80,8 @@ pub(crate) struct FrontmatterSeedState {
 }
 
 impl FrontmatterSeedState {
-    pub(crate) fn new(data: HashMap<String, Value>, context: ComposeContext) -> Self {
+    pub(crate) fn new(data: impl Into<SharedFrontmatter>, context: ComposeContext) -> Self {
+        let data = data.into();
         Self {
             declared_properties: data.keys().cloned().collect(),
             data,
@@ -1305,7 +1308,7 @@ fn transitively_shell_blocked_keys(
     templated_keys: &[String],
     original_values: &HashMap<String, Value>,
     shell_pending_keys: &HashSet<String>,
-    seed_map: &HashMap<String, Value>,
+    seed_map: &SharedFrontmatter,
 ) -> HashSet<String> {
     let mut blocked: HashSet<String> = HashSet::new();
     if shell_pending_keys.is_empty() {
@@ -1346,7 +1349,7 @@ fn extract_frontmatter_key_refs_for_shell_blocking(
     value: &Value,
     shell_pending_keys: &HashSet<String>,
     blocked_keys: &HashSet<String>,
-    seed_map: &HashMap<String, Value>,
+    seed_map: &SharedFrontmatter,
 ) -> Vec<String> {
     let mut refs = Vec::new();
     collect_frontmatter_key_refs_for_shell_blocking(
@@ -1366,7 +1369,7 @@ fn collect_frontmatter_key_refs_for_shell_blocking(
     refs: &mut Vec<String>,
     shell_pending_keys: &HashSet<String>,
     blocked_keys: &HashSet<String>,
-    seed_map: &HashMap<String, Value>,
+    seed_map: &SharedFrontmatter,
 ) {
     match value {
         Value::String(s) => {
@@ -1410,7 +1413,7 @@ fn collect_variable_roots_for_shell_blocking(
     refs: &mut Vec<String>,
     shell_pending_keys: &HashSet<String>,
     blocked_keys: &HashSet<String>,
-    seed_map: &HashMap<String, Value>,
+    seed_map: &SharedFrontmatter,
 ) {
     match expr {
         Expr::Fallback { primary, fallback } => match static_truthiness(primary, seed_map) {
@@ -1526,7 +1529,7 @@ fn collect_variable_roots_for_shell_blocking(
     }
 }
 
-fn static_truthiness(expr: &Expr, seed_map: &HashMap<String, Value>) -> Option<bool> {
+fn static_truthiness(expr: &Expr, seed_map: &SharedFrontmatter) -> Option<bool> {
     match expr {
         Expr::StringLiteral(value) => Some(!value.is_empty()),
         Expr::NumberLiteral(value) => Some(*value != 0.0),

@@ -19,8 +19,8 @@ use darkmatter::markdown::compose::expression::{
     AuthoredMode, BindingView, Expr, RootClass, SpannedExpr, SpannedExprKind, prepare_value,
     scalar_string, static_variable_reads,
 };
-use darkmatter::markdown::compose::{ComposeContext, EffectiveStateBuilder};
-use serde_json::{Map, Value};
+use darkmatter::markdown::compose::{ComposeContext, EffectiveStateBuilder, SharedFrontmatter};
+use serde_json::Value;
 
 use super::super::bindings::{
     EnclosingLoop, LifecycleScope, LifecycleValues, runtime_bindings_enclosed,
@@ -42,7 +42,8 @@ const CAPTURED_ROOTS: [&str; 2] = ["ctx", "env"];
 #[derive(Debug, Clone)]
 pub struct PrewarmInputs {
     /// The effective frontmatter the phrase's document was prepared with.
-    pub(crate) frontmatter: Map<String, Value>,
+    /// Cloning the inputs, or building a phrase's state, shares its base.
+    pub(crate) frontmatter: SharedFrontmatter,
     /// The `ctx`/`env` binding the phrase would be spoken with.
     pub(crate) context: DocumentContext,
     /// Top-level frontmatter keys a sequence injects per task. They are late
@@ -57,8 +58,19 @@ impl PrewarmInputs {
     /// A non-object `frontmatter` reads as empty.
     #[must_use]
     pub fn captured(frontmatter: &Value, context: ComposeContext) -> Self {
+        let frontmatter = frontmatter.as_object().cloned().unwrap_or_default();
+        crate::note_work!(PrewarmStateNodes, crate::work_counters::value_nodes(&frontmatter));
+        Self::shared(SharedFrontmatter::from(frontmatter), context)
+    }
+
+    /// [`Self::captured`] over a frontmatter view: the inputs share its base
+    /// and copy only the values it owns, so a container's definitions are
+    /// never copied to classify its phrases.
+    #[must_use]
+    pub fn shared(frontmatter: SharedFrontmatter, context: ComposeContext) -> Self {
+        crate::note_work!(PrewarmStateNodes, crate::work_counters::value_nodes(frontmatter.owned()));
         Self {
-            frontmatter: frontmatter.as_object().cloned().unwrap_or_default(),
+            frontmatter,
             context: DocumentContext::Captured(context),
             sequence_injected_keys: BTreeSet::new(),
         }
@@ -196,14 +208,10 @@ fn authored_text(text: &Expr) -> String {
 /// Resolve an early phrase exactly as lifecycle playback would.
 fn resolve(text: &Expr, (view, globals): Bindings, inputs: &PrewarmInputs) -> Classification {
     crate::note_work!(PrewarmStateBuild);
-    let frontmatter: HashMap<String, Value> = inputs
-        .frontmatter
-        .iter()
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
+    crate::note_work!(PrewarmStateNodes, crate::work_counters::value_nodes(inputs.frontmatter.owned()));
     let (DocumentContext::Captured(context) | DocumentContext::Pending(context)) = &inputs.context;
     let Ok(state) = EffectiveStateBuilder::new()
-        .with_frontmatter(frontmatter)
+        .with_shared_frontmatter(inputs.frontmatter.clone())
         .with_context(context.clone())
         .with_allow_ctx_override(true)
         .build()

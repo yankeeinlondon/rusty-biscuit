@@ -59,11 +59,33 @@ pub enum Work {
     /// reads an expression: the hint and the keys it reads, directly or
     /// through other keys.
     PredictionWithStateNodes,
-    /// JSON nodes ([`value_nodes`]) of the step frontmatter materialized to
-    /// resolve one shell `set` value; only a ternary's branches read it.
+    /// JSON nodes ([`value_nodes`]) copied from the step frontmatter view to
+    /// resolve one shell `set` value: the values the view owns, never its
+    /// shared base; only a ternary's branches read it.
     ShellValueStateNodes,
     /// Recorded prompt references compared while deduplicating a new one.
     PromptReferenceCompare,
+    /// JSON nodes ([`value_nodes`]) a looping container copies from its state
+    /// view to resolve its templated cap and to stage each pass's action: the
+    /// values the view owns (runtime writes, the action's own writes), never
+    /// its shared base.
+    ContainerStateNodes,
+    /// JSON nodes ([`value_nodes`]) copied into pre-warm inputs: a whole
+    /// captured document, or only the values a shared view owns.
+    PrewarmStateNodes,
+    /// A container's authoring document parsed by nested preparation: once
+    /// per distinct text of the file in one invocation.
+    NestedSourceParse,
+    /// A referenced data document (group file or catalog, `kind: task` file,
+    /// referenced sequence file) parsed by any preflight walk: once per
+    /// distinct text of the file in one invocation.
+    ReferencedDocumentParse,
+    /// JSON nodes ([`nodes`]) of referenced data documents parsed, scanned in
+    /// whole for retired reads, or copied out by a reference.
+    ReferencedDocumentNodes,
+    /// A file a group start reread to decide whether its sources changed
+    /// since the audit walk captured them.
+    FreshnessSourceReads,
 }
 
 impl Work {
@@ -84,6 +106,12 @@ impl Work {
         Work::PredictionWithStateNodes,
         Work::ShellValueStateNodes,
         Work::PromptReferenceCompare,
+        Work::ContainerStateNodes,
+        Work::PrewarmStateNodes,
+        Work::NestedSourceParse,
+        Work::ReferencedDocumentParse,
+        Work::ReferencedDocumentNodes,
+        Work::FreshnessSourceReads,
     ];
 }
 
@@ -130,12 +158,14 @@ pub fn snapshot() -> WorkSnapshot {
 /// size measure for a frontmatter-shaped map that grows with an embedded
 /// `sequence:` list.
 pub fn value_nodes<'a>(entries: impl IntoIterator<Item = (&'a String, &'a serde_json::Value)>) -> u64 {
-    fn nodes(value: &serde_json::Value) -> u64 {
-        1 + match value {
-            serde_json::Value::Array(items) => items.iter().map(nodes).sum(),
-            serde_json::Value::Object(map) => map.values().map(nodes).sum(),
-            _ => 0,
-        }
-    }
     entries.into_iter().map(|(_, value)| nodes(value)).sum()
+}
+
+/// `value` and every value nested in it, each counted once.
+pub fn nodes(value: &serde_json::Value) -> u64 {
+    1 + match value {
+        serde_json::Value::Array(items) => items.iter().map(nodes).sum(),
+        serde_json::Value::Object(map) => map.values().map(nodes).sum(),
+        _ => 0,
+    }
 }

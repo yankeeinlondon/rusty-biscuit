@@ -27,7 +27,7 @@ fn inputs(frontmatter: &Value) -> PrewarmInputs {
         panic!("frontmatter is a mapping");
     };
     PrewarmInputs {
-        frontmatter: map,
+        frontmatter: map.into(),
         context: DocumentContext::Pending(ComposeContext::capture_minimal()),
         sequence_injected_keys: BTreeSet::new(),
     }

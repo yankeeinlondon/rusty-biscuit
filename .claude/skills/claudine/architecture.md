@@ -767,14 +767,55 @@ and primitive execution; `cli/src/commands/wrap/sequence/` owns orchestration.
   later placeholders and container terminal-event placeholders require shape
   approval. Late roots are `seq`, `loop`, and `group`. The graph's audited
   root lifecycle is installed on the root guard; rereads settle only against
-  original approval membership.
+  original approval membership. A walk decodes and scans the document's
+  frontmatter (with its `sequence:` list) once into a shared seed
+  (`Loader::step_seed`, a Darkmatter `SharedFrontmatter`); each step's view
+  is the seed plus its `seq` overlay, its late keys come from
+  `overlay_derived` (overlay-only scan, whole-view fallback when the overlay
+  shadows or adds a late key), and a `with` hint is classified over its read
+  closure (`providers::classify_reads`); a ternary shell `set` value's
+  branches read the step view itself (`record_resolved_bytes`). Never clone, decode, or rescan the
+  whole document per step: that per-step cost times S steps is the quadratic
+  growth `preflight/tests/scaling.rs` guards with work counters.
 - `sequence/task/` executes primitives and concurrent named group legs.
   Group workers clone runtime snapshots, preserving isolated mutations and
-  proxy ancestry. Only groups accept `fail_fast`: atomic failed groups publish
+  proxy ancestry. Each leg's live document cell is a clone of the group-start
+  `SharedFrontmatter` view: it shares that view's base and owns only the
+  leg's own writes, which are dropped with the group (the file write already
+  happened; the next root step rereads it). `StackExecutionContext::frontmatter`
+  is `&SharedFrontmatter`; never materialize a `Map` just to borrow it.
+  `task/tests/leg_views.rs` counts cells (`LiveFrontmatterView`) and the nodes
+  each copies (`LiveFrontmatterCopy`). The same holds per container start and
+  loop pass: `open_loop`'s templated cap, `finish_container_pass`'s condition
+  and staged action (`ActionStaging` over an `ActionTarget`, here a view
+  clone), and a container's pre-warm (`PrewarmInputs::shared`) read the view
+  in place; `task/tests/container_state.rs` counts them
+  (`ContainerStateNodes`, `PrewarmStateNodes`). Only groups accept `fail_fast`: atomic failed groups publish
   no leg state; tolerant groups merge completed legs in declaration order.
 - `lifecycle/runtime::ContainerRunner` and `LifecycleRunGuard` own container
   events. Root initialize precedes preflight; nested preparation is just in
-  time. Retry retains mutations but clears child results and defers finalize
+  time. It reads the container's source on every start but parses it only
+  when the text differs from the invocation's last parse
+  (`PreflightGraph::nested_sources`, content-compared, successes only);
+  `task/tests/nested_source.rs` counts parses (`NestedSourceParse`). The same
+  memo holds referenced data documents (`ReferencedDocument`: group files and
+  catalogs, `kind: task` files, referenced sequence files) for every walk,
+  keyed by the walk's own `capture_source` bytes, which a data format parses
+  itself (`data::load_document_from_text`; Markdown keys by the text its own
+  read parsed), so an entry never holds a parse of other bytes; a `Loader` shares them by
+  `Arc`, a reference borrows its entry (`select_catalog_group`, lazy name
+  index), and the retired-read check is memoized per retired-name presence
+  set. Never clone a whole referenced document per reference;
+  `task/tests/referenced_documents.rs` counts parses and nodes
+  (`ReferencedDocumentParse`, `ReferencedDocumentNodes`). A group start
+  re-prepares only when one of its own files changed
+  (`PreflightGroup::sources`: its authoring document and every file its
+  subtree referenced in the audit walk; `PreflightGraph::sources_unchanged`
+  rereads only those), so another group's file never affects it;
+  `task/tests/group_freshness.rs` counts the reads (`FreshnessSourceReads`).
+  The graph's prompt-document, command, and template lookups are indexed
+  (`prompt_document`, `contains_shell_command`, `candidates_authored`);
+  only the walk appends to those `pub` vectors. Retry retains mutations but clears child results and defers finalize
   until the final attempt. Unhandled failures propagate outward. Cancellation
   settles descendants before `cancelled` and `finalize`, without recovery.
 - `composition/runtime_state.rs` holds invocation-local mutations and lexical

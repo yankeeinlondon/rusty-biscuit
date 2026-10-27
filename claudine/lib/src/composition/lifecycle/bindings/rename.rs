@@ -25,6 +25,15 @@ pub const RETIRED_SEQUENCE_NAMES: &[(&str, &str)] = &[
     ("is_last", "seq.is_last"),
 ];
 
+/// Which [`RETIRED_SEQUENCE_NAMES`] `values` declares, one bit per name in
+/// that order: the only part of a `supplied` overlay the retired-read checks
+/// read, so a check that passed under one set passes under it again.
+pub fn retired_names_present(values: &serde_json::Map<String, Value>) -> u16 {
+    RETIRED_SEQUENCE_NAMES.iter().enumerate()
+        .filter(|(_, (name, _))| values.contains_key(*name))
+        .fold(0, |present, (bit, _)| present | (1 << bit))
+}
+
 /// The first retired sequence read of `expr` whose root `declared` does not
 /// claim, as `(removed, replacement)`, in source order.
 ///

@@ -414,6 +414,56 @@ fn every_value_reads_the_pre_write_state() {
     assert_eq!(result.mutations.get("flag"), Some(&json!(false)));
 }
 
+/// A repository whose `git config --get biscuit.answer` prints `yes`, and
+/// that command as `$( … )` body text: a portable command with known output.
+fn answering_repo() -> (Repo, String) {
+    let repo = Repo::new();
+    git(repo.dir.path(), &["config", "biscuit.answer", "yes"]);
+    let answer = repo.git("config --get biscuit.answer");
+    (repo, answer)
+}
+
+/// A conditional value's condition reads a write an earlier item made over
+/// the document's value, as every other expression does.
+#[test]
+fn a_conditional_value_reads_an_earlier_write_over_the_document_value() {
+    let (repo, answer) = answering_repo();
+    let frontmatter = start(json!([
+        { "set": { "flag": true } },
+        { "set": { "result": format!("$( flag ? {answer} : 'no' )") } },
+    ]));
+    let config = prepared(&repo, &frontmatter);
+    let result = run(&config, &[LifecycleSignal::Start], &map(json!({ "flag": false })), &MockShell::new(0));
+    assert_eq!(result.outcome, LifecycleEventOutcome::default());
+    assert_eq!(result.mutations.get("result"), Some(&json!("yes")));
+}
+
+/// Executing a `set` value copies only the values the document view owns,
+/// never its shared base: the same count beside a 10- and a 100-entry
+/// `sequence:` list, for a conditional and a plain value alike.
+#[cfg(feature = "work-counters")]
+#[test]
+fn a_set_value_copies_the_same_state_beside_10_and_100_sequence_entries() {
+    use darkmatter::work_counters::{Work, snapshot};
+    let (repo, answer) = answering_repo();
+    for value in [format!("$( flag ? {answer} : {} )", repo.git("config --get biscuit.missing")), format!("$({answer})")] {
+        let config = prepared(&repo, &start(json!([{ "set": { "result": value } }])));
+        let mut copied = Vec::new();
+        for entries in [10, 100] {
+            let sequence: Vec<Value> = (0..entries)
+                .map(|index| json!({ "name": format!("step-{index}"), "shell": format!("echo {index}") }))
+                .collect();
+            let base = map(json!({ "flag": true, "sequence": sequence }));
+            let before = snapshot();
+            let result = run(&config, &[LifecycleSignal::Start], &base, &MockShell::new(0));
+            copied.push(snapshot().since(&before).get(Work::ShellValueStateNodes));
+            assert_eq!(result.outcome, LifecycleEventOutcome::default(), "{value}");
+            assert_eq!(result.mutations.get("result"), Some(&json!("yes")), "{value}");
+        }
+        assert_eq!(copied[0], copied[1], "{value}: nodes copied beside 10 and 100 entries");
+    }
+}
+
 /// Runs `value` as the only `set` value and asserts it fails the action.
 fn assert_set_fails(repo: &Repo, value: &str, fragment: &str) {
     let config = prepared(repo, &start(json!([{ "set": { "v": value } }])));

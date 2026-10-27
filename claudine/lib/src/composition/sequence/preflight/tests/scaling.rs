@@ -161,6 +161,64 @@ mod counted {
         assert_eq!(commands, (0..20).map(|index| format!("echo {index}")).collect::<Vec<_>>());
     }
 
+    /// `steps` steps whose container `success` event assigns `value`: a
+    /// nested sequence's own event, or the event of a group of one shell leg.
+    fn assignment_steps(dir: &Path, steps: usize, group: bool, value: &str) -> String {
+        let success = json!([{ "set": { "result": value } }]);
+        let steps: Vec<Value> = (0..steps)
+            .map(|index| match group {
+                false => json!({ "name": format!("step-{index}"), "sequence": [], "success": success }),
+                true => json!({ "name": format!("step-{index}"), "group": { "name": format!("g{index}"),
+                    "tasks": [{ "name": "leg", "shell": format!("echo leg-{index}") }], "success": success } }),
+            })
+            .collect();
+        sequence_document(dir, "flag: true\n", &steps)
+    }
+
+    /// The step state a conditional assignment's branches read is the step
+    /// view, never a copy of the other steps' definitions: the nodes copied
+    /// grow linearly with the step count (each step copies only its own `seq`
+    /// position, which is a few nodes smaller at the first and last step), and
+    /// both branches of every step stay in the approval inventory.
+    #[test]
+    fn a_conditional_shell_set_value_copies_bounded_state_per_step() {
+        for group in [false, true] {
+            let mut copied = Vec::new();
+            for steps in [10, 55, 100] {
+                let dir = TempDir::new().unwrap();
+                let path = assignment_steps(dir.path(), steps, group, "$( flag ? echo yes : echo no )");
+                let (graph, claudine, _) = work(&path);
+                assert_eq!(graph.steps.len(), steps);
+                let commands: Vec<&str> = graph.shell_commands.iter().map(|command| command.command.as_str()).collect();
+                let assignments: Vec<&str> = commands.iter().copied().filter(|command| !command.starts_with("echo leg-")).collect();
+                assert_eq!(assignments, ["echo yes", "echo no"].repeat(steps), "group={group}");
+                if group {
+                    assert_eq!(commands.len() - assignments.len(), steps, "every leg's command is recorded");
+                }
+                copied.push(claudine.get(Work::ShellValueStateNodes));
+            }
+            let [small, middle, large] = copied[..] else { unreachable!() };
+            assert!(small > 0, "group={group}: the ternary's branches read no state");
+            assert_eq!(middle - small, large - middle, "group={group}: {small} → {middle} → {large}");
+        }
+    }
+
+    /// The plain controls of the conditional case: a fixed command is never
+    /// given the step state at all.
+    #[test]
+    fn a_plain_shell_set_value_copies_no_state_in_a_sequence_or_group_event() {
+        for group in [false, true] {
+            for steps in [10, 100] {
+                let dir = TempDir::new().unwrap();
+                let (graph, claudine, _) = work(&assignment_steps(dir.path(), steps, group, "$(echo yes)"));
+                assert_eq!(graph.steps.len(), steps);
+                let assignments = graph.shell_commands.iter().filter(|command| command.command == "echo yes").count();
+                assert_eq!(assignments, steps, "group={group}");
+                assert_eq!(claudine.get(Work::ShellValueStateNodes), 0, "group={group}, {steps} steps");
+            }
+        }
+    }
+
     /// Distinct prompt references are never compared with one another; a
     /// repeated reference at the same position is still recorded once.
     #[test]

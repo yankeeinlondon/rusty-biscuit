@@ -15,7 +15,7 @@ use serde_json::{Map, Value};
 
 use super::super::error::CompositionError;
 use super::super::types::{LoopCondition, LoopConfig};
-use super::actions::ActionStaging;
+use super::actions::{ActionStaging, ActionTarget};
 use super::engine::DEFAULT_MAX_ITERATIONS;
 use super::expression::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 
@@ -301,24 +301,27 @@ impl LoopFrame {
 
     /// Stage the loop's action against `frontmatter`, all or nothing.
     ///
+    /// A shared view stages into a clone of it, so only the values the
+    /// action writes are copied; an owned map is copied whole.
+    ///
     /// Call only after [`Self::decide`] returned [`LoopDecision::Continue`].
     ///
     /// ## Errors
     ///
     /// [`CompositionError::LoopEvaluationFailed`] wrapping the first failing
     /// action; nothing is committed.
-    pub fn stage_actions(
+    pub fn stage_actions<F: ActionTarget>(
         &self,
-        frontmatter: &Map<String, Value>,
+        frontmatter: &F,
         lookup: &dyn EvaluationLookup,
-    ) -> Result<Map<String, Value>, CompositionError> {
+    ) -> Result<F, CompositionError> {
         let mut stage = ActionStaging::new(frontmatter, self.count, self.config.actions.len());
         for (index, action) in self.config.actions.iter().enumerate() {
             stage
                 .apply_action(action, index + 1, Some(lookup))
                 .map_err(|source| self.evaluation_failed("action", source))?;
         }
-        Ok(stage.commit_map())
+        Ok(stage.into_staged())
     }
 
     /// Move to the next pass.

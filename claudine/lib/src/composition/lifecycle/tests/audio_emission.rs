@@ -745,7 +745,7 @@ async fn speech_fired_during_a_blocked_prewarm_publishes_without_joining_it() {
     let worker = PrewarmWorker::start_with(std::sync::Arc::new(fake.clone()));
     let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
     let inputs = PrewarmInputs {
-        frontmatter: frontmatter.as_object().unwrap().clone(),
+        frontmatter: frontmatter.as_object().unwrap().clone().into(),
         context: DocumentContext::Pending(darkmatter::markdown::compose::ComposeContext::capture_minimal()),
         sequence_injected_keys: Default::default(),
     };

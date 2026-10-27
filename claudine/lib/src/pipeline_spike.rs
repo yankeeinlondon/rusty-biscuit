@@ -4,12 +4,12 @@
 //! The public scenarios live in `benches/pipeline_work_alloc.rs`. The ones
 //! here reach code a bench target cannot see, so they run as ignored unit
 //! tests of this crate, whose test binary declares the counting allocator
-//! (`lib.rs`). Counters and the allocator are process-wide, so run them on one
-//! thread:
+//! (`lib.rs`). Counters and the allocator are process-wide, so run one
+//! scenario per invocation, from `claudine/`:
 //!
 //! ```text
-//! cargo test -p claudine --lib --release --features work-counters -- \
-//!     --ignored --nocapture --test-threads=1 pipeline_spike
+//! just test-library --release --features work-counters --run-ignored only \
+//!     --no-capture pipeline_spike_c1
 //! ```
 //!
 //! Each scenario prints `SPIKE` rows in the bench target's format.

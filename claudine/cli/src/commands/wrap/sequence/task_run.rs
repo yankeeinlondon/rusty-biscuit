@@ -400,6 +400,7 @@ fn push_action_scan(action: &PreflightAction, scan: &mut String) {
                 tasks,
                 origin_path: _,
                 loop_config,
+                sources: _,
             } = group;
             push_scan(name, scan);
             // The loop condition reads `ctx.*` against the group's run.

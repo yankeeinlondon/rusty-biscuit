@@ -76,10 +76,27 @@ pub fn load_referenced_sequence(
     document_fail_fast: bool,
     file_resolution_context: &FileResolutionContext,
 ) -> Result<SequencePlan, CompositionError> {
-    let format = SourceFormat::for_path(path);
     let loaded = data::load_document(path)?;
-    let orders = Arc::new(loaded.orders);
-    let document = loaded.value;
+    plan_referenced_sequence(
+        reference, path, &loaded.value, Arc::new(loaded.orders), invocation_path,
+        frontmatter, document_fail_fast, file_resolution_context,
+    )
+}
+
+/// [`load_referenced_sequence`] over a `document` (and its authored `orders`)
+/// the caller already loaded from `path`; only the selected items are copied.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn plan_referenced_sequence(
+    reference: &SequenceReference,
+    path: &Path,
+    document: &Value,
+    orders: Arc<darkmatter::markdown::MappingOrders>,
+    invocation_path: &Path,
+    frontmatter: &dyn DocumentFrontmatter,
+    document_fail_fast: bool,
+    file_resolution_context: &FileResolutionContext,
+) -> Result<SequencePlan, CompositionError> {
+    let format = SourceFormat::for_path(path);
 
     if let Some(offset) = &reference.offset
         && format.is_line_delimited()
@@ -91,8 +108,8 @@ pub fn load_referenced_sequence(
         });
     }
 
-    let formal = is_formal_sequence(&document, reference);
-    let items = select_items(&document, reference, formal)?;
+    let formal = is_formal_sequence(document, reference);
+    let items = select_items(document, reference, formal)?;
 
     let items = match &reference.operator {
         Some(operator) => apply_source_operator(
