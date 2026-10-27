@@ -21,6 +21,7 @@ packages:
     - darkmatter-cli
     - claudine-cli
     - content-policy
+    - test-toolkit
 source_files_during_phase_2:
     - claudine/cli/src/commands/wrap/sequence/container.rs
     - claudine/cli/src/commands/wrap/sequence/task_run.rs
@@ -117,20 +118,17 @@ decisions_for_review:
       Not done: composition's earlier pre-shell report still builds one position map when it has problems that composition later sets aside. Avoiding that means carrying the deferred map through composition's filtering, a medium-sized change.
     - |-
       Alphanumeric checks (D13): the check lives in `simplified/convert.rs`, not `resolve.rs` as the plan said, so that file was changed. To avoid editing the validator cache while another agent was working in it, a compile is counted after checking the cache first. If two threads miss on the same constraints at the same moment, the count can be one too high. Results are unaffected. For an exact count, expose the cache's existing lookup-or-compile function (which reports whether it compiled) and use its flag, a one-line change in each file.
-message_to_agent: |-
-  Phase 3 (C1, C7, D1, D2, D4, D13) is done and every gate passed: darkmatter 12,954 and claudine 11,745 tests, lint clean, 0 stranded. Phase 2 and Phase 3 changes are both uncommitted in the tree. Facts for phase 4:
-  - New counting tools.
-    - Claudine: `work_counters::Gauge::RuntimeStateBranch` (live/peak, `work-counters` only), plus the `test-fixtures` seam `CLAUDINE_TEST_GROUP_BRANCHES=<path>` (one JSON line per settled group attempt) for CLI tests.
-    - Darkmatter: `ValidatorCache::validator_for_reporting_compile` returns `(validator, compiled)`. `RewriteArmCompile`, `AlphanumericCheckCompile` and `PositionMapBuild` now count real work only.
-  - New Darkmatter API: `DarkmatterSchemas::validate_summarized` → `(ValidationReport, PreparationSummary { has_schema })`. The private `validate_prepared` is the one place document reports are produced, and it locates problems lazily (`ProblemPositions` in `positions.rs`).
-  - D13's check is in `schemas/simplified/convert.rs`, not `resolve.rs`.
-  - Known gaps, recorded in `decisions_for_review`:
-    - a caller-supplied value's `match()` inside a property-level union is judged from the document folder (pre-existing);
-    - composition's pre-shell report can still build one position map;
-    - in C7, a literal `model` is deferred when `agent` reads a runtime-written key.
-  - Phase 4's input-robustness work is the D12 loader's CLI-boundary cells. No loader changed in phase 3.
-  - The C1 peak figures in the log were measured in debug. Phase 5 must re-measure them in release against `pipeline-work-pre`, which is still untouched.
-  - `just test-library` / `just test-cli` still break on `-E 'test(/…/)'`; use `cargo nextest run -p <pkg> --features … -E '…'` directly.
+    - |-
+      I did not repair the one timing slowdown that reproduced: D5 (a lifecycle stack of 1,000 conditionals) ran 6.8% slower than the saved baseline on a second, isolated run. Its counted work, allocations, bytes and peak are identical to the spike's figures, and no code it runs is in this feature's diff, so the slowdown is host noise on a memory-heavy case, not something this change caused. The plan only asks to resolve regressions attributable to the change.
+      Alternatives: investigate D5 now (outside this feature's items, and the plan forbids repeated measurement campaigns), or open a spec for it.
+      If the reviewer wants it chased: rerun `cargo bench -p darkmatter --bench pipeline_work -- --baseline pipeline-work-pre D5/conditionals/1000` on a quiet host first; nothing else depends on it.
+    - |-
+      The timing comparison ran under moderate load (1-minute load 7.2 falling to 6.1), similar to or slightly lighter than the baseline pass (7.7 rising to 12.3). I did not wait for a quiet host, because the baseline itself was not quiet and matching the conditions matters more than an absolute quiet. The large changes (A5 -99.5%, A1 -24%, A4 -2.8%) are far outside Criterion's intervals; small ones (under about 3%) should not be read as real.
+      If the reviewer wants cleaner numbers: save a new baseline and compare on a quiet host at the parent revision and this branch; the log's commands are reusable.
+    - |-
+      The documentation pass fixed two things beyond this feature's own changes: a broken code fence in `darkmatter/docs/topics/schemas/definition.md` (Candidate Linting) that predates the feature, and a sentence in `tools/test-toolkit/README.md` that said a library never declares the counting allocator (Claudine's unit-test binary does). It also corrected `claudine/docs/cli/sequence.md`, whose example said a plain `model` is always predicted as written; when `agent` reads a runtime-written key, both are decided at launch. Each is a small, Markdown-only revert if unwanted.
+    - |-
+      The before/after anchor figures are recorded only in the implementation log, as the spec's acceptance item 7 asks. I did not add an "after" section to `spike-report.md`, which records the spike and the pre-implementation refresh. If the reviewer wants the report to carry the outcome too, copy the log's "Anchor comparison" table into a new report section.
 source_files_during_phase_3:
     - claudine/cli/tests/l1/group_branch_lifetime.rs
     - claudine/cli/tests/l1/main.rs
@@ -172,6 +170,98 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4:
+    - claudine/cli/tests/l1/compose_named_type_import.rs
+    - claudine/cli/tests/l1/main.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - tools/test-toolkit/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+source_code:
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/tests/l1/compose_named_type_import.rs
+    - claudine/cli/tests/l1/group_branch_lifetime.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/looping/container.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/looping/expression/tests.rs
+    - claudine/lib/src/composition/looping/expression/tests/loop_leaf_reads.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/runtime_state/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/providers.rs
+    - claudine/lib/src/composition/sequence/preflight/providers/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/providers/tests/literal_hints.rs
+    - claudine/lib/src/composition/sequence/task/container_regressions.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/group/branch.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/templates.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/task/tests/branch_admission.rs
+    - claudine/lib/src/composition/sequence/task/tests/pipeline_spike.rs
+    - claudine/lib/src/composition/sequence/task/tests/runtime_projections.rs
+    - claudine/lib/src/dispatch/expression.rs
+    - claudine/lib/src/dispatch/expression/tests.rs
+    - claudine/lib/src/dispatch/expression/tests/hook_leaf_reads.rs
+    - claudine/lib/src/pipeline_spike/tests.rs
+    - claudine/lib/src/work_counters.rs
+    - claudine/lib/tests/l1/context_construction_guard.rs
+    - claudine/lib/tests/l1/host_catalog.rs
+    - darkmatter/cli/src/commands/render.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/schema_validate_summary.rs
+    - darkmatter/justfile
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/benches/pipeline_work_support/mod.rs
+    - darkmatter/lib/benches/schema_validation.rs
+    - darkmatter/lib/src/markdown/schemas/bound_operands.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/positions.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/tests/lazy_positions.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/work_counters.rs
+    - darkmatter/lib/tests/l1/content_policy_duration_parity.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schemas_alphanumeric_check_cache.rs
+    - darkmatter/lib/tests/l1/schemas_named_import_errors.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_memo.rs
+    - darkmatter/lib/tests/l1/schemas_rewrite_arm_validators.rs
+    - darkmatter/lib/tests/l1/schemas_validation_summary.rs
+documentation:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/rust-testing/performance-testing.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/features/2026-10-25-pipeline-work-reduction/completion-walk-design.md
+    - claudine/features/2026-10-25-pipeline-work-reduction/spike-report.md
+    - claudine/features/2026-10-27-shared-launch-trigger-discovery/spec.md
+    - claudine/features/2026-10-27-shell-site-placeholder-parse-once/spec.md
+    - content-policy/docs/topics/policy-lifecycle.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - tools/test-toolkit/README.md
+completed_phase: 5
+implemented: true
 ---
 ---
 
@@ -514,3 +604,186 @@ Results that changed from the report's last figures:
 | D13 one compile for equal constraints; different options apart; no verdict cache; diagnostics unchanged | `schemas_alphanumeric_check_cache::*` (4) |
 
 - Input robustness matrix: no reader or loader changed in this phase. D1, D4 and D13 change validator and position lifetimes, not document parsing. Phase 4 owns the D12 loader cells.
+
+## Phase 4
+
+- Start revision `51b2e810c` (branch `feat/work-reduction`), clean tree. Host macOS, 16 cores. No subagents: the only code change was one CLI test file, and every gate ran once, sequentially, from this session.
+
+### D12 loader: CLI-boundary cells
+
+- New `claudine/cli/tests/l1/compose_named_type_import.rs` (registered in `l1/main.rs` under `#[cfg(feature = "test-fixtures")]`, which the area's `just test` enables). It uses `CliProcessFixture` and the compiled `claudine-fake-goose` with `PROVIDER_MARKER`, so it runs on every OS. The document is `$schema: { title: name@./types.yaml }` importing a tagged table `name: string(required; min(10))`.
+  - `a_valid_named_type_import_launches_the_provider_once` — control: success, one launch.
+  - `a_value_the_imported_type_rejects_stops_the_launch` — proves the import is load-bearing at the CLI: `title: short` fails, the report names `title`, no launch. The imported type is `required` because an optional rejected value is dropped with a warning and the launch goes ahead (the existing drop-and-warn rule; first draft of this test found it).
+  - `a_malformed_imported_file_is_a_located_error_and_launches_nothing` (`types: [`) and `a_duplicate_key_in_the_imported_file_is_a_located_error_and_launches_nothing` — failure, stderr names `types.yaml` and says `not valid YAML`, no launch.
+- The remaining loader cells stay in-process, where phase 2 left them complete: document shapes (duplicate key, trailing content, second document, invalid UTF-8, malformed YAML, JSON-compatible YAML, not-a-schema) in `darkmatter/lib/tests/l1/schemas_named_import_errors.rs`; the shared envelope validator's field shapes (`types` absent, null, number, list, every element wrong, `{}`, duplicate) in `schema_enhancements_matrix/envelope.rs`; mixed/all-invalid entries and empty-map-is-unknown-name in `schemas_named_import_errors`; cold and warm malformed/deleted/repaired reads in `schemas_named_type_memo`.
+- Code-smell grep re-run over `load_named_types`, `read_named_types`, `named_types_from_text` (`darkmatter/lib/src/markdown/schemas/resolve.rs`): no `serde(default)`, `unwrap_or_default`, `.ok()`, or `filter_map`. Nothing in the loader changed after phase 2.
+
+### Coverage audit (item-to-test map)
+
+| Item | Removed-work regression | Behavior coverage |
+| ---- | ----------------------- | ----------------- |
+| C1 | `branch_admission::{a_capped_group_keeps_at_most_cap_branches_alive_and_builds_one_per_leg, an_uncapped_group_admits_every_leg_and_builds_one_branch_each, a_nested_group_bounds_live_branches_by_its_active_caps}`; CLI `group_branch_lifetime::*` | retries, interruption, fail-fast, never-admitted, delayed-leg seed, tolerant fold: `branch_admission::*` (8) plus the existing `container_group_contract`, `parallel_groups`, `container_regressions` tests listed under phase 3 |
+| C2 | `hook_leaf_reads::work_counts::*` | `hook_leaf_reads::*` (58-path equivalence, missing members, `hook.env` absent, per-event freshness) |
+| C3 | `runtime_state::tests::field_projections_take_no_full_snapshot_…`, `runtime_projections::*` (4) | projection equality, concurrent coherence, scope move, plus existing retry/nested/lexical tests (phase 2 list) |
+| C4 | `loop_leaf_reads::work_counts::*` | `loop_leaf_reads::*` |
+| C7 | `literal_hints::counted::*` | `literal_hints::*` (equivalence, precedence, runtime-written and late deferral, failures) |
+| D1 | `schemas_rewrite_arm_validators::a_cold_rewrite_compiles_each_arm_once_whatever_the_batch_size` | the other 5 `schemas_rewrite_arm_validators::*` |
+| D2 | `schemas_validation_summary::*` preparation counts | `schemas_validation_summary::*`, CLI `schema_validate_summary::*`, existing `schema_validate*.rs` |
+| D4 | `lazy_positions::counts::*` | `lazy_positions::*` (4 eager-map equivalence tests) |
+| D12 | `schemas_named_type_memo::named_type_memo_reuses_every_path_past_256_files_and_reparses_only_an_edit` | `schemas_named_type_memo::*`, `resolve::named_type_file_memo::*`, loader matrix above, CLI `compose_named_type_import::*` (new) |
+| D13 | `schemas_alphanumeric_check_cache::*` | same module (diagnostics, different options apart, no verdict cache) |
+| P1 | lexical matrix, not a counter (by spec) | `content_policy_duration_parity::*` |
+
+- Registration: every module above ran in this phase's gate runs (checked in the nextest output, for example `branch_admission` 8, `group_branch_lifetime` 2, `runtime_projections` 4, `literal_hints::counted` 4, `compose_named_type_import` 4), and `just check-tier-coverage` reports 0 stranded for both areas. Counter features come from the area recipes: Claudine `claudine --features work-counters`, Darkmatter `work-counters` (phase 2 wiring).
+- Unchanged public behavior (spec acceptance 10) is carried by the existing integration suites, which all passed: diagnostics and file resolution (`compose_schema_cli`, `launch_trigger_schemas`, Darkmatter `schema_validate*`), approval membership and lifecycle ordering (sequence preflight and container tests), retries (`loop_retry_passes`, `container_group_contract`), plus the L2 captures below. No attributable regression found; no repair needed.
+
+### Phase 4 gates (run sequentially, no concurrent work)
+
+| Gate | Result |
+| ---- | ------ |
+| `claudine/ just test` | 11,749 passed, 15 skipped, 0 slow (215 s; phase 3 was 11,745, +4 new) |
+| `claudine/ just lint` | passed (only the existing macOS linker `__eh_frame` note) |
+| `just check-tier-coverage claudine` | 0 stranded |
+| `claudine/ just test-l2` | claudine-cli 289 passed; claudine-gen 3 passed |
+| `darkmatter/ just test` (with `work-counters`, includes DMLS) | 12,954 passed, 10 skipped (80 s) |
+| `darkmatter/ just lint` | passed |
+| `just check-tier-coverage darkmatter` | 0 stranded |
+| `darkmatter/ just test-l2` | 18 + 69 + 3 passed |
+| root `just test test-toolkit` / `just _lint test-toolkit` | 477 passed, 4 skipped / passed |
+| Default build, separate invocation: `cargo build -p darkmatter -p darkmatter-cli -p claudine -p claudine-cli --message-format=json` | lib artifacts' features: `darkmatter` = `[default]`, `claudine` = `[]`; no `work-counters`. Control `cargo check -p claudine --features work-counters` reports it, so the check can see it |
+| Benches with their required features: `cargo check -p darkmatter --benches --features work-counters`, `cargo check -p claudine --benches --features work-counters`, `cargo check -p dmls --benches` | clean |
+
+- No failures, no reruns, nothing load-sensitive. L2 runs use detached tmux (and kitty's `--keep-focus` where present); no window took focus.
+- Headless browser checks not run: nothing in this work renders to a browser.
+- Dependents: this phase changed only a Claudine CLI test file, so no dependent package needed retesting; phase 3's dependent runs still stand.
+- Environments that actually ran: macOS only. No `just cross-check`: the new test uses the portable fake-goose pattern and no path comparison, `cfg(windows)` code, or process handling changed. Linux and macOS are proven by pull-request CI; Windows and WSL2 by the nightly.
+- No `cargo fmt`; the new file was written by hand.
+- Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`, after every edit including this log and the plan): `packages` = `claudine-cli`, `test-toolkit`, `darkmatter`; `change_class` = `package`. The gates could not be skipped, and all of them ran and passed; the Darkmatter and test-toolkit gates above cover the two packages beyond `claudine-cli`.
+
+### Requirement-to-test mapping (phase 4)
+
+| Requirement | Tests |
+| ----------- | ----- |
+| D12 loader wired at the CLI: control launches | `compose_named_type_import::a_valid_named_type_import_launches_the_provider_once` |
+| imported constraint is load-bearing at the CLI | `compose_named_type_import::a_value_the_imported_type_rejects_stops_the_launch` |
+| malformed imported file: located error, no launch | `compose_named_type_import::a_malformed_imported_file_is_a_located_error_and_launches_nothing` |
+| duplicate key in imported file: located error, no launch | `compose_named_type_import::a_duplicate_key_in_the_imported_file_is_a_located_error_and_launches_nothing` |
+| default builds uninstrumented | default-build artifact feature check above |
+
+## Phase 5
+
+- Start revision `51b2e810c` (branch `feat/work-reduction`). Phase 4's two test changes (`claudine/cli/tests/l1/compose_named_type_import.rs`, its `l1/main.rs` line) and its log/plan edits were still uncommitted, so the working tree is phase 4 plus phase 5. Phase 5 changed no Rust source. Host: macOS, 16 cores, `rustc 1.98.1 (48a229cea 2026-09-01)`, `bench` profile.
+- One documentation subagent ran (Markdown only, no builds) while the timing pass ran. Every measurement ran from this session, one at a time, with no build, test, or other measurement running alongside.
+
+### Anchor comparison
+
+Commands (repository root; every bench target was pre-built with `--no-run` first, so nothing compiled during timing; `BENCH_NONINTERACTIVE=1 BENCH_YES=1`):
+
+| Command | Load (1-min) before → after |
+| ------- | --------------------------- |
+| `just _bench darkmatter --bench pipeline_work -- --baseline pipeline-work-pre` | 7.22 → 7.10 (14:56–15:00) |
+| `just _bench claudine --bench pipeline_work -- --baseline pipeline-work-pre` | 7.10 → 6.14 (15:00–15:01) |
+| `just _bench darkmatter --features work-counters --bench pipeline_work_alloc` | 6.05 → 5.88 |
+| `just _bench claudine --features work-counters --bench pipeline_work_alloc` | 5.88 → 5.89 |
+| `just _bench dmls --bench pipeline_work_a3` | 5.89 |
+| `claudine/`: `just test-library --release --features work-counters --run-ignored only --no-capture pipeline_spike_{a4,c1,c3}` | 4.44 → 12.34 (the build raised it; counts and bytes do not depend on load) |
+
+The saved baseline ran at 7.70 → 12.29, so the comparison host was about as loaded as, or slightly less loaded than, the baseline host. That favors the "after" figures a little; the intervals below are what Criterion reported, and no percentage is claimed beyond them. Times are system allocator, default features. Bytes come from the counting benches (warm unless marked).
+
+| Anchor | Before: median (interval) | After: median (interval) | Criterion change (interval, p) | Bytes before → after | Direct work |
+| ------ | ------------------------- | ------------------------ | ------------------------------ | -------------------- | ----------- |
+| A1 corpus validate, 1,000, warm | 23.755 ms (23.535–23.909) | 17.820 ms (17.722–17.956) | −24.4% (−25.4…−23.5), p<0.05 | 88,826,897 → 74,976,218 | `PositionMapBuild` 100 (D4: maps only for documents with problems) |
+| A1 + runtime baseline, warm / cold | 27.808 / 47.181 ms | 22.865 (22.742–22.992) / 41.928 ms (41.652–42.170) | −18.2% / −12.3% (−13.8…−11.0) | 93,888,707 → 80,038,028 / 180,609,812 → 166,761,765 | as above |
+| A2 `implement_plan`, warm / cold | 2.3622 / 65.746 ms | 2.3520 (2.3350–2.3793) / 64.379 ms (63.907–65.026) | +1.1% p=0.61 / −1.4% p=0.08: no change | 4,667,124 → 4,667,124 / 331,148,774 → 331,143,333 | unchanged |
+| A2 other bundles, warm bytes | — | — | within noise except `document_events-warm` (see regressions) | `no_trigger_match` 3,130,659 → 3,129,617; `document_events` 3,209,451 → 3,193,230; `nested_sequence_group` 3,223,037 → 3,196,526 | unchanged counts |
+| A3 `a3x1`, warm / cold | instrumented 19.2 / 73.0 ms | instrumented 17.9 / 69.6 ms | no Criterion target | 52,848,942 → 52,848,942 / 345,580,121 → 345,582,753 | DMLS counters 0 in every warm loop; hovers 66,277 / 69,943 B (unchanged) |
+| A3 `a3x10`, warm / cold | instrumented 42.1 / 95.1 ms | instrumented 38.8 / 91.2 ms | no Criterion target | 98,051,049 → 98,051,049 / 390,782,228 → 390,782,228 | unchanged |
+| A4 sequence preflight (50 steps, 200 legs) | 35.349 ms (35.132–35.599) | 34.425 ms (34.150–34.683) | −2.8% (−3.6…−2.1), p<0.05 | 91,614,330 → 74,802,037 | `PredictionStateBuild` 98 → 0 (C7) |
+| A4 group step (200 legs, cap 4) | — (no timing target) | — | — | 624,837,390 → 192,122,867; peak 149,752,757 → 7,115,564 | `RuntimeSnapshot` 615 → 2, `RuntimeStateBranch` 200 (C1, C3) |
+| A4 total | — | — | — | **716,451,720 → 266,924,904 (−62.7%)** | |
+| A5 event dispatch (100 events) | 130.90 ms (129.78–132.01) | 674.67 µs (669.56–679.47) | −99.48% (−99.49…−99.47), p<0.05 | 1,550,137,044 → 1,315,052 | C2/C4 leaf reads: no whole-payload `hook`/`loop` materialization |
+| A6 shell preparation (100 × 10) | 8.2117 ms (8.1460–8.2866) | 8.1907 ms (8.0992–8.3324) | +0.9% (−0.4…+2.6), p=0.27: no change | 26,709,585 → 26,709,593 | `ExpressionParse` 10,000, unchanged (D8 is its own spec, not built here) |
+
+C1 peaks re-measured in **release** (phase 3's were debug): A4 group step 7.12 MB peak (was 149.75 MB); C1 cap 4 at 10/100/1,000 legs, 0 KB frontmatter payload: 2.45/2.93/6.85 MB (was 3.69/22.60/212.2 MB). One construction per admitted leg (`RuntimeStateBranch` 10/100/1,000), two full snapshots per group at any leg count.
+
+Item cases with a Criterion row (same pass): C2 `hook.tool_name` at 1 MB −99.985%; C4 `loop.count` at 1 MB −99.991%; C5 `evaluate_condition` −41.1% (C4 also serves its condition read); C7 `build_preflight_graph/tasks=100` −47.4%; D1 isolated rewrite −27…−29%, normalize only −25.1%; D2 `validate_only` −23…−25% and `validate_then_presence` −13…−15% (the bench still calls both, which is the library contract; `md schema validate` itself now prepares once); D4 `schema_free_validate` −89.1%, `a1_validate` −21.1%; D12 `edit_and_reuse/300` −8.6% (`NamedTypeTableParse` 300 → 1); D13 `suggested_imports/100` −79.6% (`AlphanumericCheckCompile` 101 → 1). Closed items C8, D3, D6, D7, D9, D10, D11, X4 are within noise or a few percent either way with unchanged counts; X3 −5.2%.
+
+### Regressions checked
+
+Five cases reported a slowdown in the full pass. I re-ran only those cases once against `pipeline-work-pre` (`cargo bench -p darkmatter --bench pipeline_work -- --baseline pipeline-work-pre <case>`, one invocation per case, because the bench pre-filter is a plain substring; load 5.48 → 4.42). I then judged each by its direct work:
+
+| Case | Full pass | Re-run | Direct work vs. before | Verdict |
+| ---- | --------- | ------ | ---------------------- | ------- |
+| A2 `document_events-warm` | +3.6% (p=0.01) | +0.9% (p=0.25) | counts equal, bytes −16 KB | not reproducible |
+| D4 `a1_no_positions_control` | +7.4% | −0.05% (p=0.92) | 73,834,949 → 73,830,949 B, same counts | not reproducible |
+| D12 `edit_and_reuse/10` | +6.1% | +0.3% (p=0.69) | `NamedTypeTableParse` 1 → 1 | not reproducible |
+| D8 `template_holes/1,10,50` | +1…+5% | +1.7…+2.7% | `ExpressionParse` 3 per hole, unchanged; template code not in this diff | not attributable |
+| D5 `conditionals/1000` | +9.6% | +6.8% (+5.5…+8.1) | visits 1,504,497, allocations 184,680, bytes 58,716,764, peak 3,045,203: identical to the spike's row; lifecycle call-check code not in this diff (`git diff d7ea96a1f --stat -- darkmatter/lib/src` touches only `markdown/schemas/` and `work_counters.rs`) | reproducible but not attributable: same work, untouched code |
+
+- No repair was made. D5's quadratic case allocates 58.7 MB per run and is the most sensitive to a loaded host's memory bandwidth. A real D5 change belongs to its own measurement, which this plan excludes (no repeated campaigns).
+- The A2 re-run's first attempt went through `just _bench` with a `|`-joined filter. `just` passed it unquoted, so the shell read `|` as a pipe and Criterion panicked on a closed stdout. Nothing was saved (`--baseline` only reads the baseline). The direct `cargo bench` runs above replaced it. For later readers: pass one case per invocation, or call `cargo bench` directly.
+
+### Documentation reconciliation
+
+A documentation-only subagent checked every page this feature touched against the code. Fixes:
+
+- `claudine/docs/cli/sequence.md`:
+  - a YAML example's closing fence carried prose on the same line, so the block never closed; split it.
+  - The example said `model: big  # predicted as written`, which is wrong when `agent` reads a runtime-written key: dependencies are tracked per task (`providers.rs::defer_runtime_written`), so both hints move to launch. The text and comment now say so (phase 3 recorded this rule as a decision; the doc had drifted from it).
+- `claudine/docs/topics/flow-control/sequences.md`: added a Mermaid flowchart of group admission (seed once → admit next leg → build branch → run → keep result and writes → drop branch → next; never-admitted legs build nothing).
+- `tools/test-toolkit/README.md`: said "a library never does" declare the counting allocator; Claudine's lib unit-test binary does under `cfg(all(test, feature = "work-counters"))`. Corrected.
+- `.claude/skills/claudine/SKILL.md`: the same per-task `agent`/`model` rule in the provider-prediction paragraph.
+- `darkmatter/docs/topics/schemas/definition.md`: a second fence with trailing prose (Candidate Linting). It predates this feature, but it broke the fence pairing of everything after it on a page this feature edits.
+
+Checks that needed no change: C2/C3/C4/D1/D2/D4/D12/D13/P1 text matches the code; no `docs/` page or README names a feature or fix snapshot; no current doc describes the X2 shared completion walk (the existing "completion walks the glob" lines describe today's behavior, so nothing needs a **planned** marker); `performance-testing.md` already lists the four allocator owners correctly; no README overview claim changed; no crate was added, so no dependency doc changed.
+
+### Phase 5 gates (sequential, nothing else running)
+
+| Gate | Result |
+| ---- | ------ |
+| `claudine/ just test` | 11,749 passed, 15 skipped (210 s) |
+| `claudine/ just lint` | passed (only the existing macOS linker `__eh_frame` note) |
+| `just check-tier-coverage claudine` | 0 stranded |
+| `darkmatter/ just test` (with `work-counters`, includes DMLS) | 12,954 passed (2 slow), 10 skipped (108 s); run because `definition.md` changed and the scope calculator lists `darkmatter` |
+| root `just test test-toolkit` | 477 passed (4 slow), 4 skipped; run because its README changed |
+
+- No failures and no reruns.
+- No `just test-l2`, `darkmatter/ just lint`, or dependent-package runs: phase 5 changed no Rust source, so phase 4's L2, lint and dependent results still apply to identical code.
+- No cross-OS check: no code changed.
+- Scope calculator after every phase-5 edit (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`): `packages` = `claudine-cli`, `test-toolkit`, `darkmatter`; `change_class` = `package`. Not skippable; the gates above ran. `claudine-cli` is there because of phase 4's still-uncommitted test file.
+
+### Closure audit
+
+Spec acceptance list against the evidence:
+
+| # | Criterion | Evidence | State |
+| - | --------- | -------- | ----- |
+| 1 | Tooling compiles away by default | phase 4 default-build artifact check (`darkmatter` = `[default]`, `claudine` = `[]`); no Rust changed since | met |
+| 2 | Every C1–C8, D1–D13, X1–X4 has a report row, limitations kept | `spike-report.md` → "Current outcome (2026-10-27)" (phase 1) | met |
+| 3 | `pipeline-work-pre` saved and compared on the same host, features, profile, workloads; revision recorded | phase 1 (saved at `d7ea96a1f`), phase 5 (compared at `51b2e810c` plus phase 4 test-only edits) | met; both passes were under moderate load (recorded above) |
+| 4 | `just test` and `just lint` pass in darkmatter, claudine, test-toolkit; counters have empty disabled expansions | phase 4 and phase 5 gates; `note_work!` expands to a `cfg`-gated statement | met |
+| 5 | Each implemented item has a removed-work L1 regression and behavior coverage | phase 4 → "Coverage audit (item-to-test map)"; every module ran in this phase's gate | met |
+| 6 | D12, D13, P1 implemented | phase 2 (D12, P1), phase 3 (D13) | met |
+| 7 | Log records each anchor's before/after timing, bytes, uncertainty; reproducible attributable regressions resolved | "Anchor comparison" and "Regressions checked" above | met; D5's reproducible slowdown has unchanged work and untouched code, so it is not attributable |
+| 8 | test, test-l2, lint pass in every touched area including DMLS; default builds proven separately; L1 under 5 s; no focus taken | phase 4 (all of these), phase 5 L1 gates | met |
+| 9 | C6, D3, D8 terminally classified; qualifying items have dated active specs; X2 design delivered; no item awaits a ruling | C6 measured, no change; D3 → `2026-10-27-shared-launch-trigger-discovery`; D8 → `2026-10-27-shell-site-placeholder-parse-once` (both exist); `completion-walk-design.md` marked "candidate design, not implemented"; spec `needs_rulings: false` | met |
+| 10 | Public behavior unchanged except the reductions | existing integration suites and L2 (phase 4) green | met, with the recorded departures below |
+
+Scope checks:
+
+- No excluded optimization was built. `git diff d7ea96a1f --name-only` touches nothing in `claudine/cli/src/completion/` (X2), `claudine/lib/src/composition/schema/` (D3 trigger discovery), or Darkmatter's template code (D8).
+- No X1 cache was duplicated: DMLS source is not in the diff.
+- No formatting churn: `git diff -w` differs from `git diff` by 18 changed lines across 55 Rust files, all re-indentation inside rewritten blocks. No `cargo fmt` was run in any phase.
+- No unrelated production change. The production edits outside the item surfaces are the phase-1 lint attribute (`render.rs`) and the `manifest_dir!()` path spellings, both recorded as decisions.
+
+Departures from the snapshot spec and plan (the spec is left as written; each is in `decisions_for_review`):
+
+- D2's summary carries only `has_schema`, not the plan's "presence and timing metadata".
+- D13 lives in `simplified/convert.rs`, not `resolve.rs`.
+- D1 aligns root-level union-arm origins with validation (a small behavior fix). Property-level arms keep the document folder for `match()`, as before.
+- C3 added an early return for tasks with no `when:`.
+- C7 counts state builds per task, not per key.
+- Lifecycle-action and body `loop.*` reads stay eager (C4 covers conditions only).
+- C1's CLI evidence is a `test-fixtures` seam, not counters.
+
+**Implementation complete, ready for review.** Evidence limitations: performance figures come from one macOS host under moderate load (1-minute load about 6–12) in both passes; A3 has only instrumented elapsed times; Windows, Linux and WSL2 evidence comes from CI, not this phase.

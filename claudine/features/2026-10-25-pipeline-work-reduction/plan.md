@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-10-26
 total_phases: 5
-phase: 4
+phase: 6
 agent: codex/gpt-6.1-sol
 yolo: true
 human_review: false
@@ -24,6 +24,7 @@ packages:
 - darkmatter-cli
 - claudine-cli
 - content-policy
+- test-toolkit
 source_files_during_phase_2:
 - claudine/cli/src/commands/wrap/sequence/container.rs
 - claudine/cli/src/commands/wrap/sequence/task_run.rs
@@ -103,6 +104,98 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/claudine/SKILL.md
 - .claude/skills/darkmatter/schema.md
+source_files_during_phase_4:
+- claudine/cli/tests/l1/compose_named_type_import.rs
+- claudine/cli/tests/l1/main.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+- claudine/docs/cli/sequence.md
+- claudine/docs/topics/flow-control/sequences.md
+- darkmatter/docs/topics/schemas/definition.md
+- tools/test-toolkit/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/claudine/SKILL.md
+source_code:
+- claudine/cli/src/commands/wrap/sequence/container.rs
+- claudine/cli/src/commands/wrap/sequence/task_run.rs
+- claudine/cli/tests/l1/compose_named_type_import.rs
+- claudine/cli/tests/l1/group_branch_lifetime.rs
+- claudine/cli/tests/l1/main.rs
+- claudine/lib/src/composition/lifecycle/executor.rs
+- claudine/lib/src/composition/looping/container.rs
+- claudine/lib/src/composition/looping/expression.rs
+- claudine/lib/src/composition/looping/expression/tests.rs
+- claudine/lib/src/composition/looping/expression/tests/loop_leaf_reads.rs
+- claudine/lib/src/composition/runtime_state.rs
+- claudine/lib/src/composition/runtime_state/tests.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/preflight/providers.rs
+- claudine/lib/src/composition/sequence/preflight/providers/tests.rs
+- claudine/lib/src/composition/sequence/preflight/providers/tests/literal_hints.rs
+- claudine/lib/src/composition/sequence/task/container_regressions.rs
+- claudine/lib/src/composition/sequence/task/group.rs
+- claudine/lib/src/composition/sequence/task/group/branch.rs
+- claudine/lib/src/composition/sequence/task/mod.rs
+- claudine/lib/src/composition/sequence/task/sequence.rs
+- claudine/lib/src/composition/sequence/task/templates.rs
+- claudine/lib/src/composition/sequence/task/tests.rs
+- claudine/lib/src/composition/sequence/task/tests/branch_admission.rs
+- claudine/lib/src/composition/sequence/task/tests/pipeline_spike.rs
+- claudine/lib/src/composition/sequence/task/tests/runtime_projections.rs
+- claudine/lib/src/dispatch/expression.rs
+- claudine/lib/src/dispatch/expression/tests.rs
+- claudine/lib/src/dispatch/expression/tests/hook_leaf_reads.rs
+- claudine/lib/src/pipeline_spike/tests.rs
+- claudine/lib/src/work_counters.rs
+- claudine/lib/tests/l1/context_construction_guard.rs
+- claudine/lib/tests/l1/host_catalog.rs
+- darkmatter/cli/src/commands/render.rs
+- darkmatter/cli/src/commands/schema/validate.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/cli/tests/l1/schema_validate_summary.rs
+- darkmatter/justfile
+- darkmatter/lib/Cargo.toml
+- darkmatter/lib/benches/pipeline_work_support/mod.rs
+- darkmatter/lib/benches/schema_validation.rs
+- darkmatter/lib/src/markdown/schemas/bound_operands.rs
+- darkmatter/lib/src/markdown/schemas/mod.rs
+- darkmatter/lib/src/markdown/schemas/positions.rs
+- darkmatter/lib/src/markdown/schemas/resolve.rs
+- darkmatter/lib/src/markdown/schemas/rewrite.rs
+- darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+- darkmatter/lib/src/markdown/schemas/tests/lazy_positions.rs
+- darkmatter/lib/src/markdown/schemas/tests/mod.rs
+- darkmatter/lib/src/markdown/schemas/validate.rs
+- darkmatter/lib/src/work_counters.rs
+- darkmatter/lib/tests/l1/content_policy_duration_parity.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/schemas_alphanumeric_check_cache.rs
+- darkmatter/lib/tests/l1/schemas_named_import_errors.rs
+- darkmatter/lib/tests/l1/schemas_named_type_memo.rs
+- darkmatter/lib/tests/l1/schemas_rewrite_arm_validators.rs
+- darkmatter/lib/tests/l1/schemas_validation_summary.rs
+documentation:
+- .claude/skills/claudine/SKILL.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/rust-testing/performance-testing.md
+- claudine/docs/cli/sequence.md
+- claudine/docs/topics/configuring-actions.md
+- claudine/docs/topics/flow-control/looping.md
+- claudine/docs/topics/flow-control/sequences.md
+- claudine/features/2026-10-25-pipeline-work-reduction/completion-walk-design.md
+- claudine/features/2026-10-25-pipeline-work-reduction/spike-report.md
+- claudine/features/2026-10-27-shared-launch-trigger-discovery/spec.md
+- claudine/features/2026-10-27-shell-site-placeholder-parse-once/spec.md
+- content-policy/docs/topics/policy-lifecycle.md
+- darkmatter/docs/inline/schema-validation.md
+- darkmatter/docs/topics/schemas/definition.md
+- tools/test-toolkit/README.md
+completed_phase: 5
+implemented: true
 ---
 
 # Pipeline work reduction implementation plan
@@ -580,7 +673,7 @@ The coordinator performs these two tasks sequentially: complete the coverage
 audit, then run the consolidated required checks. Do not run area-wide checks
 concurrently with focused agents or each other.
 
-- [ ] **Audit behavior coverage**
+- [x] **Audit behavior coverage**
   - Build an item-to-test map for C1/C2/C3/C4/C7/D1/D2/D4/D12/D13/P1 and
     the public loader matrix. Verify tests are registered in consolidated
     binaries and counter features are explicitly enabled through area recipes.
@@ -592,7 +685,7 @@ concurrently with focused agents or each other.
     integration tests. Preserve entry-point parity across library, CLI, and
     affected DMLS consumers. Repair any attributable regression within scope.
 
-- [ ] **Run required checks**
+- [x] **Run required checks**
   - Sequentially run `just test` and `just lint` in `darkmatter/` and
     `claudine/`; include the counter-enabled L1 cases using their supported
     package-qualified feature arguments. Run `just test-l2` where affected
@@ -618,7 +711,7 @@ remain uninstrumented, and each selected item is behaviorally complete.
 
 ### Wave 7 — Final evidence and documentation
 
-- [ ] **Compare anchor results**
+- [x] **Compare anchor results**
   - On the baseline host/toolchain/profile/features/workloads, run the same
     target-specific timing commands with `--baseline pipeline-work-pre` and
     the existing allocation/counting targets. Run measurements sequentially
@@ -632,7 +725,7 @@ remain uninstrumented, and each selected item is behaviorally complete.
     byte assertions, or statistical gates. Repairs rerun only affected checks;
     repeated complete measurement campaigns are not part of this plan.
 
-- [ ] **Reconcile current docs**
+- [x] **Reconcile current docs**
   - May run concurrently with measurement only as documentation work with no
     builds. Reconcile touched canonical pages in `claudine/docs/topics/` and
     `darkmatter/docs/topics/schemas/`, plus relevant skills. Explain behavior
@@ -646,7 +739,7 @@ remain uninstrumented, and each selected item is behaviorally complete.
 
 ### Wave 8 — Closure audit
 
-- [ ] **Prepare review record**
+- [x] **Prepare review record**
   - Reconcile the spec acceptance list against the item-to-test map, check
     results, anchor comparison, refreshed report, conditional active specs,
     and `completion-walk-design.md`. Record departures from the snapshot spec

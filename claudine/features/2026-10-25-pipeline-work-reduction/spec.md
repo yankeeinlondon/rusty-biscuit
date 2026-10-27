@@ -39,6 +39,8 @@ related:
     - 2026-10-25-host-function-catalog-leak
     - 2026-10-25-schema-diagnostic-provenance
     - 2026-10-25-shared-acyclic-definitions
+implemented: true
+implemented_by: "claude/opus"
 ---
 
 # Pipeline work reduction: measure, then remove repeated work
