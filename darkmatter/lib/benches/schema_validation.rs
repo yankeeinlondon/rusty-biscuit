@@ -36,7 +36,7 @@ use darkmatter::markdown::schemas::{DarkmatterSchemas, reset_process_caches_for_
 use serde_yaml_ng::Value as YamlValue;
 use std::collections::HashMap;
 use std::hint::black_box;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const CORPUS_SIZE: usize = 1_000;
 
@@ -335,7 +335,7 @@ const FROZEN_CASES: [(&str, &str); 2] =
     [("unrolled_depth5", "lifecycle.yaml"), ("recursive", "lifecycle-recursive.yaml")];
 
 fn frozen_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/recursive_schema_frozen")
+    biscuit_test_harness::manifest_dir!().join("tests/fixtures/recursive_schema_frozen")
 }
 
 /// Every event typed as the fixture's `stack`, and `loop` as its `loop`.
