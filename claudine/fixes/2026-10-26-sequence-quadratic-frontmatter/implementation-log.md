@@ -59,8 +59,6 @@ docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/darkmatter/SKILL.md
     - .claude/skills/darkmatter/frontmatter.md
-message_to_agent: |-
-    Phase 3 landed all three repairs serially (one crate; interface changes). Beyond the plan, StackExecutionContext/StackInputs/MdStackContext.frontmatter are now &SharedFrontmatter, and three sites Phase 1 had not counted were fixed: the load_sequence globals copy, classify_reads scanning the whole step state for an expression `with` hint, and per-group re-scans of the owner document for retired names. Counter semantics changed: LiveFrontmatterCopy now counts JSON nodes deep-copied into leg cells (the group-start view's owned values), and the new LiveFrontmatterView counts one per leg cell. Phase 1's C1 LiveFrontmatterCopy rows are not comparable by value. Wave 5 must also replace pipeline_spike's `fixture.frontmatter.clone()` C1 probe (task/tests/pipeline_spike.rs), which still clones a Map, with the real cell construction (SharedFrontmatter view clone). claudine/lib/Cargo.toml now declares [package.metadata.ci.tests] features = ["work-counters"], so `just test` in claudine/ runs the counted regressions (preflight/tests/scaling.rs, task/tests/leg_views.rs). Deliberately left sites are listed in the log's Phase 3 "Sites deliberately left" table; docs (claudine/docs/topics/flow-control/sequences.md and the claudine skill) are still Phase 4's.
 source_files_during_phase_3:
     - darkmatter/lib/src/markdown/compose/context/shared_frontmatter.rs
     - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs
@@ -130,6 +128,113 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/frontmatter.md
     - .claude/skills/darkmatter/compose.md
+source_files_during_phase_4:
+    - claudine/lib/src/composition/sequence/task/container_regressions.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/task/tests/pipeline_spike.rs
+    - claudine/lib/src/pipeline_spike.rs
+    - claudine/cli/tests/l1/sequence_containers.rs
+docs_updated_during_phase_4:
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/features/2026-10-25-pipeline-work-reduction/spike-report.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/architecture.md
+source_code:
+    - claudine/lib/src/work_counters.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/reapproval.rs
+    - claudine/lib/src/composition/sequence/preflight/providers.rs
+    - claudine/lib/benches/pipeline_work_alloc.rs
+    - darkmatter/lib/src/work_counters.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+    - darkmatter/dmls/tests/l1/registry_preparation.rs
+    - darkmatter/dmls/tests/l1/startup_preparation.rs
+    - darkmatter/lib/src/markdown/compose/context/shared_frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/context/mod.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+    - darkmatter/lib/src/lifecycle/executor.rs
+    - darkmatter/lib/src/lifecycle/executor/host.rs
+    - darkmatter/lib/src/lifecycle/executor/shell.rs
+    - darkmatter/lib/src/lifecycle/executor/tests.rs
+    - darkmatter/lib/src/lifecycle/md_host.rs
+    - darkmatter/lib/src/lifecycle/md_host/tests.rs
+    - darkmatter/lib/tests/l1/lifecycle_event_binding.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/binding_contract.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mutation_visibility.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/templates.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+    - darkmatter/lib/src/lifecycle/preflight/shell_walk.rs
+    - darkmatter/lib/tests/l1/shell_result_values.rs
+    - claudine/lib/Cargo.toml
+    - claudine/lib/src/pipeline_spike/tests.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/sequence/expr.rs
+    - claudine/lib/src/composition/sequence/source.rs
+    - claudine/lib/src/composition/sequence/formal.rs
+    - claudine/lib/src/composition/sequence/preflight/runtime_fixture.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests/scaling.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+    - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+    - claudine/lib/src/composition/lifecycle/tests/break_prep.rs
+    - claudine/lib/src/composition/lifecycle/tests/container_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+    - claudine/lib/src/composition/looping/container.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/tests/leg_views.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline/tests.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/composition/tests.rs
+    - claudine/justfile
+    - claudine/lib/src/composition/sequence/task/container_regressions.rs
+    - claudine/lib/src/composition/sequence/task/tests/pipeline_spike.rs
+    - claudine/lib/src/pipeline_spike.rs
+    - claudine/cli/tests/l1/sequence_containers.rs
+documentation:
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/features/2026-10-25-pipeline-work-reduction/spike-report.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/frontmatter.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/claudine/architecture.md
+completed_phase: 4
+implemented: true
+pipeline_refreshed:
+    - 2026-10-25-pipeline-work-reduction
+decisions_for_author: []
 ---
 
 # Implementation Log for 2026-10-26-sequence-quadratic-frontmatter (4 phases)
@@ -708,8 +813,13 @@ each event's stack copies nothing. The CLI's one-shot root sites (`initialize`,
 | Runtime `prompt_references.iter().find` (`task/mod.rs`) | Prompt launch after preflight is out of scope (spec). Each search is a path-and-position compare per distinct reference, beside a provider launch. |
 | Loop-pass copies (`finish_container_pass`, `open_loop`, `ActionStaging`) | One copy per loop pass, which does not grow with the step count. |
 | A ternary `set` value's state | It still materializes the step state once, because `FrontmatterSeedState` owns a `HashMap`. Plain commands, including the measured `SQ-set` shape, no longer do. |
+| *(Note added in review 1, R1-F1)* | The ternary `set` row above is now repaired: `FrontmatterSeedState` holds a `SharedFrontmatter`, preflight passes the step view, and Darkmatter's `execute_set_shell_values` no longer copies the whole state for plain or conditional values. |
+| *(Note added in review 1, R1-F1.10–R1-F1.14)* | The loop-pass row above was wrong: each copy is the size of the container's whole state, which holds the `sequence:` list, and a sequence can declare N looping containers, so the total grew as N². It is now repaired: `open_loop` and `finish_container_pass` read the shared view (runtime writes in its overlay), `ActionStaging` stages into a view clone (`ActionTarget`), and `prewarm_container`, the CLI root pre-warm, and the preflight pre-warm walk build `PrewarmInputs` over a view (`PrewarmInputs::shared`), so the "`to_map()` once per `initialize`/`start`" boundaries listed earlier no longer copy. The completion instance in `loop_control.rs` stays: it runs once per prompt launch, which the spec leaves out of scope, and the schema validation it feeds reads the whole instance anyway. |
 | Referenced-document decode in `load_sequence` | One copy of the *referenced* document per reference, which is linear. |
 | `classify_reads`'s document path (`raw_state`) | A prompt document's own state, constant in the sequence size (Track 5, C7). |
+| *(Note added for R1-F1.16)* Referenced data documents in a nested preparation (`Loader::load_data_document`) | Each nested preparation's fresh `Loader` still loads (and clones from its per-walk cache) a `kind: task`/`group`/`group-catalog` file its own executable references. That is one parse of the *referenced* file per container, linear in the sibling count; it grows as N² only if N siblings reference one shared file whose size also grows with N (a catalog of N groups). Routing it through `NestedSources` would still clone the whole `Value` per preparation and would change the read-failure error, so it is left. |
+| *(Note added for R1-F1.16)* `RuntimeState::snapshot` per child (`sequence_binding`, `mutation_snapshot`, `mutation_delta`, the step loop's `SequenceBinding::step`) | After the nested-source memo, the residual dominant caller at 1500 sibling containers (about a third of samples). Each child copies the enclosing container's `seq.outputs`, which grows by one result per completed sibling. These are runtime results, not definitions, so it is a different class from this fix; measured 0.19 / 0.35 / 0.72 / 1.76 s at 100 / 200 / 400 / 800 containers. |
+| *(Note added for R1-F1.17)* | The R1-F1.16 row on referenced data documents and the "Referenced-document decode in `load_sequence`" row are now repaired. A `Loader` shares each parsed referenced document (`ReferencedDocument`, by `Arc`) instead of cloning it per reference; a catalog step borrows its one entry through a lazy name index; a referenced sequence file is no longer parsed a second time (`plan_referenced_sequence`); and nested preparations reuse the invocation's parse through `NestedSources` when the walk's own bytes are unchanged, with the retired-read check memoized per retired-name presence set. A missing file still fails in `resolve_reference`, and an unreadable one goes to `data::load_document` unmemoized, so the error text is unchanged. The whole-document copy for a whole-document sequence reference stays: it is that step's own definition. |
 
 ### Design Decisions
 
@@ -855,3 +965,212 @@ declaration.
 - Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`): `packages` = claudine, claudine-cli, darkmatter, darkmatter-cli, test-toolkit; `change_class` = package. Gates were run, not skipped. The worktree still holds Phase 2's uncommitted edits.
 - Cross-OS: no paths, processes, or `cfg`-specific code changed. The only path code is the existing `canonical` helper reused for the owner memo key. No cross-check was run.
 - Wave 3 checkpoint: every Phase 1 site in the source-to-repair map is repaired, except the rows Phase 1 assigned to Track 5. The three sites this phase found are repaired too. What remains is in "Sites deliberately left", each with its reason.
+
+## Phase 4
+
+Waves 4–6: behavioral verification, documentation, allocation evidence, and
+final gates. I did it serially with no subagents, because the measurements must
+run alone on the host and the test additions were small.
+
+### Wave 4 — Behavioral verification
+
+Five of the plan's six regression cases already had tests; I added the two
+that were missing, or only partly covered.
+
+| Plan case | Test | State |
+| --------- | ---- | ----- |
+| Sibling reads after another leg's private write | `parallel_groups::a_sibling_mutation_is_invisible_until_the_group_completes` (runtime `set`, gated, deterministic); `container_regressions::nested_group_legs_keep_memory_private_but_reread_shared_files_between_steps` | existing |
+| Small live-frontmatter writes over a large inline definition | `container_regressions::small_leg_writes_stay_private_over_a_large_inline_definition` (**new**, L1, F1 in-process): 40 legs, `max_parallel: 4`, 80 KB of group variables in the inline definition; every leg `set_frontmatter`s the same document key in `setup`, then reads it back in `teardown`; asserts each leg read its own value and the authored `title`, the write reached the file, and the file's `sequence:` is unchanged | added |
+| Disk write followed by the next step's reread | `sequence_containers::a_leg_write_reaches_disk_for_the_next_step_but_not_its_sibling` (**new**, L1, F3 through the `claudine sequence` binary, `CliProcessFixture`): a leg writes `sequence.md`; the sibling after it prints `initial`; the next root step prints `written` | added |
+| Nested-step file visibility | `container_regressions::nested_group_legs_keep_memory_private_but_reread_shared_files_between_steps` | existing |
+| Failed group publication | `container_group_contract::group_finalize_error_discards_leg_mutations_and_result`; `nested_sequences::failure_stops_nested_sequence_and_publishes_nothing`; `container_regressions::unhandled_nested_failure_finalizes_innermost_first_and_never_starts_later_children` | existing |
+| Preparation after a changed-file reread keeps frozen membership | `group_preparation_contract::{new_child_*_is_refused, new_child_command_is_blocked_before_start_and_publishes_nothing, retry_rereads_source_without_repeating_initialize, inline_group_rereads_variables_and_lifecycle_after_initial_audit, external_*}`; CLI `root_retry_keeps_approval_closed_when_a_referenced_task_changes` | existing |
+
+The in-process test needed `Fixture::mutating_its_directory()` (test-only), which roots
+the effect engine at the fixture directory so a `set_frontmatter` may target
+the sequence document; the default engine root is a separate temp dir.
+
+**The new in-process test is load-bearing.** I temporarily made every leg share cell 0
+(`live_cells.get(0)` in `group.rs`), and it failed on 3 of 3 runs (legs 0,
+10, and 20 read a sibling's write). Then I restored the file.
+
+The existing suites ran unchanged: `just test-library --features work-counters
+composition::sequence composition::lifecycle composition::looping
+runtime_state` passed all 1,486 tests.
+
+### Documentation
+
+- `claudine/docs/topics/flow-control/sequences.md`: a new "What a leg sees"
+  subsection under Groups covers private in-memory state versus the shared
+  file, nested steps, a Mermaid diagram, and the CLI test's example with its
+  output. It also explains that a leg's view is not a copy. A new
+  static-preflight bullet states that the walk reads the document's
+  definitions once and checks each step against that shared state plus its
+  `seq` row. Neither change promises new behavior; both describe how the
+  view and the walk are formed.
+- `.claude/skills/claudine/architecture.md` § Sequences: the preflight seed
+  and overlay (`step_seed`, `overlay_derived`, `classify_reads`), the
+  leg-cell view, `&SharedFrontmatter` on the stack context, and the counters
+  and tests that guard them.
+- No README change: no public behavior changed.
+
+### Wave 5 — Allocation evidence
+
+`pipeline_spike.rs`: the C1 and A4 `one-live-frontmatter-copy` probes
+(`fixture.frontmatter.clone()`, a whole `Map`) are replaced by
+`one-live-frontmatter-view`, which times `Mutex::new(view.clone())` over the
+group-start view, exactly as `group.rs` builds a cell. The module doc's
+reproduction command is now the nextest recipe. The bench
+(`pipeline_work_alloc.rs`) already measures through the production preflight
+path and has no view probe, so it is unchanged.
+
+Commands, run one at a time on this macOS host (load average 7–25 while
+they ran; times are context only):
+
+```sh
+cargo bench -p claudine --features work-counters --bench pipeline_work_alloc -- C7   # also A6, A4, SQ
+# from claudine/
+just test-library --release --features work-counters --run-ignored only --no-capture pipeline_spike_c1   # also _a4, _c3
+```
+
+| Row | Before (Phase 1) | After |
+| --- | ---------------: | ----: |
+| C7 prompt preflight, 100 tasks: bytes | 63.04 MB (630 KB/task) | 43,933,686 B (439.3 KB/task) |
+| C7 prompt preflight, 1,000 tasks: bytes | 2,330.0 MB (2,330 KB/task) | 425,932,685 B (425.9 KB/task) |
+| C7 per-task ratio 1,000 : 100 | 3.70 | **0.9695**: `abs(0.9695 − 1) = 0.031 ≤ 0.10` ✔ |
+| C7 peak, 100 / 1,000 | — | 1.33 MB / 5.72 MB |
+| C7 `PreflightStepFrontmatterNodes` 10/100/1,000 | 559 / 32,689 / 3,026,989 | 280 / 2,890 / 28,990 (29 per step) |
+| C7 `PromptReferenceCompare` 10/100/1,000 | 17 / 197 / 1,997 | 8 / 98 / 998 |
+| A6 `dm.ExpressionParse`, 10 / 100 steps | 1,900 / 109,000 | **1,000 / 10,000**, 100 per step at both ✔ |
+| A6 `dm.DeferredRootScanParse` | 1,100 / 101,000 | 200 / 2,000 |
+| A6 bytes | 3.97 MB / 92.12 MB | 3.19 MB / 26.66 MB |
+| A4 preflight (50 steps, 200 legs) | 115.9 MB, peak 22.5 MB | 91.6 MB, peak 22.4 MB |
+| A4 group step (200 legs) | 728.2 MB, peak 190.0 MB | 624.8 MB, peak 150.0 MB |
+| A4 one leg cell | (a 100 KB+ map copy) | 288 B, 2 allocations |
+| SQ-with 10 / 100 steps: bytes | — | 1.60 MB / 14.01 MB |
+| SQ-set 10 / 100 steps: bytes | — | 1.52 MB / 13.68 MB |
+| C1 one leg cell, 10 / 100 / 1,000 legs, payload 0 or 100 KB | 7.65 KB / 48.2 KB / 455.0 KB | **288 B at every size and payload** ✔ |
+| C1 group-step peak, payload 0 KB, 10 / 100 / 1,000 legs | 3.82 / 27.75 / 669.5 MB | 3.69 / 22.60 / 212.2 MB |
+| C1 group-step bytes, payload 0 KB | — | 8.92 / 56.50 / 532.9 MB |
+| C1 counters per run | `LiveFrontmatterCopy` = legs (one per copy) | `LiveFrontmatterView` = legs; `LiveFrontmatterCopy` = legs (one node each: the group-start view owns no values in this fixture) |
+| C3 nested-sequence-of-3 `PreflightStepFrontmatterNodes` | 65 | 41 |
+
+**The three scaling criteria pass:**
+
+1. Shell `ExpressionParse` per step is equal at 10 and 100 steps (100 and 100).
+2. Per-leg view construction is constant at 10 and 100 legs. The view is
+   288 B whatever the leg count or payload, and `leg_views` (L1) asserts equal
+   copied nodes per leg.
+3. Prompt preflight bytes per task differ by 3.1% between 100 and 1,000
+   tasks, measured on full-preflight rows with nothing subtracted.
+
+**The remaining runtime-branch costs** are reported separately, as the plan
+asks. Each declared leg still gets a `RuntimeState::from_snapshot` branch
+before admission: 103 KB per leg in C1 (`one-runtime-branch`), and 608 KB in
+A4, where the branch carries 49 committed outputs. That accounts for C1's
+remaining 212 MB peak at 1,000 legs and A4's 150 MB. These are Track 5's C1
+and C3. Both are linear in the leg count.
+
+Every measurement test finished in under 1 s (C1 0.18 s, A4 0.10 s, C3 0.03 s),
+so none needed splitting. I also added the before/after table and the
+commands to `claudine/features/2026-10-25-pipeline-work-reduction/spike-report.md`,
+in a new dated section that leaves the historical rows untouched.
+
+### Design Decisions
+
+1. **The C1 and A4 cell probes time the cell, not a stand-in**
+   - **decision:** Probe `Mutex::new(view.clone())` over a
+     `SharedFrontmatter::from(fixture.frontmatter.clone())` view, which is
+     what `Fixture::execute_step` seeds as the live cell and what `group.rs`
+     clones per leg.
+   - **alternatives considered:** Keep the `Map` clone as a historical probe
+     (it would measure code the executor no longer runs; the plan rules it
+     out); probe through the whole group run only (it cannot isolate one
+     cell from the runtime branch).
+   - **why:** The spec asks for a bytes probe of per-leg view size, and this
+     is the exact construction.
+   - **downsides:** In production the group-start view may own values that
+     earlier events wrote, and a cell copies those (counted by
+     `LiveFrontmatterCopy`). This fixture's view owns none, so the probe
+     shows the floor.
+2. **Disk-write regression through the CLI**
+   - **decision:** Test "a leg's write reaches disk and the next step rereads
+     it" with one `CliProcessFixture` test, and test sibling privacy of live
+     writes in-process.
+   - **alternatives considered:** In-process only (the fixture runs one step
+     and cannot reread between root steps); a CLI matrix (adds spawns and
+     no new coverage).
+   - **why:** The root runner's reread lives in the CLI's sequence loop,
+     which only the binary exercises.
+   - **downsides:** One more process spawn, about 1 s.
+3. **Bench unchanged**
+   - **decision:** Leave `pipeline_work_alloc.rs` as it is.
+   - **alternatives considered:** Add a view probe to the bench (a bench
+     target cannot reach the crate-private fixture).
+   - **why:** Its rows already run the production preflight entry points.
+   - **downsides:** none.
+
+4. **Review 1: shell assignments retain the full performance requirement**
+   - **decision:** Conditional and plain shell assignments must read shared
+     frontmatter through resolution and execution without materializing the
+     enclosing sequence. The remaining conditional preflight copy and the
+     runtime shell-value adapter's whole-state copy are part of this repair.
+   - **alternatives considered:** Keep only the plain-command preflight
+     optimization (leaves requested scope unfinished); remove `sequence` from
+     the state (changes authored-data lookup); copy an inferred subset of
+     keys (adds dependency analysis where the existing shared view suffices).
+   - **why:** The spec explicitly forbids copying other steps' definitions.
+     Review probes through public APIs reproduced sequence-size-dependent
+     copies for conditional preflight and for both runtime assignment forms.
+     Phase 3's wider-change cost does not justify narrowing that contract.
+   - **downsides:** The repair must adapt Darkmatter's shell-value seed-state
+     boundary as well as Claudine's preflight caller; it must preserve branch
+     interpolation, approval inventories, and failure timing.
+
+### Pipeline Refresh
+
+- `2026-10-25-pipeline-work-reduction` (spec and plan, not started):
+  **changed.** The plan's C1 task now names the runtime branch as the
+  heavyweight eager allocation, because leg cells are already views, and
+  records the counter semantics. Its C7 task names only the prediction-state
+  builds, because the `with` copy is gone. A new decision 11 records both.
+  The spec gains the Design Decision "What
+  `2026-10-26-sequence-quadratic-frontmatter` already delivered". No outcome
+  was dropped or narrowed.
+- `2026-10-26-dmls-frontmatter-typing-allocation`: upstream of this fix (both
+  worktrees start from it), so not downstream; unchanged.
+
+### Wave 6 — Gates and verification
+
+- `just lint` in `claudine/`: pass. The only warning is the existing
+  `__eh_frame section too large` linker message.
+- `cargo clippy -p claudine --features claudine/work-counters --lib --tests --benches -- -D warnings`:
+  clean. This covers the feature-gated `pipeline_spike.rs` and `leg_views.rs`.
+- `just test` in `claudine/`: 11,661 passed, 15 skipped, no failures (547 s).
+  The two new tests took 0.38 s (in-process) and 3.09 s (CLI, under load).
+  126 existing tests went over 5 s in that run. The host's load average
+  was 33–44 from work outside this session, and this phase touches none of
+  those tests. Rerun alone, the slowest took 0.52–2.49 s
+  (`every_consumer_of_the_launch_document_reads_its_captured_map`,
+  `frozen_cli_implement{,_plan}`,
+  `cancelled_conditional_depth_is_the_parsers_alone_to_limit`), so they are
+  recorded as **load-sensitive**.
+- `just test-l2` in `claudine/`: 289 + 3 passed, through the recipe's
+  harness.
+- `just check-tier-coverage claudine`: nothing stranded.
+- `just lint` and `just test` in `darkmatter/` (the calculator lists
+  `darkmatter`; this phase changed no Darkmatter code): lint pass; 12,590
+  passed, 10 skipped.
+- Scope calculator (`git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`):
+  `packages` = claudine, claudine-cli, test-toolkit, darkmatter;
+  `change_class` = package. The gates were run, not skipped.
+- Both builds compile: ordinary (`just lint`, `just test-l2`) and with
+  `work-counters` (`just test`, which enables it for `claudine`; clippy;
+  benches). No production path depends on counters or on macOS sampling
+  tools: `note_work!` expands to nothing without the feature, and `sample`
+  and `rustfilt` were Phase 1 tools only.
+- Cross-OS: this phase adds tests and docs only. The new CLI test uses the
+  side-effect grammar and spawns no shell, so I ran no cross-check.
+- The spec snapshot is unchanged apart from its `implemented` and
+  `implemented_by` frontmatter, and the fix stays in its active directory.
+  Final state: implementation complete, ready for review.

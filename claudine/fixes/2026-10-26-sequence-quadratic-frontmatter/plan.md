@@ -130,6 +130,110 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/frontmatter.md
     - .claude/skills/darkmatter/compose.md
+source_files_during_phase_4:
+    - claudine/lib/src/composition/sequence/task/container_regressions.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/sequence/task/tests/pipeline_spike.rs
+    - claudine/lib/src/pipeline_spike.rs
+    - claudine/cli/tests/l1/sequence_containers.rs
+docs_updated_during_phase_4:
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/features/2026-10-25-pipeline-work-reduction/spike-report.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/architecture.md
+source_code:
+    - claudine/lib/src/work_counters.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/reapproval.rs
+    - claudine/lib/src/composition/sequence/preflight/providers.rs
+    - claudine/lib/benches/pipeline_work_alloc.rs
+    - darkmatter/lib/src/work_counters.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+    - darkmatter/dmls/tests/l1/registry_preparation.rs
+    - darkmatter/dmls/tests/l1/startup_preparation.rs
+    - darkmatter/lib/src/markdown/compose/context/shared_frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/context/mod.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+    - darkmatter/lib/src/lifecycle/executor.rs
+    - darkmatter/lib/src/lifecycle/executor/host.rs
+    - darkmatter/lib/src/lifecycle/executor/shell.rs
+    - darkmatter/lib/src/lifecycle/executor/tests.rs
+    - darkmatter/lib/src/lifecycle/md_host.rs
+    - darkmatter/lib/src/lifecycle/md_host/tests.rs
+    - darkmatter/lib/tests/l1/lifecycle_event_binding.rs
+    - darkmatter/cli/src/commands/compose/lifecycle.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/binding_contract.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mutation_visibility.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/set_shell_values.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/sequence/task/group.rs
+    - claudine/lib/src/composition/sequence/task/sequence.rs
+    - claudine/lib/src/composition/sequence/task/templates.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/commands/wrap/sequence/container.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+    - darkmatter/lib/src/lifecycle/preflight/shell_walk.rs
+    - darkmatter/lib/tests/l1/shell_result_values.rs
+    - claudine/lib/Cargo.toml
+    - claudine/lib/src/pipeline_spike/tests.rs
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/sequence/expr.rs
+    - claudine/lib/src/composition/sequence/source.rs
+    - claudine/lib/src/composition/sequence/formal.rs
+    - claudine/lib/src/composition/sequence/preflight/runtime_fixture.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests/scaling.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/rename.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+    - claudine/lib/src/composition/lifecycle/tests/audio_emission.rs
+    - claudine/lib/src/composition/lifecycle/tests/break_prep.rs
+    - claudine/lib/src/composition/lifecycle/tests/container_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+    - claudine/lib/src/composition/looping/container.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/tests/leg_views.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline/tests.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/composition/runner.rs
+    - claudine/cli/src/commands/wrap/composition/tests.rs
+    - claudine/justfile
+    - claudine/lib/src/composition/sequence/task/container_regressions.rs
+    - claudine/lib/src/composition/sequence/task/tests/pipeline_spike.rs
+    - claudine/lib/src/pipeline_spike.rs
+    - claudine/cli/tests/l1/sequence_containers.rs
+documentation:
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/features/2026-10-25-pipeline-work-reduction/spike-report.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/frontmatter.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/claudine/architecture.md
+completed_phase: 4
+implemented: true
 ---
 
 # Remove quadratic sequence frontmatter work
@@ -385,7 +489,7 @@ Depends on integrated Wave 3. Tests and documentation can proceed concurrently
 in disjoint files; keep allocation measurements out of this wave to avoid
 measurement contention.
 
-- [ ] **Verify runtime parity**
+- [x] **Verify runtime parity**
   - Run existing sequence, nested-container, group, preflight, approval, and
     retry suites unchanged. Add only missing regression cases: sibling reads
     after another leg's private write; small live-frontmatter writes with a
@@ -401,7 +505,7 @@ measurement contention.
     Use per-test before/after counter deltas; never reset shared counters
     while worker threads are active. Keep each L1 case under five seconds.
 
-- [ ] **Document state ownership**
+- [x] **Document state ownership**
   - Update the private-view and static-preflight explanations in
     `claudine/docs/topics/flow-control/sequences.md`, with a compact example
     of a private write and a later step's disk reread. Distinguish private
@@ -419,7 +523,7 @@ Depends on Wave 4. Run measurement scenarios sequentially on one host. This
 is acceptance remeasurement of the original spike, not a second attribution
 spike or an expanded performance study.
 
-- [ ] **Measure allocation scaling**
+- [x] **Measure allocation scaling**
   - Update `pipeline_work_alloc.rs` and the existing crate-private measurement
     fixtures so they measure the actual new production view construction.
     Replace C1's obsolete standalone `fixture.frontmatter.clone()` probe;
@@ -459,7 +563,7 @@ spike or an expanded performance study.
 
 Depends on Wave 5 and completed documentation.
 
-- [ ] **Run final gates**
+- [x] **Run final gates**
   - Run `just test`, `just test-l2`, and `just lint` in `claudine/` once over
     the integrated change. L2 must use the recipe's harness without raising
     terminal/browser focus. Do not invoke `cargo fmt`; correct any formatting
