@@ -6,6 +6,16 @@ phase: 1
 agent: codex/gpt-6.1-sol
 yolo: true
 human_review: false
+source_files_during_phase_1:
+    - darkmatter/lib/tests/l1/shared_acyclic_definitions.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+    - darkmatter
+    - claudine
 ---
 
 # Shared acyclic definitions implementation plan
@@ -88,13 +98,20 @@ to `_completed`.
      that undoes the stored bound. Union defaults, suggestions, and optional-file
      sentinel behavior require the same scrutiny as count constraints.
    - **Landing order:** this feature follows
-     `2026-10-25-schema-diagnostic-provenance` (its `next_spec` predecessor), so
-     `SchemaError::ConstraintConflict` already carries participants (origin plus
-     typed constraint). Conflict tests through shared references assert each
-     participant's value as well as its inherited-first origin. If that feature
-     has unexpectedly not landed when this one starts, assert origins only and
-     record the gap in `implementation-log.md`; do not implement participants
-     here.
+     `2026-10-25-schema-diagnostic-provenance` (its `next_spec` predecessor),
+     which has landed: `SchemaError::ConstraintConflict.constraints` is a
+     `Vec<SchemaConstraintParticipant { origin, constraint }>` in
+     inherited-first order, and every renderer (`Display`, terminal
+     `StatusBlock`, DMLS related information) shows
+     `Constraint::diagnostic_excerpt()`. Conflict tests through shared
+     references assert each participant's `constraint` as well as its
+     inherited-first `origin`, and compare messages against the excerpt rather
+     than hand-formatted values. Sharing must not change which participant
+     value is reported (for `Scheme`, the effective inherited list just before
+     the failing intersection).
+     *(Refreshed by `2026-10-25-schema-diagnostic-provenance`: the conditional
+     "if it has not landed" fallback was removed because the participant type
+     now exists; the type and renderer names were added.)*
    - **Downsides:** Some eligible uses remain inline; compatibility needs direct
      behavior tests beyond successful JSON Schema compilation.
 
@@ -205,7 +222,7 @@ Run these tasks sequentially under one owner. Both must finish before any resolv
 trigger, library, bundle, or snapshot changes. Measurements are implementation
 work; this planning pass does not invent baseline values.
 
-- [ ] **Capture semantics**
+- [x] **Capture semantics**
   - Inventory affected shipped artifacts, all frozen corpus entries, current
     representation assertions, and public consumers of `TypeExpr::Ref` and
     `DefinitionTable`. Read the darkmatter schema/testing guidance and claudine
@@ -221,7 +238,7 @@ work; this planning pass does not invent baseline values.
     unchanged frozen inputs in `implementation-log.md`. Give every planned acceptance
     family a named existing or new test owner; avoid duplicating existing coverage.
 
-- [ ] **Capture measurements**
+- [x] **Capture measurements**
   - Reuse `embedded_trigger_payloads_resolve_within_two_megabytes` inputs exactly:
     `claudine.yaml` (`start: []`), `sequence.yaml` (`sequence: []`), and `both`.
     Record compact byte counts and identify largest repeated helpers by authored
