@@ -319,3 +319,146 @@ fn document_and_caller_origins_use_separate_root_arm_validators() {
     assert_eq!(from_document, json!({ "kind": "doc", "path": "a.md" }));
     assert_eq!(from_caller, from_document);
 }
+
+/// The `$schema` block of R1-F2's root union: arm 0 declares the recursive
+/// `node` and types `spec` with `spelling`; arm 1 accepts only a number, so a
+/// file value selects arm 0.
+fn origin_schema(spelling: &str) -> String {
+    format!(
+        "  - node: \"file(eager; match(./*.md)) | {{ children: node[] }}\"\n    \
+         spec: {spelling}\n  - spec: number(required)\n"
+    )
+}
+
+/// [`fixture`] plus `launch/a.md`, the file a caller captured at `launch/`
+/// names.
+fn origin_fixture() -> (tempfile::TempDir, PathBuf) {
+    let (dir, root) = fixture(TAGGED);
+    std::fs::create_dir_all(root.join("launch")).expect("create launch");
+    std::fs::write(root.join("launch/a.md"), "# launch A\n").expect("write launch/a.md");
+    (dir, root)
+}
+
+/// `launch/a.md`'s absolute path, as a caller captured at `launch/` supplies
+/// it.
+fn launch_file(root: &Path) -> Value {
+    json!(root.join("launch").join("a.md").to_string_lossy())
+}
+
+/// The effective schema for `schema`, with each `(property, raw)` of
+/// `callers` recorded as supplied by a caller captured at `launch/`.
+fn prepare_with_callers(root: &Path, schema: &str, callers: &[(&str, &Value)]) -> EffectiveSchema {
+    let launch = context_at(&root.join("launch"));
+    let records: CallerInputRecords = callers
+        .iter()
+        .map(|(property, raw)| {
+            (property.to_string(), CallerInputRecord::new((*raw).clone(), launch.clone()))
+        })
+        .collect();
+    effective_with(
+        &DarkmatterSchemas::new(context_at(root)).with_caller_input_records(&records),
+        root,
+        schema,
+    )
+}
+
+/// Validates `instance` (asserting it is accepted) and returns its
+/// normalized form.
+fn validated_normalized(row: &str, effective: &EffectiveSchema, instance: &Value) -> Value {
+    let report = effective.validate(instance);
+    assert!(report.valid, "{row}: validation accepts {instance}: {:?}", report.problems);
+    normalize(effective, instance)
+}
+
+/// `wrap(value)` places a file value in the row's container shape.
+fn origin_row(row: &str, spelling: &str, wrap: fn(Value) -> Value, caller: bool) {
+    let (_dir, root) = origin_fixture();
+    let schema = origin_schema(spelling);
+    let (raw, expected) = if caller {
+        (launch_file(&root), json!("launch/a.md"))
+    } else {
+        (json!("./a.md"), json!("a.md"))
+    };
+    let spec = wrap(raw);
+    let effective = if caller {
+        prepare_with_callers(&root, &schema, &[("spec", &spec)])
+    } else {
+        prepare(&root, &schema)
+    };
+
+    let normalized = validated_normalized(row, &effective, &json!({ "spec": spec }));
+
+    assert_eq!(normalized["spec"], wrap(expected), "{row}: `spec: {spelling}`");
+}
+
+fn bare(value: Value) -> Value {
+    value
+}
+
+fn listed(value: Value) -> Value {
+    json!([value])
+}
+
+fn under_path(value: Value) -> Value {
+    json!({ "path": value })
+}
+
+/// R1-F2: a value inside a root-union arm is judged and rewritten from the
+/// origin of the top-level property that owns it, whether the file arm is
+/// reached directly, through a reference, a property union, a list, or an
+/// inline object. Each row validates, then normalizes to the path its own
+/// origin names.
+macro_rules! origin_rows {
+    ($($name:ident: $row:literal, $spelling:literal, $wrap:ident, $caller:literal;)+) => {
+        $(
+            #[test]
+            fn $name() {
+                origin_row($row, $spelling, $wrap, $caller);
+            }
+        )+
+    };
+}
+
+origin_rows! {
+    caller_origin_direct_root_arm_file: "R1-F2.1", "file(eager; required; match(./*.md))", bare, true;
+    caller_origin_reference_to_recursive_union: "R1-F2.2", "node(required)", bare, true;
+    caller_origin_property_union_with_reference: "R1-F2.3", "\"node | number\"", bare, true;
+    caller_origin_list_of_recursive_union: "R1-F2.4", "node[]", listed, true;
+    caller_origin_inline_object_of_recursive_union: "R1-F2.5", "\"{ path: node }\"", under_path, true;
+    document_origin_direct_root_arm_file: "R1-F2.6", "file(eager; required; match(./*.md))", bare, false;
+    document_origin_reference_to_recursive_union: "R1-F2.7", "node(required)", bare, false;
+    document_origin_property_union_with_reference: "R1-F2.8", "\"node | number\"", bare, false;
+    document_origin_list_of_recursive_union: "R1-F2.9", "node[]", listed, false;
+    document_origin_inline_object_of_recursive_union: "R1-F2.10", "\"{ path: node }\"", under_path, false;
+}
+
+/// R1-F2.11: two top-level properties typed by the same recursive union in
+/// one document, one supplied by a caller from `launch/` and one authored in
+/// the document, are each judged and rewritten from their own origin. The
+/// retained arm validators are therefore kept per origin, and a list under
+/// one property still compiles each distinct arm once.
+#[test]
+fn caller_origin_and_document_origin_properties_keep_their_own_arm_validators() {
+    let (_dir, root) = origin_fixture();
+    let schema = "  - node: \"file(eager; match(./*.md)) | { children: node[] }\"\n    \
+        spec: node[]\n    other: node[]\n  - spec: number(required)\n";
+    let items = |raw: Value, count: usize| Value::Array(vec![raw; count]);
+    let spec = items(launch_file(&root), 20);
+    let other = items(json!("./a.md"), 20);
+    let effective = prepare_with_callers(&root, schema, &[("spec", &spec)]);
+    let instance = json!({ "spec": spec, "other": other });
+
+    let cold = compiles_now();
+    let normalized = validated_normalized("R1-F2.11", &effective, &instance);
+    // `validate` compiles nothing new: `effective_for` already compiled the
+    // root arms. Each property's union has two arms, one per origin and one
+    // validator each, however many items the list holds.
+    assert_compiles("R1-F2.11, cold", &cold, 4);
+
+    assert_eq!(normalized["spec"], items(json!("launch/a.md"), 20), "caller-supplied `spec`");
+    assert_eq!(normalized["other"], items(json!("a.md"), 20), "document-authored `other`");
+
+    let warm = compiles_now();
+    assert_eq!(normalize(&effective, &instance), normalized);
+    assert_compiles("R1-F2.11, warm", &warm, 0);
+}

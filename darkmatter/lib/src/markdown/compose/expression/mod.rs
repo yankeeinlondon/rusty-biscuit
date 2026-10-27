@@ -92,7 +92,7 @@ pub use absence::{AccessStep, StaticAccessRead, StaticVariableRead, branch_scope
 pub use ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
 pub use binding::{
     Availability, BindingError, BindingView, BindingViewBuilder, EvaluationSession,
-    GlobalDeclaration, HostGlobals, LazyProvider, ResolvedBinding, RootClass, RuntimeBinding, ScopeId,
+    GlobalDeclaration, HostGlobals, LazyProvider, MemberProvider, ResolvedBinding, RootClass, RuntimeBinding, ScopeId,
     UnavailabilityReason, UnavailableBinding, is_reserved_namespace,
 };
 pub use call_binding::{

@@ -4120,9 +4120,16 @@ validator from the same cache. The arm is compiled whole, with the root
 validator compiled for one document directory, fallback, request context, or
 set of caller origins never judges for another. A root-union arm is compiled
 from the same wrapped arm the document's validation uses, so the rewrite
-reuses that validator. The rewrite holds each arm's validator for the rest of
-the call, so a list of 1,000 union items costs one lookup per distinct arm,
-not 1,000 compilations. Only compiled validators are reused: every item, and
+reuses that validator. An arm of a union inside a property (reached directly,
+through a type reference, a list, or an inline object) is judged from the
+origin of the top-level property it sits under, as that property's
+validation judged it. For example, with
+`node: "file(eager; match(./*.md)) | { children: node[] }"` in a root-union
+arm, a caller in `launch/` who supplies `[a.md]` for `spec: node[]` gets
+`["launch/a.md"]` (its `./*.md` is judged from `launch/`), while a document-authored `other: node[]`
+holding `./a.md` gets `["a.md"]`. The rewrite holds each arm's validator, per
+origin, for the rest of the call, so a list of 1,000 union items costs one
+lookup per distinct arm and origin, not 1,000 compilations. Only compiled validators are reused: every item, and
 whether its file exists, is judged on every call, so a file created or
 removed between two compositions changes the outcome.
 

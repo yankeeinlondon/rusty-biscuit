@@ -102,7 +102,10 @@ pub fn rewrite_eager_file_values(
 
 /// [`rewrite_eager_file_values`] for an effective schema: its root-union arms
 /// are judged with the validators its own validation compiled (the same
-/// wrapped arms, fallback, and caller origins), so they are cache hits.
+/// wrapped arms, fallback, and caller origins), so they are cache hits. A
+/// property-level union arm is judged from the origin of the top-level
+/// property it sits under, so a caller-supplied value selects the arm its
+/// validation accepted.
 pub(super) fn rewrite_for_effective(
     effective: &super::EffectiveSchema,
     instance: &Value,
@@ -152,33 +155,40 @@ fn rewrite_with(
 /// The union-arm validators of one rewrite invocation.
 ///
 /// Each arm's validator is taken from the [`ValidatorCache`] at most once per
-/// invocation and its handle retained, so a list of union items costs one
-/// lookup per distinct arm, not one per item. A validator is compiled for a
-/// complete arm schema carrying its root's `$defs`, never for a fragment with
-/// dangling references, and the cache keys it by the document directory,
-/// fallback, request context, and caller origins it judges with. Only
-/// compiled validators are shared: no verdict is retained, so each value and
-/// each file's existence is judged on every call.
+/// invocation and origin, and its handle retained, so a list of union items
+/// costs one lookup per distinct arm and origin, not one per item. A
+/// validator is compiled for a complete arm schema carrying its root's
+/// `$defs`, never for a fragment with dangling references, and the cache keys
+/// it by the document directory, fallback, request context, and caller
+/// origins it judges with. Only compiled validators are shared: no verdict is
+/// retained, so each value and each file's existence is judged on every call.
 struct ArmValidators<'a> {
     /// Judges root-union arms, which see the whole instance, so each
     /// caller-supplied top-level property is judged from its own origin.
     root_cache: ValidatorCache,
-    /// Judges property-level arms, without caller origins. Such an arm
-    /// compiles alone below its top-level property, so a caller origin keyed
-    /// by top-level name would be matched against the arm's own sub-property
-    /// names instead.
-    property_cache: ValidatorCache,
+    /// The origin of the top-level property being walked, as the origins of
+    /// a validator whose whole instance is a value inside it (see
+    /// [`Self::enter_property`]). A property-level arm compiles alone below
+    /// that property, so its location no longer names it; the arm is judged
+    /// from the property's origin instead, as the surrounding validation
+    /// judged it.
+    owner: CallerOrigins,
     /// The root arms as the effective schema's validators were compiled from
     /// (shared allocations whose digests the cache already holds), if known.
     wrapped_root_arms: Option<Arc<[Arc<Value>]>>,
     base_dir: &'a Path,
     context: &'a biscuit_file::FileResolutionContext,
-    /// By arm address: the arm's validator, or `None` for an arm without the
-    /// eager marker or one that does not compile. Every arm is borrowed from
-    /// the invocation's schema, so an address names one arm for the whole
-    /// invocation.
-    property_arms: HashMap<*const Value, Option<Arc<Validator>>>,
+    /// By arm address, then owning property's origin: the arm's validator,
+    /// or `None` for an arm without the eager marker or one that does not
+    /// compile. Every arm is borrowed from the invocation's schema, so an
+    /// address names one arm for the whole invocation; the same arm reached
+    /// under properties of different origins judges with different
+    /// validators.
+    property_arms: HashMap<*const Value, Vec<RetainedArm>>,
 }
+
+/// A property-level arm's validator for one owning-property origin.
+type RetainedArm = (CallerOrigins, Option<Arc<Validator>>);
 
 impl<'a> ArmValidators<'a> {
     fn new(
@@ -189,7 +199,7 @@ impl<'a> ArmValidators<'a> {
     ) -> Self {
         Self {
             root_cache: cache.clone(),
-            property_cache: cache.clone().with_caller_origins(CallerOrigins::default()),
+            owner: CallerOrigins::default(),
             wrapped_root_arms,
             base_dir,
             context,
@@ -214,23 +224,31 @@ impl<'a> ArmValidators<'a> {
         Self::note(looked_up)
     }
 
-    /// The validator for an eligible property-level arm, or `None` for an
-    /// ineligible arm or one that does not compile.
+    /// Judges the property-level arms met from here on from the origin of
+    /// top-level property `name`.
+    fn enter_property(&mut self, name: &str) {
+        self.owner = CallerOrigins::whole_instance(self.root_cache.caller_origins().origin_of(name));
+    }
+
+    /// The validator for an eligible property-level arm, judged from the
+    /// current property's origin, or `None` for an ineligible arm or one that
+    /// does not compile.
     fn property_arm(&mut self, arm: &Value, root: &Value) -> Option<Arc<Validator>> {
-        let address = std::ptr::from_ref(arm);
-        if let Some(retained) = self.property_arms.get(&address) {
-            return retained.clone();
+        let retained = self.property_arms.entry(std::ptr::from_ref(arm)).or_default();
+        if let Some((_, validator)) = retained.iter().find(|(origin, _)| *origin == self.owner) {
+            return validator.clone();
         }
         let validator = contains_eager_file_fragment(arm, root)
             .then(|| {
-                Self::note(self.property_cache.validator_for_reporting_compile(
+                let cache = self.root_cache.clone().with_caller_origins(self.owner.clone());
+                Self::note(cache.validator_for_reporting_compile(
                     &super::scope::with_root_definitions(arm, root),
                     Some(self.base_dir),
                     self.context,
                 ))
             })
             .flatten();
-        self.property_arms.insert(address, validator.clone());
+        retained.push((self.owner.clone(), validator.clone()));
         validator
     }
 
@@ -361,6 +379,7 @@ fn rewrite_object(
         let Some(prop_schema) = props.get(name) else {
             continue;
         };
+        arms.enter_property(name);
         if let Some(rewritten) = rewrite_property(
             prop_schema,
             value,
@@ -1419,6 +1438,53 @@ mod tests {
 
         assert_eq!(outcome.value["looped"], json!("./spec.md"));
         assert_eq!(outcome.value["spec"], json!("spec.md"));
+    }
+
+    /// R1-F2.11: one union arm, reached under a document-authored property
+    /// and a caller-supplied one, is judged from each property's own origin.
+    /// `other` is walked first; a validator retained by arm address alone
+    /// would judge `spec` from the document's folder too, where `./*.md`
+    /// does not admit `launch/a.md`.
+    #[test]
+    fn a_shared_arm_is_judged_from_each_owning_property_origin() {
+        let repo = repo_fixture();
+        let root = biscuit_file::canonicalize_simplified(repo.path()).unwrap();
+        let launch = root.join("launch");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::write(root.join("a.md"), "# A\n").unwrap();
+        std::fs::write(launch.join("a.md"), "# launch A\n").unwrap();
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "other": {"$ref": "#/$defs/pick"},
+                "spec": {"$ref": "#/$defs/pick"}
+            },
+            "$defs": {
+                "pick": {"anyOf": [
+                    {
+                        "type": "string",
+                        "format": DARKMATTER_FILE_FORMAT,
+                        "x-darkmatter-match": ["./*.md"]
+                    },
+                    {"type": "number"}
+                ]}
+            }
+        });
+        let launch_file = biscuit_file::to_portable_string(&launch.join("a.md"));
+        let instance = json!({"other": "./a.md", "spec": launch_file});
+        let context = biscuit_file::FileResolutionContext::new(&root);
+        let cache = ValidatorCache::new().with_caller_origins(CallerOrigins::new([(
+            "spec".to_string(),
+            biscuit_file::FileResolutionContext::new(&launch),
+        )]));
+        let mut arms = ArmValidators::new(&cache, None, &root, &context);
+
+        let outcome = rewrite_with(&schema, &instance, &root, &HashSet::new(), &context, &mut arms);
+
+        assert_eq!(outcome.value["other"], json!("a.md"));
+        assert_eq!(outcome.value["spec"], json!("launch/a.md"));
+        let retained = arms.property_arms.values().map(Vec::len).max();
+        assert_eq!(retained, Some(2), "the file arm is retained once per origin");
     }
 
     /// Sanity: a non-object instance (e.g. a bare string at the root) is

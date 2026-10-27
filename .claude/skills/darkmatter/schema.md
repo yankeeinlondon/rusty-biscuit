@@ -445,7 +445,13 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   graft the ref redirects and join the copies); `union_to_root_schema` lowers
   in that mode and attaches the direct keyword. A copy names its property in
   `x-darkmatter-match-property` because its `$defs` location cannot (the
-  keyword factory reads it for the caller origin). Compatibility tests:
+  keyword factory reads it for the caller origin). The eager-file rewrite
+  compiles a property-level union arm alone, so it judges the arm with
+  `CallerOrigins::whole_instance(<owning top-level property's origin>)`
+  (`rewrite.rs::ArmValidators::enter_property`) and retains validators by
+  arm address *and* that origin; never compile such an arm with the
+  property-keyed map or with no origins
+  (`schemas_rewrite_arm_validators::caller_origin_*`). Compatibility tests:
   `schema_cache_validity::acyclic_match_*` (six shapes, five routes, phases).
 - **`$defs` across merges** (`schemas/scope.rs`). `$defs` live only at a
   schema's root. A sub-schema compiled alone (a root-union arm, a

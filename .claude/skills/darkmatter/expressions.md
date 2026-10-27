@@ -278,7 +278,13 @@ composition takes globals through `ComposeOptions::with_host_globals`
 inherits them, a bare read of one is exempt from the deferred-key (DM1a) check,
 and an unavailable read is a fatal transclusion failure
 (`MarkdownError::unavailable_binding`). Claudine declares `loop` and the retired
-`_loop_*` names this way. There is no
+`_loop_*` names this way. An entry is `Eager`, `Lazy` (whole root on first
+read, cached per session), `Members { member, whole }` (a dotted
+`root.name.rest` asks `member(name)` and selects `rest`; a bare or bracketed
+read runs the cached `whole`; `member` must agree with `whole`), or
+`Unavailable`; every match on `RuntimeBinding` (`read_global`, `kind`,
+`identity`, `check_agreement`, `subtree::undeclared_view`) handles all four.
+There is no
 strict mode and no root-membership hook. See
 [Host Bindings](../../../darkmatter/docs/topics/darkmatter-expressions.md#host-bindings).
 

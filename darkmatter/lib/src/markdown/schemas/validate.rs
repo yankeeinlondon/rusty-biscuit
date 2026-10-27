@@ -139,36 +139,79 @@ pub(crate) enum ValueOrigin<'a> {
 /// launch directory), so its `match()` globs are judged there too: a bare or
 /// `./` pattern starts at the launch directory for a caller value and at the
 /// document's folder for a frontmatter value.
+///
+/// A validator compiled for a sub-schema of one top-level property (a union
+/// arm the eager-file rewrite judges alone) instead takes
+/// [`Self::whole_instance`]: the arm's location no longer names that
+/// property, so every value it judges takes the property's origin.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct CallerOrigins(Arc<std::collections::BTreeMap<String, biscuit_file::FileResolutionContext>>);
+pub(crate) struct CallerOrigins(Origins);
+
+#[derive(Clone, Debug, PartialEq)]
+enum Origins {
+    ByProperty(Arc<std::collections::BTreeMap<String, biscuit_file::FileResolutionContext>>),
+    /// Every value of the instance was authored in this context.
+    WholeInstance(Arc<biscuit_file::FileResolutionContext>),
+}
+
+impl Default for Origins {
+    fn default() -> Self {
+        Self::ByProperty(Arc::default())
+    }
+}
 
 impl CallerOrigins {
     pub(crate) fn new(
         origins: impl IntoIterator<Item = (String, biscuit_file::FileResolutionContext)>,
     ) -> Self {
-        Self(Arc::new(origins.into_iter().collect()))
+        Self(Origins::ByProperty(Arc::new(origins.into_iter().collect())))
+    }
+
+    /// Origins for a validator whose whole instance is the value of one
+    /// top-level property that came from `origin`: a document origin is the
+    /// empty map, a caller's applies to every keyword whatever its location.
+    pub(crate) fn whole_instance(origin: ValueOrigin<'_>) -> Self {
+        match origin {
+            ValueOrigin::Document => Self::default(),
+            ValueOrigin::Caller(context) => Self(Origins::WholeInstance(Arc::new(context.clone()))),
+        }
     }
 
     /// Where `property`'s value came from.
     pub(crate) fn origin_of(&self, property: &str) -> ValueOrigin<'_> {
-        match self.0.get(property) {
-            Some(context) => ValueOrigin::Caller(context),
-            None => ValueOrigin::Document,
-        }
+        self.origin_at(Some(property))
+    }
+
+    /// Where the value a keyword judges came from; `property` is the
+    /// top-level property its location names, if any.
+    pub(crate) fn origin_at(&self, property: Option<&str>) -> ValueOrigin<'_> {
+        let context = match &self.0 {
+            Origins::ByProperty(by_property) => property.and_then(|property| by_property.get(property)),
+            Origins::WholeInstance(context) => Some(context.as_ref()),
+        };
+        context.map_or(ValueOrigin::Document, ValueOrigin::Caller)
     }
 
     fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        matches!(&self.0, Origins::ByProperty(by_property) if by_property.is_empty())
     }
 
     /// Cache-key bytes: each property and the directories that root its
     /// patterns. The full contexts are compared on lookup.
     fn key_bytes(&self, bytes: &mut Vec<u8>) {
-        for (property, origin) in self.0.iter() {
-            bytes.push(0xfd);
-            bytes.extend_from_slice(property.as_bytes());
-            bytes.push(0xff);
-            bytes.extend_from_slice(origin.cwd().to_string_lossy().as_bytes());
+        match &self.0 {
+            Origins::ByProperty(by_property) => {
+                for (property, origin) in by_property.iter() {
+                    bytes.push(0xfd);
+                    bytes.extend_from_slice(property.as_bytes());
+                    bytes.push(0xff);
+                    bytes.extend_from_slice(origin.cwd().to_string_lossy().as_bytes());
+                }
+            }
+            Origins::WholeInstance(origin) => {
+                bytes.push(0xfc);
+                bytes.extend_from_slice(origin.cwd().to_string_lossy().as_bytes());
+            }
         }
     }
 }

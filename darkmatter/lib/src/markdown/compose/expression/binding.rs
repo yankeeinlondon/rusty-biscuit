@@ -394,6 +394,14 @@ fn check_reason(root: &str, reason: &UnavailabilityReason) -> Result<(), Binding
 /// only when the root is first read.
 pub type LazyProvider<'a> = Arc<dyn Fn() -> Value + Send + Sync + 'a>;
 
+/// A member-aware global's resolver: the value of one top-level member, or
+/// `None` when the whole value has no such member.
+///
+/// It must agree with the binding's whole-root provider: for every `name`,
+/// `member(name)` equals `whole().get(name).cloned()`. Unlike the whole
+/// provider it is not cached, so it may run once per read.
+pub type MemberProvider<'a> = Arc<dyn Fn(&str) -> Option<Value> + Send + Sync + 'a>;
+
 /// The runtime entry a host supplies for one declared global.
 #[derive(Clone)]
 pub enum RuntimeBinding<'a> {
@@ -401,6 +409,21 @@ pub enum RuntimeBinding<'a> {
     Eager(Value),
     /// A value computed on first read and cached for the session.
     Lazy(LazyProvider<'a>),
+    /// An object global whose dotted reads resolve one member without
+    /// building the whole value.
+    ///
+    /// `root.<name>.<rest>` asks `member` for `<name>` and selects `<rest>`
+    /// from its result, exactly as the same path selects from `whole()`. A
+    /// bare root read, and any read the evaluator does not spell as a dotted
+    /// path (bracket access such as `root['name']`), runs `whole` instead,
+    /// at most once per session like [`Self::Lazy`]; once it has run, member
+    /// reads in that session select from its value.
+    Members {
+        /// Resolves one top-level member.
+        member: MemberProvider<'a>,
+        /// Builds the whole value.
+        whole: LazyProvider<'a>,
+    },
     /// Reading the global fails with this reason.
     Unavailable(UnavailabilityReason),
 }
@@ -417,6 +440,19 @@ impl<'a> RuntimeBinding<'a> {
         Self::Lazy(Arc::new(provider))
     }
 
+    /// A [`Self::Members`] binding. `member` must agree with `whole`: see
+    /// [`MemberProvider`].
+    pub fn members<M, W>(member: M, whole: W) -> Self
+    where
+        M: Fn(&str) -> Option<Value> + Send + Sync + 'a,
+        W: Fn() -> Value + Send + Sync + 'a,
+    {
+        Self::Members {
+            member: Arc::new(member),
+            whole: Arc::new(whole),
+        }
+    }
+
     pub fn unavailable(reason: UnavailabilityReason) -> Self {
         Self::Unavailable(reason)
     }
@@ -425,6 +461,7 @@ impl<'a> RuntimeBinding<'a> {
         match self {
             Self::Eager(_) => "eager",
             Self::Lazy(_) => "lazy",
+            Self::Members { .. } => "members",
             Self::Unavailable(_) => "unavailable",
         }
     }
@@ -435,6 +472,11 @@ impl fmt::Debug for RuntimeBinding<'_> {
         match self {
             Self::Eager(value) => f.debug_tuple("Eager").field(value).finish(),
             Self::Lazy(_) => f.debug_tuple("Lazy").field(&"Fn(..)").finish(),
+            Self::Members { .. } => f
+                .debug_struct("Members")
+                .field("member", &"Fn(&str)")
+                .field("whole", &"Fn(..)")
+                .finish(),
             Self::Unavailable(reason) => f.debug_tuple("Unavailable").field(reason).finish(),
         }
     }
@@ -640,7 +682,7 @@ where
 }
 
 /// Reads an available global's `root`, running a lazy provider on first read.
-/// The cache lock is never held while the provider runs.
+/// The cache lock is never held while a provider runs.
 fn read_global(
     cache: &Mutex<HashMap<String, Value>>,
     root: &str,
@@ -649,19 +691,41 @@ fn read_global(
 ) -> Value {
     match binding {
         RuntimeBinding::Eager(value) => project(value, rest),
-        RuntimeBinding::Lazy(provider) => {
+        RuntimeBinding::Lazy(provider) => read_cached(cache, root, provider, rest),
+        RuntimeBinding::Members { member, whole } => {
+            let mut segments = path_segments(rest);
+            let Some(name) = segments.next() else {
+                return read_cached(cache, root, whole, rest);
+            };
             if let Some(cached) = lock_cache(cache).get(root) {
                 return project(cached, rest);
             }
-            let value = provider();
-            let mut cache = lock_cache(cache);
-            // A re-entrant provider may have filled the slot first; the
-            // first value wins so every read agrees.
-            let cached = cache.entry(root.to_string()).or_insert(value);
-            project(cached, rest)
+            match member(name) {
+                Some(value) => select(&value, segments).cloned().unwrap_or(Value::Null),
+                None => Value::Null,
+            }
         }
         RuntimeBinding::Unavailable(_) => Value::Null,
     }
+}
+
+/// `rest` from the session's cached value for `root`, computing it with
+/// `provider` on the first read.
+fn read_cached(
+    cache: &Mutex<HashMap<String, Value>>,
+    root: &str,
+    provider: &LazyProvider<'_>,
+    rest: &str,
+) -> Value {
+    if let Some(cached) = lock_cache(cache).get(root) {
+        return project(cached, rest);
+    }
+    let value = provider();
+    let mut cache = lock_cache(cache);
+    // A re-entrant provider may have filled the slot first; the first value
+    // wins so every read agrees.
+    let cached = cache.entry(root.to_string()).or_insert(value);
+    project(cached, rest)
 }
 
 /// The cache only ever gains complete entries, so a poisoned lock still
@@ -770,6 +834,7 @@ impl HostGlobals {
             let entry = match &self.runtime[root] {
                 RuntimeBinding::Eager(value) => format!("eager:{}", canonical_json(value)),
                 RuntimeBinding::Lazy(_) => format!("lazy:{:p}", Arc::as_ptr(&self.cache)),
+                RuntimeBinding::Members { .. } => format!("members:{:p}", Arc::as_ptr(&self.cache)),
                 RuntimeBinding::Unavailable(reason) => format!("unavailable:{reason}"),
             };
             identity.push_str(&format!(";{root}={entry}"));
@@ -812,7 +877,10 @@ fn check_agreement(
 ) -> Result<(), BindingError> {
     let agrees = match (&declaration.availability, binding) {
         (Availability::ExecutionDependent, _) => true,
-        (Availability::Available, RuntimeBinding::Eager(_) | RuntimeBinding::Lazy(_)) => true,
+        (
+            Availability::Available,
+            RuntimeBinding::Eager(_) | RuntimeBinding::Lazy(_) | RuntimeBinding::Members { .. },
+        ) => true,
         (Availability::Unavailable(declared), RuntimeBinding::Unavailable(supplied)) => {
             declared.code == supplied.code
         }
@@ -836,17 +904,22 @@ fn check_agreement(
 /// Selects `rest` (`a.b`, or empty for the root) from `value`; a missing
 /// member is `null`, never a fall-through.
 fn project(value: &Value, rest: &str) -> Value {
+    select(value, path_segments(rest)).cloned().unwrap_or(Value::Null)
+}
+
+fn path_segments(rest: &str) -> impl Iterator<Item = &str> {
+    rest.split('.').filter(|segment| !segment.is_empty())
+}
+
+fn select<'v, 's>(value: &'v Value, segments: impl Iterator<Item = &'s str>) -> Option<&'v Value> {
     let mut current = value;
-    for segment in rest.split('.').filter(|segment| !segment.is_empty()) {
+    for segment in segments {
         match current {
-            Value::Object(map) => match map.get(segment) {
-                Some(next) => current = next,
-                None => return Value::Null,
-            },
-            _ => return Value::Null,
+            Value::Object(map) => current = map.get(segment)?,
+            _ => return None,
         }
     }
-    current.clone()
+    Some(current)
 }
 
 impl EvaluationLookup for EvaluationSession<'_> {

@@ -203,3 +203,61 @@ fn a_transcluded_child_reads_the_parent_compositions_globals() {
     .unwrap_err();
     assert_eq!(unavailable_reason(&error), Some(format!("retired:{REMOVED}")), "{error:?}");
 }
+
+/// `loop` as a member-aware global whose whole-value builds are counted.
+fn member_loop_globals(whole_builds: Arc<std::sync::atomic::AtomicUsize>) -> HostGlobals {
+    let view = BindingView::builder(ScopeId::new("host.iteration"))
+        .declare("loop", "The iteration's values.", Availability::Available)
+        .build()
+        .unwrap();
+    HostGlobals::associate(
+        Arc::new(view),
+        [(
+            "loop".to_string(),
+            RuntimeBinding::members(
+                |name| iteration().get(name).cloned(),
+                move || {
+                    whole_builds.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    iteration()
+                },
+            ),
+        )],
+    )
+    .unwrap()
+}
+
+/// Dotted reads in the body, compose-time frontmatter, and a transcluded
+/// child resolve their members without building the whole global; a bare
+/// read builds it once for the whole composition.
+#[test]
+fn a_member_aware_global_builds_its_whole_value_only_for_a_whole_read() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let builds = Arc::new(AtomicUsize::new(0));
+    let composed = compose_with(
+        "---\nlabel: \"pass {{ loop.count }}\"\nloop:\n  max: 3\n---\n\
+         [{{ loop.count }}] [{{ loop.is_last ? 'last' : 'more' }}] [{{ loop.max }}] \
+         [{{ label }}] [{{ fm.loop.max }}]\n::file ./child.md\n",
+        Some("---\ntitle: child\n---\nchild pass {{ loop.count }}\n"),
+        |options| options.with_host_globals(member_loop_globals(Arc::clone(&builds))),
+    )
+    .unwrap();
+    assert!(
+        composed.content().contains("[2] [last] [] [pass 2] [3]"),
+        "{}",
+        composed.content()
+    );
+    assert!(composed.content().contains("child pass 2"), "{}", composed.content());
+    assert_eq!(builds.load(Ordering::SeqCst), 0);
+
+    let builds = Arc::new(AtomicUsize::new(0));
+    let composed = compose_with(
+        &format!("{LOOP_DOCUMENT}[{{{{ loop['last_output'] }}}}] [{{{{ loop.count }}}}]\n::file ./child.md\n"),
+        Some("---\ntitle: child\n---\nchild {{ loop['count'] }}\n"),
+        |options| options.with_host_globals(member_loop_globals(Arc::clone(&builds))),
+    )
+    .unwrap();
+    assert!(composed.content().contains("[prior answer] [2]"), "{}", composed.content());
+    assert!(composed.content().contains("child 2"), "{}", composed.content());
+    assert_eq!(builds.load(Ordering::SeqCst), 1, "one whole build per composition");
+}
