@@ -495,12 +495,12 @@ fn context_catalog_markdown() -> String {
 fn expression_function_signatures_markdown() -> String {
     let catalog = expression_function_catalog();
     let mut out = String::new();
-    for category in catalog.categories {
+    for category in &catalog.categories {
         let mut group = catalog.descriptors.iter().filter(|d| d.category == category.name).peekable();
         if group.peek().is_none() {
             continue;
         }
-        out.push_str(&format!("\n**{}**\n\n", escape_markdown(category.name)));
+        out.push_str(&format!("\n**{}**\n\n", escape_markdown(&category.name)));
         for descriptor in group {
             out.push_str(&format!(
                 "- `{}` — {}\n",
@@ -876,7 +876,7 @@ mod tests {
         let listed: Vec<&str> = expression_function_catalog()
             .categories
             .iter()
-            .map(|category| category.name)
+            .map(|category| &*category.name)
             .filter(|name| headings.contains(name))
             .collect();
         assert_eq!(headings, listed);
@@ -891,6 +891,74 @@ mod tests {
             sorted.sort_unstable();
             assert_eq!(names, sorted, "{group}");
         }
+    }
+
+    // The exact-text pins below were captured from `md --verbose schema about`
+    // before the catalog descriptors became owned, so they prove the section's
+    // source Markdown survived that refactor byte for byte. They pin excerpts,
+    // not the whole catalog, so adding a function elsewhere does not churn them.
+
+    #[test]
+    fn expression_function_signatures_pin_category_heading_order() {
+        let signatures = expression_function_signatures_markdown();
+        let headings: Vec<&str> = signatures
+            .lines()
+            .filter_map(|line| line.strip_prefix("**")?.strip_suffix("**"))
+            .collect();
+        assert_eq!(
+            headings,
+            [
+                "Type Predicates",
+                "Math",
+                "Collection",
+                "String Predicates",
+                "String Mutations",
+                "Rendering",
+                "Date Formatting",
+                "Date Validators",
+                "Date Arithmetic",
+                "Logical",
+                "Type Conversion",
+                "Filesystem",
+                "Context",
+                "List Formatting",
+                "Git",
+                "Pull Requests",
+                "CI/CD",
+                "Shell",
+                "Agentic CLIs",
+                "Repository",
+                "Network",
+                "Composition",
+            ]
+        );
+    }
+
+    #[test]
+    fn expression_function_signatures_pin_math_excerpt_exactly() {
+        let signatures = expression_function_signatures_markdown();
+        let excerpt = "\n**Math**\n\n\
+             - `abs(x: number) -> number` — Returns the absolute value of a number.\n\
+             - `max(a: number, b: number) -> number` — Returns the larger of two numbers.\n\
+             - `min(a: number, b: number) -> number` — Returns the smaller of two numbers.\n\
+             - `round(x: numberlike, [fallback: number]) -> number` — Rounds a number or numeric text to \
+             the nearest whole number, halfway values away from zero. When `x` is not a number or numeric \
+             text, a supplied `fallback` is rounded and returned instead; without one the call is a type \
+             error.\n";
+        assert!(signatures.contains(excerpt), "missing exact Math excerpt:\n{signatures}");
+    }
+
+    #[test]
+    fn expression_function_signatures_pin_overloaded_link_lines_exactly() {
+        let signatures = expression_function_signatures_markdown();
+        let overloads = "\n\
+             - `link(file: file | null) -> string | null | error` — Creates a Markdown link to a local \
+             file, using its relative path as the link text and its absolute path as the destination. \
+             HTTP(S) URLs are rejected because they need a description; null passes through.\n\
+             - `link(target: file | null, desc: string | null) -> string | null | error` — Creates a \
+             Markdown link to a local file or an HTTP(S) URL with the given description as its text; null \
+             passes through.\n";
+        assert!(signatures.contains(overloads), "missing exact link overloads:\n{signatures}");
     }
 
     #[test]

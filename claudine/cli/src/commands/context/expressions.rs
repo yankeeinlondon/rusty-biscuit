@@ -4,6 +4,7 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent};
 use biscuit_terminal::terminal::Terminal;
+use darkmatter::catalog::Described;
 use darkmatter::markdown::compose::expression::semantics::{
     arithmetic_operator_descriptors, comparison_operator_descriptors, mode_descriptors,
     null_propagation_descriptors, operator_descriptors, truthiness_descriptors,
@@ -99,7 +100,7 @@ pub(super) fn render_expressions_precedence(term: &Terminal) {
             (
                 format!("{}", i + 1).into(),
                 inline_code_text(desc.operators, term).into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -123,7 +124,7 @@ pub(super) fn render_expressions_truthiness(term: &Terminal) {
             (
                 inline_code_text(desc.form, term).into(),
                 (if desc.is_falsy { "yes" } else { "no" }).into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -147,7 +148,7 @@ pub(super) fn render_expressions_unary(term: &Terminal) {
             (
                 inline_code_text(desc.syntax, term).into(),
                 inline_code_text(desc.description, term).into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -171,7 +172,7 @@ pub(super) fn render_expressions_comparison(term: &Terminal) {
             (
                 inline_code_text(desc.syntax, term).into(),
                 inline_code_text(desc.description, term).into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -195,7 +196,7 @@ pub(super) fn render_expressions_arithmetic(term: &Terminal) {
             (
                 inline_code_text(desc.syntax, term).into(),
                 inline_code_text(desc.description, term).into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -219,7 +220,7 @@ pub(super) fn render_expressions_variable_access(term: &Terminal) {
             (
                 inline_code_text(desc.form, term).into(),
                 inline_code_text(desc.description, term).into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -249,7 +250,7 @@ pub(super) fn render_expressions_modes(term: &Terminal) {
             (
                 inline_code_text(desc.surface, term).into(),
                 desc.pipe_meaning.into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -293,7 +294,7 @@ pub(super) fn render_expressions_null_propagation(term: &Terminal) {
             (
                 inline_code_text(desc.operation, term).into(),
                 inline_code_text(desc.behavior, term).into(),
-                format_example(desc.example.as_ref(), term).into(),
+                format_example(desc.example(), term).into(),
             )
         })
         .collect();
@@ -325,8 +326,8 @@ pub(super) fn render_expressions_functions(term: &Terminal) {
             .iter()
             .map(|func| {
                 (
-                    inline_code_text(func.signature, term).into(),
-                    inline_code_text(func.description, term).into(),
+                    inline_code_text(&func.signature, term).into(),
+                    inline_code_text(&func.description, term).into(),
                     format_function_examples(func, term).into(),
                 )
             })

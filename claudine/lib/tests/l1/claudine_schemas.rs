@@ -378,7 +378,7 @@ pub(crate) fn generated_verbs() -> BTreeSet<String> {
     effect_descriptors()
         .iter()
         .map(|descriptor| name_of(descriptor.signature))
-        .chain(expression_function_descriptors().iter().map(|descriptor| name_of(descriptor.signature)))
+        .chain(expression_function_descriptors().iter().map(|descriptor| name_of(&descriptor.signature)))
         .filter(|name| name != "set")
         .collect()
 }

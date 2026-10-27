@@ -20,7 +20,8 @@ use darkmatter::markdown::coercion::ValueKind;
 use darkmatter::markdown::compose::expression::call_binding::{EvaluationMode, FactKind, FactType, RegistrationError};
 use darkmatter::markdown::compose::expression::host::FactsArtifact;
 use darkmatter::markdown::compose::expression::{
-    ArgumentCategory, BindingView, CallCheck, DeclaredTypes, ExpressionError, HostFunctionCatalog, HostFunctionError,
+    ArgumentCategory, BindingView, CallCheck, DeclaredTypes, ExpressionError, HostCatalogError, HostFunctionCatalog,
+    HostFunctionError,
     HostFunctions, TypeScope, check_expression_calls, incomplete_host_calls, install_host_functions, parse_spanned,
     validate_expression,
 };
@@ -155,6 +156,83 @@ fn registration_rejects_collisions_parity_gaps_and_invalid_facts_before_evaluati
     assert_eq!(entries(), (0, 0), "no handler ran");
 }
 
+/// A loaded catalog owns what it read: after the source text and path
+/// strings it was loaded from are dropped, its metadata, the registrations
+/// built over it, and the facts artifact it regenerates are unchanged.
+#[test]
+fn a_host_catalog_outlives_the_strings_it_was_loaded_from() {
+    let fixture = std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join("tests/fixtures/host_functions/project.yaml"))
+        .expect("the test catalog");
+    let committed = std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join("tests/fixtures/host_functions/project.facts.json"))
+        .expect("the committed artifact");
+    let committed_hash: Value = serde_json::from_str(&committed).expect("the committed artifact is JSON");
+
+    let source = fixture.clone();
+    let path = String::from("tests/fixtures/host_functions/project.yaml");
+    let catalog = HostFunctionCatalog::load(&source, &path).expect("the test catalog loads");
+    drop((source, path));
+
+    assert_eq!(catalog.function_names(), ["is_project_file", "project_label"]);
+    assert_eq!(catalog.path(), Path::new("tests/fixtures/host_functions/project.yaml"));
+    assert_eq!(Some(catalog.version()), committed_hash["catalog_hash"].as_str());
+
+    let analysis = HostFunctions::analysis_only(catalog.clone(), FactsArtifact::Text(&committed)).expect("reads");
+    assert!(analysis.incomplete_functions().is_empty(), "{:?}", analysis.incomplete_functions());
+    let file = analysis.registration("is_project_file").expect("complete");
+    let parameter = &file.overloads()[0].parameters()[0];
+    assert_eq!((parameter.name(), parameter.type_text()), ("value", "unknown | null"));
+    let fact = file.narrowing_fact().expect("the fact");
+    assert_eq!((fact.parameter(), fact.index(), fact.kind()), ("value", 0, FactKind::TrueImplies));
+    let label = analysis.registration("project_label").expect("complete");
+    assert_eq!(label.overloads()[0].parameters()[0].excluded_sources(), [ValueKind::Number]);
+
+    let handler: darkmatter::markdown::compose::expression::HostHandler = Arc::new(|_| Ok(json!(true)));
+    let host = HostFunctions::builder(catalog)
+        .function(
+            "is_project_file",
+            &[],
+            |registration| registration.narrows("value", FactKind::TrueImplies, FactType::Type("file".into())),
+            handler.clone(),
+        )
+        .function("project_label", &[], |registration| registration.reject_sources("name", &[ValueKind::Number]), handler)
+        .build()
+        .expect("the test host registers");
+    assert_eq!(host.function_names(), ["is_project_file", "project_label"]);
+    assert_eq!(host.facts_artifact(), committed, "the retained catalog regenerates the committed artifact");
+}
+
+/// A catalog whose earlier function loads, inline example and all, and whose
+/// later function names a file-form example fails the whole load with the
+/// typed host error; nothing of the partly projected catalog is returned.
+#[test]
+fn a_host_catalog_failing_after_a_valid_inline_example_is_a_typed_load_error() {
+    let source = concat!(
+        "kind: schema\n",
+        "categories:\n",
+        "    - Project -> Ask about the test host's project.\n",
+        "types:\n",
+        "    project_first: |-\n",
+        "        function(\n",
+        "            parameters(text: string);\n",
+        "            returns(string);\n",
+        "            category(Project);\n",
+        "            example(project_first(\"a\") => \"a\");\n",
+        "        ) -> Loads.\n",
+        "    project_second: |-\n",
+        "        function(\n",
+        "            parameters(text: string);\n",
+        "            returns(string);\n",
+        "            category(Project);\n",
+        "            example(./function-examples/as_tsv.yaml);\n",
+        "        ) -> Names a file-form example.\n",
+    );
+    let error: HostCatalogError = HostFunctionCatalog::load(source, "project_partial.yaml").expect_err("the load fails");
+    assert_eq!(
+        error.to_string(),
+        "project_partial.yaml: `types.project_second`: example file `./function-examples/as_tsv.yaml` is not embedded"
+    );
+}
+
 // ── facts artifact ──────────────────────────────────────────────────────────
 
 /// The generated artifact equals the committed one byte for byte, and two
@@ -185,6 +263,8 @@ enum Expect {
     NoFacts,
     /// Nothing is incomplete, but `project_label` refuses no source.
     NoExclusions,
+    /// Nothing is incomplete, and the check sees the edited field's rule.
+    Complete(fn(&HostFunctions)),
 }
 
 /// One edit of the committed artifact.
@@ -369,6 +449,138 @@ fn the_facts_artifact_reader_walks_the_input_robustness_matrix() {
             Expect::Incomplete(&["is_project_file"]),
             "unknown field `extra`",
         ),
+        (
+            "facts element wrong position type",
+            Edit::Json(|root| root["functions"]["is_project_file"]["facts"][0]["position"] = json!("0")),
+            Expect::Incomplete(&["is_project_file"]),
+            "has `facts[0].position` a string instead of a non-negative integer",
+        ),
+        (
+            "unknown fact field",
+            Edit::Json(|root| root["functions"]["is_project_file"]["facts"][0]["extra"] = json!(1)),
+            Expect::Incomplete(&["is_project_file"]),
+            "`facts[0]` has unknown field `extra`",
+        ),
+        (
+            "more than one fact",
+            Edit::Json(|root| {
+                let fact = root["functions"]["is_project_file"]["facts"][0].clone();
+                root["functions"]["is_project_file"]["facts"].as_array_mut().unwrap().push(fact);
+            }),
+            Expect::Incomplete(&["is_project_file"]),
+            "lists 2 facts; a function registers at most one",
+        ),
+        (
+            "aliases control",
+            Edit::Json(|root| root["functions"]["is_project_file"]["aliases"] = json!(["ipf"])),
+            Expect::Complete(|functions| {
+                let registration = functions.registration("IPF").expect("the alias resolves");
+                assert_eq!(registration.name(), "is_project_file");
+            }),
+            "",
+        ),
+        ("aliases wrong type", Edit::Json(|root| root["functions"]["is_project_file"]["aliases"] = json!("ipf")), Expect::Incomplete(&["is_project_file"]), "`aliases` a string instead of an array"),
+        (
+            "one alias element of the wrong type",
+            Edit::Json(|root| root["functions"]["is_project_file"]["aliases"] = json!(["ipf", 3])),
+            Expect::Incomplete(&["is_project_file"]),
+            "`aliases[1]` a number instead of a string",
+        ),
+        (
+            "source_exclusions wrong type",
+            Edit::Json(|root| root["functions"]["project_label"]["source_exclusions"] = json!({})),
+            Expect::Incomplete(&["project_label"]),
+            "`source_exclusions` an object instead of an array",
+        ),
+        (
+            "exclusion parameter wrong type",
+            Edit::Json(|root| root["functions"]["project_label"]["source_exclusions"][0]["parameter"] = json!(3)),
+            Expect::Incomplete(&["project_label"]),
+            "has `source_exclusions[0].parameter` a number instead of a string",
+        ),
+        (
+            "exclusion on a nonexistent parameter",
+            Edit::Json(|root| root["functions"]["project_label"]["source_exclusions"][0]["parameter"] = json!("other")),
+            Expect::Incomplete(&["project_label"]),
+            "does not register",
+        ),
+        (
+            "absent exclusion kinds",
+            Edit::Json(|root| drop(root["functions"]["project_label"]["source_exclusions"][0].as_object_mut().unwrap().remove("kinds"))),
+            Expect::Incomplete(&["project_label"]),
+            "has no `source_exclusions[0].kinds` field",
+        ),
+        (
+            "exclusion kinds wrong type",
+            Edit::Json(|root| root["functions"]["project_label"]["source_exclusions"][0]["kinds"] = json!("number")),
+            Expect::Incomplete(&["project_label"]),
+            "has `source_exclusions[0].kinds` a string instead of an array",
+        ),
+        (
+            "empty exclusion kinds",
+            Edit::Json(|root| root["functions"]["project_label"]["source_exclusions"][0]["kinds"] = json!([])),
+            Expect::Incomplete(&["project_label"]),
+            "has an empty `source_exclusions[0].kinds`",
+        ),
+        (
+            "unknown exclusion kind",
+            Edit::Json(|root| root["functions"]["project_label"]["source_exclusions"][0]["kinds"] = json!(["date"])),
+            Expect::Incomplete(&["project_label"]),
+            "has `source_exclusions[0].kinds[0]` `date`",
+        ),
+        (
+            "unknown exclusion field",
+            Edit::Json(|root| root["functions"]["project_label"]["source_exclusions"][0]["extra"] = json!(1)),
+            Expect::Incomplete(&["project_label"]),
+            "`source_exclusions[0]` has unknown field `extra`",
+        ),
+        (
+            "malformed_reference control",
+            Edit::Json(|root| root["functions"]["is_project_file"]["malformed_reference"] = json!({"parameter": "value", "position": 0})),
+            Expect::Complete(|functions| {
+                let registration = functions.registration("is_project_file").expect("complete");
+                assert_eq!(registration.malformed_reference_parameter(), Some(0));
+            }),
+            "",
+        ),
+        (
+            "malformed_reference parameter wrong type",
+            Edit::Json(|root| root["functions"]["is_project_file"]["malformed_reference"] = json!({"parameter": 0, "position": 0})),
+            Expect::Incomplete(&["is_project_file"]),
+            "has `malformed_reference.parameter` a number instead of a string",
+        ),
+        (
+            "malformed_reference on a nonexistent parameter",
+            Edit::Json(|root| root["functions"]["is_project_file"]["malformed_reference"] = json!({"parameter": "other", "position": 0})),
+            Expect::Incomplete(&["is_project_file"]),
+            "does not register",
+        ),
+        (
+            "absent malformed_reference position",
+            Edit::Json(|root| root["functions"]["is_project_file"]["malformed_reference"] = json!({"parameter": "value"})),
+            Expect::Incomplete(&["is_project_file"]),
+            "has no `malformed_reference.position` field",
+        ),
+        (
+            "malformed_reference position wrong type",
+            Edit::Json(|root| root["functions"]["is_project_file"]["malformed_reference"] = json!({"parameter": "value", "position": "0"})),
+            Expect::Incomplete(&["is_project_file"]),
+            "has `malformed_reference.position` a string instead of a non-negative integer",
+        ),
+        (
+            "malformed_reference at the wrong position",
+            Edit::Json(|root| root["functions"]["is_project_file"]["malformed_reference"] = json!({"parameter": "value", "position": 1})),
+            Expect::Incomplete(&["is_project_file"]),
+            "records `malformed_reference.position` 1, but `value` is at position 0",
+        ),
+        (
+            "unknown malformed_reference field",
+            Edit::Json(|root| {
+                root["functions"]["is_project_file"]["malformed_reference"] = json!({"parameter": "value", "position": 0, "extra": 1});
+            }),
+            Expect::Incomplete(&["is_project_file"]),
+            "`malformed_reference` has unknown field `extra`",
+        ),
         ("empty facts", Edit::Json(|root| root["functions"]["is_project_file"]["facts"] = json!([])), Expect::NoFacts, ""),
         (
             "empty source_exclusions",
@@ -400,8 +612,11 @@ fn the_facts_artifact_reader_walks_the_input_robustness_matrix() {
         let expected: &[&str] = match expect {
             Expect::AllIncomplete => both,
             Expect::Incomplete(names) => names,
-            Expect::NoFacts | Expect::NoExclusions => &[],
+            Expect::NoFacts | Expect::NoExclusions | Expect::Complete(_) => &[],
         };
+        if let Expect::Complete(check) = expect {
+            check(&functions);
+        }
         assert_eq!(incomplete, expected, "{cell}: incomplete functions");
         for (name, found) in functions.incomplete_functions() {
             assert!(found.contains(reason), "{cell}: `{name}`'s reason {found:?} lacks {reason:?}");
@@ -438,8 +653,102 @@ fn the_facts_artifact_reader_walks_the_input_robustness_matrix() {
         }
         walked.push(cell);
     }
-    assert_eq!(walked.len(), 50, "every cell ran: {walked:?}");
+    assert_eq!(walked.len(), 71, "every cell ran: {walked:?}");
     assert_eq!(entries(), (0, 0), "analysis never enters a host handler");
+
+    conversion_recovery_cells();
+}
+
+/// One `conversion_recovery` cell: its name, its edit of the generated
+/// artifact, the recovery rule a complete read registers, and the reason an
+/// incomplete read gives (empty when the read is complete).
+type RecoveryCell = (&'static str, fn(&mut Value), Option<(&'static str, &'static str)>, &'static str);
+
+/// The `conversion_recovery` rows of the matrix. The test catalog has no
+/// function a recovery can apply to, so these cells read an artifact the
+/// writer generates for `project_round`, whose `fallback` recovers `x`.
+fn conversion_recovery_cells() {
+    fn recovery(root: &mut Value) -> &mut Value {
+        &mut root["functions"]["project_round"]["conversion_recovery"]
+    }
+    const ROUND_CATALOG: &str = concat!(
+        "kind: schema\n",
+        "categories:\n",
+        "    - Project -> Ask about the test host's project.\n",
+        "types:\n",
+        "    project_round: |-\n",
+        "        function(\n",
+        "            parameters(x: number, fallback?: number);\n",
+        "            returns(number);\n",
+        "            category(Project);\n",
+        "        ) -> Rounds `x`, or `fallback` when `x` is not a number.\n",
+    );
+    let round_catalog = || HostFunctionCatalog::load(ROUND_CATALOG, "project_round.yaml").expect("the round catalog loads");
+    let base = HostFunctions::builder(round_catalog())
+        .function(
+            "project_round",
+            &[],
+            |registration| registration.numeric_recovery("x", "fallback"),
+            Arc::new(|_| Ok(json!(0))),
+        )
+        .build()
+        .expect("the round host registers")
+        .facts_artifact();
+
+    let cells: Vec<RecoveryCell> = vec![
+        ("conversion_recovery control", |_| {}, Some(("x", "fallback")), ""),
+        ("explicit null conversion_recovery", |root| *recovery(root) = Value::Null, None, ""),
+        (
+            "absent conversion_recovery subject",
+            |root| drop(recovery(root).as_object_mut().unwrap().remove("subject")),
+            None,
+            "has no `conversion_recovery.subject` field",
+        ),
+        (
+            "conversion_recovery subject wrong type",
+            |root| recovery(root)["subject"] = json!(0),
+            None,
+            "has `conversion_recovery.subject` a number instead of a string",
+        ),
+        (
+            "conversion_recovery subject on a nonexistent parameter",
+            |root| recovery(root)["subject"] = json!("other"),
+            None,
+            "does not register",
+        ),
+        (
+            "null conversion_recovery fallback",
+            |root| recovery(root)["fallback"] = Value::Null,
+            None,
+            "has `conversion_recovery.fallback: null`",
+        ),
+        (
+            "unknown conversion_recovery field",
+            |root| recovery(root)["extra"] = json!(1),
+            None,
+            "`conversion_recovery` has unknown field `extra`",
+        ),
+    ];
+    for (cell, edit, rule, reason) in cells {
+        let mut root: Value = serde_json::from_str(&base).expect("the generated artifact is JSON");
+        edit(&mut root);
+        let edited = serde_json::to_string_pretty(&root).unwrap();
+        let functions =
+            HostFunctions::analysis_only(round_catalog(), FactsArtifact::Text(&edited)).expect("the catalog is valid");
+        let incomplete = functions.incomplete_functions();
+        if reason.is_empty() {
+            assert!(incomplete.is_empty(), "{cell}: {incomplete:?}");
+            let registration = functions.registration("project_round").expect("complete");
+            let recovered = registration.numeric_recovery().map(|recovery| (recovery.subject.as_str(), recovery.fallback.as_str()));
+            assert_eq!(recovered, rule, "{cell}: the recovery rule");
+        } else {
+            assert_eq!(incomplete.len(), 1, "{cell}: {incomplete:?}");
+            let (name, found) = incomplete[0];
+            assert_eq!(name, "project_round", "{cell}");
+            assert!(found.contains(reason), "{cell}: the reason {found:?} lacks {reason:?}");
+            assert!(functions.registration("project_round").is_none(), "{cell}: an incomplete function registers nothing");
+        }
+    }
 }
 
 // ── composition and runtime parity ─────────────────────────────────────────

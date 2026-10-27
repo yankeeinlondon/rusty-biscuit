@@ -114,8 +114,9 @@ impl HostFunctionCatalog {
     /// ([`facts_artifact_path`]). File-form examples (`example(./x.yaml)`)
     /// are not available to a host catalog and fail the load.
     ///
-    /// The loaded descriptors live for the rest of the process; load each
-    /// catalog version once.
+    /// The catalog owns everything it loads and borrows nothing from
+    /// `source`; it is freed with the last clone of this value and of any
+    /// [`HostFunctions`] built from it.
     ///
     /// ## Errors
     ///
@@ -148,11 +149,11 @@ impl HostFunctionCatalog {
     }
 
     /// Every function's canonical name, in documentation order.
-    pub fn function_names(&self) -> Vec<&'static str> {
-        let mut names: Vec<&'static str> = Vec::new();
-        for descriptor in self.inner.catalog.descriptors {
-            if !names.contains(&descriptor.name) {
-                names.push(descriptor.name);
+    pub fn function_names(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = Vec::new();
+        for descriptor in &self.inner.catalog.descriptors {
+            if !names.contains(&&*descriptor.name) {
+                names.push(&descriptor.name);
             }
         }
         names
@@ -166,7 +167,7 @@ impl HostFunctionCatalog {
             .catalog
             .descriptors
             .iter()
-            .filter(|descriptor| descriptor.name == name)
+            .filter(|descriptor| &*descriptor.name == name)
             .map(|descriptor| descriptor.function_type.clone())
             .collect();
         (!overloads.is_empty()).then(|| FunctionRegistration::builder_from_types(name, overloads))
@@ -174,6 +175,25 @@ impl HostFunctionCatalog {
 
     fn build(&self, builder: RegistrationBuilder) -> Result<FunctionRegistration, RegistrationError> {
         builder.build_with(&self.inner.catalog.type_resolver())
+    }
+
+    /// Test-only: observes whether this catalog's owner is still alive.
+    #[cfg(test)]
+    pub(crate) fn owner_probe(&self) -> CatalogOwnerProbe {
+        CatalogOwnerProbe(Arc::downgrade(&self.inner))
+    }
+}
+
+/// Test-only weak view of a loaded catalog's owner; it holds nothing alive.
+#[cfg(test)]
+pub(crate) struct CatalogOwnerProbe(std::sync::Weak<CatalogData>);
+
+#[cfg(test)]
+impl CatalogOwnerProbe {
+    /// Whether any catalog clone, function set, or scope guard still holds
+    /// the owner.
+    pub(crate) fn is_alive(&self) -> bool {
+        self.0.upgrade().is_some()
     }
 }
 

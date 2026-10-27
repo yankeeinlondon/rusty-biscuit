@@ -470,7 +470,7 @@ fn context_expressions_includes_every_function() {
     let functions = darkmatter::markdown::compose::expression::expression_function_descriptors();
     let expected: Vec<String> = functions.iter().map(|f| f.signature.to_string()).collect();
     let signatures: std::collections::HashSet<&str> =
-        functions.iter().map(|f| f.signature).collect();
+        functions.iter().map(|f| &*f.signature).collect();
 
     let actual: Vec<String> = context_first_column_cells(&["context", "--expressions"])
         .into_iter()
@@ -593,7 +593,7 @@ fn context_reports_list_more_context_names_and_the_recent_commits_pair_once() {
         .find(|descriptor| descriptor.name == "recent_commits")
         .unwrap();
     let function = &darkmatter::markdown::compose::expression::function_descriptors("recent_commits")[0];
-    assert_eq!(function.returns, "recent-commits");
+    assert_eq!(&*function.returns, "recent-commits");
     assert!(function.description.contains("`ctx.recent_commits`"), "{}", function.description);
     assert!(variable.description.contains("`recent_commits(count)`"), "{}", variable.description);
 }

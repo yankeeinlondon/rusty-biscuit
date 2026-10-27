@@ -263,8 +263,8 @@ fn build_registry(catalog: &FunctionCatalog) -> Result<Registry, RegistryError> 
             return Err(RegistryError::InvalidHandler(binding.canonical.to_string()));
         }
     }
-    for descriptor in catalog.descriptors {
-        if !seen.contains(descriptor.name) {
+    for descriptor in &catalog.descriptors {
+        if !seen.contains(&*descriptor.name) {
             return Err(RegistryError::CatalogWithoutBinding(descriptor.name.to_string()));
         }
     }
@@ -275,7 +275,7 @@ fn build_registry(catalog: &FunctionCatalog) -> Result<Registry, RegistryError> 
         let overloads: Vec<_> = catalog
             .descriptors
             .iter()
-            .filter(|descriptor| descriptor.name == binding.canonical)
+            .filter(|descriptor| &*descriptor.name == binding.canonical)
             .map(|descriptor| descriptor.function_type.clone())
             .collect();
         if overloads.is_empty() {
@@ -2001,7 +2001,7 @@ mod registration_tests {
     /// function has a binding and every binding a catalog function.
     #[test]
     fn catalog_and_runtime_bindings_have_bidirectional_canonical_parity() {
-        let catalog: HashSet<_> = expression_function_descriptors().iter().map(|descriptor| descriptor.name).collect();
+        let catalog: HashSet<_> = expression_function_descriptors().iter().map(|descriptor| &*descriptor.name).collect();
         let runtime: HashSet<_> = bindings().map(|binding| binding.canonical).collect();
         assert_eq!(catalog, runtime);
         assert_eq!(joined_bindings().len(), runtime.len());
@@ -2014,7 +2014,7 @@ mod registration_tests {
         for entry in joined_bindings() {
             let descriptors: Vec<_> = expression_function_descriptors()
                 .iter()
-                .filter(|descriptor| descriptor.name == entry.binding.canonical)
+                .filter(|descriptor| &*descriptor.name == entry.binding.canonical)
                 .collect();
             assert_eq!(entry.registration.overloads().len(), descriptors.len(), "{}", entry.binding.canonical);
             for (index, descriptor) in descriptors.iter().enumerate() {

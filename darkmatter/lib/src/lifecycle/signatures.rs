@@ -8,17 +8,17 @@ pub struct Overload {
 impl Overload {
     #[allow(missing_docs)]
     pub fn parameters(&self) -> &'static [FunctionParameterDescriptor] {
-        self.descriptor.parameters
+        &self.descriptor.parameters
     }
 
     /// The parameter names, in positional order.
     pub fn names(&self) -> impl Iterator<Item = &'static str> {
-        self.descriptor.parameters.iter().map(|parameter| parameter.name)
+        self.descriptor.parameters.iter().map(|parameter| &*parameter.name)
     }
 
     /// The catalog display key, e.g. `round(x, [fallback])` or `and(...)`.
     pub fn display(&self) -> &'static str {
-        self.descriptor.signature
+        &self.descriptor.signature
     }
 
     /// Whether a rest parameter takes any number of trailing arguments.
@@ -51,8 +51,8 @@ impl Overload {
         self.descriptor
             .parameters
             .iter()
-            .filter(|parameter| !parameter.optional && !parameter.rest && !keys.contains(&parameter.name))
-            .map(|parameter| parameter.name)
+            .filter(|parameter| !parameter.optional && !parameter.rest && !keys.contains(&&*parameter.name))
+            .map(|parameter| &*parameter.name)
             .collect()
     }
 }
@@ -163,7 +163,7 @@ impl VerbSignature {
             verb,
             overloads: descriptors
                 .iter()
-                .filter(|descriptor| descriptor.name == verb)
+                .filter(|descriptor| &*descriptor.name == verb)
                 .map(|descriptor| Overload { descriptor })
                 .collect(),
         }
@@ -233,7 +233,7 @@ pub fn is_lifecycle_control_verb(verb: &str) -> bool {
 fn is_known_expression_function_verb(verb: &str) -> bool {
     expression_function_descriptors()
         .iter()
-        .any(|d| d.name == verb)
+        .any(|d| &*d.name == verb)
 }
 
 /// Extract the verb name from a raw descriptor signature string.
@@ -253,7 +253,7 @@ pub fn expression_function_signature(verb: &str) -> Option<&'static VerbSignatur
         let descriptors = expression_function_descriptors();
         descriptors
             .iter()
-            .map(|descriptor| (descriptor.name, VerbSignature::from_catalog(descriptor.name, descriptors)))
+            .map(|descriptor| (&*descriptor.name, VerbSignature::from_catalog(&descriptor.name, descriptors)))
             .collect()
     });
     SIGNATURES.get(verb)
@@ -286,7 +286,7 @@ pub fn all_lifecycle_verbs() -> Vec<&'static str> {
             verbs.push(verb);
         }
     }
-    verbs.extend(expression_function_descriptors().iter().map(|desc| desc.name));
+    verbs.extend(expression_function_descriptors().iter().map(|desc| &*desc.name));
     verbs.sort_unstable();
     verbs.dedup();
     verbs
@@ -312,12 +312,57 @@ mod tests {
     fn a_rest_parameter_after_a_fixed_prefix_counts_the_prefix_as_required() {
         let source = "kind: schema\ncategories:\n    - Text -> Text.\ntypes:\n    joined: |-\n        function(\n            parameters(separator: string, ...parts: string);\n            returns(string);\n            category(Text);\n        ) -> Joins parts.\n";
         let catalog: &'static _ = Box::leak(Box::new(load_catalog(source, "fixture.yaml", &[]).expect("fixture loads")));
-        let joined = VerbSignature::from_catalog("joined", catalog.descriptors);
+        let joined = VerbSignature::from_catalog("joined", &catalog.descriptors);
 
         assert!(joined.is_variadic());
         assert_eq!(joined.min_count(), 1);
         assert!(!joined.accepts_count(0));
         assert!(joined.accepts_count(1) && joined.accepts_count(4));
         assert!(joined.select_named(&["separator"]).is_err(), "a variadic overload has no long form");
+    }
+
+    /// The built-in catalogs live in `LazyLock` owners, so their accessors
+    /// and the lifecycle views over them lend permanent borrows. The typed
+    /// bindings are the check: narrowing any of these lifetimes stops this
+    /// test compiling.
+    #[test]
+    fn static_catalog_accessors_lend_permanent_borrows() {
+        use crate::catalog::{Described, Example, ExampleVerification};
+        use crate::markdown::compose::expression::function_descriptors;
+
+        let all_functions: fn() -> &'static [ExpressionFunctionDescriptor] = expression_function_descriptors;
+        let overloads_of: fn(&str) -> &'static [ExpressionFunctionDescriptor] = function_descriptors;
+        let all_effects: fn() -> &'static [ExpressionFunctionDescriptor] = effect_function_descriptors;
+
+        let round: &'static [ExpressionFunctionDescriptor] = overloads_of("round");
+        assert!(all_functions().iter().any(|descriptor| &*descriptor.signature == "round(x, [fallback])"));
+        assert!(all_effects().iter().any(|descriptor| &*descriptor.signature == "set(key, value)"));
+        let example: Option<Example<'static>> = round[0].example();
+        assert_eq!(
+            example,
+            Some(Example {
+                invocation: "round(3.7)",
+                result: "4",
+                verification: ExampleVerification::Executable,
+            })
+        );
+
+        let verbs: Vec<&'static str> = all_lifecycle_verbs();
+        assert!(verbs.contains(&"round") && verbs.contains(&"set"), "{verbs:?}");
+
+        let function: &'static VerbSignature = expression_function_signature("round").expect("`round` is a verb");
+        let verb: &'static str = function.verb();
+        let overload: Overload = function.overloads()[0];
+        let display: &'static str = overload.display();
+        let names: Vec<&'static str> = overload.names().collect();
+        let parameters: &'static [FunctionParameterDescriptor] = overload.parameters();
+        let parameter: &'static str = &parameters[1].name;
+        assert_eq!((verb, display, parameter), ("round", "round(x, [fallback])", "fallback"));
+        assert_eq!(names, ["x", "fallback"]);
+
+        let effect: &'static VerbSignature = side_effect_signature("set").expect("`set` is a side effect");
+        let effect_verb: &'static str = effect.verb();
+        let effect_names: Vec<&'static str> = effect.overloads()[0].names().collect();
+        assert_eq!((effect_verb, effect_names), ("set", vec!["key", "value"]));
     }
 }

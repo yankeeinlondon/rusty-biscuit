@@ -646,6 +646,22 @@ fn schema_about_verbose_prints_context_and_expression_sections() {
         );
     }
 
+    // Exact rendered text of one overloaded function, captured before the
+    // catalog descriptors became owned: every overload on its own wrapped item.
+    let link_overloads = concat!(
+        " - link(file: file | null) -> string | null | error \u{2014} Creates a Markdown link\n",
+        "   to a local file, using its relative path as the link text and its\n",
+        "   absolute path as the destination. HTTP(S) URLs are rejected because they\n",
+        "   need a description; null passes through.\n",
+        " - link(target: file | null, desc: string | null) -> string | null | error \u{2014}\n",
+        "   Creates a Markdown link to a local file or an HTTP(S) URL with the given\n",
+        "   description as its text; null passes through.\n",
+    );
+    assert!(
+        plain.contains(link_overloads),
+        "verbose schema about must render the `link` overloads exactly:\n{plain}"
+    );
+
     for retired in ["packages_list", "dirty_files_list"] {
         assert!(
             !plain.contains(retired),

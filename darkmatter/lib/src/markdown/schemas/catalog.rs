@@ -518,9 +518,14 @@ impl std::error::Error for HostFunctionCatalogError {}
 ///
 /// A catalog that does not load, or that names a built-in function, is
 /// returned as its error; a missing or bad facts artifact is not an error but
-/// makes the affected functions incomplete. Results are cached per catalog
-/// path, catalog bytes, and artifact bytes, because a loaded catalog lives
-/// for the rest of the process.
+/// makes the affected functions incomplete.
+///
+/// The process keeps one result per catalog path: the catalog's content
+/// hash, the artifact as read, and the loaded set or its error. An unchanged
+/// revision reuses that result, an error included; a changed catalog or
+/// artifact replaces it, so a replaced catalog is freed once no caller holds
+/// a set, clone, or scope guard from it. A set obtained earlier keeps
+/// working after its path's entry is replaced.
 pub fn host_function_catalogs(
     context: &biscuit_file::FileResolutionContext,
 ) -> Vec<Result<crate::markdown::compose::expression::HostFunctions, HostFunctionCatalogError>> {
@@ -585,27 +590,44 @@ impl ArtifactKey {
     }
 }
 
-type HostFunctionCacheKey = (std::path::PathBuf, String, ArtifactKey);
 type HostFunctionCacheValue = Result<crate::markdown::compose::expression::HostFunctions, HostFunctionCatalogError>;
+
+/// The latest revision `host_function_set` processed for one catalog path.
+struct HostFunctionEntry {
+    catalog_hash: String,
+    artifact: ArtifactKey,
+    result: HostFunctionCacheValue,
+}
+
+type HostFunctionCache = std::collections::HashMap<std::path::PathBuf, HostFunctionEntry>;
+
+fn host_function_cache() -> std::sync::MutexGuard<'static, HostFunctionCache> {
+    static CACHE: std::sync::LazyLock<std::sync::Mutex<HostFunctionCache>> = std::sync::LazyLock::new(Default::default);
+    CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn host_function_set(path: &Path, text: &str) -> HostFunctionCacheValue {
     use crate::markdown::compose::expression::host::facts_artifact_path;
     use crate::markdown::compose::expression::{HostFunctionCatalog, HostFunctions};
-    static CACHE: std::sync::LazyLock<
-        std::sync::Mutex<std::collections::HashMap<HostFunctionCacheKey, HostFunctionCacheValue>>,
-    > = std::sync::LazyLock::new(Default::default);
 
-    let key = (path.to_path_buf(), biscuit_hash::blake3_hash(text), ArtifactKey::read(&facts_artifact_path(path)));
-    let mut cache = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(found) = cache.get(&key) {
-        return found.clone();
+    let catalog_hash = biscuit_hash::blake3_hash(text);
+    let artifact = ArtifactKey::read(&facts_artifact_path(path));
+    // Lookup, build, and replacement happen under one lock, so an unchanged
+    // revision is never built twice and each path keeps one result.
+    let mut cache = host_function_cache();
+    if let Some(cached) = cache.get(path)
+        && cached.catalog_hash == catalog_hash
+        && cached.artifact == artifact
+    {
+        return cached.result.clone();
     }
+    discovery_probe::note_host_function_build();
     let fail = |message: String| HostFunctionCatalogError { path: path.to_path_buf(), message };
-    let built = HostFunctionCatalog::load(text, path).map_err(|error| fail(error.to_string())).and_then(|catalog| {
-        HostFunctions::analysis_only(catalog, key.2.artifact()).map_err(|error| fail(error.to_string()))
+    let result = HostFunctionCatalog::load(text, path).map_err(|error| fail(error.to_string())).and_then(|catalog| {
+        HostFunctions::analysis_only(catalog, artifact.artifact()).map_err(|error| fail(error.to_string()))
     });
-    cache.insert(key, built.clone());
-    built
+    cache.insert(path.to_path_buf(), HostFunctionEntry { catalog_hash, artifact, result: result.clone() });
+    result
 }
 
 /// The host lifecycle profile recorded beside one host catalog in a
@@ -771,9 +793,10 @@ fn observe_candidate(
     Some(HostLifecycleDiscovery { catalog: path.to_path_buf(), profile })
 }
 
-/// Test-only observation of lifecycle discovery on the current thread:
-/// which catalog and artifact files it reads, how many profiles it builds,
-/// read failures to inject, and what the process cache holds for a path.
+/// Test-only observation of schema-root discovery on the current thread:
+/// which lifecycle catalog and artifact files it reads, how many lifecycle
+/// profiles and host function sets it builds, read failures to inject, and
+/// what the process caches hold for a path.
 /// Compiled for this crate's tests and with the test-only `work-counters`
 /// feature; production builds read the disk directly.
 #[cfg(any(test, feature = "work-counters"))]
@@ -785,6 +808,7 @@ pub mod discovery_probe {
     #[derive(Default)]
     struct State {
         builds: usize,
+        host_function_builds: usize,
         reads: Vec<PathBuf>,
         failures: HashMap<PathBuf, String>,
     }
@@ -829,6 +853,12 @@ pub mod discovery_probe {
             with_state(|state| state.builds)
         }
 
+        /// The host function sets `host_function_catalogs` loaded (successfully
+        /// or not) so far; a cached result is not counted.
+        pub fn host_function_builds(&self) -> usize {
+            with_state(|state| state.host_function_builds)
+        }
+
         /// The catalog and artifact files discovery read so far, in order,
         /// failed reads included; clears the record.
         pub fn take_reads(&self) -> Vec<PathBuf> {
@@ -865,6 +895,46 @@ pub mod discovery_probe {
         })
     }
 
+    /// The facts artifact as the host function cache recorded it.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum CachedArtifact {
+        Absent,
+        Unreadable(String),
+        Text(String),
+    }
+
+    /// The host function cache's entry for one catalog path.
+    #[derive(Debug, Clone)]
+    pub struct CachedHostFunctions {
+        pub catalog_hash: String,
+        pub artifact: CachedArtifact,
+        /// The cached set's function names, or the cached load error.
+        pub result: Result<Vec<String>, super::HostFunctionCatalogError>,
+    }
+
+    /// The host function cache's entry for `path`, if it holds one. Holds
+    /// nothing of the cached set alive.
+    pub fn cached_host_functions(path: &Path) -> Option<CachedHostFunctions> {
+        super::host_function_cache().get(path).map(|cached| CachedHostFunctions {
+            catalog_hash: cached.catalog_hash.clone(),
+            artifact: match &cached.artifact {
+                super::ArtifactKey::Absent => CachedArtifact::Absent,
+                super::ArtifactKey::Unreadable(reason) => CachedArtifact::Unreadable(reason.clone()),
+                super::ArtifactKey::Text(text) => CachedArtifact::Text(text.clone()),
+            },
+            result: cached
+                .result
+                .as_ref()
+                .map(|set| set.function_names().into_iter().map(str::to_string).collect())
+                .map_err(Clone::clone),
+        })
+    }
+
+    /// How many host function cache entries are for paths under `dir`.
+    pub fn host_function_entries_under(dir: &Path) -> usize {
+        super::host_function_cache().keys().filter(|path| path.starts_with(dir)).count()
+    }
+
     pub(super) fn read(path: &Path) -> std::io::Result<Vec<u8>> {
         let injected = STATE.with_borrow_mut(|state| {
             let state = state.as_mut()?;
@@ -884,6 +954,14 @@ pub mod discovery_probe {
             }
         });
     }
+
+    pub(super) fn note_host_function_build() {
+        STATE.with_borrow_mut(|state| {
+            if let Some(state) = state {
+                state.host_function_builds += 1;
+            }
+        });
+    }
 }
 
 #[cfg(not(any(test, feature = "work-counters")))]
@@ -893,6 +971,8 @@ mod discovery_probe {
     }
 
     pub(super) fn note_build() {}
+
+    pub(super) fn note_host_function_build() {}
 }
 
 /// Whether `text` claims the function-catalog envelope: `kind: schema` with
@@ -1056,6 +1136,9 @@ fn same_shape(left: &PropertyDef, right: &PropertyDef) -> bool {
 
 #[cfg(test)]
 mod discovery_tests;
+
+#[cfg(test)]
+mod host_function_cache_tests;
 
 #[cfg(test)]
 mod tests {

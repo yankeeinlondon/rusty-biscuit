@@ -1791,7 +1791,7 @@ mod tests {
                 "`{name}` hover should carry its catalog block: {markdown}"
             );
             assert!(markdown.contains(&descriptor.typed_signature()));
-            assert!(markdown.contains(descriptor.description));
+            assert!(markdown.contains(&*descriptor.description));
         }
         // An unknown function keeps the generic parsed-expression hover.
         let markdown = interpolation_hover_markdown("mystery(items)", 3, no_frontmatter, no_schema);
@@ -1997,9 +1997,9 @@ mod tests {
         assert_eq!(length.kind, CompletionItemKind::FUNCTION);
         // D4: untyped signature label, typed-signature detail, description
         // documentation, bare-name insertion (no snippet, no parentheses).
-        assert_eq!(length.label, descriptor.signature);
+        assert_eq!(*length.label, *descriptor.signature);
         assert_eq!(length.detail, Some(descriptor.typed_signature()));
-        assert_eq!(length.documentation.as_deref(), Some(descriptor.description));
+        assert_eq!(length.documentation.as_deref(), Some(&*descriptor.description));
         assert!(!length.new_text.contains('('));
     }
 

@@ -110,7 +110,7 @@ fn a_built_in_entry_counts_under_its_canonical_name() {
 #[test]
 fn the_embedded_catalog_and_the_registry_have_the_same_functions() {
     let cataloged: HashSet<&str> =
-        expression_function_catalog().descriptors.iter().map(|descriptor| descriptor.name).collect();
+        expression_function_catalog().descriptors.iter().map(|descriptor| &*descriptor.name).collect();
     let registered: HashSet<&str> = dispatchable_canonical_names().into_iter().collect();
     assert_eq!(cataloged, registered);
 }

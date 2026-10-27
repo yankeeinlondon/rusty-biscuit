@@ -89,7 +89,7 @@ pub(super) fn format_safety(safety: EffectSafety, term: &Terminal) -> String {
 }
 
 /// Renders a descriptor's optional example for table cells.
-pub(super) fn format_example(example: Option<&darkmatter::catalog::Example>, term: &Terminal) -> String {
+pub(super) fn format_example(example: Option<darkmatter::catalog::Example<'_>>, term: &Terminal) -> String {
     match example {
         Some(ex) => {
             let example = format!("{} → {}", ex.invocation, ex.result).replace('\t', r"\t");
@@ -148,7 +148,7 @@ pub(super) fn format_function_examples(
 /// column only displays the result arrow and value, keeping the four-column
 /// report within the minimum supported terminal width.
 pub(super) fn format_effect_example(
-    example: Option<&darkmatter::catalog::Example>,
+    example: Option<darkmatter::catalog::Example<'_>>,
     term: &Terminal,
 ) -> String {
     match example {

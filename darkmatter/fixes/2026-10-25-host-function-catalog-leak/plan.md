@@ -13,6 +13,60 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages:
     - darkmatter
+    - darkmatter-cli
+    - dmls
+    - claudine
+    - claudine-cli
+source_files_during_phase_2:
+    - darkmatter/lib/src/catalog/mod.rs
+    - darkmatter/lib/src/effects/catalog.rs
+    - darkmatter/lib/src/effects/types.rs
+    - darkmatter/lib/src/lifecycle/schema_projection.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/capabilities.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/semantics.rs
+    - darkmatter/lib/tests/l1/function_catalog_parity.rs
+    - darkmatter/lib/tests/l1/function_dispatch.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+    - darkmatter/lib/tests/l1/predict_conflicts.rs
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - claudine/cli/src/commands/context/effects.rs
+    - claudine/cli/src/commands/context/expressions.rs
+    - claudine/cli/src/commands/context/format.rs
+    - claudine/cli/src/commands/context/mod.rs
+    - claudine/cli/src/commands/context/tests.rs
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+docs_updated_during_phase_2:
+    - darkmatter/lib/src/catalog/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/expressions.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/catalog/host_function_cache_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/host-functions.md
+    - darkmatter/lib/src/catalog/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/library-surfaces.md
 ---
 
 # Host function catalog ownership plan
@@ -184,7 +238,7 @@ identified; no unresolved design choices or spikes remain.
 
 ### Wave 2 — Ownership migration
 
-- [ ] **Own catalog data**
+- [x] **Own catalog data**
   - Prerequisite: Wave 1. One task owns the shared framework and core catalog
     migration because their lifetime changes are coupled.
   - Convert `catalog/mod.rs`, expression catalog types, `load_catalog`,
@@ -217,7 +271,7 @@ integration tests/examples in the third, and docs/skills in the fourth. Coordina
 any newly discovered core API correction through the Wave 2 owner before merging
 dependent edits; do not have two lanes edit the core framework simultaneously.
 
-- [ ] **Bound revision retention**
+- [x] **Bound revision retention**
   - Replace the revision-tuple map in `schemas/catalog.rs::host_function_set`
     with one stored entry per path. Preserve `ArtifactKey::{Absent, Unreadable,
     Text}`, including unreadable reasons and exact text comparison.
@@ -249,7 +303,7 @@ dependent edits; do not have two lanes edit the core framework simultaneously.
     guard cannot accidentally substitute its registrations for the old set.
   - Correct `host_function_catalogs`' process-lifetime comment and cache comments.
 
-- [ ] **Adapt external consumers**
+- [x] **Adapt external consumers**
   - Update Darkmatter CLI descriptor consumers, DMLS completion/hover, and
     actual Claudine metadata consumers for borrowed fields and removed `Copy`
     behavior. Claudine currently registers no host expression functions:
@@ -263,7 +317,7 @@ dependent edits; do not have two lanes edit the core framework simultaneously.
   - Preserve Claudine registration and facts-artifact expectations without
     regenerating different artifact bytes or accepting new snapshots.
 
-- [ ] **Pin catalog contracts**
+- [x] **Pin catalog contracts**
   - Add compile checks assigning `expression_function_descriptors()`,
     `function_descriptors()`, and `effect_function_descriptors()` to their
     existing `&'static` slice types, plus lifecycle verb and parameter names to
@@ -280,7 +334,7 @@ dependent edits; do not have two lanes edit the core framework simultaneously.
     `lifecycle_schema_generator`; retain metadata ordering and generated text.
     Complete the bounded input coverage described below using existing tests.
 
-- [ ] **Document ownership contracts**
+- [x] **Document ownership contracts**
   - Update `docs/topics/host-functions.md` with owner lifetimes, per-path latest
     revision retention, deliberate survival of held old sets, and error recovery.
     Give compact examples; distinguish incomplete facts from catalog failures.

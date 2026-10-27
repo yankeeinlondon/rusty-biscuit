@@ -364,7 +364,7 @@ impl LifecycleSchemaProjection {
             (VerbOrigin::ExpressionFunction, catalogs.expression_functions),
         ] {
             for descriptor in descriptors {
-                functions.entry((origin, descriptor.name)).or_default().push(descriptor);
+                functions.entry((origin, &*descriptor.name)).or_default().push(descriptor);
             }
         }
 
@@ -386,7 +386,7 @@ impl LifecycleSchemaProjection {
                 });
             }
             if origin == VerbOrigin::ExpressionFunction
-                && catalogs.side_effects.iter().any(|descriptor| descriptor.name == name)
+                && catalogs.side_effects.iter().any(|descriptor| &*descriptor.name == name)
             {
                 return Err(ProjectionError::Collision {
                     verb: name.to_string(),
@@ -401,7 +401,7 @@ impl LifecycleSchemaProjection {
                 });
             }
             overloads.sort_by_key(|descriptor| descriptor.overload);
-            let types: Vec<&FunctionType> = overloads.iter().map(|descriptor| descriptor.function_type).collect();
+            let types: Vec<&FunctionType> = overloads.iter().map(|descriptor| &descriptor.function_type).collect();
             if types.iter().any(|function| has_callback_parameter(function)) {
                 callback_exclusions.push(name.to_string());
                 continue;

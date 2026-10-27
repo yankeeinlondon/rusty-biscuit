@@ -9,20 +9,72 @@ docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages:
     - darkmatter
+    - darkmatter-cli
+    - dmls
+    - claudine
+    - claudine-cli
 human_review: false
 message_to_agent: |-
-    Phase 1 changed no source. Read the log's "Consumer inventory" before editing: there are 12
-    `Described` implementations (8 in expression/semantics.rs), not 5. Claudine reads the static
-    `.example` field directly in cli/src/commands/context/{expressions,effects,tests}.rs and its
-    format.rs helpers take `Option<&Example>`; Phase 1 decided they take `Option<Example<'_>>` via
-    the trait method. `aliases` is not leaked today (it comes from the static binding table and is
-    `&[]` for host functions); Decision 1 still makes it owned. Test code that copies descriptors:
-    lib/tests/l1/lifecycle_schema_generation.rs (`*descriptors...find`, `.copied()` at 201/219).
-    Pre-refactor output baselines are in this fix directory's `baselines/` (md schema about,
-    claudine context --expressions/--side-effects, both generator examples, and DMLS function
-    hover/completion); diff post-refactor output against them, and Phase 3 should add exact-text
-    tests for the two unpinned outputs (md schema about Expression Functions section, DMLS
-    function hover/completion). The facts-matrix gaps are listed under "Facts-artifact matrix audit".
+    Phase 3 landed all four Wave 3 lanes. The host function cache in
+    schemas/catalog.rs is now one HostFunctionEntry per path (host_function_cache());
+    tests are in schemas/catalog/host_function_cache_tests.rs and use the extended
+    discovery_probe (host_function_builds, cached_host_functions,
+    host_function_entries_under) plus the cfg(test) HostFunctionCatalog::owner_probe.
+    Generator stdout already diffed byte-identical to baselines/ this phase, and
+    md schema about / DMLS hover+completion now have exact-text pins. The darkmatter
+    just test (12610 passed) and just lint are green; Claudine's full just test/just lint
+    have NOT been run in this phase (only scoped claudine tests) - Phase 4 must run them.
+    signatures.rs tests live under lifecycle::actions::signatures::tests (declared from actions.rs).
+source_files_during_phase_2:
+    - darkmatter/lib/src/catalog/mod.rs
+    - darkmatter/lib/src/effects/catalog.rs
+    - darkmatter/lib/src/effects/types.rs
+    - darkmatter/lib/src/lifecycle/schema_projection.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/capabilities.rs
+    - darkmatter/lib/src/markdown/compose/context/catalog.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/semantics.rs
+    - darkmatter/lib/tests/l1/function_catalog_parity.rs
+    - darkmatter/lib/tests/l1/function_dispatch.rs
+    - darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+    - darkmatter/lib/tests/l1/predict_conflicts.rs
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - claudine/cli/src/commands/context/effects.rs
+    - claudine/cli/src/commands/context/expressions.rs
+    - claudine/cli/src/commands/context/format.rs
+    - claudine/cli/src/commands/context/mod.rs
+    - claudine/cli/src/commands/context/tests.rs
+    - claudine/cli/tests/l1/context_command.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+docs_updated_during_phase_2:
+    - darkmatter/lib/src/catalog/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/expressions.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/catalog/host_function_cache_tests.rs
+    - darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+    - darkmatter/lib/src/lifecycle/signatures.rs
+    - darkmatter/lib/tests/l1/host_functions.rs
+    - darkmatter/cli/src/commands/schema/about.rs
+    - darkmatter/cli/tests/l1/schema_about.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/host-functions.md
+    - darkmatter/lib/src/catalog/README.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/darkmatter/library-surfaces.md
 ---
 
 # Implementation Log for 2026-10-25-host-function-catalog-leak (4 phases)
@@ -308,3 +360,329 @@ makes an absent description empty — existing behavior, preserved.
 - `just test` (darkmatter, includes DMLS): 12593 passed, 10 skipped, 0 failed (1 slow), 100.8 s.
 - No dependent-package tests: no source changed, so no downstream symbol changed.
 - Cross-OS check: not run; Phase 1 changed no code.
+
+## Phase 2
+
+Phase 2 is the plan's Wave 2 (Own catalog data). The expression-function
+catalog now owns every value it projects, and every repository consumer
+compiles against borrowed views. The host-function cache (Wave 3) is unchanged.
+
+### Changes
+
+- **Shared framework** (`lib/src/catalog/mod.rs`): `Example<'a>` and
+  `ExampleVerification<'a>` are `Copy` borrowed views (`DisplayOnly(&'a str)`).
+  `Described::{key, description, category}` return `&str` borrowed from
+  `&self`; `example()` returns `Option<Example<'_>>`. Trait, module, and
+  `suggest_strings` comments rewritten (the latter no longer cites
+  `&'static str`).
+- **Expression catalog** (`expression/catalog/mod.rs`): `CatalogCategory`,
+  `FunctionParameterDescriptor`, `FunctionExample`, and
+  `ExpressionFunctionDescriptor` hold `Box<str>`, `Box<[_]>`, and an owned
+  `FunctionType`; they lose `Copy` and keep `Clone`. `aliases` is
+  `Box<[Box<str>]>`. `FunctionCatalog::{categories, descriptors}` are boxed
+  slices. The duplicate `example` field is removed; `Described::example`
+  derives the view from the first `FunctionExample::Call`, with the same
+  display-only mapping. `leak()` and every `Box::leak` are gone from
+  `load_catalog`, `project_examples` (now takes `&FunctionType`), and
+  `file_example`, so a later projection error frees earlier overloads' data.
+  `descriptors_for(&self)` borrows from `self`; `expression_function_descriptors()`
+  and `function_descriptors()` keep `&'static` by borrowing the `LazyLock` owner.
+  Loader doc comment corrected.
+- **Other `Described` impls**: `EffectDescriptor`, `ContextVariableDescriptor`,
+  and the eight `expression/semantics.rs` descriptors store
+  `Option<Example<'static>>` and return it by value.
+- **Library consumers**: `effects/types.rs` (borrow of the static
+  `descriptors`, `&*descriptor.name` map keys), `lifecycle/signatures.rs`
+  (`&'static` views borrowed from the static descriptors), `lifecycle/schema_projection.rs`
+  (`&descriptor.function_type`), `context/capture/capabilities.rs`,
+  `expression/functions/mod.rs`, `expression/host/mod.rs`
+  (`function_names(&self) -> Vec<&str>`; `load` doc no longer says descriptors
+  live for the process).
+- **CLI / DMLS / Claudine** (compile adaptations only, no output change):
+  `cli/src/commands/schema/about.rs`, `dmls/src/overlay/expressions.rs`;
+  Claudine `cli/src/commands/context/{expressions,effects,format,mod}.rs` call
+  `example()` and its helpers take `Option<Example<'_>>` (Phase 1 Decision 2).
+- **Tests migrated** for borrowed fields and no `Copy`: `catalog/tests.rs`,
+  `effects/types.rs`, `lifecycle/signatures.rs` and `functions/mod.rs` unit
+  tests; lib L1 `lifecycle_schema_generation.rs` (`.cloned()`, `name.into()`),
+  `predict_conflicts.rs` (`example()`), `function_catalog_parity.rs`,
+  `function_dispatch.rs`; DMLS `overlay/expressions.rs`, `providers/dsl.rs`,
+  `tests/l1/lsp_session.rs`; Claudine `cli/src/commands/context/tests.rs`,
+  `cli/tests/l1/context_command.rs`, `lib/tests/l1/claudine_schemas.rs`.
+- **Docs**: `lib/src/catalog/README.md` (borrowed `example()` view, `&str`
+  trait returns, `Option<Example<'static>>` for static tables). Skill:
+  `.claude/skills/darkmatter/expressions.md` ownership note.
+
+Ownership audit of the changed loader/projection paths: no `leak`,
+`Box::leak`, or `'static` storage remains in `expression/catalog/mod.rs`,
+`expression/host/`, or `effects/types.rs`. Out of scope and unchanged per the
+spec: `context/catalog.rs::leak` (context catalog) and the test-only leaked
+fixture in `lifecycle/signatures.rs`.
+
+### Requirement-to-test mapping
+
+| Behavior | Test |
+| -------- | ---- |
+| Loaded catalog owns its data independent of the source text and path | new `catalog::tests::a_loaded_catalog_outlives_the_text_it_was_loaded_from` (drops the `String` source and path, then reads names, types, examples, reason, categories, lookups) |
+| `Described::example` derives from the first inline call; display-only reason carries; file-only and no-example functions have no view | new `catalog::tests::the_described_example_is_a_view_of_the_first_inline_call`; existing `examples_keep_their_authored_text_and_files_are_embedded`, `predict_conflicts.rs::shipped_catalog_describes_predict_conflicts_exactly` |
+| Static APIs keep `&'static` | compile-time: `Overload::{parameters, names, display}`, `all_lifecycle_verbs`, `expression_function_signature` and `effect_registration` still return `&'static` from static owners (Phase 3 adds explicit assignment checks) |
+| Preserved output | baselines diffed byte-for-byte: both generator examples, `md schema about` (plain and verbose), `claudine context --expressions/--side-effects --plain` (stdout) — all identical; existing exact-text pins (`narrative_doc_function_table_matches_catalog`, `the_generated_regions_are_byte_identical_to_a_regeneration`, `a3_completions_are_unchanged`) pass |
+
+Fidelity: F1 unit tests at the library's public loader result (L1); the
+CLI-boundary parity is shown by the baseline diffs and the existing CLI L1
+tests. No input format, parser, or validator changed in this phase, so the
+input robustness matrix is not re-walked here (it belongs to Phase 3's cache
+and facts work).
+
+### Design Decisions
+
+1. **Consumer compile adaptations land in Phase 2**
+   - **decision:** Make the CLI, DMLS, and Claudine consumers (and their tests)
+     compile in this phase with mechanical borrow changes only; Phase 3's
+     "Adapt external consumers" lane keeps the output-pinning tests.
+   - **alternatives considered:** leave the external crates broken until
+     Phase 3; feature-gate the change.
+   - **why:** the phase gate is the darkmatter area's full `just test`, which
+     builds the CLI and DMLS; a broken Claudine would also fail its dependents.
+     The changes are type-level only, and every output was diffed equal.
+   - **downsides:** Phase 3's consumer lane has less to do; it must still add the
+     exact-text pins listed in Phase 1.
+2. **`function_type` is an owned `FunctionType`, not `Box<FunctionType>`**
+   - **decision:** Store `function_type: FunctionType` in the descriptor and
+     clone it out of the parsed `TypeExpr::Function` box.
+   - **alternatives considered:** `Box<FunctionType>` to keep the descriptor
+     small.
+   - **why:** plan Decision 1 says "owned `FunctionType` values"; consumers
+     borrow `&descriptor.function_type` or `.clone()` it exactly as before.
+   - **downsides:** a larger descriptor value; irrelevant at catalog sizes.
+3. **Aliases are copied per overload**
+   - **decision:** Build each function's `Box<[Box<str>]>` aliases once and
+     clone it into each overload's descriptor.
+   - **alternatives considered:** share through `Arc<[..]>`.
+   - **why:** spec's settled downside ("repeated names … may be allocated
+     separately"); aliases are empty for every host function.
+   - **downsides:** duplicate small allocations for overloaded built-ins.
+
+### Gates
+
+- `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [claudine, claudine-cli, darkmatter, darkmatter-cli, dmls, test-toolkit]`,
+  `change_class: package`, so the gates ran.
+- Targeted first: `cargo nextest run -p darkmatter --lib -E 'test(/expression::catalog::/) | …'`
+  → 388 passed.
+- `just lint` (darkmatter): passed (run again after the test migrations).
+- `just test` (darkmatter, includes CLI and DMLS): 12595 passed, 10 skipped,
+  0 failed (107 slow under load), 243 s. The first run failed to compile two
+  feature-gated L1 files (`function_catalog_parity.rs`, `function_dispatch.rs`,
+  behind `effects-instrumentation`/`test-fixtures`); fixed, then green.
+- Dependents (scoped, serially): `cargo nextest run -p claudine-cli --features test-fixtures -E 'test(/commands::context::/) | test(/context_command/) | test(/shipped_lifecycle_artifacts/)'`
+  → 44 passed; `cargo nextest run -p claudine -E 'test(/claudine_schemas/) | test(/host_catalog/)'`
+  → 845 passed. `just lint` (claudine): passed (pre-existing linker note only).
+  `test-toolkit` references none of the changed symbols; not run.
+- Cross-OS check: not run. The change is type/ownership only, with no paths,
+  processes, or `cfg` code.
+
+## Phase 3
+
+Phase 3 is the plan's Wave 3: four lanes. The coordinator wrote the cache lane
+(it touches the core discovery code); three subagents ran the consumer-pin,
+catalog-contract, and documentation lanes in parallel with disjoint file
+ownership.
+
+### Bound revision retention (coordinator)
+
+- `lib/src/markdown/schemas/catalog.rs`: `host_function_set` now keeps one
+  `HostFunctionEntry { catalog_hash, artifact: ArtifactKey, result }` per
+  discovery `PathBuf` in `host_function_cache()` (the same singleton
+  `LazyLock<Mutex<..>>` pattern as `profile_cache()`, moved out of the
+  function so the probe can inspect it). Lookup, comparison (catalog BLAKE3
+  digest and the complete `ArtifactKey`: absent / unreadable with reason /
+  exact text), build, and replacement all run under the one lock. An
+  unchanged revision returns its cached result, error included; any change
+  inserts the new result over the old entry, so the old set (or error, and
+  the old artifact text) is dropped from the cache. The old
+  `(PathBuf, String, ArtifactKey)` tuple key and its comment are gone.
+- `host_function_catalogs`' doc comment no longer says a loaded catalog lives
+  for the rest of the process; it states the per-path latest-revision rule
+  and that held sets survive replacement.
+- `discovery_probe` (Decision 8: extend the existing probe, no second seam)
+  gains a `host_function_builds()` counter (separate from the lifecycle
+  `builds()` so existing lifecycle assertions are unaffected),
+  `cached_host_functions(path)` (catalog hash, `CachedArtifact`, and the
+  cached function names or error — a summary that holds nothing alive), and
+  `host_function_entries_under(dir)`. The artifact read is **not** routed
+  through `discovery_probe::read`: no test needs to observe or inject it, and
+  the non-UTF-8 case is a real byte fixture.
+- `lib/src/markdown/compose/expression/host/mod.rs`: `cfg(test)`
+  `HostFunctionCatalog::owner_probe()` → `CatalogOwnerProbe` (a `Weak` to
+  the private `CatalogData`, `is_alive()`); crate-private, test-only.
+
+New L1 module `lib/src/markdown/schemas/catalog/host_function_cache_tests.rs`
+(6 tests, each ~0.06 s; every test uses its own canonical temp roots, goes
+through the production `host_function_catalogs`, and counts only entries
+under its own temp dir — no global size assertion, no cache reset):
+
+| Acceptance | Test |
+| ---------- | ---- |
+| 1 catalog-only change reclaims; inline + display-only examples owned; unchanged reuse | `a_catalog_only_change_replaces_the_entry_and_frees_the_old_catalog` |
+| 1 artifact-only change reclaims | `an_artifact_only_change_replaces_the_entry_and_frees_the_old_catalog` |
+| 1 failing-catalog replacement reclaims; 2 success→error, unchanged cached error (build counter), error→success; 4 partial construction (inline example then file-form example) via discovery | `a_failing_catalog_replaces_a_loaded_one_and_a_valid_one_recovers` |
+| 2 facts valid → absent → invalid JSON → stale hash → non-UTF-8 → valid, classification, cached artifact state, one entry | `facts_transitions_classify_each_artifact_state_and_recover` |
+| 3 held set + guard keep old registrations and call analysis; scope precedence of a newer guard; reclaimed after both drop | `a_held_set_and_guard_survive_replacement_with_their_own_analysis` |
+| 3 two paths independent; discovery order; shadowed file never loaded | `distinct_paths_keep_independent_entries_in_discovery_order` |
+
+Regression proof (by inspection; the old code was not rebuilt while the other lanes compiled): against the previous tuple-keyed cache, each test fails —
+a second revision adds a second entry for the path (`entries() == 1`
+fails) and the old set stays in the cache (`!owner.is_alive()` fails).
+Fidelity: F1 in-process at the crate's discovery API, real files in temp
+dirs; L1.
+
+### Adapt external consumers (subagent)
+
+Exact-text pins, expected text copied from the pre-refactor `baselines/`
+(so a pass proves parity); no expectation was edited to match output:
+
+- `darkmatter-cli` unit (`commands::schema::about::tests`):
+  `expression_function_signatures_pin_category_heading_order` (all 22
+  category headings in order), `expression_function_signatures_pin_math_excerpt_exactly`
+  (`**Math**` heading + full `abs`/`max`/`min`/`round` lines),
+  `expression_function_signatures_pin_overloaded_link_lines_exactly`. An
+  excerpt, not a whole-catalog golden, so adding a built-in does not churn it.
+- `darkmatter-cli` L1 `schema_about::schema_about_verbose_prints_context_and_expression_sections`
+  extended: the spawned `md --verbose schema about` (`NO_COLOR=1`) contains
+  the exact seven wrapped lines of the two `link` overloads.
+- DMLS (`overlay::expressions::tests`): `overloaded_function_hover_block_is_pinned_exactly`
+  (`link`), `single_signature_function_hover_block_is_pinned_exactly`
+  (`round`), `function_completion_items_are_pinned_exactly` (label, insert
+  text, kind, detail, documentation for three items). Host call diagnostics
+  remain pinned by `dmls/tests/l1/host_function_diagnostics.rs` (passing).
+- Claudine needed no edit; its registration/context/lifecycle-artifact tests
+  pass unchanged (no new host expression feature, per the plan).
+
+### Pin catalog contracts (subagent)
+
+- `lifecycle::actions::signatures::tests::static_catalog_accessors_lend_permanent_borrows`
+  (new; the module is declared from `actions.rs`): binds the three static
+  accessors to `&'static` slice function types, `all_lifecycle_verbs()` to
+  `Vec<&'static str>`, verb/display/names/parameter names to `&'static str`,
+  `parameters()` to `&'static [FunctionParameterDescriptor]`, and a static
+  descriptor's `example()` to `Option<Example<'static>>`, then checks values.
+- `expression::catalog::tests::the_described_example_is_a_view_of_the_first_inline_call`
+  (extended): `=> error` first example; static effect (`DisplayOnly`) and
+  operator (`Executable`) views. `a_loaded_catalog_outlives_the_text_it_was_loaded_from`
+  (extended): the `example()` view after the source and path drop.
+- `host_functions::a_host_catalog_outlives_the_strings_it_was_loaded_from`
+  (new L1): load from `String`s, drop both, then names, path, version,
+  `analysis_only` registrations/facts, and a byte-identical regenerated facts artifact.
+- `host_functions::a_host_catalog_failing_after_a_valid_inline_example_is_a_typed_load_error`
+  (new L1, acceptance 4): exact `HostCatalogError` message
+  ``project_partial.yaml: `types.project_second`: example file `./function-examples/as_tsv.yaml` is not embedded``.
+- `host_functions::the_facts_artifact_reader_walks_the_input_robustness_matrix`
+  (extended, 50 → 71 cells plus 7 `conversion_recovery` cells over an inline
+  `project_round(x: number, fallback?: number) -> number` catalog whose base
+  artifact comes from the public builder): fills every Phase 1 gap —
+  `facts[0].position` wrong type, unknown field in a fact, two facts;
+  `aliases` valid control, wrong whole type, wrong element;
+  `source_exclusions` wrong whole type; exclusion `parameter` wrong type and
+  unregistered; `kinds` absent / wrong type / empty / unknown kind; unknown
+  field in an exclusion; `malformed_reference` valid control, `parameter`
+  wrong type / unregistered, `position` absent / wrong type / mismatch,
+  unknown field; `conversion_recovery` valid control, explicit null (no
+  rule), `subject` absent / wrong type / unregistered, `fallback` null,
+  unknown field. Shared validators get one wiring case per extra field, not
+  a matrix per field. No validator defect found.
+- Generators: `cargo check -p darkmatter --example expression_doc_generator --example lifecycle_schema_generator`
+  passes; both run with exit 0 and their stdout is byte-identical to
+  `baselines/*.stdout`.
+
+Smell grep (input-matrix rule): the only changed loading path this phase is
+`host_function_set`; it adds no `serde(default)`, `Option` conflation,
+`filter_map(.. as_str())`, `unwrap_or_default()`, or `.ok()` on a
+load-bearing parse. The Phase 1 classification of the existing occurrences
+stands.
+
+### Document ownership contracts (subagent)
+
+- `darkmatter/docs/topics/host-functions.md`: new sections "How long a
+  loaded catalog lives" (shared owner, freed with the last catalog clone,
+  set, or guard; only installed sets and the built-in catalog are
+  process-lifetime) and "Discovery keeps the latest revision of each
+  catalog" (entry table, Mermaid lookup/replace flow, unchanged reuse incl.
+  errors, replacement, held sets survive, no stale success on failure,
+  recovery, facts problems vs catalog failures table, one lock and what
+  "latest" means, per-path bound, the lifecycle profile cache's different rules).
+- `darkmatter/lib/src/catalog/README.md`: intro no longer says every catalog
+  is static; borrowed `Example<'a>` views; owned expression descriptors;
+  `suggest_strings` entry.
+- Skills: `.claude/skills/darkmatter/expressions.md` (host catalog lifetime
+  and per-path cache; lifecycle cache differs) and `library-surfaces.md`
+  (owned descriptors, `&'static` views, borrowed `Described`, cache rule).
+- `docs/topics/darkmatter-expressions.md` and `darkmatter/README.md` carry no
+  affected claim; unchanged. No dependency-doc change.
+
+### Design Decisions
+
+1. **Per-path cache uses its own counter in `discovery_probe`**
+   - **decision:** Add `host_function_builds()` beside the lifecycle
+     `builds()` counter, plus `cached_host_functions(path)` and
+     `host_function_entries_under(dir)` summaries, in the existing probe.
+   - **alternatives considered:** reuse `note_build`/`builds()` for both
+     caches; a separate test-only seam for host functions.
+   - **why:** plan Decision 8 asks for one observation mechanism per file; a
+     shared counter would conflate two caches with different failure rules.
+   - **downsides:** the probe module grows three host-specific items.
+2. **The facts artifact read is not routed through `discovery_probe::read`**
+   - **decision:** Keep `ArtifactKey::read` on `std::fs::read`.
+   - **alternatives considered:** route it through the probe (Decision 8's note).
+   - **why:** no acceptance case needs to observe or inject that read; the
+     non-UTF-8 "unreadable" case is a portable byte fixture, and routing would
+     add the facts path to the lifecycle tests' read logs.
+   - **downsides:** read-failure injection for the facts artifact (other than
+     non-UTF-8) is not available to tests.
+3. **The probe returns summaries, not cached sets**
+   - **decision:** `cached_host_functions` returns the hash, artifact state,
+     and function names or error — never a `HostFunctions` clone.
+   - **alternatives considered:** return the cached `Result<HostFunctions, _>`.
+   - **why:** a returned clone would hold the owner alive and confuse the
+     weak-reference reclamation assertions.
+   - **downsides:** identity of a reused cached value is shown by the build
+     counter rather than pointer equality.
+4. **Exact-text pins are excerpts**
+   - **decision:** Pin a representative excerpt of `md schema about`'s
+     Expression Functions section, the category order, and selected DMLS
+     hover/completion items, not the whole built-in catalog.
+   - **alternatives considered:** a full golden of the section.
+   - **why:** a full golden churns on every new built-in function; the full
+     generated table is already pinned exactly by `narrative_doc_function_table_matches_catalog`.
+   - **downsides:** a regression confined to an unpinned function's line in
+     these two renderers would not be caught by the new pins.
+
+### Requirement-to-test summary
+
+| Spec acceptance | Tests |
+| --------------- | ----- |
+| 1 Reclaim replaced owners | `host_function_cache_tests::{a_catalog_only_change…, an_artifact_only_change…, a_failing_catalog_replaces…}` |
+| 2 Replace results, incl. errors; facts transitions | `a_failing_catalog_replaces_a_loaded_one_and_a_valid_one_recovers`, `facts_transitions_classify_each_artifact_state_and_recover` |
+| 3 Held values survive; two paths | `a_held_set_and_guard_survive_replacement_with_their_own_analysis`, `distinct_paths_keep_independent_entries_in_discovery_order` |
+| 4 Failed construction owns everything | `host_functions::a_host_catalog_failing_after_a_valid_inline_example_is_a_typed_load_error`, the failing-catalog cache test; loader audit in Phase 2 (repeated in Phase 4) |
+| 5 Built-in contracts and output | `static_catalog_accessors_lend_permanent_borrows`, extended example tests, `a_host_catalog_outlives_the_strings…`, CLI/DMLS exact pins, generator diffs, existing generated-region tests |
+| 6 Scoped checks | gates below |
+
+### Gates
+
+- `git status --porcelain --untracked-files=all | awk '{print $NF}' | xargs python3 scripts/ci/affected_scope.py`
+  → `packages: [claudine, claudine-cli, darkmatter, darkmatter-cli, dmls, test-toolkit]`,
+  `change_class: package`, so the gates ran.
+- `just lint` (darkmatter): exit 0. (One mid-phase `type_complexity` hit in
+  `host_functions.rs` was fixed by its lane with a `RecoveryCell` alias.)
+- `just test` (darkmatter, incl. CLI and DMLS): 12610 passed, 10 skipped,
+  0 failed (3 slow), 103 s, run once after all lanes merged with no subagent running.
+- Dependents (scoped, serially): `cargo nextest run -p claudine -E 'test(/host_catalog|claudine_schemas/)'`
+  → 845 passed; `cargo nextest run -p claudine-cli --features test-fixtures -E 'test(/commands::context::/) | test(/context_command/) | test(/shipped_lifecycle_artifacts/)'`
+  → 44 passed. `test-toolkit` uses none of the changed symbols; not run.
+- New tests each run in under 0.2 s; none needs a terminal or browser.
+- Cross-OS check: not run. The production change is an in-memory map keyed
+  by the discovery path as before (no new path normalization or
+  comparison); the new tests build paths from a `canonicalize_simplified`
+  temp dir and use a byte fixture rather than permissions. CI's Linux/macOS
+  legs and the nightly Windows/WSL2 legs cover it.

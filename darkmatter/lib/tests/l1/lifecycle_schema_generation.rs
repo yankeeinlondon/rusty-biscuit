@@ -163,9 +163,9 @@ fn the_generated_verbs_are_every_catalog_function_and_side_effect_but_set() {
     let projection = projection();
     let mut expected: Vec<(VerbOrigin, &str)> = effect_function_descriptors()
         .iter()
-        .map(|descriptor| (VerbOrigin::SideEffect, descriptor.name))
+        .map(|descriptor| (VerbOrigin::SideEffect, &*descriptor.name))
         .filter(|(_, name)| *name != "set")
-        .chain(expression_function_descriptors().iter().map(|descriptor| (VerbOrigin::ExpressionFunction, descriptor.name)))
+        .chain(expression_function_descriptors().iter().map(|descriptor| (VerbOrigin::ExpressionFunction, &*descriptor.name)))
         .collect();
     expected.sort_unstable();
     expected.dedup();
@@ -198,7 +198,7 @@ fn variadic_verbs_have_no_long_form() {
 fn a_side_effect_without_a_typed_entry_fails_the_projection() {
     let mut catalogs = ProjectionCatalogs::shipped();
     let without_append_line: Vec<ExpressionFunctionDescriptor> =
-        effect_function_descriptors().iter().copied().filter(|descriptor| descriptor.name != "append_line").collect();
+        effect_function_descriptors().iter().filter(|descriptor| &*descriptor.name != "append_line").cloned().collect();
     catalogs.side_effects = &without_append_line;
 
     let error = LifecycleSchemaProjection::project(&catalogs).expect_err("a side effect lost its types");
@@ -216,8 +216,8 @@ fn a_removed_overload_fails_the_projection() {
     let mut catalogs = ProjectionCatalogs::shipped();
     let without_overload: Vec<ExpressionFunctionDescriptor> = effect_function_descriptors()
         .iter()
-        .copied()
-        .filter(|descriptor| !(descriptor.name == "ensure_file" && descriptor.parameters.len() == 2))
+        .filter(|descriptor| !(&*descriptor.name == "ensure_file" && descriptor.parameters.len() == 2))
+        .cloned()
         .collect();
     catalogs.side_effects = &without_overload;
 
@@ -234,8 +234,8 @@ fn a_removed_overload_fails_the_projection() {
 /// The shipped expression functions plus one renamed copy of `abs`.
 fn with_function_named(name: &'static str) -> Vec<ExpressionFunctionDescriptor> {
     let mut descriptors = expression_function_descriptors().to_vec();
-    let mut renamed = *descriptors.iter().find(|descriptor| descriptor.name == "abs").expect("abs");
-    renamed.name = name;
+    let mut renamed = descriptors.iter().find(|descriptor| &*descriptor.name == "abs").expect("abs").clone();
+    renamed.name = name.into();
     descriptors.push(renamed);
     descriptors
 }

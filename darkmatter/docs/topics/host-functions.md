@@ -219,7 +219,116 @@ use:
 - `incomplete_host_calls(expr)` lists the calls in an expression to functions
   that are incomplete in the current scope.
 - `darkmatter::markdown::schemas::catalog::host_function_catalogs(context)`
-  discovers, loads, and caches the sets of a document's schema roots.
+  discovers, loads, and caches the sets of a document's schema roots (see
+  [Discovery keeps the latest revision of each catalog](#discovery-keeps-the-latest-revision-of-each-catalog)).
+
+## How long a loaded catalog lives
+
+A loaded `HostFunctionCatalog` owns everything it read: names, signatures,
+descriptions, compiled types, examples, and display-only reasons. It borrows
+nothing from the source text or the path, so both can be dropped as soon as
+`load` returns.
+
+The catalog, its clones, every `HostFunctions` set built from it, and every
+guard returned by `set.enter()` share one copy of that data. The copy is freed
+when the last of them is dropped:
+
+```rust
+use darkmatter::markdown::compose::expression::{FactsArtifact, HostFunctionCatalog, HostFunctions};
+
+let catalog = HostFunctionCatalog::load(&catalog_text, "schemas/project.yaml")?;
+drop(catalog_text);                    // the catalog does not borrow it
+let set = HostFunctions::analysis_only(catalog, FactsArtifact::Absent)?;
+let guard = set.enter();
+drop(set);                             // the guard still holds the catalog
+drop(guard);                           // nothing holds it now: it is freed
+```
+
+What a catalog lends is borrowed from it, so it cannot outlive it:
+`catalog.function_names()`, `set.function_names()`, and the descriptors and
+`example()` views of a loaded catalog all borrow from their owner.
+
+Only two things are kept for the rest of the process, deliberately: a set
+passed to `install_host_functions`, which serves every thread, and
+Darkmatter's own built-in catalog, which is built once and hands out
+`&'static` descriptors (`expression_function_descriptors()`,
+`function_descriptors(name)`). The discovery cache described next holds a
+catalog only until a newer revision of the same file replaces it.
+
+## Discovery keeps the latest revision of each catalog
+
+The editor calls `host_function_catalogs(context)` each time it analyzes a
+document, so the function caches what it loads. The process keeps **one entry per catalog path**, the
+path as discovery found it:
+
+| Stored | Meaning |
+| --- | --- |
+| catalog hash | the BLAKE3 digest of the catalog's bytes |
+| facts artifact | `<stem>.facts.json` as read: absent, unreadable with its reason (bytes that are not UTF-8 count as unreadable), or its exact text |
+| result | the analysis-only `HostFunctions` set, or the `HostFunctionCatalogError` |
+
+On each lookup, discovery reads the catalog and its artifact and compares
+both with the entry by their bytes; modification times play no part.
+
+```mermaid
+flowchart TD
+    A[read catalog + facts artifact] --> B{same catalog hash and<br/>same artifact as the entry?}
+    B -- yes --> C[return the stored result,<br/>a set or an error]
+    B -- no --> D[load the catalog and<br/>build the set from these bytes]
+    D --> E[replace the path's entry]
+    E --> F[return the new result]
+    E --> G[old catalog freed once no caller<br/>holds its set, a clone, or a guard]
+```
+
+**An unchanged revision is reused, an error included.** A catalog that does
+not load is not parsed again until its bytes or its artifact change.
+
+**A changed catalog or artifact replaces the entry.** Editing either file
+produces a new result and drops the stored one; nothing is kept from earlier
+revisions, so saving a catalog a hundred times still leaves one entry.
+
+**A set already handed out keeps working.** Replacement only drops the
+cache's hold. A caller that still holds the old set, or a guard entered from
+it, keeps the old signatures, registrations, and analysis until it lets go:
+
+```rust
+let before = host_function_catalogs(&context);   // revision 1 of project.yaml
+let _scope = before[0].as_ref().unwrap().enter();
+// ... project.yaml is edited and saved ...
+let after = host_function_catalogs(&context);    // revision 2 replaces the entry
+// Code under `_scope` still sees revision 1; `after` reflects revision 2.
+// Revision 1 is freed when `_scope` and `before` are dropped.
+```
+
+**A failing revision never returns the last good set.** If an edit makes the
+catalog fail to load, the lookup returns the error, not the set from before
+the edit. The next valid revision replaces the error and recovers.
+
+**Facts problems are not catalog failures.** An absent, unreadable, stale, or
+invalid facts artifact still gives a successful set; the affected functions
+are incomplete, each with a reason such as ``the facts artifact
+`schemas/project.facts.json` is absent``. Only a catalog that does not load,
+or that declares a function a built-in already names, is an error.
+
+| Revision | Result |
+| --- | --- |
+| valid catalog, matching artifact | `Ok(set)`, every function complete |
+| valid catalog, artifact absent or stale | `Ok(set)`, functions incomplete with a reason |
+| catalog that does not load | `Err(HostFunctionCatalogError)` |
+| catalog naming a built-in such as `min` | `Err(HostFunctionCatalogError)` |
+
+Lookup, comparison, building, and replacement happen under one lock, so a
+revision is built once and each path holds exactly one result. "Latest" means
+the last revision processed: the catalog and its artifact are two files read
+one after the other, not an atomic snapshot of both.
+
+Entries are never evicted. The cache holds one result for each distinct path
+ever looked up in the process: that bounds growth per path, not the total.
+
+Host lifecycle profiles have a cache of their own with different rules: it
+does not keep a catalog that fails to load, and it drops paths that a root's
+listing no longer contains. See
+[Host Lifecycle Artifacts](./lifecycle/host-artifact.md).
 
 ## See Also
 

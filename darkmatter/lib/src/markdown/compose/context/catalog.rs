@@ -82,24 +82,24 @@ pub struct ContextVariableDescriptor {
     /// Optional verified example. Currently `None`: example artifacts move to
     /// schema-plus `example()` files, deferred until the embedded base schema
     /// gains a runtime filesystem anchor (spec E3).
-    pub example: Option<Example>,
+    pub example: Option<Example<'static>>,
 }
 
 impl Described for ContextVariableDescriptor {
-    fn key(&self) -> &'static str {
+    fn key(&self) -> &str {
         self.name
     }
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         self.description
     }
-    fn category(&self) -> &'static str {
+    fn category(&self) -> &str {
         self.category
     }
     fn order(&self) -> usize {
         self.order
     }
-    fn example(&self) -> Option<&Example> {
-        self.example.as_ref()
+    fn example(&self) -> Option<Example<'_>> {
+        self.example
     }
 }
 

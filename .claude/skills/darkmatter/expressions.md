@@ -205,7 +205,25 @@ guard, DMLS) make a set visible; lookup order is test hooks → entered →
 installed → built-ins in `functions/mod.rs`. The editor rebuilds facts from
 `<stem>.facts.json` (`facts_artifact` / `analysis_only`); a function it cannot
 trust is *incomplete* (dispatchable, no registration) and
-`incomplete_host_calls` reports it. Docs: `darkmatter/docs/topics/host-functions.md`. A `Ref` arm is classified by its definition body's top level through
+`incomplete_host_calls` reports it. Catalog descriptors own their data
+(`Box<str>`, boxed slices, an owned `FunctionType`); `load_catalog` leaks
+nothing. `&'static` views come only from the static owners
+(`expression_function_descriptors()`, `effect_function_descriptors()`,
+lifecycle signatures); `descriptors_for`, `HostFunctionCatalog::function_names`,
+and `Described` borrow from `&self`. `Described::example()` returns an
+`Example<'_>` view (an expression descriptor derives it from its first inline
+call); there is no descriptor `example` field. A `HostFunctionCatalog`
+shares its data through an `Arc`, freed with the last catalog clone,
+`HostFunctions`, or `HostFunctionScope`; only `install_host_functions` keeps
+one for the process. `schemas/catalog.rs::host_function_set` (behind
+`host_function_catalogs`) keeps one entry per discovery path (catalog BLAKE3
+hash, `ArtifactKey`, result) under one mutex: unchanged bytes reuse the
+result, an error included; any change replaces it (never falls back to an old
+success; a valid revision recovers); held old sets keep working; no eviction
+(one entry per path ever seen). Bad facts give `Ok` with incomplete functions;
+only a load failure or built-in collision is `Err`. The lifecycle
+`profile_cache` has different rules (no failed loads, root-listing pruning);
+never describe one rule for both. Docs: `darkmatter/docs/topics/host-functions.md`. A `Ref` arm is classified by its definition body's top level through
 `DeclaredTypes::definitions()` (one level, never expanded); an impossible
 guard returns the incoming type. `invalidate(&WriteSet)` (`WriteSet::destination` for a
 `set` path) and `TypeScope::join` keep facts from leaking past writes or

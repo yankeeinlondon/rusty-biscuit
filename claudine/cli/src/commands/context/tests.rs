@@ -7,6 +7,7 @@ use super::format::{
     format_value,
 };
 use super::*;
+use darkmatter::catalog::Described;
 use crate::commands::context_render::{
     configure_shared_table, context_column_widths, function_first_column_width, inline_code_text,
     render_context_section, render_table_resilient, render_table_within_contract, report_column,
@@ -233,14 +234,14 @@ fn expression_groups_follow_category_list_order_and_sort_alphabetically() {
     let listed: Vec<&str> = catalog
         .categories
         .iter()
-        .map(|category| category.name)
+        .map(|category| &*category.name)
         .filter(|name| groups.iter().any(|(group, _)| group == name))
         .collect();
     let emitted: Vec<&str> = groups.iter().map(|(category, _)| *category).collect();
     assert_eq!(emitted, listed, "categories must follow the `categories:` list order");
 
     for (category, functions) in &groups {
-        let names: Vec<&str> = functions.iter().map(|f| f.name).collect();
+        let names: Vec<&str> = functions.iter().map(|f| &*f.name).collect();
         let mut sorted = names.clone();
         sorted.sort_unstable();
         assert_eq!(names, sorted, "category `{category}` must list functions alphabetically");
@@ -432,8 +433,8 @@ fn reports_render_within_140ch_contract_at_wide_terminals() {
 
         for func in functions {
             table.add_row(vec![
-                inline_code_text(func.signature, &term).into(),
-                inline_code_text(func.description, &term).into(),
+                inline_code_text(&func.signature, &term).into(),
+                inline_code_text(&func.description, &term).into(),
                 format_function_examples(func, &term).into(),
             ]);
         }
@@ -473,7 +474,7 @@ fn reports_render_within_140ch_contract_at_wide_terminals() {
                 table.add_row(vec![
                     inline_code_text(effect.signature, &term).into(),
                     inline_code_text(effect.description, &term).into(),
-                    format_effect_example(effect.example.as_ref(), &term).into(),
+                    format_effect_example(effect.example(), &term).into(),
                     format_safety(effect.safety, &term).into(),
                 ]);
             }

@@ -3049,12 +3049,12 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
 
     let git_functions: Vec<_> = expressions::function_descriptors()
         .iter()
-        .filter(|descriptor| descriptor.category == "Git")
+        .filter(|descriptor| &*descriptor.category == "Git")
         .collect();
     assert_eq!(
         git_functions
             .iter()
-            .map(|descriptor| descriptor.signature)
+            .map(|descriptor| &*descriptor.signature)
             .collect::<Vec<_>>(),
         // Alphabetical within the category, overloads in authored order.
         [
