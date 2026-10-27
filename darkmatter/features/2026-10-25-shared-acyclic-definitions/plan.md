@@ -16,6 +16,87 @@ skills_files_updated_during_phase_1: []
 packages:
     - darkmatter
     - claudine
+    - darkmatter-cli
+    - dmls
+    - claudine-cli
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/resolve/graph.rs
+    - darkmatter/lib/src/markdown/schemas/resolve/recursive.rs
+    - darkmatter/lib/src/markdown/schemas/catalog.rs
+    - darkmatter/lib/src/markdown/schemas/frontmatter_shape.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/definitions.rs
+    - darkmatter/lib/tests/l1/shared_acyclic_selection.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/schemas_named_type_merge.rs
+    - darkmatter/lib/tests/l1/schemas_union_typed_consumers.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-action.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-claudine.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-lifecycle.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence-types.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-md-lifecycle.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-sequence.json
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-inline-compose.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-with-document-schema.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-claudine.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-lifecycle.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence-types.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-md-lifecycle.digest
+    - darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-sequence.digest
+    - darkmatter/cli/tests/l1/claudine_schema_bundle.rs
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/tests/l1/claudine_schema_discovery.rs
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_key_hovers.json
+    - claudine/schemas/document.yaml
+    - claudine/schemas/claudine.yaml
+    - claudine/schemas/inline-compose.yaml
+    - claudine/lib/src/composition/schema/bundle.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/compose_prompt_tiers.rs
+    - claudine/cli/tests/l1/entry_point_parity.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/sequence_magic_reference.rs
+    - claudine/cli/tests/l1/sequence_overlay_pty.rs
+    - claudine/cli/tests/l1/sequence_schema.rs
+docs_updated_during_phase_2:
+    - claudine/docs/topics/schemas.md
+    - claudine/schemas/README.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/claudine/cli-commands.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/schemas/resolve/recursive.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+    - darkmatter/lib/tests/l1/shared_acyclic_consumers.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/tests/l1/recursive_schema_editor.rs
+    - darkmatter/dmls/tests/fixtures/response_contracts/a3_lifecycle_key_hovers.json
+    - darkmatter/cli/tests/l1/schema_validate.rs
+    - claudine/lib/tests/l1/claudine_schemas_embedded.rs
+    - claudine/lib/tests/l1/claudine_schemas.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/darkmatter/dmls.md
 ---
 
 # Shared acyclic definitions implementation plan
@@ -268,7 +349,7 @@ These two tasks may run concurrently after Wave 1. Give them separate file
 ownership. The resolver owner owns graph code and its tests; the metadata owner
 owns Claudine schema/bundle/parity changes, excluding the final byte-budget test.
 
-- [ ] **Discover shared targets**
+- [x] **Discover shared targets**
   - Extend `darkmatter/lib/src/markdown/schemas/resolve/graph.rs` and the resolver's
     discovery result to expose value-site counts and structured classification
     alongside unchanged cycle membership/admission. Keep discovery passive and
@@ -284,7 +365,7 @@ owns Claudine schema/bundle/parity changes, excluding the final byte-budget test
     primitive aliases, primitive arrays, primitive-union arrays, and primitive-only
     unions. Cyclic admission tests remain unchanged and passing.
 
-- [ ] **Extract document metadata**
+- [x] **Extract document metadata**
   - Add `claudine/schemas/document.yaml` as a passive `kind: schema` library with
     the three exact declarations, descriptions, defaults, and hash forms. Replace
     only the corresponding payload declarations in `claudine.yaml` and
@@ -305,7 +386,7 @@ owns Claudine schema/bundle/parity changes, excluding the final byte-budget test
 Depends on **Discover shared targets**. One owner edits the coupled resolver,
 summary, and lowering code; do not split these files among simultaneous agents.
 
-- [ ] **Expand selected definitions**
+- [x] **Expand selected definitions**
   - Update `resolve.rs`, `resolve/recursive.rs`, and affected
     `simplified/definitions.rs`/`simplified/convert.rs` paths to use separate
     cyclic and storage sets, generalized worklists, inherited use summaries, and
@@ -341,7 +422,7 @@ Darkmatter library consumers/tests, DMLS providers/tests, and Claudine integrati
 tests. Coordinate shared fixture edits through one owner. Each lane runs its
 focused tests; the complete area suites run once after integration in Phase 4.
 
-- [ ] **Preserve library semantics**
+- [x] **Preserve library semantics**
   - Audit consumers that infer recursion from definition presence. Change only
     affected assumptions in phase projection, validation/origin projection,
     defaults, coercion, eager-file handling, deferred lifecycle operands, operand
@@ -361,7 +442,7 @@ focused tests; the complete area suites run once after integration in Phase 4.
     extend existing passive shipped-artifact coverage rather than making a new
     terminal suite for resolver behavior.
 
-- [ ] **Preserve editor behavior**
+- [x] **Preserve editor behavior**
   - Extend `darkmatter/dmls/tests/l1/recursive_schema_editor.rs` and appropriate
     provider/diagnostic tests with a repeated acyclic structured target at two
     uses, including a nested list item and an alias/imported declaration.
@@ -374,7 +455,7 @@ focused tests; the complete area suites run once after integration in Phase 4.
     fully copied trees to serve editor queries. Use existing fixtures and
     `CliProcessFixture`; no focus-dependent terminal or browser tests are needed.
 
-- [ ] **Prove Claudine integration**
+- [x] **Prove Claudine integration**
   - Through passive validation and `pre_validate_schema`, cover independent main
     and inline triggers, their normal merge, absent/null metadata, prompt/date
     validity, shorthand hash strings, longhand hashes and defaults, arbitrary
