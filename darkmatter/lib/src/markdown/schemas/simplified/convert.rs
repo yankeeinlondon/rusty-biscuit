@@ -93,8 +93,8 @@ pub fn to_json_schema(schema: &SimplifiedSchema) -> Result<Value, SchemaError> {
     to_json_schema_with_definitions(schema, &DefinitionTable::default())
 }
 
-/// Converts a resolved [`SimplifiedSchema`] whose cyclic named types are
-/// [`TypeExpr::Ref`]s into `definitions`.
+/// Converts a resolved [`SimplifiedSchema`] whose stored named types (cyclic
+/// or shared) are [`TypeExpr::Ref`]s into `definitions`.
 ///
 /// Each use lowers to a local `{"$ref": "#/$defs/<key>"}` carrying the use
 /// site's own constraints and annotations as siblings, and every definition

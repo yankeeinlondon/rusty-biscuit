@@ -72,7 +72,7 @@ match:
         - model: object(required)
         - model: "unknown[](required)"
 $schema:
-    prompt: "string -> the prompt sent to the agent; inline-compose requires it once caller overlays are applied"
+    prompt: prompt@./document.yaml
     agent:
         - "string -> the agent (provider) to run"
         - "string[](min(1)) -> agents to try, in preference order"
@@ -81,12 +81,8 @@ $schema:
         - "string[] -> models to try, in preference order"
     interactive: "boolean -> run the agent interactively instead of headless"
     "$schema": "schema -> the document's own SimplifiedSchema, referenced file, or root union; applied after this catalog"
-    hash:
-        - "string -> stored shorthand hash; managed by Darkmatter and Claudine's completion"
-        - kind: "enum(fm, body, simple, structured, detailed; default(simple)) -> hash resolution stored in longhand form"
-          value: "unknown -> stored hash payload"
-          ignored: "string[] -> extra frontmatter keys ignored during hash computation"
-    last_updated: "date -> managed content-change date in YYYY-MM-DD form; stamped by Claudine's completion"
+    hash: hash@./document.yaml
+    last_updated: last_updated@./document.yaml
     loop: "loop@./lifecycle.yaml -> run the prompt repeatedly; beside `sequence:`, the sequence's loop"
     argv: "string[] -> arguments passed through to the agent"
     title: "string -> the document's title"

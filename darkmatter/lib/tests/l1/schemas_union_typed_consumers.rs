@@ -17,9 +17,9 @@ use darkmatter::markdown::schemas::triggers::{MatchExpr, PathSubject, matches};
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, DetectOptions, EffectiveSchema, PropertyAtom, PropertyDef,
     SchemaPhase, SimplifiedSchema, TypeExpr, darkmatter_base_schema,
-    detect_schema, effective_property_shape, expression_atom, frontmatter_expression_values,
-    nested_property_shape, parse_yaml_schema, property_def_at_path, schema_shape_descriptors,
-    schema_to_yaml,
+    DefinitionTable, detect_schema, effective_property_shape, expression_atom,
+    frontmatter_expression_values_with_definitions, nested_property_shape_with_definitions,
+    parse_yaml_schema, property_def_at_path_with_definitions, schema_shape_descriptors, schema_to_yaml,
 };
 use serde_json::{Value, json};
 use serde_yaml_ng::Value as YamlValue;
@@ -42,6 +42,15 @@ fn resolved_shape(dir: &Path, schema: &str) -> SimplifiedSchema {
         .expect("fixture schema resolves")
         .simplified
         .expect("a SimplifiedSchema")
+}
+
+/// [`resolved_shape`] with the definitions its references point into: a
+/// type the schema uses at two places is stored once and referenced.
+fn resolved_with_definitions(dir: &Path, schema: &str) -> (SimplifiedSchema, DefinitionTable) {
+    let value: YamlValue = serde_yaml_ng::from_str(schema).expect("fixture YAML parses");
+    let resolved = resolve_yaml_schema(&value, dir, &context_at(dir)).expect("fixture schema resolves");
+    let definitions = (*resolved.definitions).clone();
+    (resolved.simplified.expect("a SimplifiedSchema"), definitions)
 }
 
 fn single_atom<'a>(schema: &'a SimplifiedSchema, name: &str) -> &'a PropertyAtom {
@@ -225,56 +234,56 @@ const TAGGED_STEPS: &str = concat!(
 #[test]
 fn frontmatter_shape_narrows_a_marked_union_by_its_literal_tag() {
     let (_dir, root) = temp_root();
-    let schema = resolved_shape(&root, TAGGED_STEPS);
+    let (schema, definitions) = resolved_with_definitions(&root, TAGGED_STEPS);
     let check = json!({ "one": { "kind": "check", "run": "a && b" } });
     let note = json!({ "one": { "kind": "note", "run": "a && b" } });
     let shape = effective_property_shape(&[], Some(&schema), &check);
 
-    let run = property_def_at_path(&shape, &check, &["one", "run"]).expect("check arm's run");
+    let run = property_def_at_path_with_definitions(&shape, &check, &["one", "run"], &definitions).expect("check arm's run");
     assert!(expression_atom(&run).is_some(), "the check arm types run as an expression");
-    let run = property_def_at_path(&shape, &note, &["one", "run"]).expect("note arm's run");
+    let run = property_def_at_path_with_definitions(&shape, &note, &["one", "run"], &definitions).expect("note arm's run");
     assert!(expression_atom(&run).is_none(), "the note arm types run as a string");
     let paths = |frontmatter: &Value| -> Vec<Vec<String>> {
-        frontmatter_expression_values(&shape, frontmatter).into_iter().map(|value| value.path).collect()
+        frontmatter_expression_values_with_definitions(&shape, frontmatter, &definitions).into_iter().map(|value| value.path).collect()
     };
     assert_eq!(paths(&check), vec![vec!["one".to_string(), "run".to_string()]]);
     assert!(paths(&note).is_empty());
 
     // An unknown tag selects no arm, so the alternatives merge.
     let unknown = json!({ "one": { "kind": "other" } });
-    let merged = nested_property_shape(&shape, &unknown, &["one"]).expect("merged arms");
+    let merged = nested_property_shape_with_definitions(&shape, &unknown, &["one"], &definitions).expect("merged arms");
     assert_eq!(merged.properties.keys().collect::<Vec<_>>(), ["kind", "run", "text"]);
 }
 
 #[test]
 fn frontmatter_shape_descends_into_the_item_alternatives_of_an_array_of_a_union() {
     let (_dir, root) = temp_root();
-    let schema = resolved_shape(&root, TAGGED_STEPS);
+    let (schema, definitions) = resolved_with_definitions(&root, TAGGED_STEPS);
     let frontmatter = json!({ "steps": [{ "kind": "check", "run": "a" }, { "kind": "note", "text": "b" }] });
     let shape = effective_property_shape(&[], Some(&schema), &frontmatter);
 
     // A key path has no sequence index, so a list's items cannot be told
     // apart by tag: every object alternative contributes its keys, and a key
     // two alternatives type differently resolves to both types.
-    let items = nested_property_shape(&shape, &frontmatter, &["steps"]).expect("item alternatives");
+    let items = nested_property_shape_with_definitions(&shape, &frontmatter, &["steps"], &definitions).expect("item alternatives");
     assert_eq!(items.properties.keys().collect::<Vec<_>>(), ["kind", "run", "text"]);
-    let run = property_def_at_path(&shape, &frontmatter, &["steps", "run"]).expect("run");
+    let run = property_def_at_path_with_definitions(&shape, &frontmatter, &["steps", "run"], &definitions).expect("run");
     let PropertyDef::Union(run_types) = run.as_ref() else {
         panic!("run is typed by both alternatives: {run:?}");
     };
     assert_eq!(run_types.len(), 2);
     assert!(expression_atom(&run).is_some());
-    assert!(frontmatter_expression_values(&shape, &frontmatter).is_empty(), "sequence values are never expressions");
+    assert!(frontmatter_expression_values_with_definitions(&shape, &frontmatter, &definitions).is_empty(), "sequence values are never expressions");
 }
 
 #[test]
 fn frontmatter_shape_finds_an_expression_alternative_of_a_marked_union() {
     let (_dir, root) = temp_root();
-    let schema = resolved_shape(&root, TAGGED_STEPS);
+    let (schema, definitions) = resolved_with_definitions(&root, TAGGED_STEPS);
     let frontmatter = json!({ "gate": "ready && !blocked" });
     let shape = effective_property_shape(&[], Some(&schema), &frontmatter);
 
-    let values = frontmatter_expression_values(&shape, &frontmatter);
+    let values = frontmatter_expression_values_with_definitions(&shape, &frontmatter, &definitions);
     assert_eq!(values.len(), 1);
     assert_eq!(values[0].path, ["gate"]);
     assert_eq!(values[0].expression, "ready && !blocked");

@@ -8,7 +8,7 @@ instead of copying them. A `darkmatter:` reference resolves from the schemas
 compiled into Darkmatter, wherever the referring file is.
 Darkmatter discovers the three trigger files through its schema locations, so
 a document under `claudine/` is validated against them in the editor (DMLS) and
-by `md schema validate`. The `claudine` binary embeds the same seven files and
+by `md schema validate`. The `claudine` binary embeds the same eight files and
 judges them in its launch verdict, so an invalid Claudine control fails
 `claudine compose`, `claudine inline-compose`, and `claudine sequence` before
 any provider starts.
@@ -23,6 +23,7 @@ them.
 | `lifecycle.yaml` | library (`kind: schema`) | the three recursive lifecycle stack families (`stack`, `initialize-stack`, `cancelled-stack`), typed at every conditional depth, and the `loop:` block type |
 | `sequence-types.yaml` | library (`kind: schema`) | the sequence step and container types (`steps`, `step`, `task`, `group`); `task` and `group` recurse, so containers are typed at every depth |
 | `linking.yaml` | library (`kind: schema`) | the eleven optional linking keys of a linked skill, command, or agent |
+| `document.yaml` | library (`kind: schema`) | the document metadata (`prompt`, `hash`, `last_updated`) that `claudine.yaml` and `inline-compose.yaml` both import |
 | `claudine.yaml` | trigger (`kind: schema-trigger`) | applies Claudine's frontmatter catalog to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model`; types Darkmatter's `composed` and `failed` as errors that name `start` and `blocked` |
 | `inline-compose.yaml` | trigger (`kind: schema-trigger`) | applies inline-compose's document metadata to a document with a non-null `prompt` and no non-null `sequence` |
 | `sequence.yaml` | trigger (`kind: schema-trigger`) | applies the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`) to a document with a non-null `sequence` |

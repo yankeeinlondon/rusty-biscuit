@@ -467,6 +467,11 @@ DMLS projects Darkmatter's typed surfaces into LSP:
   Definition hover adds `schema_type_descriptor` text and, for
   `alphanumeric`, `PropertyAtom::alphanumeric_options()` with the
   `AsciiCharSet` `Display` rendering.
+- Frontmatter key hover on a stored definition (`$defs`, cyclic or shared
+  acyclic) whose body resolves to two or more alternatives lists them as the
+  inlined union did (`providers/frontmatter.rs::stored_union_type_line`);
+  any other stored reference renders "`X` is defined as". Hovering opens only
+  the top-level references of the hovered type.
 - Expression completion, hover, and parse diagnostics inside
   expression-typed frontmatter.
 - Hover/documentation from typed descriptor catalogs.

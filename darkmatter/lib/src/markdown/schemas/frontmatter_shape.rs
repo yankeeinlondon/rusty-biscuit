@@ -212,6 +212,17 @@ pub fn frontmatter_expression_values(
     shape: &SchemaShape,
     frontmatter: &Value,
 ) -> Vec<FrontmatterExpressionValue> {
+    frontmatter_expression_values_with_definitions(shape, frontmatter, &NO_DEFINITIONS)
+}
+
+/// [`frontmatter_expression_values`] for a resolved shape whose references
+/// point into `definitions`, classified through
+/// [`property_def_at_path_with_definitions`].
+pub fn frontmatter_expression_values_with_definitions(
+    shape: &SchemaShape,
+    frontmatter: &Value,
+    definitions: &DefinitionTable,
+) -> Vec<FrontmatterExpressionValue> {
     let mut out = Vec::new();
     let Some(root) = frontmatter.as_object() else {
         return out;
@@ -222,7 +233,7 @@ pub fn frontmatter_expression_values(
             continue;
         }
         path.push(key.as_str());
-        collect_expression_values(shape, frontmatter, &mut path, value, &mut out);
+        collect_expression_values(shape, frontmatter, definitions, &mut path, value, &mut out);
         path.pop();
     }
     out
@@ -231,6 +242,7 @@ pub fn frontmatter_expression_values(
 fn collect_expression_values<'v>(
     shape: &SchemaShape,
     frontmatter: &Value,
+    definitions: &DefinitionTable,
     path: &mut Vec<&'v str>,
     value: &'v Value,
     out: &mut Vec<FrontmatterExpressionValue>,
@@ -239,7 +251,7 @@ fn collect_expression_values<'v>(
         Value::Object(map) => {
             for (key, child) in map {
                 path.push(key.as_str());
-                collect_expression_values(shape, frontmatter, path, child, out);
+                collect_expression_values(shape, frontmatter, definitions, path, child, out);
                 path.pop();
             }
             return;
@@ -248,7 +260,7 @@ fn collect_expression_values<'v>(
         Value::String(text) => text.clone(),
         Value::Bool(_) | Value::Number(_) => value.to_string(),
     };
-    let is_expression = property_def_at_path(shape, frontmatter, path)
+    let is_expression = property_def_at_path_with_definitions(shape, frontmatter, path, definitions)
         .is_some_and(|def| expression_atom(&def).is_some());
     if is_expression {
         out.push(FrontmatterExpressionValue {

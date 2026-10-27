@@ -253,10 +253,11 @@ judged as text. A template is recognized only by
 every caller setting template problems aside for later rendering judges as
 written: `EffectiveSchema::validate_with_options` (DMLS, `PendingPolicy::Defer`)
 keeps that problem, as `md schema validate` and Claudine's launch
-pre-validation do. The resolver stores only cycle
-members in `$defs` and inlines every other named type at each reference, so
-a host must write its stack families recursively (Claudine's are), never
-unrolled: Claudine's typed three-level unroll resolved to 11 MB.
+pre-validation do. The resolver stores cycle members, and any structured
+acyclic type with two or more authored uses, in `$defs`; it inlines
+everything else at each reference. A host should still write its stack
+families recursively (Claudine's are), never unrolled: Claudine's typed
+three-level unroll resolved to 11 MB before sharing.
 The passive operand check is `lifecycle::validate_operands` (runtime
 registration, `select_overload_with`), and schema validation runs it: every
 generated arm but `null` and `template-operand` carries `operands(<verb>-short|-long)`
@@ -369,9 +370,27 @@ Baseline, Selecting the Baseline); Content Policy's typing limits are in the
   description merged with the postfix), and the presence-free body goes into
   the `DefinitionTable` (`ResolvedSchema.definitions`,
   `EffectiveSchema::definitions()`, `NamedTypeExpansion.definitions`).
-  A schema with a cycle expands twice (`resolve/recursive.rs`: pass 1 learns
-  each definition's `UseSummary`); an acyclic one takes the old single pass,
-  pinned byte-for-byte by `lib/tests/l1/recursive_schema_golden.rs`. Lower
+  Discovery also selects **shared** acyclic targets (`Discovery { cyclic,
+  shared }`): a structured type (object, dictionary, tuple, list of
+  structured items, union with a structured arm; aliases followed) with two
+  or more distinct authored value sites, keyed `(namespace, full path,
+  DefKey)`. Root and body revisits count once, callable-only reach does not
+  count, and layers never pool counts. A shared body expands at its first
+  use under that use's import stack, so the 32-level limit is unchanged. Each
+  use keeps a `Ref` only if `recursive.rs::use_is_representable` and the
+  union-arm and alias checks prove that inlining would give the same result.
+  Otherwise that one use inlines; errors are never retried as inlining. Only
+  definitions that a surviving reference reaches are published. Catalog
+  declarations (`fm`, `darkmatter_base_schema()`) resolve with sharing off.
+  A type whose expansion holds `file(match(...))` outside a reference is
+  never shared (`is_shareable` → `holds_file_match`): a root-union arm
+  enforces `match` inside any definition it reaches, so storing it would
+  turn an acyclic suggestion into a rejection. Structural identity in
+  `simplified/subtype.rs` opens references through the table, so a shared
+  use and its inlined copy compare equal. A schema with a cycle or a shared type expands twice
+  (`resolve/recursive.rs`: pass 1 learns each definition's `UseSummary`);
+  otherwise it takes the single pass. `lib/tests/l1/recursive_schema_golden.rs`
+  pins the output. Lower
   with `to_json_schema_with_definitions` (`$ref` with use-site siblings, one
   root `$defs` body per reachable definition, in allocation order); plain
   `to_json_schema` errors on a `Ref`. Every typed and JSON walker follows a

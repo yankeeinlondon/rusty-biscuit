@@ -4,7 +4,9 @@
 //! its named back-reference, go-to-definition across a two-file cycle, a deep
 //! validation failure at its node, non-descending cycles as schema
 //! diagnostics on their references, and same-named definitions in two
-//! triggers' inline payloads kept apart.
+//! triggers' inline payloads kept apart. The same surfaces cover an acyclic
+//! type stored once because several uses share it: an imported object at two
+//! properties and, through an alias, a list item, and a shared union.
 //!
 //! Every completion and hover assertion below a recursion point offers
 //! nothing if DMLS does not open the `TypeExpr::Ref` it stands on.
@@ -626,6 +628,308 @@ fn same_named_inline_trigger_definitions_keep_their_own_bodies() {
     assert_eq!(diagnostics[0]["code"], json!("dm.schema.type_mismatch"), "{diagnostics:#?}");
     assert_eq!(diagnostics[0]["data"]["instance_path"], json!("/right/children/0/right_value"), "{diagnostics:#?}");
     assert_eq!(diagnostics[0]["range"], range_of(&document.text, "\"x\"", 0), "{diagnostics:#?}");
+
+    fixture.shutdown();
+}
+
+/// `entry` is an acyclic object declared in an imported file, and `item` an
+/// alias of it there. The document names it at three sites (`first`,
+/// `second`, and the list item of `items` through the alias), so the resolver
+/// stores it once and references it at each use; see
+/// `the_shared_fixture_stores_entry_once_and_references_it_at_every_use`.
+/// `spare` is shared too, by two properties no document writes, so a walk
+/// that opens it has left the cursor path.
+const SHARED_TYPES: &str = concat!(
+    "kind: schema\n",
+    "types:\n",
+    "  entry: \"{ name: string(required) -> The entry name, size: number(min(0)) -> The entry size }\"\n",
+    "  item: entry\n",
+    "  spare: \"{ unused: string }\"\n",
+);
+
+const SHARED_SCHEMA: &str = concat!(
+    "$schema:\n",
+    "  first: \"entry@./types.yaml\"\n",
+    "  second: \"entry@./types.yaml\"\n",
+    "  items: \"item[]@./types.yaml\"\n",
+    "  spare_a: \"spare@./types.yaml\"\n",
+    "  spare_b: \"spare@./types.yaml\"\n",
+);
+
+const SHARED_VALUES: &str = concat!(
+    "first:\n",
+    "  name: a\n",
+    "  size: 1\n",
+    "second:\n",
+    "  name: b\n",
+    "  size: 2\n",
+    "items:\n",
+    "  - name: c\n",
+    "    size: 3\n",
+    "  - name: d\n",
+    "    size: 4\n",
+);
+
+/// A session whose client watches files, over a workspace holding
+/// `types.yaml`.
+fn shared_session(workspace: &LspWorkspace) -> LspFixture<'_> {
+    write(workspace, "types.yaml", SHARED_TYPES);
+    let mut params = initialize_params(workspace.path());
+    params["capabilities"]["workspace"] = json!({ "didChangeWatchedFiles": { "dynamicRegistration": true } });
+    let mut fixture = LspFixture::start(workspace);
+    fixture.initialize(params);
+    fixture
+}
+
+/// Every `$ref` below `value`.
+fn refs_below(value: &Value) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Object(map) => {
+                if let Some(Value::String(pointer)) = map.get("$ref") {
+                    found.push(pointer.clone());
+                }
+                pending.extend(map.values());
+            }
+            Value::Array(items) => pending.extend(items),
+            _ => {}
+        }
+    }
+    found
+}
+
+/// Guards the fixture: the library stores `entry` as one `$defs` entry and
+/// every use references it, so the editor tests below stand on a `$ref` at
+/// each use rather than on three inlined copies.
+#[test]
+fn the_shared_fixture_stores_entry_once_and_references_it_at_every_use() {
+    let workspace = LspWorkspace::new();
+    write(&workspace, "types.yaml", SHARED_TYPES);
+    let document: serde_yaml_ng::Value = serde_yaml_ng::from_str(SHARED_SCHEMA).unwrap();
+    let context = biscuit_file::FileResolutionContext::new(workspace.path());
+
+    let resolved = darkmatter::markdown::schemas::resolve::resolve_yaml_schema(&document["$schema"], workspace.path(), &context)
+        .unwrap();
+
+    let schema = &resolved.json_schema;
+    let pointer = refs_below(&schema["properties"]["first"]);
+    assert_eq!(pointer.len(), 1, "{schema:#}");
+    for property in ["second", "items"] {
+        assert_eq!(refs_below(&schema["properties"][property]), pointer, "{property}: {schema:#}");
+    }
+    let key = pointer[0].strip_prefix("#/$defs/").unwrap();
+    let mut keys: Vec<&String> = schema["$defs"][key]["properties"].as_object().unwrap().keys().collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["name", "size"], "{schema:#}");
+}
+
+/// Spec acceptance 3 and 7 in the editor: a failure reached through each use
+/// of the shared type, a list item included, is published at its own value
+/// with its full instance path.
+#[test]
+fn a_failure_through_each_shared_use_is_published_at_its_value() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = shared_session(&workspace);
+    let invalid = SHARED_VALUES
+        .replace("  size: 1\n", "  size: -1\n")
+        .replace("  size: 2\n", "  size: [2]\n")
+        .replace("  - name: d\n", "  - name: [1]\n");
+    let (document, diagnostics) = open_text(&mut fixture, &workspace, "doc.md", &markdown(&format!("{SHARED_SCHEMA}{invalid}")));
+
+    let mut published: Vec<(Value, Value, Value, Value)> = diagnostics
+        .iter()
+        .map(|diagnostic| {
+            (
+                diagnostic["data"]["instance_path"].clone(),
+                diagnostic["code"].clone(),
+                diagnostic["message"].clone(),
+                diagnostic["range"].clone(),
+            )
+        })
+        .collect();
+    published.sort_by_key(|(path, ..)| path.to_string());
+    assert_eq!(
+        published,
+        [
+            (
+                json!("/first/size"),
+                json!("dm.schema.constraint"),
+                json!("-1 is less than the minimum of 0"),
+                range_of(&document.text, "-1", 0),
+            ),
+            (
+                json!("/items/1/name"),
+                json!("dm.schema.type_mismatch"),
+                json!("[1] is not of type \"string\""),
+                range_of(&document.text, "[1]", 0),
+            ),
+            (
+                json!("/second/size"),
+                json!("dm.schema.type_mismatch"),
+                json!("[2] is not of type \"number\""),
+                range_of(&document.text, "[2]", 0),
+            ),
+        ],
+        "{diagnostics:#?}"
+    );
+
+    fixture.shutdown();
+}
+
+/// Key completion inside an incomplete object at either use and in an empty
+/// list item offers the shared type's keys, opening only `entry`: never
+/// `spare`, which the schema stores too but the cursor path does not reach.
+#[test]
+fn completion_offers_the_shared_keys_at_each_use_and_in_an_empty_item() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = shared_session(&workspace);
+    let incomplete = "first:\n  \nsecond:\n  name: b\n  \nitems:\n  - \nother: 1\n";
+    let (document, _) = open_text(&mut fixture, &workspace, "doc.md", &markdown(&format!("{SHARED_SCHEMA}{incomplete}")));
+    fixture.flush_server();
+
+    let both = [("name", Some("(required)")), ("size", None)];
+    for (case, needle, expected) in [
+        ("key-less first", "first:\n  ", &both[..]),
+        ("second with name written", "name: b\n  ", &both[1..]),
+        ("empty item", "items:\n  - ", &both[..]),
+    ] {
+        dmls::work_counters::record_definition_lookups();
+        let items = completion_at(&mut fixture, &document, offset(&document.text, needle, 0, needle.len()));
+        let opened = dmls::work_counters::definition_lookups();
+        assert_eq!(item_keys(&items), expected, "{case}: {items:?}");
+        assert!(opened.contains(&"entry".to_string()), "{case} opens the reference: {opened:?}");
+        assert!(opened.iter().all(|name| name == "entry"), "{case} opens only `entry`: {opened:?}");
+    }
+
+    fixture.shutdown();
+}
+
+/// Hover on a field reads the same description at both uses and in a list
+/// item; hover on a use's key names the shared type and shows its body once.
+#[test]
+fn hover_describes_the_shared_type_at_each_use() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = shared_session(&workspace);
+    let (document, _) = open_text(&mut fixture, &workspace, "doc.md", &markdown(&format!("{SHARED_SCHEMA}{SHARED_VALUES}")));
+
+    let name = "**`name`**\n\nType: **string**\n\nRequired\n\n\n\nThe entry name";
+    let size = "**`size`**\n\nType: **number**\n\n\n\nThe entry size";
+    for (field, expected) in [("name: ", name), ("size: ", size)] {
+        for occurrence in 0..3 {
+            let markup = hover_at(&mut fixture, &document, offset(&document.text, field, occurrence, 0));
+            assert!(markup.starts_with(expected), "{field}#{occurrence}: {markup}");
+        }
+    }
+
+    let body = "`entry` is defined as: `{name: string(required) -> The entry name,size: number(min(0)) -> The entry size}`";
+    for (key, spelled) in [("\nfirst:", "entry"), ("\nsecond:", "entry"), ("\nitems:", "entry[]")] {
+        let markup = hover_at(&mut fixture, &document, offset(&document.text, key, 0, 1));
+        assert_eq!(markup, format!("**`{}`**\n\nType: **{spelled}**\n\n{body}", &key[1..key.len() - 1]));
+    }
+
+    fixture.shutdown();
+}
+
+/// Go-to-definition from each reference to the shared type, the alias
+/// included, lands on its declaration in the imported file, and the alias's
+/// own reference lands on `entry`.
+#[test]
+fn definition_from_each_shared_reference_reaches_the_imported_declaration() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = shared_session(&workspace);
+    let types_uri = canonical_uri(&workspace.path().join("types.yaml"));
+    let (document, _) = open_text(&mut fixture, &workspace, "doc.md", &markdown(&format!("{SHARED_SCHEMA}{SHARED_VALUES}")));
+
+    let entry = json!([{ "uri": types_uri, "range": range_of(SHARED_TYPES, "entry", 0) }]);
+    let item = json!([{ "uri": types_uri, "range": range_of(SHARED_TYPES, "item", 0) }]);
+    for (needle, occurrence, expected) in [("entry@", 0, &entry), ("entry@", 1, &entry), ("item[]@", 0, &item)] {
+        let at = offset(&document.text, needle, occurrence, 1);
+        let locations = request(&mut fixture, "textDocument/definition", &document, at);
+        assert_eq!(&locations, expected, "{needle}#{occurrence}");
+    }
+
+    let types = open_text(&mut fixture, &workspace, "types.yaml", SHARED_TYPES).0;
+    let locations = request(&mut fixture, "textDocument/definition", &types, offset(SHARED_TYPES, "item: entry", 0, 7));
+    assert_eq!(locations, json!([{ "uri": types.uri, "range": range_of(SHARED_TYPES, "entry", 0) }]));
+
+    fixture.shutdown();
+}
+
+/// Editing the imported file that declares the shared type refreshes the
+/// document's diagnostics at every use without reopening it, and restoring
+/// the file clears them.
+#[test]
+fn editing_the_imported_shared_type_refreshes_every_use() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = shared_session(&workspace);
+    let (document, diagnostics) = open_text(&mut fixture, &workspace, "doc.md", &markdown(&format!("{SHARED_SCHEMA}{SHARED_VALUES}")));
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    let types_uri = url::Url::from_file_path(workspace.path().join("types.yaml")).unwrap().to_string();
+    let edit_types = |fixture: &mut LspFixture<'_>, text: &str| {
+        write(&workspace, "types.yaml", text);
+        fixture.notify("workspace/didChangeWatchedFiles", json!({ "changes": [{ "uri": types_uri, "type": 2 }] }));
+        fixture.wait_for_diagnostics(&document.uri)
+    };
+
+    let diagnostics = edit_types(&mut fixture, &SHARED_TYPES.replace("number(min(0))", "number(min(5))"));
+    let mut paths: Vec<&str> = diagnostics
+        .iter()
+        .map(|diagnostic| {
+            assert_eq!(diagnostic["code"], json!("dm.schema.constraint"), "{diagnostic:#?}");
+            diagnostic["data"]["instance_path"].as_str().unwrap()
+        })
+        .collect();
+    paths.sort_unstable();
+    assert_eq!(paths, ["/first/size", "/items/0/size", "/items/1/size", "/second/size"], "{diagnostics:#?}");
+
+    let diagnostics = edit_types(&mut fixture, SHARED_TYPES);
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+
+    fixture.shutdown();
+}
+
+/// A union with an object arm, declared in `types.yaml` beside the
+/// sharing fixture.
+const SHAPE_TYPES: &str = concat!(
+    "kind: schema\n",
+    "types:\n",
+    "  shape:\n",
+    "    - \"{ side: number -> The side length }\"\n",
+    "    - \"enum(none) -> No shape\"\n",
+);
+
+/// A stored union hovers exactly as the same union inlined at a single use
+/// does: its alternatives are listed rather than its body spelled out.
+#[test]
+fn a_shared_union_hovers_as_its_inlined_alternatives() {
+    let workspace = LspWorkspace::new();
+    write(&workspace, "types.yaml", SHAPE_TYPES);
+    let shared = "$schema:\n  left: \"shape(required)@./types.yaml\"\n  right: \"shape(required)@./types.yaml\"\n";
+    let single = "$schema:\n  left: \"shape(required)@./types.yaml\"\n";
+    let values = "left:\n  side: 1\nright: none\n";
+    let context = biscuit_file::FileResolutionContext::new(workspace.path());
+    for (schema, stored) in [(shared, true), (single, false)] {
+        let document: serde_yaml_ng::Value = serde_yaml_ng::from_str(schema).unwrap();
+        let resolved =
+            darkmatter::markdown::schemas::resolve::resolve_yaml_schema(&document["$schema"], workspace.path(), &context)
+                .unwrap();
+        assert_eq!(!refs_below(&resolved.json_schema["properties"]["left"]).is_empty(), stored, "{schema}");
+    }
+    let mut fixture = session(&workspace);
+
+    let (shared, _) = open_text(&mut fixture, &workspace, "shared.md", &markdown(&format!("{shared}{values}")));
+    let (single, _) = open_text(&mut fixture, &workspace, "single.md", &markdown(&format!("{single}{values}")));
+    let inlined = hover_at(&mut fixture, &single, offset(&single.text, "\nleft:", 0, 1));
+    assert_eq!(
+        inlined,
+        "**`left`**\n\nType: one of:\n- **object** with `side`\n- **enum** — No shape\n\nRequired"
+    );
+    for key in ["\nleft:", "\nright:"] {
+        let markup = hover_at(&mut fixture, &shared, offset(&shared.text, key, 0, 1));
+        assert_eq!(markup, inlined.replace("left", &key[1..key.len() - 1]), "{key}");
+    }
 
     fixture.shutdown();
 }

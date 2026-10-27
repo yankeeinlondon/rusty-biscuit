@@ -68,10 +68,10 @@ use super::{
 #[derive(Debug, Clone)]
 pub struct ResolvedSchema {
     pub simplified: Option<SimplifiedSchema>,
-    /// The cyclic named types `simplified` reaches through
-    /// [`TypeExpr::Ref`], lowered once under `json_schema`'s root `$defs`.
-    /// Empty when nothing recurses, which is every schema that existed
-    /// before recursion was supported.
+    /// The stored named types `simplified` reaches through
+    /// [`TypeExpr::Ref`] (cyclic ones, and acyclic structured ones referenced
+    /// from two or more sites), lowered once under `json_schema`'s root
+    /// `$defs`. Empty when nothing recurses or is shared.
     pub definitions: Arc<DefinitionTable>,
     pub json_schema: Value,
     /// Where the schema came from — an inline `$schema` mapping/sequence
@@ -231,48 +231,14 @@ pub(crate) fn resolve_yaml_schema_owned_by(
                 &mut stack,
             )
         }
-        YamlValue::Mapping(_) => {
-            let schema = parse_yaml_schema(value)?;
-            // Inline the definitions of any `Name@file` named-type imports
-            // (Feature B) before conversion — `to_json_schema` rejects a
-            // surviving import. `@this` resolves against this mapping, whose
-            // namespace is its owner's.
-            let mut searched = BTreeSet::new();
-            let mut definitions = DefinitionTable::default();
-            let (schema, imports) = expand_document_imports(
-                schema,
-                base_dir,
-                owner.root(),
-                &SchemaSourcePath::root(),
-                schema_roots,
-                request_context,
-                &mut searched,
-                &mut definitions,
-            )?;
-            let mut json = to_json_schema_with_definitions(&schema, &definitions)?;
-            // Inline `$schema` mappings have no on-disk path, so `this` example
-            // references have no target here (the acceptance driver references
-            // examples from a schema *file*, resolved in `parse_yaml_referenced_file`).
-            let examples = resolve_document_examples(
-                &mut json,
-                base_dir,
-                None,
-                schema_roots,
-                request_context,
-                &mut searched,
-            )?;
-            Ok(ResolvedSchema {
-                simplified: Some(schema),
-                definitions: Arc::new(definitions),
-                json_schema: json,
-                origin: SchemaOrigin::document(),
-                imports,
-                examples,
-                referenced_files: Vec::new(),
-                searched: searched.into_iter().collect(),
-                advisories: Vec::new(),
-            })
-        }
+        YamlValue::Mapping(_) => resolve_inline_mapping(
+            value,
+            owner,
+            base_dir,
+            schema_roots,
+            request_context,
+            Sharing::Automatic,
+        ),
         YamlValue::Sequence(items) => {
             resolve_root_union(items, owner, base_dir, schema_roots, request_context, &mut stack)
         }
@@ -283,6 +249,73 @@ pub(crate) fn resolve_yaml_schema_owned_by(
             ),
         }),
     }
+}
+
+/// Resolves one global catalog declaration, `value` (a single-entry
+/// mapping), from schema files in `base_dir`. A declaration stores only its
+/// cyclic definitions: catalog consumers, the built-in baseline above all,
+/// read a declaration as a definition-free shape (see [`Sharing::Off`]).
+pub(crate) fn resolve_catalog_declaration(
+    value: &YamlValue,
+    base_dir: &Path,
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<ResolvedSchema, SchemaError> {
+    resolve_inline_mapping(value, InlineOwner::Document, base_dir, &[], request_context, Sharing::Off)
+}
+
+/// Resolves the inline `$schema` mapping `value` authored by `owner`.
+fn resolve_inline_mapping(
+    value: &YamlValue,
+    owner: InlineOwner<'_>,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+    sharing: Sharing,
+) -> Result<ResolvedSchema, SchemaError> {
+    let schema = parse_yaml_schema(value)?;
+    // Inline the definitions of any `Name@file` named-type imports
+    // (Feature B) before conversion — `to_json_schema` rejects a
+    // surviving import. `@this` resolves against this mapping, whose
+    // namespace is its owner's.
+    let mut searched = BTreeSet::new();
+    let mut definitions = DefinitionTable::default();
+    let source = NamespaceSource::Files {
+        schema_roots: schema_roots.to_vec(),
+        context: Box::new(request_context.clone()),
+    };
+    let (schema, imports) = expand_imports(
+        schema,
+        base_dir,
+        owner.root(),
+        &SchemaSourcePath::root(),
+        source,
+        sharing,
+        &mut searched,
+        &mut definitions,
+    )?;
+    let mut json = to_json_schema_with_definitions(&schema, &definitions)?;
+    // Inline `$schema` mappings have no on-disk path, so `this` example
+    // references have no target here (the acceptance driver references
+    // examples from a schema *file*, resolved in `parse_yaml_referenced_file`).
+    let examples = resolve_document_examples(
+        &mut json,
+        base_dir,
+        None,
+        schema_roots,
+        request_context,
+        &mut searched,
+    )?;
+    Ok(ResolvedSchema {
+        simplified: Some(schema),
+        definitions: Arc::new(definitions),
+        json_schema: json,
+        origin: SchemaOrigin::document(),
+        imports,
+        examples,
+        referenced_files: Vec::new(),
+        searched: searched.into_iter().collect(),
+        advisories: Vec::new(),
+    })
 }
 
 /// The canonical path of the file an explicit named-type reference
@@ -313,14 +346,15 @@ pub fn named_type_reference_path(
 }
 
 /// A schema whose named-type references were expanded, with what expansion
-/// read and the cyclic definitions its [`TypeExpr::Ref`]s point into.
+/// read and the stored definitions its [`TypeExpr::Ref`]s point into.
 #[derive(Debug, Clone)]
 pub struct NamedTypeExpansion {
     /// The expanded schema.
     pub schema: SimplifiedSchema,
     /// The files the references imported, sorted.
     pub imports: Vec<PathBuf>,
-    /// The cyclic definitions the schema reaches; empty when nothing recurses.
+    /// The stored definitions the schema reaches; empty when nothing recurses
+    /// or is shared.
     pub definitions: Arc<DefinitionTable>,
 }
 
@@ -1243,7 +1277,7 @@ pub(crate) fn prepare_embedded_schema_in(
             return Err(unsupported("an embedded schema cannot be a whole-file reference"));
         }
     };
-    lower_embedded_schema(schema, path, documents, bundle)
+    lower_embedded_schema(schema, path, documents, bundle, Sharing::Automatic)
 }
 
 /// Prepares an inline `$schema` mapping authored in the embedded document
@@ -1267,7 +1301,25 @@ pub(crate) fn prepare_embedded_inline_schema(
             message: "an embedded inline schema cannot be a root union".into(),
         });
     }
-    lower_embedded_schema(schema, importer, documents, bundle)
+    lower_embedded_schema(schema, importer, documents, bundle, Sharing::Automatic)
+}
+
+/// [`prepare_embedded_inline_schema`] for one global catalog declaration,
+/// which stores only its cyclic definitions (see
+/// [`resolve_catalog_declaration`]).
+pub(crate) fn prepare_embedded_catalog_declaration(
+    value: &YamlValue,
+    importer: &str,
+    documents: &[EmbeddedDocument<'_>],
+) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
+    let schema = parse_yaml_schema(value)?;
+    if matches!(schema, SimplifiedSchema::Union(_)) {
+        return Err(SchemaError::SchemaDocument {
+            path: PathBuf::from(importer),
+            message: "an embedded inline schema cannot be a root union".into(),
+        });
+    }
+    lower_embedded_schema(schema, importer, documents, "", Sharing::Off)
 }
 
 /// Expands a single-object embedded schema authored at `path` and lowers it,
@@ -1277,6 +1329,7 @@ fn lower_embedded_schema(
     path: &str,
     documents: &[EmbeddedDocument<'_>],
     bundle: &str,
+    sharing: Sharing,
 ) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
     let mut definitions = DefinitionTable::default();
     let (schema, mut reads) = expand_imports(
@@ -1285,6 +1338,7 @@ fn lower_embedded_schema(
         DefNamespace::Embedded(path.to_string()),
         &SchemaSourcePath::root(),
         NamespaceSource::Embedded { documents, bundle },
+        sharing,
         // Embedded imports resolve lexically in the table and probe no disk.
         &mut BTreeSet::new(),
         &mut definitions,
@@ -1495,9 +1549,11 @@ fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, Sc
 // reference, including `required` and `generated`. Postfix composes outward:
 // `Name[]@file` becomes an array of the inlined type, and
 // `Name(constraints)@file` merges the use-site constraints into the inherited
-// ones (`apply_import_postfix`). Acyclic definitions expand inline; descending
-// cycles become references to shared definitions. `to_json_schema` rejects
-// any unresolved import that survives.
+// ones (`apply_import_postfix`). Members of a descending cycle, and acyclic
+// structured definitions referenced from two or more authored sites, become
+// references to definitions stored once; every other definition expands
+// inline, as does any use of a shared one whose postfix a reference cannot
+// represent. `to_json_schema` rejects any unresolved import that survives.
 //
 // Each namespace's unexpanded table is shared through an `Arc`: the engine
 // cache, every later import of that file, and every `@this` hold the same
@@ -1529,9 +1585,12 @@ struct Namespace {
 /// Drives eager, bounded, cycle-checked expansion of `Name@file` imports over
 /// a parsed [`SimplifiedSchema`].
 struct ImportEngine<'a> {
-    /// The acyclic definitions currently being inlined, used to bound the
-    /// depth of an import chain. A cyclic definition is never a frame: its
-    /// uses are references and its body is expanded on its own.
+    /// The acyclic definitions currently being expanded at a use, used to
+    /// bound the depth of an import chain. A cyclic definition is never a
+    /// frame: its uses are references and its body is expanded on its own.
+    /// A shared definition's body is expanded at its first use, under that
+    /// use's frames, exactly as an inlined one is, so storing it never
+    /// shortens a chain.
     stack: Vec<DefKey>,
     /// Resolved import file paths, deduplicated — the dependency edges a warm
     /// cache / DMLS index consumes to invalidate on imported-file change.
@@ -1565,14 +1624,27 @@ struct ImportEngine<'a> {
     /// The definitions that take part in a reference cycle, found before
     /// expansion starts. Empty for a schema that does not recurse.
     cyclic: HashSet<DefKey>,
-    /// What each cyclic definition contributes to a use site. `None` during
-    /// the first of the two passes a recursive schema takes.
+    /// The acyclic definitions selected for storage (see `graph`). Kept apart
+    /// from `cyclic`: selection never changes cycle admission.
+    shared: HashSet<DefKey>,
+    /// What each stored definition contributes to a use site. `None` during
+    /// the first of the two passes a schema with stored definitions takes.
     summaries: Option<HashMap<DefKey, recursive::UseSummary>>,
-    /// Each cyclic definition reached in this pass, in first-reached order,
+    /// Each stored definition reached in this pass, in first-reached order,
     /// with its namespace and, once expanded, its body.
     reached: IndexMap<DefKey, recursive::ReachedDefinition>,
     /// Reached cyclic definitions whose bodies are not expanded yet.
     pending: VecDeque<DefKey>,
+    /// Expansions of definitions whose top-level alias chain is inlined
+    /// through to its end, for a use a reference to a shared target cannot
+    /// represent (see `recursive`).
+    forced_cache: HashMap<DefKey, ExpandedDef>,
+    /// Set just before expanding an atom that is a union alternative, and
+    /// taken by that atom's expansion.
+    arm_use: bool,
+    /// Set just before expanding a definition's top-level atom that must not
+    /// become a reference to a shared definition; taken by that expansion.
+    force_inline: bool,
 }
 
 /// Where an expansion reads the namespaces its imports name. This is all that
@@ -1607,9 +1679,13 @@ impl<'a> ImportEngine<'a> {
             shipped_cache: HashMap::new(),
             expanded_cache: HashMap::new(),
             cyclic: HashSet::new(),
+            shared: HashSet::new(),
             summaries: None,
             reached: IndexMap::new(),
             pending: VecDeque::new(),
+            forced_cache: HashMap::new(),
+            arm_use: false,
+            force_inline: false,
         }
     }
 }
@@ -1625,6 +1701,17 @@ struct SelectedFile {
 struct CachedNamespace {
     base_dir: PathBuf,
     named_types: Arc<IndexMap<String, PropertyDef>>,
+}
+
+/// Where a named-type reference is used.
+#[derive(Clone, Copy)]
+struct Use {
+    /// The reference is an alternative of a union, which flattens a union
+    /// target into its own alternatives.
+    as_arm: bool,
+    /// The reference is the top level of a definition whose use must inline
+    /// any shared definition it aliases.
+    force_inline: bool,
 }
 
 /// One named-type reference as authored: the type, the namespace it names,
@@ -1808,8 +1895,8 @@ fn pattern_key_source_name(key: &PatternKey) -> String {
 /// `searched`. Schemas with no imports are returned untouched
 /// (byte-equivalent to legacy output).
 ///
-/// The cyclic definitions the schema reaches are added to `definitions`,
-/// which allocates their `$defs` keys; a root union passes one table to
+/// The stored definitions the schema reaches (cyclic and shared) are added to
+/// `definitions`, which allocates their `$defs` keys; a root union passes one table to
 /// every inline arm so their keys never collide.
 #[allow(clippy::too_many_arguments)]
 fn expand_document_imports(
@@ -1826,23 +1913,40 @@ fn expand_document_imports(
         schema_roots: schema_roots.to_vec(),
         context: Box::new(request_context.clone()),
     };
-    expand_imports(schema, base_dir, key, root, source, searched, definitions)
+    expand_imports(schema, base_dir, key, root, source, Sharing::Automatic, searched, definitions)
+}
+
+/// Whether an expansion stores repeated acyclic structured definitions once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Sharing {
+    /// Store each definition discovery selects (see `graph`).
+    Automatic,
+    /// Store only cyclic definitions and inline everything else. A global
+    /// catalog declaration resolves this way: the built-in baseline is
+    /// published as a definition-free schema
+    /// ([`super::darkmatter_base_schema`]), and the catalog's consumers read
+    /// a declaration's members without a definition table.
+    Off,
 }
 
 /// [`expand_document_imports`] over an explicit namespace source.
 ///
-/// The named-type graph is discovered first. Without a cycle, expansion
-/// inlines every reference exactly as it always has. With one, every use of a
-/// cyclic definition becomes a [`TypeExpr::Ref`] and expansion runs twice:
-/// the first pass learns what each cyclic definition contributes to a use
-/// site (its markers and outer shape, see `recursive::UseSummary`), and the
-/// second builds every use site from that summary with full provenance.
+/// The named-type graph is discovered first. Without a cycle or a definition
+/// selected for sharing, expansion inlines every reference exactly as it
+/// always has. Otherwise every use of a cyclic definition, and every use of a
+/// shared one a reference can represent, becomes a [`TypeExpr::Ref`] and
+/// expansion runs twice: the first pass learns what each stored definition
+/// contributes to a use site (its markers and outer shape, see
+/// `recursive::UseSummary`), and the second builds every use site from that
+/// summary with full provenance, inlining the uses it cannot represent.
+#[allow(clippy::too_many_arguments)]
 fn expand_imports(
     schema: SimplifiedSchema,
     base_dir: &Path,
     key: DefNamespace,
     root: &SchemaSourcePath,
     source: NamespaceSource<'_>,
+    sharing: Sharing,
     searched: &mut BTreeSet<PathBuf>,
     definitions: &mut DefinitionTable,
 ) -> Result<(SimplifiedSchema, Vec<PathBuf>), SchemaError> {
@@ -1861,8 +1965,12 @@ fn expand_imports(
         named_types,
     };
     let mut engine = ImportEngine::new(source);
-    engine.cyclic = engine.discover(&schema, &current, root)?;
-    let expanded = if engine.cyclic.is_empty() {
+    let discovery = engine.discover(&schema, &current, root)?;
+    engine.cyclic = discovery.cyclic;
+    if sharing == Sharing::Automatic {
+        engine.shared = discovery.shared;
+    }
+    let expanded = if engine.cyclic.is_empty() && engine.shared.is_empty() {
         engine.expand_schema(schema, &current, root)?
     } else {
         engine.expand_schema(schema.clone(), &current, root)?;
@@ -1871,7 +1979,7 @@ fn expand_imports(
         engine.begin_final_pass(summaries);
         let expanded = engine.expand_schema(schema, &current, root)?;
         engine.expand_reached_definitions()?;
-        engine.publish_definitions(definitions);
+        engine.publish_definitions(&expanded, definitions);
         expanded
     };
     searched.extend(engine.searched);
@@ -1971,6 +2079,7 @@ impl ImportEngine<'_> {
         let mut out = Vec::with_capacity(arms.len());
         let mut markers = Vec::new();
         for (index, atom) in arms.into_iter().enumerate() {
+            self.arm_use = true;
             match self.expand_atom(atom, current, &path.union_arm(index))? {
                 ExpandedDef::Single(atom, provenance) => match *atom {
                     PropertyAtom {
@@ -2030,9 +2139,14 @@ impl ImportEngine<'_> {
             array_constraints,
             description,
         } = atom;
+        let as_arm = std::mem::take(&mut self.arm_use);
+        let force_inline = std::mem::take(&mut self.force_inline);
         let mut hoisted = Vec::new();
         let ty = match ty {
             TypeExpr::Imported { name, reference } => {
+                // A list of a shared definition keeps the reference on its
+                // items whatever the postfix, so forcing stops at `[]`.
+                let force_inline = force_inline && !is_array;
                 return self.expand_import(
                     NamedReference {
                         name,
@@ -2044,6 +2158,7 @@ impl ImportEngine<'_> {
                     },
                     current,
                     path,
+                    Use { as_arm, force_inline },
                 );
             }
             TypeExpr::Primitive(p) => TypeExpr::Primitive(p),
@@ -2094,6 +2209,7 @@ impl ImportEngine<'_> {
         reference: NamedReference,
         current: &Namespace,
         path: &SchemaSourcePath,
+        context: Use,
     ) -> Result<ExpandedDef, SchemaError> {
         if self.stack.len() >= MAX_IMPORT_DEPTH {
             return Err(SchemaError::ImportCycle {
@@ -2130,31 +2246,60 @@ impl ImportEngine<'_> {
             self.reach(&frame, &target);
             return self.recursive_use(frame, reference, &site, &definition);
         }
-        let base = if let Some(expanded) = self.expanded_cache.get(&frame) {
-            expanded.clone()
-        } else {
-            // Admission rejected every cycle that does not pass through a
-            // cyclic definition, so this guards an invariant.
-            if self.stack.contains(&frame) {
-                return Err(SchemaError::ImportCycle {
-                    chain: self.describe_cycle(&reference.name),
-                });
-            }
-            self.stack.push(frame.clone());
-            // Cloned only here: a cached expansion never reads the body.
-            let base = match def.clone() {
-                PropertyDef::Single(atom) => self.expand_atom(atom, &target, &definition_path)?,
-                PropertyDef::Union(arms) => {
-                    self.expand_union_arms(arms, &target, &definition_path)?.into_expanded()
-                }
-            };
-            self.stack.pop();
-
-            let base = self.rehome_definition_examples(base, &target.key)?;
-            self.expanded_cache.insert(frame, base.clone());
-            base
-        };
+        let mut base = self.inline_base(&frame, def, &target, &definition_path, &reference.name, context.force_inline)?;
+        if !context.force_inline && self.shared.contains(&frame) && self.can_reference(&frame, &base, &reference, context.as_arm) {
+            self.reach_shared(&frame, &target, &base);
+            return self.recursive_use(frame, reference, &site, &definition);
+        }
+        if !context.force_inline && !self.alias_use_keeps_reference(&base, &reference, context.as_arm) {
+            base = self.inline_base(&frame, def, &target, &definition_path, &reference.name, true)?;
+        }
         self.apply_postfix(base, reference, &site, &definition)
+    }
+
+    /// The expansion of `def`, the definition `frame`, before any use-site
+    /// postfix, from the cache when an earlier use expanded it. With
+    /// `force_inline`, a top-level alias chain into shared definitions is
+    /// inlined through to its end rather than ending in a reference.
+    fn inline_base(
+        &mut self,
+        frame: &DefKey,
+        def: &PropertyDef,
+        target: &Namespace,
+        definition_path: &SchemaSourcePath,
+        name: &str,
+        force_inline: bool,
+    ) -> Result<ExpandedDef, SchemaError> {
+        if let Some(expanded) = self.expanded_cache.get(frame)
+            && !(force_inline && self.shared_alias_target(expanded).is_some())
+        {
+            return Ok(expanded.clone());
+        }
+        if force_inline && let Some(expanded) = self.forced_cache.get(frame) {
+            return Ok(expanded.clone());
+        }
+        // Admission rejected every cycle that does not pass through a
+        // cyclic definition, so this guards an invariant.
+        if self.stack.contains(frame) {
+            return Err(SchemaError::ImportCycle {
+                chain: self.describe_cycle(name),
+            });
+        }
+        self.stack.push(frame.clone());
+        // Cloned only here: a cached expansion never reads the body.
+        let base = match def.clone() {
+            PropertyDef::Single(atom) => {
+                self.force_inline = force_inline;
+                self.expand_atom(atom, target, definition_path)?
+            }
+            PropertyDef::Union(arms) => self.expand_union_arms(arms, target, definition_path)?.into_expanded(),
+        };
+        self.stack.pop();
+
+        let base = self.rehome_definition_examples(base, &target.key)?;
+        let cache = if force_inline { &mut self.forced_cache } else { &mut self.expanded_cache };
+        cache.insert(frame.clone(), base.clone());
+        Ok(base)
     }
 
     /// Pins the examples of a definition expanded from a schema file (see

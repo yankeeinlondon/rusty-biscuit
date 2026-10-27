@@ -1,9 +1,11 @@
-//! The finite definition table behind recursive named types.
+//! The finite definition table behind stored named types.
 //!
 //! A named type that takes part in a reference cycle is stored once here and
-//! every use of it is a [`TypeExpr::Ref`]. Acyclic named types never enter the
-//! table: they inline at each use site exactly as before, so a schema without
-//! recursion has an empty table and lowers with no `$defs`.
+//! every use of it is a [`TypeExpr::Ref`]. So is an acyclic structured type
+//! (an object, dictionary, tuple, or a list or union of one) that two or
+//! more authored sites reference, at every use a reference can represent.
+//! Every other named type inlines at each use site, so a schema with neither
+//! has an empty table and lowers with no `$defs`.
 //!
 //! A [`Definition`] body is the reusable value shape. Property presence and
 //! annotations (`required`, `generated`, `eager`, `default`, `suggest`,
@@ -95,10 +97,11 @@ impl DefNamespace {
     }
 }
 
-/// One cyclic named type.
+/// One stored named type: a member of a reference cycle, or a shared
+/// acyclic type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Definition {
-    /// The reusable value shape, expanded. Nested uses of cyclic definitions
+    /// The reusable value shape, expanded. Nested uses of stored definitions
     /// are [`TypeExpr::Ref`]; presence markers and annotations were moved to
     /// the use sites.
     pub body: PropertyDef,
@@ -125,7 +128,7 @@ pub enum DefinitionOuter {
     Other,
 }
 
-/// The finite, immutable set of cyclic definitions one resolution reached.
+/// The finite, immutable set of stored definitions one resolution reached.
 ///
 /// Entries keep allocation order, which is the order the resolver first
 /// reached each definition, and that order is the `$defs` emission order.
@@ -136,7 +139,7 @@ pub struct DefinitionTable {
 }
 
 impl DefinitionTable {
-    /// Whether the table holds no definition (the acyclic case).
+    /// Whether the table holds no definition (nothing recurses or is shared).
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

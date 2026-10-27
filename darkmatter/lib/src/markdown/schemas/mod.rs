@@ -116,7 +116,7 @@ pub use errors::{CycleReference, SchemaError};
 pub use json_shape::shape_from_json_schema;
 pub use frontmatter_shape::{
     FrontmatterExpressionValue, effective_property_shape, expression_atom,
-    frontmatter_expression_values, nested_property_shape, nested_property_shape_with_definitions, property_def_at_path,
+    frontmatter_expression_values, frontmatter_expression_values_with_definitions, nested_property_shape, nested_property_shape_with_definitions, property_def_at_path,
     property_def_at_path_with_definitions,
 };
 pub use phase::SchemaPhase;

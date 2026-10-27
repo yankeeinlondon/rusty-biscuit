@@ -350,7 +350,10 @@ fn sequence_shell_expanded_value_violating_schema_aborts_step() {
     // schema must surface a SchemaValidation error and not launch the
     // provider for that step.
     let fixture = CliProcessFixture::named("sequence-shell-schema-violation");
-    fixture.seed_inline_metadata_schema(include_str!("../../../schemas/inline-compose.yaml"));
+    fixture.seed_inline_metadata_schema(
+        include_str!("../../../schemas/inline-compose.yaml"),
+        include_str!("../../../schemas/document.yaml"),
+    );
     write_shell_whitelist(fixture.cwd(), &["echo"]);
     let count_path = fixture.cwd().join("call-count.txt");
 

@@ -1057,8 +1057,10 @@ fn resolve_declaration(
     single.insert(YamlValue::String(name.to_string()), value.clone());
     let single = YamlValue::Mapping(single);
     let resolved = match source {
-        Source::Embedded(documents) => resolve::prepare_embedded_inline_schema(&single, catalog, documents, "").map(|(resolved, _)| resolved),
-        Source::Disk { dir, context } => resolve::resolve_yaml_schema(&single, dir, context),
+        Source::Embedded(documents) => {
+            resolve::prepare_embedded_catalog_declaration(&single, catalog, documents).map(|(resolved, _)| resolved)
+        }
+        Source::Disk { dir, context } => resolve::resolve_catalog_declaration(&single, dir, context),
     }
     .map_err(|error| CatalogErrorReason::Resolve(Box::new(error)))?;
     match resolved.simplified {

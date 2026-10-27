@@ -338,10 +338,13 @@ fn item_count_bounds_merge_on_an_already_array_target_and_never_with_item_bounds
 #[test]
 fn key_bounds_from_constraints_blocks_and_postfixes_are_one_scope() {
     let dir = TempDir::new().expect("tempdir");
+    // Each type has one use, so each use inlines and merges into one scope;
+    // a type used twice would be stored once and referenced.
     let resolved = resolve_inline(
         dir.path(),
         "card:\n  $constraints:\n    min-keys: 1\n    max-keys: 5\n  a: string\n  b: string\n  c: string\n\
-         tight: card(max-keys(2))\nfull: card(min-keys(3); max-keys(9))\n\
+         wide:\n  $constraints:\n    min-keys: 1\n    max-keys: 5\n  a: string\n  b: string\n  c: string\n\
+         tight: card(max-keys(2))\nfull: wide(min-keys(3); max-keys(9))\n\
          postfixed: '{ a: string, b: string }(min-keys(1))'\nboth: postfixed(min-keys(2))\n",
     )
     .expect("schema resolves");

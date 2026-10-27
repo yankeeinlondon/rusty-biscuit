@@ -1,9 +1,24 @@
-//! Expansion of cyclic named types into references.
+//! Expansion of stored named types into references.
 //!
-//! Every use of a cyclic definition is a [`TypeExpr::Ref`] whose atom holds
-//! what the use site's property needs: the definition's presence markers and
-//! annotations merged with the use site's own postfix. The definition's body
-//! is expanded once per pass, from a worklist, and stored without them.
+//! A definition is stored when it takes part in a reference cycle, or when
+//! discovery selected it for sharing (an acyclic structured value referenced
+//! from two or more authored sites). Every use of a cyclic definition, and
+//! every use of a shared one a reference can represent, is a
+//! [`TypeExpr::Ref`] whose atom holds what the use site's property needs:
+//! the definition's presence markers and annotations merged with the use
+//! site's own postfix. The definition's body is expanded once per pass and
+//! stored without them: a cyclic body from a worklist, a shared body at its
+//! first use, exactly where inlining would have expanded it.
+//!
+//! A use of a shared definition stays inline when a reference beside the
+//! unchanged body could not reproduce what inlining gives it: a key
+//! exclusion that changes how the body's own key bounds count, a constraint
+//! a reference cannot carry, or, as a union alternative, anything the union
+//! would otherwise flatten into its own alternatives (property markers, a
+//! description over a union, a list). A body whose top level carries
+//! use-context behavior (a nullable value, an optional `file` alternative,
+//! a union alternative's presence marker or suggestion) is never shared.
+//! Only definitions a surviving reference reaches are published.
 //!
 //! What a definition hands its use sites depends only on its top level,
 //! never on what sits below a descending edge, but a top level can itself be
@@ -14,7 +29,7 @@
 //! The second pass builds each use site from its definition's summary with
 //! the same merge rules, and the same provenance, an inlined reference uses.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::{
     AtomProvenance, CountedBound, ExpandedDef, ImportEngine, MergeSite, Namespace, NamedReference,
@@ -22,6 +37,7 @@ use super::{
     reconcile_property_defaults, reinterpret_bounds,
 };
 use crate::markdown::schemas::{
+    SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
     errors::SchemaError,
     simplified::{
         DefKey, DefinitionOuter, DefinitionTable, SchemaConstraintOrigin, SchemaReferenceSite,
@@ -30,7 +46,7 @@ use crate::markdown::schemas::{
     },
 };
 
-/// A cyclic definition reached by the current pass.
+/// A stored definition reached by the current pass.
 pub(super) struct ReachedDefinition {
     namespace: Namespace,
     /// The expanded body, with its top-level markers still in place; `None`
@@ -38,7 +54,7 @@ pub(super) struct ReachedDefinition {
     body: Option<ExpandedDef>,
 }
 
-/// What a cyclic definition contributes to each of its use sites.
+/// What a stored definition contributes to each of its use sites.
 #[derive(Clone)]
 pub(super) struct UseSummary {
     /// What the value is at its top level.
@@ -134,19 +150,57 @@ impl ImportEngine<'_> {
         Ok(())
     }
 
-    /// Starts the second pass of a recursive schema with what the first one
-    /// learned.
+    /// Records that the shared definition `key`, whose body is `base`, is
+    /// used through a reference in this pass.
+    pub(super) fn reach_shared(&mut self, key: &DefKey, namespace: &Namespace, base: &ExpandedDef) {
+        if self.reached.contains_key(key) {
+            return;
+        }
+        self.reached.insert(
+            key.clone(),
+            ReachedDefinition {
+                namespace: namespace.clone(),
+                body: Some(base.clone()),
+            },
+        );
+    }
+
+    /// Starts the second pass of a schema with stored definitions with what
+    /// the first one learned.
     pub(super) fn begin_final_pass(&mut self, summaries: HashMap<DefKey, UseSummary>) {
         self.summaries = Some(summaries);
         self.expanded_cache.clear();
+        self.forced_cache.clear();
         self.reached.clear();
         self.pending.clear();
     }
 
-    /// Adds every reached body, without its use-site markers, to
-    /// `definitions` in first-reached order.
-    pub(super) fn publish_definitions(&mut self, definitions: &mut DefinitionTable) {
+    /// Adds every body a reference in `schema` reaches, directly or through
+    /// another body, without its use-site markers, to `definitions` in
+    /// first-reached order. A body reached in this pass only by an
+    /// expansion whose use was then inlined is left out.
+    pub(super) fn publish_definitions(&mut self, schema: &SimplifiedSchema, definitions: &mut DefinitionTable) {
+        let mut used = HashSet::new();
+        let mut queue = Vec::new();
+        schema_refs(schema, &mut |key| {
+            if used.insert(key.clone()) {
+                queue.push(key.clone());
+            }
+        });
+        while let Some(key) = queue.pop() {
+            let Some(body) = self.reached.get(&key).and_then(|reached| reached.body.as_ref()) else {
+                continue;
+            };
+            expanded_refs(body, &mut |key| {
+                if used.insert(key.clone()) {
+                    queue.push(key.clone());
+                }
+            });
+        }
         for (key, reached) in std::mem::take(&mut self.reached) {
+            if !used.contains(&key) {
+                continue;
+            }
             let body = reached.body.expect("the final pass expanded every reached body");
             let origin = SchemaReferenceSite {
                 source: key.namespace.source_id(),
@@ -156,7 +210,7 @@ impl ImportEngine<'_> {
         }
     }
 
-    /// The use of the cyclic definition `key` written as `reference`.
+    /// The use of the stored definition `key` written as `reference`.
     pub(super) fn recursive_use(
         &self,
         key: DefKey,
@@ -192,7 +246,7 @@ impl ImportEngine<'_> {
     }
 
     /// Applies a use-site postfix to an expanded definition. A definition
-    /// that is itself a use of a cyclic definition (an acyclic alias of one)
+    /// that is itself a use of a stored definition (an inlined alias of one)
     /// takes the reference rules; anything else is inlined.
     pub(super) fn apply_postfix(
         &self,
@@ -458,6 +512,371 @@ impl ImportEngine<'_> {
             bounds: Vec::new(),
             admits_null,
         })
+    }
+}
+
+impl ImportEngine<'_> {
+    /// The shared definition `base`'s top level is a reference to, when it
+    /// is an alias of one.
+    pub(super) fn shared_alias_target<'b>(&self, base: &'b ExpandedDef) -> Option<&'b DefKey> {
+        let ExpandedDef::Single(atom, _) = base else {
+            return None;
+        };
+        match (&atom.ty, atom.is_array) {
+            (TypeExpr::Ref(key), false) if self.shared.contains(key) => Some(key),
+            _ => None,
+        }
+    }
+
+    /// Whether the use `reference` of the shared definition `key`, whose
+    /// expansion is `base`, can be a reference that behaves as the inlined
+    /// copy does. The first pass makes every representable-looking use a
+    /// reference so every body is summarized; the second judges the postfix
+    /// against the summary.
+    pub(super) fn can_reference(
+        &self,
+        key: &DefKey,
+        base: &ExpandedDef,
+        reference: &NamedReference,
+        as_arm: bool,
+    ) -> bool {
+        if !self.is_shareable(base) {
+            return false;
+        }
+        let summary = match &self.summaries {
+            None => None,
+            Some(summaries) => match summaries.get(key) {
+                Some(summary) => Some(summary),
+                None => return false,
+            },
+        };
+        if as_arm {
+            return self.arm_keeps_reference(base, reference);
+        }
+        summary.is_none_or(|summary| {
+            use_is_representable(
+                summary,
+                &[],
+                &reference.constraints,
+                &reference.array_constraints,
+                reference.is_array,
+            )
+        })
+    }
+
+    /// Whether an inlined use of `base` may keep the reference `base`'s top
+    /// level holds to a shared definition (an alias of one). When it may
+    /// not, the alias is expanded again with the chain inlined.
+    pub(super) fn alias_use_keeps_reference(
+        &self,
+        base: &ExpandedDef,
+        reference: &NamedReference,
+        as_arm: bool,
+    ) -> bool {
+        let Some(target) = self.shared_alias_target(base) else {
+            return true;
+        };
+        if as_arm {
+            return self.arm_keeps_reference(base, reference);
+        }
+        let no_postfix = !reference.is_array
+            && reference.constraints.is_empty()
+            && reference.array_constraints.is_empty()
+            && reference.description.is_none();
+        let (Some(summaries), false) = (&self.summaries, no_postfix) else {
+            return true;
+        };
+        let ExpandedDef::Single(atom, _) = base else {
+            return true;
+        };
+        let inherited: Vec<Constraint> = atom.constraints.iter().chain(&atom.array_constraints).cloned().collect();
+        summaries.get(target).is_none_or(|summary| {
+            use_is_representable(
+                summary,
+                &inherited,
+                &reference.constraints,
+                &reference.array_constraints,
+                reference.is_array,
+            )
+        })
+    }
+
+    /// Whether a union alternative may be a reference to `base` rather than
+    /// the arm, or arms, inlining would place in the union.
+    fn arm_keeps_reference(&self, base: &ExpandedDef, reference: &NamedReference) -> bool {
+        reference.constraints.is_empty()
+            && reference.array_constraints.is_empty()
+            && !self.arm_differs_from_reference(base, 0)
+    }
+
+    /// Whether inlining `base` as a union alternative gives the union
+    /// something a reference arm would not: a union target's alternatives,
+    /// which flatten into the enclosing union so every consumer sees one
+    /// list of alternatives, property markers or annotations it hoists, or a
+    /// list, which `[]` over the union refuses.
+    fn arm_differs_from_reference(&self, base: &ExpandedDef, depth: usize) -> bool {
+        let atom = match base {
+            ExpandedDef::Union(_) => return true,
+            ExpandedDef::Single(atom, _) => atom,
+        };
+        if atom.is_array
+            || atom
+                .constraints
+                .iter()
+                .chain(&atom.array_constraints)
+                .any(is_use_site_marker)
+        {
+            return true;
+        }
+        match &atom.ty {
+            TypeExpr::Union(_) => true,
+            TypeExpr::Ref(target) => {
+                if depth > self.reached.len() {
+                    return true;
+                }
+                match self.reached.get(target).and_then(|reached| reached.body.as_ref()) {
+                    Some(body) => self.arm_differs_from_reference(body, depth + 1),
+                    None => true,
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether `base`, a shared definition's expansion, behaves the same
+    /// stored once as at each use. Its top level must not admit null (which
+    /// makes each use optional) or carry an annotation the converter places
+    /// at the use (`operands`, `deferred`); a union's alternatives must
+    /// carry no property marker or suggestion, which a property hoists or
+    /// counts, no optional `file` alternative, whose empty-string tolerance
+    /// depends on the use, and no reference into a cycle.
+    ///
+    /// Nor may the value hold a `file(match(...))` of its own: a root-union
+    /// arm enforces the glob inside every definition it references (through
+    /// the arm's copy), while the inlined copy of an acyclic type only
+    /// suggests, so storing one would rule out arms that accept the value.
+    fn is_shareable(&self, base: &ExpandedDef) -> bool {
+        let (top, arms): (Vec<&Constraint>, Option<&[PropertyAtom]>) = match base {
+            ExpandedDef::Union(arms) => {
+                if arms.iter().any(holds_file_match) {
+                    return false;
+                }
+                (Vec::new(), Some(arms))
+            }
+            ExpandedDef::Single(atom, _) => {
+                if atom.admits_null() || holds_file_match(atom) {
+                    return false;
+                }
+                let arms = match (&atom.ty, atom.is_array) {
+                    (TypeExpr::Union(arms), false) => Some(arms.as_slice()),
+                    _ => None,
+                };
+                (atom.constraints.iter().chain(&atom.array_constraints).collect(), arms)
+            }
+        };
+        if top
+            .iter()
+            .any(|constraint| matches!(constraint, Constraint::Operands(_) | Constraint::Deferred))
+        {
+            return false;
+        }
+        let Some(arms) = arms else {
+            return true;
+        };
+        if top.iter().any(|constraint| is_arm_property_marker(constraint)) {
+            return false;
+        }
+        arms.iter().all(|arm| {
+            !arm.admits_null()
+                && !arm
+                    .constraints
+                    .iter()
+                    .chain(&arm.array_constraints)
+                    .any(|constraint| is_arm_property_marker(constraint) || matches!(constraint, Constraint::Suggest(_)))
+                && !(matches!(arm.ty, TypeExpr::Primitive(SimplifiedType::File)) && !arm.is_array)
+                && !matches!(&arm.ty, TypeExpr::Ref(target) if self.cyclic.contains(target))
+        })
+    }
+}
+
+/// Whether `atom` holds a `file` with a `match(...)` group in its own
+/// expansion: in it, or in an object, dictionary, tuple, or union nested
+/// there. A reference is not entered: it is a cycle member, which a root-union
+/// arm copies and enforces whether or not this use is stored, or a shared
+/// definition, which passed this check itself.
+fn holds_file_match(atom: &PropertyAtom) -> bool {
+    let def_holds = |def: &PropertyDef| match def {
+        PropertyDef::Single(atom) => holds_file_match(atom),
+        PropertyDef::Union(arms) => arms.iter().any(holds_file_match),
+    };
+    match &atom.ty {
+        TypeExpr::Primitive(SimplifiedType::File) => atom
+            .constraints
+            .iter()
+            .any(|constraint| matches!(constraint, Constraint::Match(patterns) if !patterns.is_empty())),
+        TypeExpr::InlineObject(shape) => shape
+            .properties
+            .values()
+            .chain(shape.pattern_keys.iter().map(|pattern| &pattern.def))
+            .any(def_holds),
+        TypeExpr::Union(arms) => arms.iter().any(holds_file_match),
+        TypeExpr::Tuple(tuple) => {
+            tuple.elements.iter().any(|element| def_holds(&element.def))
+                || tuple.spread.as_deref().is_some_and(holds_file_match)
+        }
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) | TypeExpr::Ref(_) => false,
+    }
+}
+
+/// Whether a use with the postfix `value`/`array` (`is_array` for `[]`),
+/// over a reference that already holds `inherited`, lowers beside the
+/// unchanged body of a definition summarized by `summary` exactly as the
+/// inlined copy does.
+///
+/// Beside a reference, the use's key bounds count keys in their own scope;
+/// inlined, they merge with the body's into one. The two agree only when
+/// both scopes leave out the same keys, or when one side has no bound for
+/// the other's exclusion to change: `uncounted-keys(note)` at a use of a
+/// body bounded by `max-keys(1)` must inline.
+fn use_is_representable(
+    summary: &UseSummary,
+    inherited: &[Constraint],
+    value: &[Constraint],
+    array: &[Constraint],
+    is_array: bool,
+) -> bool {
+    if inherited
+        .iter()
+        .chain(value)
+        .chain(array)
+        .any(|constraint| matches!(constraint, Constraint::Suggest(_) | Constraint::Options(_)))
+    {
+        return false;
+    }
+    if is_array {
+        let union_conflict = summary.outer == DefinitionOuter::Union
+            && (summary.array_arm.is_some()
+                || summary
+                    .markers
+                    .iter()
+                    .map(|(constraint, _)| constraint)
+                    .chain(inherited)
+                    .any(|constraint| matches!(constraint, Constraint::Default(_))));
+        if !value.is_empty()
+            || summary.outer == DefinitionOuter::Array
+            || union_conflict
+            || !array
+                .iter()
+                .all(|constraint| is_use_site_marker(constraint) || is_array_container_constraint(constraint))
+        {
+            return false;
+        }
+    } else {
+        let allowed = |constraint: &Constraint| match summary.outer {
+            DefinitionOuter::Union => is_union_marker(constraint),
+            DefinitionOuter::Object => {
+                is_use_site_marker(constraint)
+                    || matches!(
+                        constraint,
+                        Constraint::MinKeys(_) | Constraint::MaxKeys(_) | Constraint::UncountedKeys(_)
+                    )
+            }
+            DefinitionOuter::Array => {
+                is_use_site_marker(constraint)
+                    || matches!(
+                        constraint,
+                        Constraint::MinItems(_)
+                            | Constraint::MaxItems(_)
+                            | Constraint::Unique
+                            | Constraint::Min(_)
+                            | Constraint::Max(_)
+                    )
+            }
+            _ => is_use_site_marker(constraint),
+        };
+        if !array.is_empty() || !value.iter().all(allowed) {
+            return false;
+        }
+    }
+    if summary.outer != DefinitionOuter::Object {
+        return true;
+    }
+    let sibling: Vec<&Constraint> = if is_array {
+        inherited.iter().collect()
+    } else {
+        inherited.iter().chain(value).collect()
+    };
+    let (use_excluded, use_bounded) = key_scope(sibling.into_iter());
+    let (body_excluded, body_bounded) = key_scope(summary.bounds.iter().map(|(constraint, _)| constraint));
+    match use_excluded {
+        None => !use_bounded || body_excluded.is_none(),
+        Some(keys) => body_excluded.as_ref() == Some(&keys) || (body_excluded.is_none() && !body_bounded),
+    }
+}
+
+/// The keys a scope's `uncounted-keys` leave out, and whether it bounds the
+/// key count.
+fn key_scope<'c>(constraints: impl Iterator<Item = &'c Constraint>) -> (Option<BTreeSet<&'c str>>, bool) {
+    let mut excluded: Option<BTreeSet<&str>> = None;
+    let mut bounded = false;
+    for constraint in constraints {
+        match constraint {
+            Constraint::UncountedKeys(keys) => excluded.get_or_insert_default().extend(keys.iter().map(String::as_str)),
+            Constraint::MinKeys(_) | Constraint::MaxKeys(_) => bounded = true,
+            _ => {}
+        }
+    }
+    (excluded, bounded)
+}
+
+/// Calls `found` with every definition a reference in `schema` names.
+fn schema_refs(schema: &SimplifiedSchema, found: &mut impl FnMut(&DefKey)) {
+    match schema {
+        SimplifiedSchema::Single(shape) => shape_refs(shape, found),
+        SimplifiedSchema::Union(arms) => {
+            for arm in arms {
+                if let SchemaArm::Inline(shape) = arm {
+                    shape_refs(shape, found);
+                }
+            }
+        }
+    }
+}
+
+fn expanded_refs(body: &ExpandedDef, found: &mut impl FnMut(&DefKey)) {
+    match body {
+        ExpandedDef::Single(atom, _) => atom_refs(atom, found),
+        ExpandedDef::Union(arms) => arms.iter().for_each(|arm| atom_refs(arm, found)),
+    }
+}
+
+fn shape_refs(shape: &SchemaShape, found: &mut impl FnMut(&DefKey)) {
+    for def in shape.properties.values().chain(shape.pattern_keys.iter().map(|pattern| &pattern.def)) {
+        def_refs(def, found);
+    }
+}
+
+fn def_refs(def: &PropertyDef, found: &mut impl FnMut(&DefKey)) {
+    match def {
+        PropertyDef::Single(atom) => atom_refs(atom, found),
+        PropertyDef::Union(arms) => arms.iter().for_each(|arm| atom_refs(arm, found)),
+    }
+}
+
+fn atom_refs(atom: &PropertyAtom, found: &mut impl FnMut(&DefKey)) {
+    match &atom.ty {
+        TypeExpr::Ref(key) => found(key),
+        TypeExpr::InlineObject(shape) => shape_refs(shape, found),
+        TypeExpr::Union(arms) => arms.iter().for_each(|arm| atom_refs(arm, found)),
+        TypeExpr::Tuple(tuple) => {
+            for element in &tuple.elements {
+                def_refs(&element.def, found);
+            }
+            if let Some(spread) = &tuple.spread {
+                atom_refs(spread, found);
+            }
+        }
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => {}
     }
 }
 

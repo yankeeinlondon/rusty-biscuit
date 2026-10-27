@@ -1994,12 +1994,37 @@ pub(crate) fn schema_hover_body(key: &str, def: &PropertyDef, definitions: &dyn 
     Some(format!("**`{key}`**\n\n{details}"))
 }
 
+/// The type line of a reference whose definition resolves to several
+/// alternatives: the list the same union shows when it is inlined. The
+/// resolver stores a union two sites share, and that must not change what
+/// either use shows; the list is also the one the union-item note numbers.
+/// Opens only the references at the top of the hovered type. `None` when the
+/// reference resolves to one alternative.
+fn stored_union_type_line(atom: &PropertyAtom, definitions: &dyn DefinitionLookup) -> Option<String> {
+    let reference = PropertyDef::Single(PropertyAtom {
+        description: None,
+        ..atom.clone()
+    });
+    let alternatives = resolved_alternatives(&reference, definitions);
+    if alternatives.len() < 2 {
+        return None;
+    }
+    let lead = if alternatives.iter().all(|alternative| alternative.is_array) {
+        "Type: **array**, each item one of:"
+    } else {
+        "Type: one of:"
+    };
+    let atoms: Vec<&PropertyAtom> = alternatives.iter().map(|alternative| alternative.atom).collect();
+    Some(format!("{lead}\n{}", alternative_lines(&atoms, definitions)))
+}
+
 /// The schema-hover body **without** the leading `**`key`**` heading: type,
 /// required, eager, enum, default, and description. A union-typed reference
 /// (`U[]`, `U(required)`) is described by its flattened alternatives, each
-/// with its own description, in place of a single type. A recursive reference
-/// (`item[]`) is named as its type and followed by its definition's body
-/// looked up in `definitions`, in which every recursive use is again written
+/// with its own description, in place of a single type, whether the union was
+/// inlined or stored as a definition. Any other stored reference (`item[]`,
+/// recursive or shared) is named as its type and followed by its definition's
+/// body looked up in `definitions`, in which every stored use is again written
 /// by name, so the whole type shows once and never expands further. Callers
 /// that already display the property name in their own header (e.g. the
 /// interpolation hover's `**Expression**` block) use this to avoid repeating
@@ -2008,7 +2033,13 @@ pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn Definiti
     let atom = primary_atom(def)?;
     let mut lines = Vec::new();
 
+    let stored_union = match &atom.ty {
+        TypeExpr::Ref(_) => stored_union_type_line(atom, definitions),
+        _ => None,
+    };
+    let described_by_alternatives = stored_union.is_some();
     let type_line = match &atom.ty {
+        _ if let Some(line) = stored_union => line,
         TypeExpr::Primitive(ty) => {
             let suffix = if atom.is_array { "[]" } else { "" };
             format!("Type: **{}{}**", ty.as_keyword(), suffix)
@@ -2041,6 +2072,7 @@ pub(crate) fn schema_hover_details(def: &PropertyDef, definitions: &dyn Definiti
     };
     lines.push(type_line);
     if let TypeExpr::Ref(key) = &atom.ty
+        && !described_by_alternatives
         && let Some(definition) = definitions.lookup_definition(key)
     {
         let body = darkmatter::markdown::schemas::simplified::serialize_property_def(&definition.body);

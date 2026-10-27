@@ -95,7 +95,7 @@ remains the authority on what can run. The schemas catch most mistakes early,
 but a document they accept can still be rejected by the parser (see
 [What only the parser checks](#what-only-the-parser-checks)).
 
-### The seven files
+### The eight files
 
 | File | Kind | Holds |
 |---|---|---|
@@ -103,11 +103,12 @@ but a document they accept can still be rejected by the parser (see
 | [`lifecycle.yaml`](../../schemas/lifecycle.yaml) | library (`kind: schema`) | the stack types (`stack`, `initialize-stack`, `cancelled-stack`) and the `loop:` block type |
 | [`sequence-types.yaml`](../../schemas/sequence-types.yaml) | library (`kind: schema`) | the sequence step and container types (`steps`, `step`, `task`, `group`) |
 | [`linking.yaml`](../../schemas/linking.yaml) | library (`kind: schema`) | the eleven optional linking keys of a linked skill, command, or agent |
+| [`document.yaml`](../../schemas/document.yaml) | library (`kind: schema`) | the document metadata types (`prompt`, `hash`, `last_updated`) that both `claudine.yaml` and `inline-compose.yaml` import, so the two triggers declare them identically |
 | [`claudine.yaml`](../../schemas/claudine.yaml) | trigger (`kind: schema-trigger`) | Claudine's frontmatter catalog, applied to a document with a non-null lifecycle event, `loop`, `prompt`, `agent`, or `model`; declares Darkmatter's `composed` and `failed` as errors naming `start` and `blocked` |
 | [`inline-compose.yaml`](../../schemas/inline-compose.yaml) | trigger (`kind: schema-trigger`) | inline-compose's document metadata (`prompt`, `hash`, `last_updated`), applied to a document with a non-null `prompt` and no non-null `sequence` |
 | [`sequence.yaml`](../../schemas/sequence.yaml) | trigger (`kind: schema-trigger`) | the sequence document's catalog (`sequence`, `template`, and the removed root `fail_fast`), applied to a document with a non-null `sequence` |
 
-A library reaches a document only through a trigger's imports, so the seven
+A library reaches a document only through a trigger's imports, so the eight
 files work as one bundle. Copy all of them together. For editor analysis of
 Claudine's host globals and lifecycle events, also copy `globals.yaml` and
 `globals.lifecycle.json`; these describe the host rather than adding document
@@ -994,7 +995,7 @@ These routes do **not** work:
 
 ### In the `claudine` CLI
 
-The `claudine` binary embeds the seven files (`include_str!` in
+The `claudine` binary embeds the eight files (`include_str!` in
 [`schema/bundle.rs`](../../lib/src/composition/schema/bundle.rs)), so an
 installed binary validates Claudine controls with no checkout and no disk
 bundle. The embedded copy is the **last** location:
@@ -1124,3 +1125,4 @@ parser still enforces the execution rules.
         - [Action types](../../schemas/action.yaml)
         - [Lifecycle stacks and `loop:`](../../schemas/lifecycle.yaml)
         - [Linking keys](../../schemas/linking.yaml)
+        - [Document metadata (`prompt`, `hash`, `last_updated`)](../../schemas/document.yaml)

@@ -25,9 +25,10 @@ use dmls::{DmlsConfig, OverlayState};
 use serde_json::{Value, json};
 
 /// Claudine's complete schema bundle, copied byte for byte into the fixture.
-const BUNDLE: [(&str, &str); 7] = [
+const BUNDLE: [(&str, &str); 8] = [
     ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
     ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
+    ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
     ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
     ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
     ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),

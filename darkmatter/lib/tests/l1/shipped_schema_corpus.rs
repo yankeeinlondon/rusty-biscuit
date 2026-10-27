@@ -10,6 +10,8 @@
 //! references are resolved. The source-aware parsers of
 //! `2026-10-25-schema-diagnostic-provenance` locate no failure in a valid
 //! standalone artifact and return the source-free value for an inline one.
+//! Every lowered artifact's local `$ref`s resolve in its root `$defs`, and a
+//! loadable artifact that stores definitions resolves to the same bytes twice.
 //!
 //! The same walk accounts for the core types of `2026-10-16-core-schema-types`:
 //! [`CORE_TYPE_USERS`] names every artifact declaring `unknown`/`any`, `null`,
@@ -266,11 +268,12 @@ const CORE_TYPE_USERS: &[(&str, &[&str])] = &[
     ("claudine/schemas/action.yaml", &["null", "unknown"]),
     // Loose bodies and loop-action values.
     ("claudine/schemas/lifecycle.yaml", &["unknown"]),
-    // The hash payload, and the `null`-typed Darkmatter event names.
-    ("claudine/schemas/claudine.yaml", &["null", "unknown"]),
+    // The `null`-typed Darkmatter event names.
+    ("claudine/schemas/claudine.yaml", &["null"]),
+    // The hash payload, which both metadata triggers import.
+    ("claudine/schemas/document.yaml", &["unknown"]),
     // Step outputs, loop results, and leg payloads are any value.
     ("claudine/schemas/globals.yaml", &["unknown"]),
-    ("claudine/schemas/inline-compose.yaml", &["unknown"]),
     // Removed root `fail_fast`, and the parser-checked task and step fields.
     ("claudine/schemas/sequence.yaml", &["null"]),
     ("claudine/schemas/sequence-types.yaml", &["unknown"]),
@@ -488,6 +491,33 @@ fn assert_lowered(resolved: &ResolvedSchema, label: &str) {
         "{label} must lower to a JSON Schema object: {}",
         resolved.json_schema
     );
+    assert_references_resolve(&resolved.json_schema, label);
+}
+
+/// Every local `$ref` of a lowered schema names an entry of its root
+/// `$defs`, so each use of a stored definition, recursive or shared, reaches
+/// its body. Data keywords are skipped: their values are never references.
+fn assert_references_resolve(schema: &serde_json::Value, label: &str) {
+    fn walk(node: &serde_json::Value, defs: Option<&serde_json::Map<String, serde_json::Value>>, label: &str) {
+        match node {
+            serde_json::Value::Object(map) => {
+                if let Some(pointer) = map.get("$ref").and_then(serde_json::Value::as_str)
+                    && let Some(key) = pointer.strip_prefix("#/$defs/")
+                {
+                    let key = key.replace("~1", "/").replace("~0", "~");
+                    assert!(defs.is_some_and(|defs| defs.contains_key(&key)), "{label}: `{pointer}` must resolve");
+                }
+                for (key, value) in map {
+                    if !matches!(key.as_str(), "const" | "default" | "examples" | "enum") && !key.starts_with("x-") {
+                        walk(value, defs, label);
+                    }
+                }
+            }
+            serde_json::Value::Array(items) => items.iter().for_each(|item| walk(item, defs, label)),
+            _ => {}
+        }
+    }
+    walk(schema, schema.get("$defs").and_then(serde_json::Value::as_object), label);
 }
 
 /// The core types whose meaning or presence changed: `unknown` (alias `any`),
@@ -800,6 +830,7 @@ fn loadable_shipped_schemas_resolve_and_lower() {
     let context = FileResolutionContext::new(scratch.path());
 
     let mut resolved_files = 0usize;
+    let mut with_definitions = 0usize;
     let mut inline_bodies = 0usize;
     for artifact in &artifacts {
         let label = artifact.label();
@@ -823,6 +854,16 @@ fn loadable_shipped_schemas_resolve_and_lower() {
                 );
                 assert_lowered(&resolved, &label);
                 resolved_files += 1;
+                if resolved.json_schema.get("$defs").is_some() {
+                    let again = resolve_schema_with_roots(&reference, dir, &[], &context)
+                        .unwrap_or_else(|error| panic!("{label} must resolve again: {error}"));
+                    assert_eq!(
+                        again.json_schema.to_string(),
+                        resolved.json_schema.to_string(),
+                        "{label}: stored definitions resolve to the same bytes"
+                    );
+                    with_definitions += 1;
+                }
             }
             Class::EnvelopeRejected | Class::NotASchema | Class::Trigger | Class::GlobalCatalog => {
                 if matches!(artifact.class, Class::EnvelopeRejected | Class::GlobalCatalog) {
@@ -882,6 +923,8 @@ fn loadable_shipped_schemas_resolve_and_lower() {
         resolved_files >= 10,
         "only {resolved_files} shipped schemas resolved"
     );
+    // Claudine's lifecycle and sequence schemas store their repeated helpers.
+    assert!(with_definitions >= 2, "only {with_definitions} shipped schemas store definitions");
     // The global catalog's partials became loadable libraries, so they count
     // among `resolved_files` rather than here.
     assert!(

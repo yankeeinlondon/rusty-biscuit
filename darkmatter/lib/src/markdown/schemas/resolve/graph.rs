@@ -20,6 +20,16 @@
 //! a child (`a: b` with `b: a`, or `a: [a, string]`), which no finite
 //! document can satisfy and a naive walker would loop on. Every other cycle
 //! describes a nesting grammar with a finite leaf.
+//!
+//! The same walk counts **use sites**: each distinct authored value
+//! reference, identified by the namespace it is written in, its full source
+//! path, and its target. The root's declarations and every definition a value
+//! reaches are walked once each, so two uses of a parent never multiply the
+//! single reference written in the parent's body, and a reference reached
+//! only through a `function(...)` signature counts for nothing. An acyclic
+//! definition with two or more sites whose value is **structured** (an object
+//! or dictionary, a tuple, or a list or union of something structured) is
+//! selected for storage as a shared definition.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -80,11 +90,32 @@ struct Graph {
     /// first-reached order.
     nodes: IndexMap<DefKey, Namespace>,
     edges: Vec<Edge>,
+    /// The definition each authored reference resolved to, by the body it is
+    /// written in (`None` for the root) and its path there, so a body's
+    /// top-level alias can be followed without resolving it again.
+    targets: HashMap<(Option<usize>, SchemaSourcePath), usize>,
+    /// Every value reference: the body it is written in and its target.
+    value_sites: Vec<(Option<usize>, usize)>,
+    /// The distinct value sites already recorded, by target, namespace, and
+    /// path, so the root walk and a walk of the root's own named types count
+    /// one authored reference once.
+    seen_sites: HashSet<(usize, SchemaSourceId, SchemaSourcePath)>,
+    /// One entry per distinct value site, in discovery order.
+    counted: Vec<(Option<usize>, usize)>,
+}
+
+/// The definitions expansion treats as references rather than inlining.
+pub(super) struct Discovery {
+    /// The members of every reference cycle.
+    pub(super) cyclic: HashSet<DefKey>,
+    /// The acyclic definitions selected for storage: structured values with
+    /// at least two distinct authored use sites.
+    pub(super) shared: HashSet<DefKey>,
 }
 
 impl ImportEngine<'_> {
     /// Discovers the definitions `schema` reaches and returns those that take
-    /// part in a reference cycle.
+    /// part in a reference cycle and those selected for sharing.
     ///
     /// A reference that does not resolve adds no edge; expansion reports it
     /// in its usual order.
@@ -98,7 +129,7 @@ impl ImportEngine<'_> {
         schema: &SimplifiedSchema,
         current: &Namespace,
         root: &SchemaSourcePath,
-    ) -> Result<HashSet<DefKey>, SchemaError> {
+    ) -> Result<Discovery, SchemaError> {
         let mut graph = Graph::default();
         match schema {
             SimplifiedSchema::Single(shape) => {
@@ -122,7 +153,9 @@ impl ImportEngine<'_> {
             self.discover_def(def, &namespace, &path, Position::TOP, Some(next), &mut graph);
             next += 1;
         }
-        graph.admit()
+        let cyclic = graph.admit()?;
+        let shared = graph.shared(&cyclic);
+        Ok(Discovery { cyclic, shared })
     }
 
     fn discover_shape(
@@ -244,6 +277,14 @@ impl ImportEngine<'_> {
             Some(index) => index,
             None => graph.nodes.insert_full(key, target).0,
         };
+        graph.targets.insert((from, path.clone()), to);
+        if !position.in_function {
+            graph.value_sites.push((from, to));
+            let source = namespace.key.source_id();
+            if graph.seen_sites.insert((to, source, path.clone())) {
+                graph.counted.push((from, to));
+            }
+        }
         if let Some(from) = from {
             graph.edges.push(Edge {
                 from,
@@ -259,6 +300,104 @@ impl ImportEngine<'_> {
 }
 
 impl Graph {
+    /// The acyclic definitions with two or more distinct use sites written at
+    /// the root or in a body a value reaches, whose value is structured.
+    fn shared(&self, cyclic: &HashSet<DefKey>) -> HashSet<DefKey> {
+        // A body reached only through a `function(...)` signature describes
+        // a callable: its references are not value uses.
+        let mut reachable = vec![false; self.nodes.len()];
+        let mut queue: Vec<usize> = Vec::new();
+        for &(from, to) in &self.value_sites {
+            if from.is_none() && !reachable[to] {
+                reachable[to] = true;
+                queue.push(to);
+            }
+        }
+        while let Some(node) = queue.pop() {
+            for &(from, to) in &self.value_sites {
+                if from == Some(node) && !reachable[to] {
+                    reachable[to] = true;
+                    queue.push(to);
+                }
+            }
+        }
+        let mut sites = vec![0usize; self.nodes.len()];
+        for &(from, to) in &self.counted {
+            if from.is_none_or(|from| reachable[from]) {
+                sites[to] += 1;
+            }
+        }
+        let mut structured = HashMap::new();
+        let mut shared = HashSet::new();
+        for (node, (key, _)) in self.nodes.iter().enumerate() {
+            if sites[node] >= 2
+                && !cyclic.contains(key)
+                && self.is_structured(node, cyclic, &mut structured, &mut HashSet::new())
+            {
+                shared.insert(key.clone());
+            }
+        }
+        shared
+    }
+
+    /// Whether `node`'s value is structured, following top-level aliases
+    /// through the targets discovery already resolved. Memoized in `memo`.
+    fn is_structured(
+        &self,
+        node: usize,
+        cyclic: &HashSet<DefKey>,
+        memo: &mut HashMap<usize, bool>,
+        visiting: &mut HashSet<usize>,
+    ) -> bool {
+        if let Some(&known) = memo.get(&node) {
+            return known;
+        }
+        let (key, namespace) = self.nodes.get_index(node).expect("a node index is in range");
+        if cyclic.contains(key) {
+            return true;
+        }
+        if !visiting.insert(node) {
+            return false;
+        }
+        let path = SchemaSourcePath::root().property(key.name.as_str());
+        let def = namespace
+            .named_types
+            .get(&key.name)
+            .expect("a discovered definition exists in its namespace");
+        let structured = match def {
+            PropertyDef::Single(atom) => self.atom_is_structured(atom, node, &path, cyclic, memo, visiting),
+            PropertyDef::Union(arms) => arms.iter().enumerate().any(|(index, arm)| {
+                self.atom_is_structured(arm, node, &path.union_arm(index), cyclic, memo, visiting)
+            }),
+        };
+        visiting.remove(&node);
+        memo.insert(node, structured);
+        structured
+    }
+
+    /// A list is structured through its items, so `[]` changes nothing here.
+    fn atom_is_structured(
+        &self,
+        atom: &PropertyAtom,
+        node: usize,
+        path: &SchemaSourcePath,
+        cyclic: &HashSet<DefKey>,
+        memo: &mut HashMap<usize, bool>,
+        visiting: &mut HashSet<usize>,
+    ) -> bool {
+        match &atom.ty {
+            TypeExpr::InlineObject(_) | TypeExpr::Tuple(_) | TypeExpr::Ref(_) => true,
+            TypeExpr::Union(arms) => arms.iter().enumerate().any(|(index, arm)| {
+                self.atom_is_structured(arm, node, &path.union_arm(index), cyclic, memo, visiting)
+            }),
+            TypeExpr::Imported { .. } => self
+                .targets
+                .get(&(Some(node), path.clone()))
+                .is_some_and(|&target| self.is_structured(target, cyclic, memo, visiting)),
+            TypeExpr::Primitive(_) | TypeExpr::Function(_) => false,
+        }
+    }
+
     /// The members of every cyclic group, or the cycles that never descend.
     fn admit(&self) -> Result<HashSet<DefKey>, SchemaError> {
         if self.edges.is_empty() {

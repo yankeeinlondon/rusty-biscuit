@@ -14,10 +14,13 @@
 //! optional atom to it is not a presence check; a caller that needs
 //! nullability compares it separately.
 //!
-//! A recursive reference ([`TypeExpr::Ref`]) is compared by definition
-//! identity and unfolded only through the [`DefinitionTable`] a caller passes
-//! to [`is_subtype_with_definitions`]: the comparison is coinductive, so it
-//! terminates on self- and mutually recursive definitions.
+//! A reference ([`TypeExpr::Ref`]) to a recursive or a shared definition is
+//! unfolded only through the [`DefinitionTable`] a caller passes to
+//! [`is_subtype_with_definitions`]. Two uses of one definition are the same
+//! type; anywhere else, structural identity included, a reference is its
+//! definition's value, so a shared definition compares as the inlined copy
+//! it replaced did. The comparison is coinductive, so it terminates on self-
+//! and mutually recursive definitions.
 
 use std::collections::BTreeSet;
 
@@ -126,7 +129,7 @@ impl<'t> Comparison<'t> {
     }
 
     fn subtype(&mut self, a: &PropertyAtom, b: &PropertyAtom) -> bool {
-        if same_atom_identity(a, b) {
+        if Identities::new(self.definitions).same_atom(a, b) {
             return true;
         }
         if let Some(arms) = scalar_union_arms(a) {
@@ -190,7 +193,9 @@ impl<'t> Comparison<'t> {
     }
 
     /// `def`'s leaf alternatives with each scalar reference replaced by its
-    /// definition's leaves, every definition expanded at most once.
+    /// definition's leaves, every definition expanded at most once. A list of
+    /// a reference to a union is a list of each of its leaves, as the
+    /// inlined list of that union flattens (`(A | B)[]` is `A[]` and `B[]`).
     fn leaves(&self, def: &PropertyDef) -> Vec<PropertyAtom> {
         let mut out = Vec::new();
         let mut expanded = Vec::new();
@@ -202,6 +207,15 @@ impl<'t> Comparison<'t> {
         for alternative in flattened_alternatives(def) {
             let mut atom = alternative.atom.clone();
             atom.is_array |= alternative.is_array;
+            if let Some((key, body)) = list_of_union_reference(&atom, self.definitions)
+                && !expanded.contains(key)
+            {
+                expanded.push(key.clone());
+                let start = out.len();
+                self.push_leaves(body, expanded, out);
+                out[start..].iter_mut().for_each(|leaf| leaf.is_array = true);
+                continue;
+            }
             let body = scalar_reference(&atom)
                 .filter(|key| !expanded.contains(key))
                 .and_then(|key| Some((key.clone(), &self.definitions.get(key)?.body)));
@@ -221,6 +235,21 @@ fn operand(atom: &PropertyAtom) -> Operand {
         Some(key) => Operand::Definition(key),
         None => Operand::Atom(atom),
     }
+}
+
+/// The definition a list of a reference names, with its body, when that body
+/// is a union whose alternatives are not lists themselves.
+fn list_of_union_reference<'a>(atom: &'a PropertyAtom, definitions: &'a DefinitionTable) -> Option<(&'a DefKey, &'a PropertyDef)> {
+    let TypeExpr::Ref(key) = &atom.ty else {
+        return None;
+    };
+    let body = &definitions.get(key)?.body;
+    let arms = match body {
+        PropertyDef::Union(arms) => arms.as_slice(),
+        PropertyDef::Single(single) if !single.is_array => single.union_arms()?,
+        PropertyDef::Single(_) => return None,
+    };
+    (atom.is_array && arms.iter().all(|arm| !arm.is_array)).then_some((key, body))
 }
 
 /// The definition a non-array reference names; `K[]` is a list and compares
@@ -359,8 +388,9 @@ fn is_always_text(atom: &PropertyAtom) -> bool {
     }
 }
 
-/// The parts of an atom that name its type, with ordinary constraints left
-/// out. An unresolved reference has no identity, so it equals nothing.
+/// The parts of a non-reference atom that name its type, with ordinary
+/// constraints left out. An unresolved reference has no identity, so it
+/// equals nothing.
 enum Identity<'a> {
     Primitive {
         ty: SimplifiedType,
@@ -389,78 +419,179 @@ fn identity(atom: &PropertyAtom) -> Identity<'_> {
     }
 }
 
-impl PartialEq for Identity<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Self::Primitive { ty, options, members, literal },
-                Self::Primitive { ty: other_ty, options: other_options, members: other_members, literal: other_literal },
-            ) => ty == other_ty && options == other_options && members == other_members && literal == other_literal,
-            (Self::Structured(left), Self::Structured(right)) => same_structured_identity(left, right),
+/// One side of an identity comparison: an atom's type, or a union's
+/// alternatives, and whether the value is a list of it. A reference opens to
+/// its definition's value, so the list flag can come from the use while the
+/// type comes from the body.
+#[derive(Clone, Copy)]
+enum Side<'a> {
+    Atom { is_array: bool, atom: &'a PropertyAtom },
+    Arms { is_array: bool, arms: &'a [PropertyAtom] },
+}
+
+impl<'a> Side<'a> {
+    fn of(atom: &'a PropertyAtom) -> Self {
+        Self::Atom { is_array: atom.is_array, atom }
+    }
+
+    fn is_array(self) -> bool {
+        match self {
+            Self::Atom { is_array, .. } | Self::Arms { is_array, .. } => is_array,
+        }
+    }
+
+    fn reference(self) -> Option<&'a DefKey> {
+        match self {
+            Self::Atom { atom: PropertyAtom { ty: TypeExpr::Ref(key), .. }, .. } => Some(key),
+            _ => None,
+        }
+    }
+}
+
+/// Structural type identity, with references opened through `definitions`.
+///
+/// A reference is the same type as its definition's value, so a stored
+/// definition is identical to the inlined copy it stands for (`entry[]` and
+/// `{ n: number }[]`). Two references to one definition are identical without
+/// opening it. A pair of different references met again while its own
+/// comparison is in progress holds, so recursive bodies terminate. A
+/// reference `definitions` does not hold is identical only to itself.
+struct Identities<'t> {
+    definitions: &'t DefinitionTable,
+    assumed: Vec<(DefKey, DefKey, bool, bool)>,
+}
+
+impl<'t> Identities<'t> {
+    fn new(definitions: &'t DefinitionTable) -> Self {
+        Self { definitions, assumed: Vec::new() }
+    }
+
+    fn same_atom(&mut self, left: &PropertyAtom, right: &PropertyAtom) -> bool {
+        self.same(Side::of(left), Side::of(right))
+    }
+
+    fn same(&mut self, left: Side<'_>, right: Side<'_>) -> bool {
+        match (left.reference(), right.reference()) {
+            (Some(left_key), Some(right_key)) if left_key == right_key => return left.is_array() == right.is_array(),
+            (Some(left_key), Some(right_key)) => {
+                let pair = (left_key.clone(), right_key.clone(), left.is_array(), right.is_array());
+                if self.assumed.contains(&pair) {
+                    return true;
+                }
+                self.assumed.push(pair);
+                let same = self.open(left).is_some_and(|opened| self.same(opened, right));
+                self.assumed.pop();
+                return same;
+            }
+            (Some(_), None) => return self.open(left).is_some_and(|opened| self.same(opened, right)),
+            (None, Some(_)) => return self.open(right).is_some_and(|opened| self.same(left, opened)),
+            (None, None) => {}
+        }
+        match (as_arms(left), as_arms(right)) {
+            (Side::Arms { is_array, arms: left }, Side::Arms { is_array: right_array, arms: right }) => {
+                is_array == right_array && self.same_alternatives(left, right)
+            }
+            (Side::Atom { is_array, atom: left }, Side::Atom { is_array: right_array, atom: right }) => {
+                is_array == right_array
+                    && match (identity(left), identity(right)) {
+                        (
+                            Identity::Primitive { ty, options, members, literal },
+                            Identity::Primitive {
+                                ty: other_ty,
+                                options: other_options,
+                                members: other_members,
+                                literal: other_literal,
+                            },
+                        ) => {
+                            ty == other_ty && options == other_options && members == other_members && literal == other_literal
+                        }
+                        (Identity::Structured(left), Identity::Structured(right)) => self.same_structured(left, right),
+                        _ => false,
+                    }
+            }
+            _ => false,
+        }
+    }
+
+    /// The value a reference side stands for: its definition's body, as a
+    /// list when the use is one. `None` when the table does not hold the
+    /// definition, or for a list of a list, which no inlined atom spells.
+    fn open<'s>(&self, side: Side<'s>) -> Option<Side<'s>>
+    where
+        't: 's,
+    {
+        let key = side.reference()?;
+        let use_is_array = side.is_array();
+        match &self.definitions.get(key)?.body {
+            PropertyDef::Single(atom) if use_is_array && atom.is_array => None,
+            PropertyDef::Single(atom) => Some(Side::Atom { is_array: use_is_array || atom.is_array, atom }),
+            PropertyDef::Union(arms) => Some(Side::Arms { is_array: use_is_array, arms }),
+        }
+    }
+
+    fn same_alternatives(&mut self, left: &[PropertyAtom], right: &[PropertyAtom]) -> bool {
+        left.iter().all(|left| right.iter().any(|right| self.same_atom(left, right)))
+            && right.iter().all(|right| left.iter().any(|left| self.same_atom(left, right)))
+    }
+
+    fn same_definition(&mut self, left: &PropertyDef, right: &PropertyDef) -> bool {
+        fn arms(def: &PropertyDef) -> &[PropertyAtom] {
+            match def {
+                PropertyDef::Single(atom) => std::slice::from_ref(atom),
+                PropertyDef::Union(arms) => arms,
+            }
+        }
+        self.same_alternatives(arms(left), arms(right))
+    }
+
+    fn same_shape(&mut self, left: &SchemaShape, right: &SchemaShape) -> bool {
+        left.properties.len() == right.properties.len()
+            && left.properties.iter().all(|(key, def)| {
+                right.properties.get(key).is_some_and(|other| self.same_definition(def, other))
+            })
+            && left.pattern_keys.len() == right.pattern_keys.len()
+            && left.pattern_keys.iter().zip(&right.pattern_keys).all(|(left, right)| {
+                left.key == right.key && self.same_definition(&left.def, &right.def)
+            })
+    }
+
+    fn same_structured(&mut self, left: &TypeExpr, right: &TypeExpr) -> bool {
+        match (left, right) {
+            (TypeExpr::InlineObject(left), TypeExpr::InlineObject(right)) => self.same_shape(left, right),
+            (TypeExpr::Tuple(left), TypeExpr::Tuple(right)) => {
+                left.elements.len() == right.elements.len()
+                    && left.elements.iter().zip(&right.elements).all(|(left, right)| {
+                        left.optional == right.optional && self.same_definition(&left.def, &right.def)
+                    })
+                    && match (left.spread.as_deref(), right.spread.as_deref()) {
+                        (Some(left), Some(right)) => self.same_atom(left, right),
+                        (None, None) => true,
+                        _ => false,
+                    }
+            }
+            (TypeExpr::Function(left), TypeExpr::Function(right)) => {
+                let left_parameters = left.parameters.as_slice();
+                let right_parameters = right.parameters.as_slice();
+                left.fallible == right.fallible
+                    && self.same_definition(&left.returns, &right.returns)
+                    && left_parameters.len() == right_parameters.len()
+                    && left_parameters.iter().zip(right_parameters).all(|(left, right)| {
+                        left.optional == right.optional
+                            && left.rest == right.rest
+                            && self.same_definition(&left.def, &right.def)
+                    })
+            }
             _ => false,
         }
     }
 }
 
-fn same_atom_identity(left: &PropertyAtom, right: &PropertyAtom) -> bool {
-    left.is_array == right.is_array && identity(left) == identity(right)
-}
-
-fn same_alternatives(left: &[PropertyAtom], right: &[PropertyAtom]) -> bool {
-    left.iter().all(|left| right.iter().any(|right| same_atom_identity(left, right)))
-        && right.iter().all(|right| left.iter().any(|left| same_atom_identity(left, right)))
-}
-
-fn same_definition_identity(left: &PropertyDef, right: &PropertyDef) -> bool {
-    fn arms(def: &PropertyDef) -> &[PropertyAtom] {
-        match def {
-            PropertyDef::Single(atom) => std::slice::from_ref(atom),
-            PropertyDef::Union(arms) => arms,
-        }
-    }
-    same_alternatives(arms(left), arms(right))
-}
-
-fn same_shape_identity(left: &SchemaShape, right: &SchemaShape) -> bool {
-    left.properties.len() == right.properties.len()
-        && left.properties.iter().all(|(key, def)| {
-            right.properties.get(key).is_some_and(|other| same_definition_identity(def, other))
-        })
-        && left.pattern_keys.len() == right.pattern_keys.len()
-        && left.pattern_keys.iter().zip(&right.pattern_keys).all(|(left, right)| {
-            left.key == right.key && same_definition_identity(&left.def, &right.def)
-        })
-}
-
-fn same_structured_identity(left: &TypeExpr, right: &TypeExpr) -> bool {
-    match (left, right) {
-        (TypeExpr::InlineObject(left), TypeExpr::InlineObject(right)) => same_shape_identity(left, right),
-        (TypeExpr::Union(left), TypeExpr::Union(right)) => same_alternatives(left, right),
-        (TypeExpr::Ref(left), TypeExpr::Ref(right)) => left == right,
-        (TypeExpr::Tuple(left), TypeExpr::Tuple(right)) => {
-            left.elements.len() == right.elements.len()
-                && left.elements.iter().zip(&right.elements).all(|(left, right)| {
-                    left.optional == right.optional && same_definition_identity(&left.def, &right.def)
-                })
-                && match (left.spread.as_deref(), right.spread.as_deref()) {
-                    (Some(left), Some(right)) => same_atom_identity(left, right),
-                    (None, None) => true,
-                    _ => false,
-                }
-        }
-        (TypeExpr::Function(left), TypeExpr::Function(right)) => {
-            let left_parameters = left.parameters.as_slice();
-            let right_parameters = right.parameters.as_slice();
-            left.fallible == right.fallible
-                && same_definition_identity(&left.returns, &right.returns)
-                && left_parameters.len() == right_parameters.len()
-                && left_parameters.iter().zip(right_parameters).all(|(left, right)| {
-                    left.optional == right.optional
-                        && left.rest == right.rest
-                        && same_definition_identity(&left.def, &right.def)
-                })
-        }
-        _ => false,
+/// A union-typed atom as its alternatives, so it compares with a reference
+/// whose definition is a union.
+fn as_arms(side: Side<'_>) -> Side<'_> {
+    match side {
+        Side::Atom { is_array, atom: PropertyAtom { ty: TypeExpr::Union(arms), .. } } => Side::Arms { is_array, arms },
+        other => other,
     }
 }
 

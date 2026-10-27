@@ -424,14 +424,14 @@ fn run(fixtures: &Fixtures, row: &Row) -> (Expected, Observed) {
     }
 }
 
-fn fixtures(host_schema: &str) -> Fixtures {
+fn fixtures(host_schema: &str, document_library: &str) -> Fixtures {
     let plain_cli = CliProcessFixture::named("entry_point_parity");
-    plain_cli.seed_inline_metadata_schema(host_schema);
+    plain_cli.seed_inline_metadata_schema(host_schema, document_library);
     let plain = ParityFixture::create(plain_cli.workspace_path());
     std::fs::write(value_document(&plain), Consumer::SchemaFile.document("placeholder"))
         .expect("write the value document");
     let declared_cli = CliProcessFixture::named("entry_point_parity_completion");
-    declared_cli.seed_inline_metadata_schema(host_schema);
+    declared_cli.seed_inline_metadata_schema(host_schema, document_library);
     let declared = ParityFixture::create(declared_cli.workspace_path());
     declare_target_schemas(&declared);
     Fixtures { plain: (plain_cli, plain), declared: (declared_cli, declared) }
@@ -456,8 +456,8 @@ fn candidate_part(candidates: Vec<PathBuf>, part: usize) -> Vec<PathBuf> {
 /// The expectation narrows to the same candidates, so across the parts every
 /// candidate is checked against its own expected verdict: an admitted
 /// candidate must be expected, and an expected one admitted.
-fn run_candidate_part(sweep: usize, part: usize, host_schema: &str) {
-    let fixtures = fixtures(host_schema);
+fn run_candidate_part(sweep: usize, part: usize, host_schema: &str, document_library: &str) {
+    let fixtures = fixtures(host_schema, document_library);
     let row = rows_for(Owner::ClaudineCli).into_iter().filter(is_candidate_sweep).nth(sweep).expect("a sweep row");
     let (cli, fixture) = fixtures.for_entry(row.entry());
     let Row::GlobValue(cell) = row else { unreachable!("{row:?} is not a candidate sweep") };
@@ -479,8 +479,8 @@ fn run_candidate_part(sweep: usize, part: usize, host_schema: &str) {
 }
 
 /// Each ordinary row is independently scheduled; Nextest owns parallelism.
-fn run_matrix_row(index: usize, host_schema: &str) {
-    let fixtures = fixtures(host_schema);
+fn run_matrix_row(index: usize, host_schema: &str, document_library: &str) {
+    let fixtures = fixtures(host_schema, document_library);
     let rows = [rows_for(Owner::ClaudineCli)
         .into_iter()
         .filter(|row| !is_candidate_sweep(row))
@@ -533,7 +533,11 @@ macro_rules! matrix_rows {
             #[test]
             fn $name() {
                 let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
-                run_matrix_row($index, include_str!("../../../schemas/inline-compose.yaml"));
+                run_matrix_row(
+                    $index,
+                    include_str!("../../../schemas/inline-compose.yaml"),
+                    include_str!("../../../schemas/document.yaml"),
+                );
             }
         )+
     };
@@ -603,7 +607,12 @@ macro_rules! candidate_rows {
             #[test]
             fn $name() {
                 let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
-                run_candidate_part($sweep, $part, include_str!("../../../schemas/inline-compose.yaml"));
+                run_candidate_part(
+                    $sweep,
+                    $part,
+                    include_str!("../../../schemas/inline-compose.yaml"),
+                    include_str!("../../../schemas/document.yaml"),
+                );
             }
         )+
     };

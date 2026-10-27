@@ -1501,9 +1501,10 @@ fn schema_validate_grouped_match_is_passive_in_a_single_schema() {
 }
 
 /// Claudine's complete schema bundle.
-const CLAUDINE_BUNDLE: [(&str, &str); 5] = [
+const CLAUDINE_BUNDLE: [(&str, &str); 6] = [
     ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
     ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
+    ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
     ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
     ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
     ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
@@ -1685,4 +1686,127 @@ fn schema_validate_bound_conflict_across_an_import_of_a_shipped_file_shows_both_
         assert!(rendered.contains(fragment), "missing {fragment:?} in {rendered}");
     }
     assert!(!rendered.contains("is valid"), "{rendered}");
+}
+
+/// `entry`, declared in `types.yaml` and aliased there as `item`, is named
+/// at three sites (`first`, `second`, and `items`' list item through the
+/// alias), so the resolver stores it once and references it at each use.
+const SHARED_ENTRY_TYPES: &str = concat!(
+    "kind: schema\n",
+    "types:\n",
+    "  entry: \"{ name: string(required), size: number(min(0)) }\"\n",
+    "  item: entry\n",
+);
+
+const SHARED_ENTRY_SCHEMA: &str = concat!(
+    "$schema:\n",
+    "  first: \"entry@./types.yaml\"\n",
+    "  second: \"entry@./types.yaml\"\n",
+    "  items: \"item[]@./types.yaml\"\n",
+);
+
+fn shared_entry_document(process: &CliProcessFixture, values: &str) -> PathBuf {
+    write_file(process.cwd(), "types.yaml", SHARED_ENTRY_TYPES);
+    write_file(
+        process.cwd(),
+        "doc.md",
+        &format!("---\n{SHARED_ENTRY_SCHEMA}{values}---\nBody\n"),
+    )
+}
+
+/// Every `$ref` below `value`.
+fn refs_below(value: &serde_json::Value) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(serde_json::Value::String(pointer)) = map.get("$ref") {
+                    found.push(pointer.clone());
+                }
+                pending.extend(map.values());
+            }
+            serde_json::Value::Array(items) => pending.extend(items),
+            _ => {}
+        }
+    }
+    found
+}
+
+#[test]
+fn schema_validate_accepts_a_shared_type_at_every_use() {
+    let process = CliProcessFixture::new();
+    let doc = shared_entry_document(
+        &process,
+        "first:\n  name: a\n  size: 1\nsecond:\n  name: b\n  size: 2\nitems:\n  - name: c\n    size: 3\n",
+    );
+    // The fixture is shared, not three inlined copies: one `$ref` at each use.
+    let schema: serde_yaml_ng::Value = serde_yaml_ng::from_str(SHARED_ENTRY_SCHEMA).unwrap();
+    let context = biscuit_file::FileResolutionContext::new(process.cwd());
+    let resolved = darkmatter::markdown::schemas::resolve::resolve_yaml_schema(
+        &schema["$schema"],
+        process.cwd(),
+        &context,
+    )
+    .unwrap();
+    let properties = &resolved.json_schema["properties"];
+    let pointer = refs_below(&properties["first"]);
+    assert_eq!(pointer.len(), 1, "{:#}", resolved.json_schema);
+    assert_eq!(refs_below(&properties["second"]), pointer, "{:#}", resolved.json_schema);
+    assert_eq!(refs_below(&properties["items"]), pointer, "{:#}", resolved.json_schema);
+
+    let (code, report) = validate_json(&process, &doc, &[]);
+
+    assert_eq!(code, Some(0), "{report}");
+    assert_eq!(report["valid"], true, "{report}");
+}
+
+#[test]
+fn schema_validate_reports_a_failure_through_each_shared_use_at_its_location() {
+    let process = CliProcessFixture::new();
+    // Line 1 is the opening `---`; the values start on line 6. A missing
+    // property is located at the object that lacks it (`second`'s first key).
+    let doc = shared_entry_document(
+        &process,
+        concat!(
+            "first:\n",
+            "  name: a\n",
+            "  size: -1\n",
+            "second:\n",
+            "  size: 2\n",
+            "items:\n",
+            "  - name: c\n",
+            "    size: 3\n",
+            "  - name: [1]\n",
+            "    size: 4\n",
+        ),
+    );
+
+    let (code, report) = validate_json(&process, &doc, &[]);
+
+    assert_eq!(code, Some(1), "{report}");
+    let found: Vec<serde_json::Value> = report["problems"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no problems array: {report}"))
+        .iter()
+        .map(|problem| {
+            serde_json::json!([
+                problem["path"],
+                problem["property"],
+                problem["kind"],
+                problem["message"],
+                problem["line"],
+                problem["column"],
+            ])
+        })
+        .collect();
+    assert_eq!(
+        found,
+        [
+            serde_json::json!(["/first/size", null, "invalid", "-1 is less than the minimum of 0", 8, 9]),
+            serde_json::json!(["/second", "name", "missing", "\"name\" is a required property", 10, 3]),
+            serde_json::json!(["/items/1/name", null, "type", "[1] is not of type \"string\"", 14, 11]),
+        ],
+        "{report}"
+    );
 }
