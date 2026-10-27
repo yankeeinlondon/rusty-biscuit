@@ -109,8 +109,24 @@ and publishes the complete file by renaming it into place. A failed write,
 flush, or publication removes the temporary file and leaves an existing entry
 untouched. Readers never see a partially written replacement.
 
-ElevenLabs uses this for API response bytes and default-voice records. The
-command-line providers instead ask their tool to write a staging file beside
+ElevenLabs uses this for API response bytes and default-voice records. Both
+publications run on Tokio's blocking pool and are awaited, so a file write
+never stalls the async worker that is running the request, even on a
+single-threaded runtime. They fail differently:
+
+| Publication | Write fails, or the blocking task panics |
+| --- | --- |
+| Synthesized audio | preparation fails with `TtsError::TempFileError` |
+| Default-voice record | a warning is logged and preparation continues |
+
+A record failure only costs a later detached request its network-free voice
+lookup, so it never fails the speech. Dropping the caller while a publication
+is running does not cancel it: the blocking task owns its bytes and
+destination and finishes the write and rename, so the entry ends complete or
+absent, never partial. The caller just never sees the result. The network
+request, playback, and the cache-hit check stay on the async side.
+
+The command-line providers instead ask their tool to write a staging file beside
 the entry and rename it into place, as described above.
 
 ### Cache Lifetime
