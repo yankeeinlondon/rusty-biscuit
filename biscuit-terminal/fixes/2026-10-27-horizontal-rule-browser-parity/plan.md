@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-10-27
-phase: 4
+phase: 6
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: 'true'
 source_files_during_phase_1:
@@ -25,6 +25,29 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+- biscuit-terminal/lib/src/components/horizontal_rule/mod.rs
+docs_updated_during_phase_4:
+- biscuit-terminal/docs/components/horizontal-rule.md
+- biscuit-terminal/docs/components/browser-renderable-trait.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_code:
+- biscuit-terminal/lib/src/components/horizontal_rule/browser.rs
+- biscuit-terminal/lib/src/components/horizontal_rule/color.rs
+- biscuit-terminal/lib/src/components/horizontal_rule/mod.rs
+- biscuit-terminal/lib/src/components/horizontal_rule/snapshots/
+- biscuit-terminal/lib/Cargo.toml
+- biscuit-terminal/justfile
+documentation:
+- biscuit-terminal/docs/components/horizontal-rule.md
+- biscuit-terminal/docs/components/browser-renderable-trait.md
+completed_phase: 5
+implemented: true
+source_files_during_phase_5: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 ---
 
 # Plan: HorizontalRule browser parity — remove the legacy SVG, revive the hidden tests
@@ -134,7 +157,7 @@ Tasks:
 
 Tasks:
 
-- [ ] **Rewrite `docs/components/horizontal-rule.md`**
+- [x] **Rewrite `docs/components/horizontal-rule.md`**
   - Keep the `blast_radius` frontmatter. Replace `rule.render_to_browser()` in both usage examples with `rule.render_html_fragment().render()` (the fragment is the public API; the trait has no `render_to_browser`).
   - Delete the `render_to_browser_with_inline_variables` subsection (lines 149-160) — that method does not exist in the library.
   - Document the browser contract: rendering flows through the shared render tree (`BrowserTreeComponent` delegation); the SVG keeps the `--hr-weight`/`--hr-color`/`--hr-width` CSS variables (preserve the CSS Variables section — they remain supported by the shared renderer); margins follow alignment (`Left` → `0 auto`, `Right` → `auto 0`, `Full` → `0 0`, `Center` → `auto auto`).
@@ -143,9 +166,9 @@ Tasks:
   - Document invalid width/color fallback: unsafe values fall back to `100%`/`currentColor` in the browser; remove the sentence "the raw string is preserved for the browser target" (line 171) and note that browser-valid terminal-unknown colors such as `tomato` still render.
   - Rename the stale `Renderable` trait references (line 69) to `TerminalRenderable`.
   - In "Tier 1 Image Rendering": remove the claim that "the same SVG produced for browser rendering is rasterized" — the terminal image path builds its own SVG (`render_image_svg`) with pixel geometry and a visibility-safe default color; while touching this section, correct the capability gate to "Kitty or ITerm image support" (matches `render_image_tier`, mod.rs:419-423).
-- [ ] **Fix `docs/components/browser-renderable-trait.md`**
+- [x] **Fix `docs/components/browser-renderable-trait.md`**
   - The page documents a trait shape that never existed (`render_to_browser`/`render_to_browser_with_inline_variables` returning `String`, lines 7-34 and 46-85). Replace the trait definition with the real one (`render_html_fragment() -> BrowserFragment<Ready>`, default `render_html_page`, `as_any`) and replace the `HorizontalRule` example with the actual delegated implementation (a few lines calling `BrowserTreeComponent::new(self.clone()).render_html_fragment()`). Keep the CSS-variable table (lines 89-97) — still accurate for the shared SVG.
-- [ ] **Skill check (no edit required)**
+- [x] **Skill check (no edit required)**
   - Decision: no skill edit is part of this change. Verified at planning time: neither `.claude/skills/biscuit-terminal/components.md` nor `.opencode/skill/biscuit-terminal/components.md` describes `HorizontalRule`'s browser output (no match for HorizontalRule/`--hr`/`darkmatter-hr` in any skill page; the two copies are byte-identical), so there is nothing to correct there. As a confirmation step only, re-run `rg -n -i "horizontalrule|darkmatter-hr|--hr" .claude/skills/biscuit-terminal/ .opencode/skill/biscuit-terminal/`; the expected result is no matches. If a match appears it means the skill changed after planning; in that case apply to the matching skill page the same corrections listed for `horizontal-rule.md` above (delegated path, no `render_to_browser`, no raw-color pass-through claim) in both the `.claude` and `.opencode` copies so they stay identical.
   - `docs/dependencies.md` needs no change (no crates added or removed).
 
@@ -157,16 +180,16 @@ Tasks:
 
 Tasks:
 
-- [ ] **Full verification gate**
+- [x] **Full verification gate**
   - `just test` — all L1 green; explicitly confirm the five previously-hidden tests appear in the results: `cargo nextest run -p biscuit-terminal --features image,serde -E 'test(test_rule_style_serde_roundtrip) + test(test_rule_style_serialized_as_kebab_case) + test(test_rule_alignment_serde_roundtrip) + test(test_rule_weight_serde_roundtrip) + test(render_text_tier_matches_render_when_image_unavailable)'` and check the five names in its output.
   - `cargo check -p biscuit-terminal --tests --all-features` (from repo root or package area) — the originally broken combination compiles, including higher-tier test code without launching it.
   - `cargo check -p biscuit-terminal --no-default-features` — the no-feature library build still compiles.
   - `just lint` and `just doctest` — source, lints, and updated public examples pass.
   - `just sanity` — the fast subset with the new feature selection passes.
   - Do not run `just test-l2` or `just test-browser`: no harness test was changed (verified: the only `browser-tests` file is `tests/l1/prose_cells_parity.rs`, which does not touch HorizontalRule).
-- [ ] **Acceptance sweep and drift check**
+- [x] **Acceptance sweep and drift check**
   - `git status`/`git diff --stat` over the whole change: source files (`horizontal_rule/{mod.rs,browser.rs,color.rs}`, `lib/Cargo.toml`, `justfile`), exactly 23 regenerated browser snapshots, the two docs pages, and the new `implementation-log.md` — nothing else; every terminal snapshot byte-identical.
   - `rg -n "render_browser_svg|MarginToCss|to_css_value|render_to_browser" biscuit-terminal/ --glob '!fixes/**' --glob '!reviews/**'` returns nothing.
-- [ ] **Write the implementation log**
+- [x] **Write the implementation log**
   - Create `implementation-log.md` in `fixes/2026-10-27-horizontal-rule-browser-parity/`: a short summary of what each phase changed, any departure from the spec (none expected — every spec item maps to a phase above), the snapshot-diff summary, and the verification commands with their pass results.
   - Do not modify the spec file, move any lifecycle directory, or commit — the session's terminal state is "implementation complete, ready for review".

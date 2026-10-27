@@ -35,6 +35,27 @@ decisions_for_review:
     Its only stale part was the `source:` header line, which insta does not
     rewrite when the content matches, so the file is untouched. No action is
     needed unless a reviewer wants that header refreshed.
+  - |-
+    Phase 4 was planned as documentation only, but its checkpoint (and the
+    Phase 5 drift sweep) requires that searching the library source for the
+    old method name `render_to_browser` finds nothing. The only remaining
+    matches were the names of ten tests that earlier phases kept after
+    migrating them to the new fragment API. I renamed them from
+    `test_render_to_browser*` to `test_render_html_fragment*` (and
+    `test_snapshot_render_to_browser_all_styles` to
+    `test_snapshot_render_html_fragment_all_styles`); their bodies and
+    snapshot files are unchanged. The alternative was to leave the names and
+    accept a failing checkpoint, or loosen the search pattern. If a reviewer
+    prefers the old names, revert the rename in
+    `lib/src/components/horizontal_rule/mod.rs`; nothing else depends on it.
+  - |-
+    The plan's last task said to create the implementation log and not to
+    modify the spec. The log already existed (earlier phases wrote it), so
+    Phase 5 appended to it instead. The pipeline's final-phase instructions
+    require marking the spec as implemented, so the spec's `implemented` flag
+    was set to true and `implemented_by` was added; no spec content changed.
+    If the reviewer wants the spec untouched, revert those two frontmatter
+    keys; nothing else depends on them.
 source_files_during_phase_2:
   - biscuit-terminal/lib/src/components/horizontal_rule/mod.rs
 docs_updated_during_phase_2: []
@@ -46,6 +67,29 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - biscuit-terminal/lib/src/components/horizontal_rule/mod.rs
+docs_updated_during_phase_4:
+  - biscuit-terminal/docs/components/horizontal-rule.md
+  - biscuit-terminal/docs/components/browser-renderable-trait.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_code:
+  - biscuit-terminal/lib/src/components/horizontal_rule/browser.rs
+  - biscuit-terminal/lib/src/components/horizontal_rule/color.rs
+  - biscuit-terminal/lib/src/components/horizontal_rule/mod.rs
+  - biscuit-terminal/lib/src/components/horizontal_rule/snapshots/
+  - biscuit-terminal/lib/Cargo.toml
+  - biscuit-terminal/justfile
+documentation:
+  - biscuit-terminal/docs/components/horizontal-rule.md
+  - biscuit-terminal/docs/components/browser-renderable-trait.md
+completed_phase: 5
+implemented: true
+source_files_during_phase_5: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 ---
 
 # Implementation Log for 2026-10-27-horizontal-rule-browser-parity (5 phases)
@@ -147,3 +191,82 @@ L1 now selects the `serde` feature, so the four horizontal-rule serialization te
 - Cross-OS: not run; feature selection carries no OS-specific risk.
 - Skill: no change. The skill's testing notes mention only the `terminal-tests`/`browser-tests` tier features, which are unchanged.
 - Affected scope (`git status … | xargs python3 scripts/ci/affected_scope.py`): `packages` = `[biscuit-terminal, test-toolkit, tree-hugger-cli]`, `change_class` = `package`, so the gates ran (above). `tree-hugger-cli` is selected as a test-input reader: `test_prelude_flag_with_real_prelude_file` runs `hug` inside `biscuit-terminal/lib`. I ran it alone with `cargo nextest run -p tree-hugger-cli -E 'test(test_prelude_flag_with_real_prelude_file)'`, and it passed 1/1.
+
+## Phase 4
+
+Both component docs now describe the single path that actually exists: the rule is projected into the render tree and drawn by the shared browser renderer. All facts were checked against the code: the trait in `renderable/src/browser/renderable.rs`, the margins and validation in `renderable/src/tree/graphics.rs`, and `render_image_tier`/`render_image_svg` in `horizontal_rule/mod.rs`.
+
+### Changes
+
+- **`docs/components/horizontal-rule.md`:**
+  - both usage examples call `rule.render_html_fragment().render()`
+  - the nonexistent `render_to_browser_with_inline_variables` subsection is deleted
+  - the BrowserRenderable section explains the delegation, with a Mermaid flow (rule → `ThematicBreak` node → `BrowserTreeComponent` → optional wrapper `<div>` → inline SVG), the three-line delegation, and the `GraphicsMode::Off` `<hr>` alternative
+  - a new "Alignment" table gives the SVG left/right margins and width for each `RuleAlignment`, and a new "`Full` ignores the authored width" subsection covers the default `Full` (always `100%`, no side margins) and how to keep an authored width
+  - a new "Rule Alignment vs Outer Layout" section: `.alignment()` sets the SVG margins, while `with_layout` adds exactly one wrapper (none for a default layout). Per-target values resolve for the browser.
+  - a new "Invalid Width and Color Values" section lists the accepted forms (mirroring `is_safe_css_dimension`/`is_safe_css_color`), the `100%`/`currentColor` fallbacks, and the injection examples. It notes that `tomato` still renders in the browser.
+  - the "raw string is preserved for the browser target" sentence is replaced
+  - `Renderable` → `TerminalRenderable`
+  - Tier 1: the gate is now "Kitty or ITerm", and the doc says the terminal builds its own pixel-sized SVG with a white/black default color rather than reusing the browser SVG
+  - the CSS Variables section is kept, and its table now says "if set and valid"
+- **`docs/components/browser-renderable-trait.md`:** the trait definition is replaced with the real one (`render_html_fragment() -> BrowserFragment<Ready>`, default `render_html_page`, `as_any`) along with per-method notes. The HorizontalRule example is the actual delegated impl. The guidelines now add "prefer the render tree" and "validate untrusted values" and drop the CSS-variable/perf guidance that described the old hand-written SVG. The CSS-variable table is kept.
+- **`lib/src/components/horizontal_rule/mod.rs` (test names only):** I renamed ten tests from `test_render_to_browser*` / `test_snapshot_render_to_browser_all_styles` to `test_render_html_fragment*` / `test_snapshot_render_html_fragment_all_styles` so that the phase checkpoint's search finds nothing (see `decisions_for_review`). Test bodies and snapshot files are unchanged, since the snapshots use explicit names.
+- The plan said to "keep the `blast_radius` frontmatter" on `horizontal-rule.md`, but the page had no frontmatter, so there was nothing to keep and none was added.
+
+### Requirement → test mapping
+
+- These are docs only, so they have no behavior to test. Every documented claim has existing tests behind it:
+  - alignment margins: `test_fragment_alignment_controls_svg_margins`
+  - `Full` width: `test_fragment_full_alignment_forces_full_width`
+  - wrapper once / no wrapper: `test_fragment_outer_layout_wraps_rule` and `test_fragment_default_layout_adds_no_wrapper`
+  - fallbacks: `test_fragment_unsafe_width_falls_back_to_full` and `test_fragment_unsafe_color_falls_back_to_current_color`
+  - `tomato`: `test_fragment_safe_authored_values_pass_through`
+  - delegation: `test_fragment_routes_through_tree_adapter`
+- Renamed tests: `cargo nextest run -p biscuit-terminal --features image,serde -E 'test(render_html_fragment)'` passed 12/12 (the 10 renamed plus 2 filesystem tests with matching names).
+- The shipped docs are read by darkmatter's corpus tests, so I ran `cargo nextest run -p darkmatter -E 'test(shipped_markdown_inline_schemas_parse_passively) + test(shipped_markdown_named_type_references_resolve)'`: 2/2 passed.
+
+### Gates
+
+- Checkpoint: `rg -n "render_to_browser|render_browser_svg|MarginToCss" biscuit-terminal/docs/ biscuit-terminal/lib/src/` finds nothing. Before the test rename it matched the 10 test names.
+- Skill check: `rg -n -i "horizontalrule|darkmatter-hr|--hr"` over both skill copies matches only `image-rendering.md:223` (the Kitty `q=2` note for the graphical HorizontalRule). The Phase 1 log already found that note, and it is still accurate, so no skill edit was made.
+- Affected scope (`git status … | xargs python3 scripts/ci/affected_scope.py`): `packages` = `[biscuit-terminal, test-toolkit, darkmatter]`, `change_class` = `package`, so the gates ran. `darkmatter` is selected as a test-input reader of `biscuit-terminal/docs` (the corpus tests above). `test-toolkit` is selected only for its lint companion suite, as in earlier phases.
+- `just test` (biscuit-terminal): 3931 run, 3931 passed, 55 skipped, the same count as Phase 3.
+- `just lint` (biscuit-terminal): passed.
+- Downstream: no other dependent tests. The source change is test names under `#[cfg(test)]`, which no dependent can observe.
+- Cross-OS: not run. Docs and test renames carry no OS risk.
+
+## Phase 5
+
+This phase verified the work and wrote the log. It changed no source, doc, or skill file; the only edits are the plan checkboxes and the frontmatter on the plan, log, and spec.
+
+### Verification gate
+
+- `just test` (biscuit-terminal): 3931 run, 3931 passed, 55 skipped. The listing includes all five tests that were hidden before: `serde_roundtrip::test_rule_style_serde_roundtrip`, `test_rule_style_serialized_as_kebab_case`, `test_rule_alignment_serde_roundtrip`, `test_rule_weight_serde_roundtrip`, and `render_text_tier_matches_render_when_image_unavailable`.
+- Targeted: `cargo nextest run -p biscuit-terminal --features image,serde -E 'test(test_rule_style_serde_roundtrip) + test(test_rule_style_serialized_as_kebab_case) + test(test_rule_alignment_serde_roundtrip) + test(test_rule_weight_serde_roundtrip) + test(render_text_tier_matches_render_when_image_unavailable)'`: 5/5 passed, with each name in the output.
+- `cargo check -p biscuit-terminal --tests --all-features`: compiles clean. This is the combination that failed with 28 errors before the fix.
+- `cargo check -p biscuit-terminal --no-default-features`: compiles clean.
+- `just lint`: passed. `just doctest`: 204 passed, 1 ignored. `just sanity`: 2086 + 83 passed.
+- `just check-tier-coverage biscuit-terminal`: 0 stranded.
+- `just test-l2` and `just test-browser` were not run, as the plan directs: no harness test changed.
+
+### Acceptance sweep
+
+- Files changed across the whole fix, compared with the commit before Phase 1: `horizontal_rule/{mod.rs,browser.rs,color.rs}`, `lib/Cargo.toml`, `justfile`, the two docs pages, the plan/log/spec, and 22 `browser_*` snapshots. Nothing else changed.
+- Snapshots: 22 browser snapshots changed (21 `browser_{style}_{weight}` plus `browser_custom_attributes_2`). `browser_custom_attributes` renders the same as before and is untouched; see `decisions_for_review`. None of the 93 `terminal_*` snapshots changed.
+- Drift: `rg -n "render_browser_svg|MarginToCss|to_css_value|render_to_browser"` over `biscuit-terminal/{lib,cli,docs,README.md}` and both biscuit-terminal skill copies finds nothing. The plan's command with `--glob '!fixes/**' --glob '!reviews/**'` still matches files under `fixes/`, `reviews/_completed/`, and `features/_completed/`, because those globs do not exclude nested paths. Every match is in a spec, plan, or review snapshot, which is never updated after it closes, so none was edited.
+
+### Summary of the fix (all phases)
+
+- Phase 1 deleted the legacy browser SVG (`render_browser_svg`, `MarginToCss`) and pointed `BrowserRenderable` at the render tree. It moved the terminal color helpers to `color.rs`, migrated the browser tests to the public fragment, deleted the parity tests, and moved the terminal test that had been misplaced under the serde gate.
+- Phase 2 added eight fragment contract tests covering routing, alignment margins, `Full` width, the outer wrapper, the no-wrapper default, unsafe width and color fallbacks, and safe pass-through.
+- Phase 3 enabled `serde` in L1, in both the Cargo CI metadata and the justfile.
+- Phase 4 rewrote both docs pages to describe the single tree path and renamed the migrated tests.
+- Departures from the plan are recorded in `decisions_for_review`: test migration moved into Phase 1, 22 snapshots changed rather than 23, the Phase 4 test rename, and the existing log and spec flag in Phase 5.
+
+### Gates and scope
+
+- Affected scope (`git status … | xargs python3 scripts/ci/affected_scope.py`): `packages` = `[biscuit-terminal, test-toolkit, darkmatter]`, `change_class` = `package`, so the gates ran (above). The working tree still holds Phase 4's uncommitted changes.
+- Downstream darkmatter: `cargo nextest run -p darkmatter -E 'test(shipped_markdown_inline_schemas_parse_passively) + test(shipped_markdown_named_type_references_resolve) + test(/horizontal_rule/) + test(/hr_/)'`: 110/110 passed.
+- `test-toolkit` is selected only for its `archive-path-guard` lint companion suite, because the justfile changed. It has no L1 tier, so no test was run for it.
+- Cross-OS: not run. The fix changes renderer output and test selection only, with no paths, processes, or `cfg(windows)` code.
+- Skill: no change. The skill's only HorizontalRule mention (`image-rendering.md`, the terminal image tier) is still accurate.

@@ -7,7 +7,8 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-27
 review_iterations: 0
 clarified: false
-implemented: false
+implemented: true
+implemented_by: "claude/opus"
 area: biscuit-terminal
 human_review: false
 $schema:
