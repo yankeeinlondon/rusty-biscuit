@@ -152,6 +152,22 @@ document does not itself execute the implementation or measurements.
     - **Downsides:** Different scopes still walk separately; preserving pruning
       behavior requires explicit treatment in the design.
 
+11. **Refresh from `2026-10-26-sequence-quadratic-frontmatter`**
+    - **Decision:** That fix landed before this plan started. C1 now targets
+      the per-leg runtime branch as the heavyweight allocation (leg frontmatter
+      cells are already shared views), and C7 targets only the prediction
+      state builds (the `with` hint's step-state copy is removed). Its
+      re-measured C7/A4/A6/C1 rows are in `spike-report.md` under
+      "Re-measured after `2026-10-26-sequence-quadratic-frontmatter`"; Wave 2
+      still re-runs them on the merged code.
+    - **Alternatives considered:** Leave the tasks as written (they would
+      describe copies that no longer exist); drop C1's frontmatter half (C1
+      still moves the view to admission, which is cheap but keeps one rule).
+    - **Why:** The fix's implementation log records the new view types and
+      counter semantics; `LiveFrontmatterCopy` changed unit, so Phase 1 spike
+      rows for it are not comparable by value.
+    - **Downsides:** None; outcomes C1 and C7 ask for are unchanged.
+
 ### Execution rules
 
 Waves have unique indices across the plan. Every task in a wave depends on the
@@ -324,6 +340,14 @@ shared documentation edits through the coordinator, not concurrent rewrites.
     and live-frontmatter creation to admission from the immutable start seed.
     Preserve eager leg validation/context capture, worker cancellation/prep
     inheritance, sibling isolation, and declaration-order result/mutation fold.
+  - The live-frontmatter cell is already a view: `2026-10-26-sequence-quadratic-frontmatter`
+    made each leg's cell a clone of the group-start `SharedFrontmatter` (288 B
+    at any leg count), counted by `LiveFrontmatterView` (cells) and
+    `LiveFrontmatterCopy` (JSON nodes deep-copied into cells, no longer one per
+    leg). The heavyweight eager allocation left is the per-leg
+    `RuntimeState::from_snapshot` branch (`RuntimeStateBranch`; 103 KB per leg
+    in C1, 608 KB in A4's group step). Move both to admission, but assert the
+    peak bound on runtime branches.
   - Extract required result/deltas and release private branches before admitting
     replacements. Instrument deterministic live/peak branch counts if existing
     construction counters cannot express the lifetime contract; disabled
@@ -338,7 +362,11 @@ shared documentation edits through the coordinator, not concurrent rewrites.
 - [ ] **Classify provider hints** — C7
   - Own `composition/sequence/preflight/providers.rs` and its preflight callers.
     Classify effective agent/model hints before constructing expression state
-    or making the caller's redundant frontmatter copy.
+    (`PredictionStateBuild`, two per task, about 231 KB each at C7's shape).
+    The `with` branch's whole-step-state copy is already gone:
+    `2026-10-26-sequence-quadratic-frontmatter` made `HintLayers::step_frontmatter`
+    a `&SharedFrontmatter` and `classify_reads` classify over the hint's read
+    closure (`PredictionWithStateNodes`).
   - Preserve document/task `with:`/caller-setter precedence, runtime-written
     key and transitive dependency analysis, late values, normal expression
     failures, and launch-time authority. Text-valued referenced/runtime-written

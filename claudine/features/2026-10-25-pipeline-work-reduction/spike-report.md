@@ -188,6 +188,43 @@ behavior. For example, `md schema validate` would stop reporting a missing
 eager file, and composition or launch would report it instead. That needs its
 own spec. It does not block this feature.
 
+## Re-measured after `2026-10-26-sequence-quadratic-frontmatter`
+
+The sequence rows of finding 2, re-run on 2026-10-26 after that fix, on the
+same macOS host, fixtures, sizes, and measurement boundaries. The rows above
+are the historical baseline and are left as measured. Counts and bytes only;
+times are context, not evidence.
+
+| Row | Before | After |
+| --- | -----: | ----: |
+| C7 prompt preflight, 100 tasks: bytes (per task) | 63.04 MB (630 KB) | 43.93 MB (439.3 KB) |
+| C7 prompt preflight, 1,000 tasks: bytes (per task) | 2,330.0 MB (2,330 KB) | 425.93 MB (425.9 KB) |
+| C7 per-task ratio, 1,000 vs 100 | 3.70 | **0.970** (within ±10%) |
+| A6 shell preflight, 10 / 100 steps: `ExpressionParse` | 1,900 / 109,000 | **1,000 / 10,000** (100 per step at both) |
+| A6 shell preflight, 10 / 100 steps: bytes | 3.97 MB / 92.12 MB | 3.19 MB / 26.66 MB |
+| A4 preflight (50 steps, 200 legs): bytes, peak | 115.9 MB, 22.5 MB | 91.6 MB, 22.4 MB |
+| A4 group step (200 legs): bytes, peak | 728.2 MB, 190.0 MB | 624.8 MB, 150.0 MB |
+| C1 one leg's live-frontmatter cell, 10 / 100 / 1,000 legs | 7.65 KB / 48.2 KB / 455.0 KB (a copy) | **288 B at every size** (a view) |
+| C1 group-step peak, payload 0 KB, cap 4, 10 / 100 / 1,000 legs | 3.82 / 27.75 / 669.5 MB | 3.69 / 22.60 / 212.2 MB |
+
+What remains in C1 and the A4 group step is the runtime branch each declared
+leg still gets before admission: 103 KB per leg in C1 and 608 KB in A4,
+which carries the 49 committed outputs. That is C1's admission-time
+allocation and C3's snapshot work, both still this feature's items. C3's
+rows are unchanged apart from preflight's nested-preparation copy (65 → 41
+nodes).
+
+Reproduce (from the repository root, then from `claudine/`):
+
+- `cargo bench -p claudine --features work-counters --bench pipeline_work_alloc -- C7`
+  (also `A6`, `A4`, `SQ`);
+- `just test-library --release --features work-counters --run-ignored only --no-capture pipeline_spike_c1`
+  (also `pipeline_spike_a4`, `pipeline_spike_c3`), one scenario per run.
+
+The C1 and A4 cell probes now time the cell the group builds (a clone of the
+group-start view) instead of a clone of the document's whole frontmatter map,
+which the executor no longer makes.
+
 ## Next steps
 
 1. Fix `2026-10-26-dmls-frontmatter-typing-allocation` and
@@ -214,6 +251,6 @@ own spec. It does not block this feature.
   - `claudine/lib/benches/pipeline_work{,_alloc}.rs`;
   - `darkmatter/dmls/benches/pipeline_work_a3.rs`, with an
     `A3_PROVIDER_BREAKDOWN=1` switch that prints each hover provider's cost.
-- Claudine crate-private scenarios: `cargo test -p claudine --lib --release
-  --features work-counters -- --ignored --nocapture --test-threads=1
-  pipeline_spike`.
+- Claudine crate-private scenarios: from `claudine/`, `just test-library
+  --release --features work-counters --run-ignored only --no-capture
+  pipeline_spike_<scenario>`.

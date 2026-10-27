@@ -575,6 +575,21 @@ also names the operation so a reader need not memorize the codes.
 - **Downsides:** None for this feature; the spike report keeps its original
   verdict as a record of that measurement.
 
+### What `2026-10-26-sequence-quadratic-frontmatter` already delivered
+
+- **Decision:** That fix made a group leg's live-frontmatter cell a shared
+  view of the group-start state (288 B per leg at any size) and removed the
+  `with` hint's whole-step-state copy in provider prediction. C1 still moves
+  leg state to admission; its heavyweight part is now the runtime branch.
+  C7 still removes the remaining prediction-state builds.
+- **Alternatives considered:** Re-scope C1 to the runtime branch only.
+- **Why:** The required C1 contract (state allocated at admission from one
+  seed) is unchanged and applies to both; the measurements moved, not the
+  outcome. `LiveFrontmatterCopy` now counts copied JSON nodes, and
+  `LiveFrontmatterView` counts cells.
+- **Downsides:** Phase 1's `LiveFrontmatterCopy` rows are not comparable by
+  value with later ones.
+
 ## Out of scope
 
 - Every item that other tracks specify (listed above).
