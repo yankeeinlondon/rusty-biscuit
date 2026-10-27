@@ -2746,6 +2746,171 @@ mod tests {
     }
 
     // ================================================================
+    // Browser fragment contract: the rule renders through the shared tree
+    // ================================================================
+
+    fn fragment_html(hr: &HorizontalRule) -> String {
+        hr.render_html_fragment().render()
+    }
+
+    #[test]
+    fn test_fragment_routes_through_tree_adapter() {
+        use crate::render_tree::BrowserTreeComponent;
+        use crate::utils::layout::Edges;
+
+        let hr = HorizontalRule::new()
+            .style(RuleStyle::Waves)
+            .weight(RuleWeight::Thick)
+            .alignment(RuleAlignment::Right)
+            .width("40ch")
+            .color("#336699")
+            .with_layout(Layout {
+                margin: Edges {
+                    top: TargetValue::universal(Length::ch(1)),
+                    ..Edges::default()
+                },
+                ..Layout::default()
+            });
+
+        let direct = fragment_html(&hr);
+        let via_adapter = BrowserTreeComponent::new(hr.clone())
+            .render_html_fragment()
+            .render();
+        assert_eq!(direct, via_adapter);
+        assert!(direct.contains("<svg"), "rich graphics renders an SVG: {direct}");
+    }
+
+    #[test]
+    fn test_fragment_alignment_controls_svg_margins() {
+        for (alignment, margin) in [
+            (RuleAlignment::Left, "margin: 0 auto 0 0"),
+            (RuleAlignment::Right, "margin: 0 0 0 auto"),
+            (RuleAlignment::Centered, "margin: 0 auto 0 auto"),
+        ] {
+            let html = fragment_html(&HorizontalRule::new().alignment(alignment.clone()).width("50%"));
+            assert!(html.contains(r#"width="50%""#), "{alignment:?} keeps authored width: {html}");
+            assert!(html.contains("--hr-width: 50%"), "{alignment:?}: {html}");
+            assert!(html.contains(margin), "{alignment:?} expects `{margin}`: {html}");
+        }
+    }
+
+    #[test]
+    fn test_fragment_full_alignment_forces_full_width() {
+        let html = fragment_html(
+            &HorizontalRule::new()
+                .alignment(RuleAlignment::Full)
+                .width("50%"),
+        );
+        assert!(html.contains(r#"width="100%""#), "{html}");
+        assert!(html.contains("--hr-width: 100%"), "{html}");
+        assert!(html.contains("margin: 0 0 0 0"), "{html}");
+        assert!(!html.contains(r#"width="50%""#), "Full must not honor the authored width: {html}");
+    }
+
+    #[test]
+    fn test_fragment_outer_layout_wraps_rule() {
+        use crate::utils::layout::{Alignment, Edges, Width};
+        use renderable::target::RenderTarget;
+        use std::collections::BTreeMap;
+
+        // Margins: a browser-specific left margin resolves for Browser, once.
+        let margins = HorizontalRule::new().with_layout(Layout {
+            margin: Edges {
+                top: TargetValue::universal(Length::ch(2)),
+                bottom: TargetValue::universal(Length::ch(1)),
+                left: TargetValue::PerTarget(BTreeMap::from([
+                    (RenderTarget::Terminal, Length::ch(2)),
+                    (RenderTarget::Browser, Length::ch(5)),
+                ])),
+                ..Edges::default()
+            },
+            ..Layout::default()
+        });
+        let html = fragment_html(&margins);
+        assert_eq!(html.matches("<div style=\"").count(), 1, "one wrapper: {html}");
+        assert_eq!(html.matches("margin-left:5ch").count(), 1, "{html}");
+        assert!(!html.contains("margin-left:2ch"), "terminal value leaked: {html}");
+        // Vertical `ch` lowers to `lh` in the tree renderer.
+        assert!(html.contains("margin-top:2lh"), "{html}");
+        let wrapper_open = html.find("<div style=\"").unwrap();
+        let svg_open = html.find("<svg").expect("svg present");
+        let wrapper_close = html.rfind("</div>").expect("wrapper closes");
+        assert!(
+            wrapper_open < svg_open && svg_open < wrapper_close,
+            "svg must sit inside the wrapper: {html}"
+        );
+
+        // Sizing: width + max-width + centering land on the wrapper.
+        let sized = HorizontalRule::new().with_layout(Layout {
+            width: Width::Fixed(TargetValue::universal(Length::percent(50.0).unwrap())),
+            max_width: Some(TargetValue::universal(Length::ch(40))),
+            alignment: Alignment::Center,
+            ..Layout::default()
+        });
+        let html = fragment_html(&sized);
+        assert_eq!(html.matches("<div style=\"").count(), 1, "one wrapper: {html}");
+        assert!(html.contains("width:50%"), "{html}");
+        assert!(html.contains("max-width:40ch"), "{html}");
+        assert!(html.contains("margin-left:auto;margin-right:auto"), "{html}");
+    }
+
+    #[test]
+    fn test_fragment_default_layout_adds_no_wrapper() {
+        let html = fragment_html(&HorizontalRule::new());
+        assert!(html.contains("<svg"), "{html}");
+        assert!(!html.contains("<div"), "default layout must not wrap: {html}");
+    }
+
+    #[test]
+    fn test_fragment_unsafe_width_falls_back_to_full() {
+        // `Left` so `Full`'s forced width cannot mask a validation failure.
+        for (payload, marker) in [
+            ("50%\" onload=\"alert(1)", "onload"),
+            ("50%;color:red", ";color:red"),
+        ] {
+            let html = fragment_html(
+                &HorizontalRule::new()
+                    .alignment(RuleAlignment::Left)
+                    .width(payload),
+            );
+            assert!(html.contains(r#"width="100%""#), "{payload}: {html}");
+            assert!(html.contains("--hr-width: 100%"), "{payload}: {html}");
+            assert!(!html.contains(marker), "{payload} leaked: {html}");
+            assert!(!html.contains("alert(1)"), "{payload} leaked: {html}");
+        }
+    }
+
+    #[test]
+    fn test_fragment_unsafe_color_falls_back_to_current_color() {
+        for (payload, marker) in [
+            ("blue\" onmouseover=\"alert(1)", "onmouseover"),
+            ("red;background:url(x)", "background:url"),
+        ] {
+            let html = fragment_html(&HorizontalRule::new().color(payload));
+            assert!(html.contains("--hr-color: currentColor"), "{payload}: {html}");
+            assert!(html.contains("var(--hr-color, currentColor)"), "{payload}: {html}");
+            assert!(!html.contains(marker), "{payload} leaked: {html}");
+            assert!(!html.contains("alert(1)"), "{payload} leaked: {html}");
+        }
+    }
+
+    #[test]
+    fn test_fragment_safe_authored_values_pass_through() {
+        for color in ["tomato", "#336699"] {
+            let html = fragment_html(
+                &HorizontalRule::new()
+                    .alignment(RuleAlignment::Left)
+                    .width("50%")
+                    .color(color),
+            );
+            assert!(html.contains(r#"width="50%""#), "{color}: {html}");
+            assert!(html.contains(&format!("--hr-color: {color}")), "{color}: {html}");
+            assert!(html.contains(&format!("var(--hr-color, {color})")), "{color}: {html}");
+            assert!(!html.contains("currentColor"), "{color} fell back: {html}");
+        }
+    }
+
+    // ================================================================
     // Phase 4: D6 — color drop asymmetry warn message
     // ================================================================
 
