@@ -1451,7 +1451,7 @@ mod tests {
     }
 
     #[test]
-    fn test_render_to_browser() {
+    fn test_render_html_fragment() {
         let hr = HorizontalRule::new()
             .style(RuleStyle::Dashes)
             .alignment(RuleAlignment::Centered)
@@ -1477,7 +1477,7 @@ mod tests {
     }
 
     #[test]
-    fn test_render_to_browser_default() {
+    fn test_render_html_fragment_default() {
         let hr = HorizontalRule::new();
         let result = hr.render_html_fragment().render();
         assert!(result.contains(r#"width="100%""#));
@@ -1908,7 +1908,7 @@ mod tests {
     }
 
     #[test]
-    fn test_snapshot_render_to_browser_all_styles() {
+    fn test_snapshot_render_html_fragment_all_styles() {
         let styles = vec![
             ("dashes", RuleStyle::Dashes),
             ("dots", RuleStyle::Dots),
@@ -2537,7 +2537,7 @@ mod tests {
     /// Default browser SVG output declares all three CSS custom
     /// properties on the root `<svg>` element.
     #[test]
-    fn test_render_to_browser_contains_css_variables() {
+    fn test_render_html_fragment_contains_css_variables() {
         let hr = HorizontalRule::new();
         let result = hr.render_html_fragment().render();
         assert!(
@@ -2566,7 +2566,7 @@ mod tests {
     /// `Dashes` style) — shape variations should not regress the override
     /// surface.
     #[test]
-    fn test_render_to_browser_every_style_uses_css_variables() {
+    fn test_render_html_fragment_every_style_uses_css_variables() {
         let styles = [
             RuleStyle::Dashes,
             RuleStyle::Dots,
@@ -2605,7 +2605,7 @@ mod tests {
     /// Each `RuleWeight` variant declares the matching pixel value as the
     /// `--hr-weight` custom-property default and as the `var()` fallback.
     #[test]
-    fn test_render_to_browser_weight_values_match_fallbacks() {
+    fn test_render_html_fragment_weight_values_match_fallbacks() {
         for (weight, expected_px) in [
             (RuleWeight::Thin, "2"),
             (RuleWeight::Medium, "4"),
@@ -2629,7 +2629,7 @@ mod tests {
     /// The `var(--hr-weight, 4)` fallback form must survive into the output
     /// so that renderers that strip inline styles still show a line.
     #[test]
-    fn test_render_to_browser_fallbacks_work() {
+    fn test_render_html_fragment_fallbacks_work() {
         let hr = HorizontalRule::new().weight(RuleWeight::Medium);
         let result = hr.render_html_fragment().render();
         assert!(
@@ -2644,7 +2644,7 @@ mod tests {
 
     /// `--hr-color` is set from the component's `.color(..)` when provided.
     #[test]
-    fn test_render_to_browser_color_declaration_reflects_component_color() {
+    fn test_render_html_fragment_color_declaration_reflects_component_color() {
         let hr = HorizontalRule::new().color("#ff00aa");
         let result = hr.render_html_fragment().render();
         assert!(
@@ -2659,7 +2659,7 @@ mod tests {
 
     /// `--hr-width` is set from the component's `.width(..)` when provided.
     #[test]
-    fn test_render_to_browser_width_declaration_reflects_component_width() {
+    fn test_render_html_fragment_width_declaration_reflects_component_width() {
         let hr = HorizontalRule::new()
             .alignment(RuleAlignment::Left)
             .width("60ch");
@@ -2728,7 +2728,7 @@ mod tests {
     /// A percent margin composed into a full browser render lands on the
     /// tree renderer's outer wrapper as legal CSS.
     #[test]
-    fn test_render_to_browser_percent_margin() {
+    fn test_render_html_fragment_percent_margin() {
         use crate::utils::layout::Layout;
         let layout = Layout {
             margin: crate::utils::layout::Edges {
