@@ -45,6 +45,9 @@ mod compose_initialize_acceptance;
 mod compose_initialize_staged_boot;
 #[cfg(unix)]
 mod compose_interactive_timeout_cli;
+// Copies the compiled fake goose, built only with `test-fixtures`.
+#[cfg(feature = "test-fixtures")]
+mod compose_named_type_import;
 #[cfg(unix)]
 mod compose_removed_grammar;
 #[cfg(unix)]
