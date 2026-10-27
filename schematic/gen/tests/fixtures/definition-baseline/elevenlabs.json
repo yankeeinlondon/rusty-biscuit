@@ -1,0 +1,1808 @@
+{
+  "definition": {
+    "auth": {
+      "ApiKey": {
+        "header": "xi-api-key",
+        "value_prefix": null
+      }
+    },
+    "auth_policy": null,
+    "base_url": "https://api.elevenlabs.io",
+    "cross_origin": "SameOrigin",
+    "default_pagination": null,
+    "description": "ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation",
+    "docs_url": "https://elevenlabs.io/docs/api-reference",
+    "endpoints": [
+      {
+        "description": "Converts text into speech and returns audio",
+        "headers": [],
+        "id": "CreateSpeech",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/text-to-speech/{voice_id}",
+        "request": {
+          "Json": {
+            "Named": "CreateSpeechBody"
+          }
+        },
+        "response": "Binary"
+      },
+      {
+        "description": "Streams audio as it's generated",
+        "headers": [],
+        "id": "StreamSpeech",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/text-to-speech/{voice_id}/stream",
+        "request": {
+          "Json": {
+            "Named": "CreateSpeechBody"
+          }
+        },
+        "response": "Binary"
+      },
+      {
+        "description": "Returns audio with character-level timing information",
+        "headers": [],
+        "id": "CreateSpeechWithTimestamps",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/text-to-speech/{voice_id}/with-timestamps",
+        "request": {
+          "Json": {
+            "Named": "CreateSpeechBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "SpeechWithTimestampsResponse"
+          }
+        }
+      },
+      {
+        "description": "Streams audio chunks with timing information",
+        "headers": [],
+        "id": "StreamSpeechWithTimestamps",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/text-to-speech/{voice_id}/stream/with-timestamps",
+        "request": {
+          "Json": {
+            "Named": "CreateSpeechBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "SpeechWithTimestampsResponse"
+          }
+        }
+      },
+      {
+        "description": "Lists all available voices",
+        "headers": [],
+        "id": "ListVoices",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": "VoiceResponseModel",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "voices"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Voices per page (at most 100)",
+              "explode": false,
+              "name": "page_size",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "The previous page's `next_page_token`",
+              "explode": false,
+              "name": "page_token",
+              "param_type": "String",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/v2/voices",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "ListVoicesResponse"
+          }
+        }
+      },
+      {
+        "description": "Retrieves a voice by ID",
+        "headers": [],
+        "id": "GetVoice",
+        "method": "GET",
+        "params": null,
+        "path": "/v1/voices/{voice_id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "VoiceResponseModel"
+          }
+        }
+      },
+      {
+        "description": "Deletes a voice",
+        "headers": [],
+        "id": "DeleteVoice",
+        "method": "DELETE",
+        "params": null,
+        "path": "/v1/voices/{voice_id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Gets default voice settings",
+        "headers": [],
+        "id": "GetDefaultVoiceSettings",
+        "method": "GET",
+        "params": null,
+        "path": "/v1/voices/settings/default",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "VoiceSettings"
+          }
+        }
+      },
+      {
+        "description": "Gets voice settings for a specific voice",
+        "headers": [],
+        "id": "GetVoiceSettings",
+        "method": "GET",
+        "params": null,
+        "path": "/v1/voices/{voice_id}/settings",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "VoiceSettings"
+          }
+        }
+      },
+      {
+        "description": "Updates voice settings",
+        "headers": [],
+        "id": "UpdateVoiceSettings",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/voices/{voice_id}/settings/edit",
+        "request": {
+          "Json": {
+            "Named": "VoiceSettings"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Gets audio for a voice sample",
+        "headers": [],
+        "id": "GetVoiceSampleAudio",
+        "method": "GET",
+        "params": null,
+        "path": "/v1/voices/{voice_id}/samples/{sample_id}/audio",
+        "request": null,
+        "response": "Binary"
+      },
+      {
+        "description": "Deletes a voice sample",
+        "headers": [],
+        "id": "DeleteVoiceSample",
+        "method": "DELETE",
+        "params": null,
+        "path": "/v1/voices/{voice_id}/samples/{sample_id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Upload audio sample for voice cloning",
+        "headers": [],
+        "id": "AddVoiceSample",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/voices/{voice_id}/samples",
+        "request": {
+          "FormData": {
+            "fields": [
+              {
+                "description": "Audio file (mp3, wav, ogg, m4a)",
+                "kind": {
+                  "File": {
+                    "accept": [
+                      "audio/*"
+                    ]
+                  }
+                },
+                "name": "audio",
+                "required": true
+              },
+              {
+                "description": "Name for the sample",
+                "kind": "Text",
+                "name": "name",
+                "required": false
+              }
+            ]
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "AddSampleResponse"
+          }
+        }
+      },
+      {
+        "description": "Lists voices from the public library",
+        "headers": [],
+        "id": "ListSharedVoices",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": "LibraryVoiceResponseModel",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "voices"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "explicit",
+            "strategy": {
+              "constants": [],
+              "follow_up": null,
+              "kind": {
+                "base": "zero_based",
+                "kind": "page_number",
+                "more": {
+                  "polarity": "true_means_more",
+                  "signal": "flag",
+                  "source": {
+                    "at": [
+                      "has_more"
+                    ],
+                    "from": "body"
+                  }
+                },
+                "page": {
+                  "in": "query",
+                  "name": "page"
+                },
+                "size": {
+                  "adjustable": false,
+                  "max": 100,
+                  "min": 1,
+                  "param": {
+                    "in": "query",
+                    "name": "page_size"
+                  },
+                  "sent_default": null,
+                  "server_default": 30
+                }
+              },
+              "partition": null,
+              "session": null,
+              "terminal_values": [],
+              "total": null
+            }
+          }
+        },
+        "params": null,
+        "path": "/v1/shared-voices",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "ListSharedVoicesResponse"
+          }
+        }
+      },
+      {
+        "description": "Adds a shared voice to your library",
+        "headers": [],
+        "id": "AddSharedVoice",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/voices/add/{public_user_id}/{voice_id}",
+        "request": {
+          "Json": {
+            "Named": "AddSharedVoiceBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "AddSharedVoiceResponse"
+          }
+        }
+      },
+      {
+        "description": "Creates a professional voice clone",
+        "headers": [],
+        "id": "CreatePvcVoice",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/voices/pvc",
+        "request": {
+          "Json": {
+            "Named": "CreatePvcVoiceBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "AddSharedVoiceResponse"
+          }
+        }
+      },
+      {
+        "description": "Updates a PVC voice",
+        "headers": [],
+        "id": "UpdatePvcVoice",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/voices/pvc/{voice_id}",
+        "request": {
+          "Json": {
+            "Named": "CreatePvcVoiceBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Starts training a PVC voice",
+        "headers": [],
+        "id": "TrainPvcVoice",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/voices/pvc/{voice_id}/train",
+        "request": {
+          "Json": {
+            "Named": "TrainPvcVoiceBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Generates a sound effect from text",
+        "headers": [],
+        "id": "CreateSoundEffect",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/sound-generation",
+        "request": {
+          "Json": {
+            "Named": "CreateSoundEffectBody"
+          }
+        },
+        "response": "Binary"
+      },
+      {
+        "description": "Lists all available models",
+        "headers": [],
+        "id": "ListModels",
+        "method": "GET",
+        "params": null,
+        "path": "/v1/models",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "ModelInfo"
+            }
+          }
+        }
+      },
+      {
+        "description": "Creates a single-use token for WebSocket auth",
+        "headers": [],
+        "id": "CreateSingleUseToken",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/single-use-token/{token_type}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "SingleUseTokenResponse"
+          }
+        }
+      },
+      {
+        "description": "Gets generated items history",
+        "headers": [],
+        "id": "GetHistory",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": "SpeechHistoryItemResponseModel",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "history"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "explicit",
+            "strategy": {
+              "constants": [],
+              "follow_up": null,
+              "kind": {
+                "backward": null,
+                "forward": {
+                  "boundary": {
+                    "boundary": "exclusive"
+                  },
+                  "parts": [
+                    {
+                      "param": {
+                        "in": "query",
+                        "name": "start_after_history_item_id"
+                      },
+                      "source": {
+                        "from": "field",
+                        "source": {
+                          "at": [
+                            "last_history_item_id"
+                          ],
+                          "from": "body"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "kind": "cursor",
+                "more": {
+                  "polarity": "true_means_more",
+                  "signal": "flag",
+                  "source": {
+                    "at": [
+                      "has_more"
+                    ],
+                    "from": "body"
+                  }
+                },
+                "resumable": true,
+                "size": {
+                  "adjustable": false,
+                  "max": 1000,
+                  "min": 1,
+                  "param": {
+                    "in": "query",
+                    "name": "page_size"
+                  },
+                  "sent_default": null,
+                  "server_default": 100
+                }
+              },
+              "partition": null,
+              "session": null,
+              "terminal_values": [],
+              "total": null
+            }
+          }
+        },
+        "params": null,
+        "path": "/v1/history",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "GetHistoryResponse"
+          }
+        }
+      },
+      {
+        "description": "Gets a specific history item",
+        "headers": [],
+        "id": "GetHistoryItem",
+        "method": "GET",
+        "params": null,
+        "path": "/v1/history/{history_item_id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "SpeechHistoryItemResponseModel"
+          }
+        }
+      },
+      {
+        "description": "Deletes a history item",
+        "headers": [],
+        "id": "DeleteHistoryItem",
+        "method": "DELETE",
+        "params": null,
+        "path": "/v1/history/{history_item_id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Gets audio for a history item",
+        "headers": [],
+        "id": "GetHistoryItemAudio",
+        "method": "GET",
+        "params": null,
+        "path": "/v1/history/{history_item_id}/audio",
+        "request": null,
+        "response": "Binary"
+      },
+      {
+        "description": "Downloads multiple history items as ZIP",
+        "headers": [],
+        "id": "DownloadHistoryItems",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/history/download",
+        "request": {
+          "Json": {
+            "Named": "DownloadHistoryBody"
+          }
+        },
+        "response": "Binary"
+      },
+      {
+        "description": "Gets usage statistics",
+        "headers": [],
+        "id": "GetUsageStats",
+        "method": "GET",
+        "params": null,
+        "path": "/v1/usage/character-stats",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "UsageStatsResponse"
+          }
+        }
+      },
+      {
+        "description": "Gets current user information",
+        "headers": [],
+        "id": "GetUser",
+        "method": "GET",
+        "params": null,
+        "path": "/v1/user",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "UserResponse"
+          }
+        }
+      },
+      {
+        "description": "Gets user subscription information",
+        "headers": [],
+        "id": "GetUserSubscription",
+        "method": "GET",
+        "params": null,
+        "path": "/v1/user/subscription",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "SubscriptionModel"
+          }
+        }
+      },
+      {
+        "description": "Gets resource information",
+        "headers": [],
+        "id": "GetResource",
+        "method": "GET",
+        "params": null,
+        "path": "/v1/workspace/resources/{resource_id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "ResourceResponse"
+          }
+        }
+      },
+      {
+        "description": "Shares a resource",
+        "headers": [],
+        "id": "ShareResource",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/workspace/resources/{resource_id}/share",
+        "request": {
+          "Json": {
+            "Named": "ShareResourceBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Removes sharing for a resource",
+        "headers": [],
+        "id": "UnshareResource",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/workspace/resources/{resource_id}/unshare",
+        "request": {
+          "Json": {
+            "Named": "UnshareResourceBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Copies a resource to another workspace",
+        "headers": [],
+        "id": "CopyResourceToWorkspace",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/workspace/resources/{resource_id}/copy-to-workspace",
+        "request": {
+          "Json": {
+            "Named": "CopyResourceBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Lists service accounts",
+        "headers": [],
+        "id": "ListServiceAccounts",
+        "method": "GET",
+        "params": null,
+        "path": "/v1/service-accounts",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "ListServiceAccountsResponse"
+          }
+        }
+      },
+      {
+        "description": "Lists API keys for a service account",
+        "headers": [],
+        "id": "ListServiceAccountApiKeys",
+        "method": "GET",
+        "params": null,
+        "path": "/v1/service-accounts/{service_account_user_id}/api-keys",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "ListApiKeysResponse"
+          }
+        }
+      },
+      {
+        "description": "Creates an API key for a service account",
+        "headers": [],
+        "id": "CreateApiKey",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/service-accounts/{service_account_user_id}/api-keys",
+        "request": {
+          "Json": {
+            "Named": "CreateApiKeyBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "CreateApiKeyResponse"
+          }
+        }
+      },
+      {
+        "description": "Updates an API key",
+        "headers": [],
+        "id": "UpdateApiKey",
+        "method": "PATCH",
+        "params": null,
+        "path": "/v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}",
+        "request": {
+          "Json": {
+            "Named": "UpdateApiKeyBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Deletes an API key",
+        "headers": [],
+        "id": "DeleteApiKey",
+        "method": "DELETE",
+        "params": null,
+        "path": "/v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Lists webhooks",
+        "headers": [],
+        "id": "ListWebhooks",
+        "method": "GET",
+        "params": null,
+        "path": "/v1/workspace/webhooks",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "ListWebhooksResponse"
+          }
+        }
+      },
+      {
+        "description": "Creates a webhook",
+        "headers": [],
+        "id": "CreateWebhook",
+        "method": "POST",
+        "params": null,
+        "path": "/v1/workspace/webhooks",
+        "request": {
+          "Json": {
+            "Named": "CreateWebhookBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "CreateWebhookResponse"
+          }
+        }
+      },
+      {
+        "description": "Updates a webhook",
+        "headers": [],
+        "id": "UpdateWebhook",
+        "method": "PATCH",
+        "params": null,
+        "path": "/v1/workspace/webhooks/{webhook_id}",
+        "request": {
+          "Json": {
+            "Named": "UpdateWebhookBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Deletes a webhook",
+        "headers": [],
+        "id": "DeleteWebhook",
+        "method": "DELETE",
+        "params": null,
+        "path": "/v1/workspace/webhooks/{webhook_id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      }
+    ],
+    "env_auth": [
+      "ELEVEN_LABS_API_KEY",
+      "ELEVENLABS_API_KEY"
+    ],
+    "env_mapping": {
+      "api_key": {
+        "header": "xi-api-key",
+        "names": {
+          "names": [
+            "ELEVEN_LABS_API_KEY",
+            "ELEVENLABS_API_KEY"
+          ]
+        }
+      },
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": null
+    },
+    "env_username": null,
+    "headers": [],
+    "module_path": null,
+    "name": "ElevenLabs",
+    "request_id_header": null,
+    "request_suffix": null,
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "49f99362d54bf122bac44d9aae24de310cbf20a8dd2954924a89c4fd1c65df12",
+    "endpoints": [
+      {
+        "blake3": "545ee2a209af5d8739f41424abf7ed3bc62af01146ddb87de0eee0d371535609",
+        "id": "CreateSpeech"
+      },
+      {
+        "blake3": "20b4cf94735df1094223add7ae7d4dca9b771834f52b6b6623b1af5db2171a70",
+        "id": "StreamSpeech"
+      },
+      {
+        "blake3": "7bfa02ed075eb3104d17e97a52e8034e8aa3d5b4a207f584b6657318ddb98a8b",
+        "id": "CreateSpeechWithTimestamps"
+      },
+      {
+        "blake3": "6a5db35936bde69fc85f3bf3335ded6f91e2fad9c014d4ae4ba3837f379a21a5",
+        "id": "StreamSpeechWithTimestamps"
+      },
+      {
+        "blake3": "45eb90e25e23c590f2b98c383f21330dc9b56f0b65905a87aca0d0b1918ecc34",
+        "id": "ListVoices"
+      },
+      {
+        "blake3": "d67011c956708a3cdc5c099ce91ae098cbeaa2aea3db0a91a09d7d300df78ede",
+        "id": "GetVoice"
+      },
+      {
+        "blake3": "7a6d468d0b648cca020f2c0184c3125bc87ff15d27031ddc2f860e26f9152a73",
+        "id": "DeleteVoice"
+      },
+      {
+        "blake3": "25ec987378ded83be1f9eb284b322eb8f92f2f7112597680f0c69938e0a4e706",
+        "id": "GetDefaultVoiceSettings"
+      },
+      {
+        "blake3": "12488d0255d8055b4def8c4608c36d584f66e39e0e23bbf71c3087134cecb6b5",
+        "id": "GetVoiceSettings"
+      },
+      {
+        "blake3": "dc4346f3f83f994a4ba8f53cf210a729c244c23333c3d7ca570842aa36d0b7aa",
+        "id": "UpdateVoiceSettings"
+      },
+      {
+        "blake3": "c10853eddc23346b8c22d2bd93da9be989f8683bd58196e8fcdf63b21c5d8424",
+        "id": "GetVoiceSampleAudio"
+      },
+      {
+        "blake3": "4d216ff3d1a388ea08a3f32fdcd1317cec4802198e165c1fa828f02dd3110cbf",
+        "id": "DeleteVoiceSample"
+      },
+      {
+        "blake3": "d62d23069bf6384ef18d385f4878c66777c1966e0cffdbd02a7b5113c23b906f",
+        "id": "AddVoiceSample"
+      },
+      {
+        "blake3": "5cc292b5b41c3fedb925b1dae15f6a689877d036347ba40901c6207969277315",
+        "id": "ListSharedVoices"
+      },
+      {
+        "blake3": "37b68b99b3331ec3edc523219e9c327148d18e7adc0680fed721044cf51c3c38",
+        "id": "AddSharedVoice"
+      },
+      {
+        "blake3": "10c5eef293ff89b9cd8fa3159dd2143d2accbdc9e22d63d2e331521855ee90c0",
+        "id": "CreatePvcVoice"
+      },
+      {
+        "blake3": "524f04ad56a4184a3c3ceab38051fad08a9a1396cb55815257f7e2d593a505c4",
+        "id": "UpdatePvcVoice"
+      },
+      {
+        "blake3": "a5d550e97d049755f424fb61eb5b9c043b5f3bc36b5721e2ce5c26b4e44b6230",
+        "id": "TrainPvcVoice"
+      },
+      {
+        "blake3": "76715feeed6b2e7e65fee6795d4a414dcba5de4513b12b6dc77e0bf2e5eca837",
+        "id": "CreateSoundEffect"
+      },
+      {
+        "blake3": "19ed0c151938a9765c976852e4fa1507522123cf2969cf6d45749d3c85bf41cf",
+        "id": "ListModels"
+      },
+      {
+        "blake3": "d46ab25c8153b9ef46ef94db7b4d3651f10de7aa8526af704c39dcc5ca1382ed",
+        "id": "CreateSingleUseToken"
+      },
+      {
+        "blake3": "b2134cee7abc4bfd6da7ad562011ec2124fc5041362a7c4275b09d42a2551df3",
+        "id": "GetHistory"
+      },
+      {
+        "blake3": "51b412b813a65f21acb60c1ae307d50452655ca29db052ca3cadba703b2be90c",
+        "id": "GetHistoryItem"
+      },
+      {
+        "blake3": "6f0f2e79ded0265eff57c7a2a5e7bf83937d1d89c6a648b8a548d825ba9cb85e",
+        "id": "DeleteHistoryItem"
+      },
+      {
+        "blake3": "35fc3c21933aee2204042013568b0794925b3383a7b28a2778b7f35db17423e5",
+        "id": "GetHistoryItemAudio"
+      },
+      {
+        "blake3": "11119ce2f76e544018dfaf7d3f109228cb922ddb5b92e7ed425c72e0cdc0c905",
+        "id": "DownloadHistoryItems"
+      },
+      {
+        "blake3": "a861f518c0cdb30b62f16c38ebcbf0670e2416b32cc95be038b8e846098749d4",
+        "id": "GetUsageStats"
+      },
+      {
+        "blake3": "7ba3c3b7acf9a4b59dfccba2719059c7cb776f8a1f306b291987ecec564581ad",
+        "id": "GetUser"
+      },
+      {
+        "blake3": "6199cc52d911322f40705f82a24d0f81576ecc82e37b1004f97c42917d35efce",
+        "id": "GetUserSubscription"
+      },
+      {
+        "blake3": "22051ab7d8699efa69c0c2f1ec37ee276ecac26307012ccca1cd5c238f06c64c",
+        "id": "GetResource"
+      },
+      {
+        "blake3": "8d01a98d08dab00cc81da1ea80196c1a2366d8340c742b04f9ba3860f449fd7e",
+        "id": "ShareResource"
+      },
+      {
+        "blake3": "567e4538fb212a0b0fd31dd90390bc676613cc0e4623c98d0c97ca2de10d20dc",
+        "id": "UnshareResource"
+      },
+      {
+        "blake3": "79432ec0391527c9691ce94faf72a4c8404dbaf2f5f81b6dff1dcd1cd6bf915a",
+        "id": "CopyResourceToWorkspace"
+      },
+      {
+        "blake3": "5f7a7b06deea92c9828a44242d3fb06a223c83e440be3a16c812ba06422d0762",
+        "id": "ListServiceAccounts"
+      },
+      {
+        "blake3": "39df98d2ecb5a721bb9819143287d92d3d96acf5714fdb255d05a2e3de6fc502",
+        "id": "ListServiceAccountApiKeys"
+      },
+      {
+        "blake3": "624a2ebc93bac1ea5384558905f3a8eadabac58c9b69797ba35c951e581a6e6c",
+        "id": "CreateApiKey"
+      },
+      {
+        "blake3": "a1ab8861e16468198fc298b052ed8378a7da8f2636109955537b8ad4c5665359",
+        "id": "UpdateApiKey"
+      },
+      {
+        "blake3": "c64db0cc3d4bc1d243ee1029b486dceae166e3412c48bf3b71ac88630b3a8900",
+        "id": "DeleteApiKey"
+      },
+      {
+        "blake3": "e0263df5c1ce455ca7d3ebb379880b73f6e7e7e34b4d0fbe582ad1115ff12e06",
+        "id": "ListWebhooks"
+      },
+      {
+        "blake3": "20116a9ca68da013ad75c1e6c3f775b4d42e3229a6ce6a306c46f308f99ad37d",
+        "id": "CreateWebhook"
+      },
+      {
+        "blake3": "9ba7dacb87f8fab8deb2a00954e366911dd39aa46b4ff5b3422fc5ef008b47ce",
+        "id": "UpdateWebhook"
+      },
+      {
+        "blake3": "1de131d98aced8ca5acf69d35012802bcd350239145ba780a28a43e39be1d7f0",
+        "id": "DeleteWebhook"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "CreateSpeech",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "StreamSpeech",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CreateSpeechWithTimestamps",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "StreamSpeechWithTimestamps",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListVoices",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "VoiceResponseModel",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "voices"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetVoice",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "DeleteVoice",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetDefaultVoiceSettings",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetVoiceSettings",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "UpdateVoiceSettings",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetVoiceSampleAudio",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "DeleteVoiceSample",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "AddVoiceSample",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "StartPage": {
+            "base": "zero_based"
+          }
+        },
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "page_size",
+            "server_default": 30
+          }
+        },
+        "Next"
+      ],
+      "endpoint": "ListSharedVoices",
+      "param_adoptions": [],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "LibraryVoiceResponseModel",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "voices"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "base": "zero_based",
+              "kind": "page_number",
+              "more": {
+                "polarity": "true_means_more",
+                "signal": "flag",
+                "source": {
+                  "at": [
+                    "has_more"
+                  ],
+                  "from": "body"
+                }
+              },
+              "page": {
+                "in": "query",
+                "name": "page"
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "page_size"
+                },
+                "sent_default": null,
+                "server_default": 30
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": null
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "AddSharedVoice",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CreatePvcVoice",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "UpdatePvcVoice",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "TrainPvcVoice",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CreateSoundEffect",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListModels",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "::schematic_definitions::elevenlabs::ModelInfo",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "Unauthored"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CreateSingleUseToken",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "ResumeCursor": {
+            "direction": "Forward",
+            "parts": 1
+          }
+        },
+        {
+          "PageSize": {
+            "max": 1000,
+            "min": 1,
+            "param": "page_size",
+            "server_default": 100
+          }
+        },
+        "Next"
+      ],
+      "endpoint": "GetHistory",
+      "param_adoptions": [],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "SpeechHistoryItemResponseModel",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "history"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "backward": null,
+              "forward": {
+                "boundary": {
+                  "boundary": "exclusive"
+                },
+                "parts": [
+                  {
+                    "param": {
+                      "in": "query",
+                      "name": "start_after_history_item_id"
+                    },
+                    "source": {
+                      "from": "field",
+                      "source": {
+                        "at": [
+                          "last_history_item_id"
+                        ],
+                        "from": "body"
+                      }
+                    }
+                  }
+                ]
+              },
+              "kind": "cursor",
+              "more": {
+                "polarity": "true_means_more",
+                "signal": "flag",
+                "source": {
+                  "at": [
+                    "has_more"
+                  ],
+                  "from": "body"
+                }
+              },
+              "resumable": true,
+              "size": {
+                "adjustable": false,
+                "max": 1000,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "page_size"
+                },
+                "sent_default": null,
+                "server_default": 100
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": null
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetHistoryItem",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "DeleteHistoryItem",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetHistoryItemAudio",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "DownloadHistoryItems",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetUsageStats",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetUser",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetUserSubscription",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetResource",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ShareResource",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "UnshareResource",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CopyResourceToWorkspace",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListServiceAccounts",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListServiceAccountApiKeys",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CreateApiKey",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "UpdateApiKey",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "DeleteApiKey",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListWebhooks",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CreateWebhook",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "UpdateWebhook",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "DeleteWebhook",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "23b654d6d059a20c00f1997d44b1b11573f58d2f7c0705bd318dd6a1e9cb7132",
+      "name": "CreateSpeechBody",
+      "rust_path": "::schematic_definitions::elevenlabs::CreateSpeechBody"
+    },
+    {
+      "blake3": "37161f657d3401a87683489871683ca753736babab8f698c46c5e27fa7de2857",
+      "name": "PronunciationDictionaryLocator",
+      "rust_path": null
+    },
+    {
+      "blake3": "f787a2d24b201cc27b3ba9fe1661feac0b9594b75796a3d2051ac388cab71ede",
+      "name": "TextNormalization",
+      "rust_path": null
+    },
+    {
+      "blake3": "ba47da587c73a28a74af9923b9240f8cf4a089d558e764294b503871b4bcf94f",
+      "name": "VoiceSettings",
+      "rust_path": "::schematic_definitions::elevenlabs::VoiceSettings"
+    },
+    {
+      "blake3": "de277d26bc6aa67272aacc6e2adc8c5cc19fe41b14429f22e032441331a46ef0",
+      "name": "AddSharedVoiceBody",
+      "rust_path": "::schematic_definitions::elevenlabs::AddSharedVoiceBody"
+    },
+    {
+      "blake3": "ac979303833de3ab00432bc5a7909e2401e7fc67a3e279dcb17b939f2e3b8cac",
+      "name": "CreatePvcVoiceBody",
+      "rust_path": "::schematic_definitions::elevenlabs::CreatePvcVoiceBody"
+    },
+    {
+      "blake3": "9ff0538168dcc99eb6a2864dede83aabb71c131ef49ed25bd9e5b287f9723287",
+      "name": "TrainPvcVoiceBody",
+      "rust_path": "::schematic_definitions::elevenlabs::TrainPvcVoiceBody"
+    },
+    {
+      "blake3": "79823e6e157cff0697414ba02f497798a579a7ddc0f42c5a00346f512aa8e01d",
+      "name": "CreateSoundEffectBody",
+      "rust_path": "::schematic_definitions::elevenlabs::CreateSoundEffectBody"
+    },
+    {
+      "blake3": "9a90ad1420b98f7a8f50fd762e3ee54722d25d86510c9206dc642ec54773b34b",
+      "name": "DownloadHistoryBody",
+      "rust_path": "::schematic_definitions::elevenlabs::DownloadHistoryBody"
+    },
+    {
+      "blake3": "f921477a36de28894f4903c09983be21c8b69e63edbd6c77071046f2afbd167d",
+      "name": "ShareResourceBody",
+      "rust_path": "::schematic_definitions::elevenlabs::ShareResourceBody"
+    },
+    {
+      "blake3": "918af8be12fdec5fad77f9dda47a4603eacea3be32f2a81d2ee50b5bf83175e5",
+      "name": "AccessLevel",
+      "rust_path": null
+    },
+    {
+      "blake3": "5b1587c5a070662221f80f8dc2a6a1f8724a711f320c200e895aa7420ab81c22",
+      "name": "ResourceType",
+      "rust_path": null
+    },
+    {
+      "blake3": "a534d3950a2b19e50c6c1ef129d251e077a01d34e19053b60ff570110cca128a",
+      "name": "UnshareResourceBody",
+      "rust_path": "::schematic_definitions::elevenlabs::UnshareResourceBody"
+    },
+    {
+      "blake3": "72ba598d0a109a809140b1d636a97a714a5ee35080dc2e249b9abb765396493f",
+      "name": "CopyResourceBody",
+      "rust_path": "::schematic_definitions::elevenlabs::CopyResourceBody"
+    },
+    {
+      "blake3": "18194325d37f4cd0a1a4499b6a279bf114b718a4486b5ec0d601020ce42a4b6a",
+      "name": "CreateApiKeyBody",
+      "rust_path": "::schematic_definitions::elevenlabs::CreateApiKeyBody"
+    },
+    {
+      "blake3": "f67ffe63b8d447b2bb1865a0bb098704093a870bb64b2ef5778e8287db7a7fb2",
+      "name": "ApiPermission",
+      "rust_path": null
+    },
+    {
+      "blake3": "c934fb8f1c3ecae8bb7712a2be13d9b235309b375cf29676341626fd0407557a",
+      "name": "PermissionSpec",
+      "rust_path": null
+    },
+    {
+      "blake3": "909dd2dde58d8e1bbd5ef66b7603171f4d632df3df41c944a06c4765b617852f",
+      "name": "UpdateApiKeyBody",
+      "rust_path": "::schematic_definitions::elevenlabs::UpdateApiKeyBody"
+    },
+    {
+      "blake3": "8d13711fbbef653dcb2929e0bb49e558501a291e16bdd4fe151a84a27fdb5f91",
+      "name": "CreateWebhookBody",
+      "rust_path": "::schematic_definitions::elevenlabs::CreateWebhookBody"
+    },
+    {
+      "blake3": "8be079d26e298b6fce6e4092eb9fe71547ca6e1ed6876b46672ea29363d4cb33",
+      "name": "WebhookAuthType",
+      "rust_path": null
+    },
+    {
+      "blake3": "10af42f5e42ad79ae132ef6e6934f42d5ab89a8400a5c9c5c13437b2d3ccb95e",
+      "name": "WebhookSettings",
+      "rust_path": null
+    },
+    {
+      "blake3": "bb4e8d1893917b551c0c6b419aec5cc6b5369d8cb78f0ab3bbaec694356c3ffc",
+      "name": "UpdateWebhookBody",
+      "rust_path": "::schematic_definitions::elevenlabs::UpdateWebhookBody"
+    },
+    {
+      "blake3": "71754beebdd2fc87fc089dd679bada40b18b1eddfafb502dccd194088d3a5fe1",
+      "name": "SpeechWithTimestampsResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::SpeechWithTimestampsResponse"
+    },
+    {
+      "blake3": "f19128ff2ff98b2ccccd9ebd0d397362d584aa0fb5b0af34a634e69c81f22000",
+      "name": "HttpAlignment",
+      "rust_path": null
+    },
+    {
+      "blake3": "586b390ac5d80971ef6a8b6e84f0c6bba5d4acd0c81e872696d664650b763106",
+      "name": "ListVoicesResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::ListVoicesResponse"
+    },
+    {
+      "blake3": "06b8f433528708ded3ec064920cd15d3a42af8b95e1cabf0a6bf9988ea4d24b1",
+      "name": "FineTuningModel",
+      "rust_path": null
+    },
+    {
+      "blake3": "11b3dba22e1749a8cc1643b96826ff04a13f44b512b4e5450228f3a52a1bd25f",
+      "name": "FineTuningState",
+      "rust_path": null
+    },
+    {
+      "blake3": "a702b298d8f8b2bef2498315decca50ae601a3331e514ebe6f45e7b7ad6e0ec0",
+      "name": "LanguageModel",
+      "rust_path": null
+    },
+    {
+      "blake3": "eb317852fc6eac5c8f54aa1dcd9000c7e9a608d016ee231506afae9eee76cee8",
+      "name": "SafetyControl",
+      "rust_path": null
+    },
+    {
+      "blake3": "875ea493afa98e10b9b0c2afadcc1447e9e4a8742fb2d941eb877f69d50b0339",
+      "name": "SampleModel",
+      "rust_path": null
+    },
+    {
+      "blake3": "dd5a6ecaf032dcc946e460b71f0c30e0c380edf79672df6df0af854b2e53d7bd",
+      "name": "SharingModel",
+      "rust_path": null
+    },
+    {
+      "blake3": "bc6a619125461b2a3bbd0f2578c1246318b99e9a729802dbb94ff8b7194abdb9",
+      "name": "VoiceCategory",
+      "rust_path": null
+    },
+    {
+      "blake3": "cf11f01b91bd6ca3835f533555d9e967d92016b1e3c56e50237c60f63f30cda7",
+      "name": "VoiceResponseModel",
+      "rust_path": "::schematic_definitions::elevenlabs::VoiceResponseModel"
+    },
+    {
+      "blake3": "a51b72a47198e2da1b35ab92a6e4904c60367aad5c599a88784502f267c74f6a",
+      "name": "VoiceVerificationModel",
+      "rust_path": null
+    },
+    {
+      "blake3": "673859e0b2676ca66303e111ca7984107a378c89c9784f76013971e819771c18",
+      "name": "StatusResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::StatusResponse"
+    },
+    {
+      "blake3": "e5e01ca225863bf8d53cf37907269ed1fbb5401985440d650bbf9cf7508375dc",
+      "name": "AddSampleResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::AddSampleResponse"
+    },
+    {
+      "blake3": "d861cc3671f562f572fcc0bc29ace917636e5406c46409a1b510604f38873824",
+      "name": "ListSharedVoicesResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::ListSharedVoicesResponse"
+    },
+    {
+      "blake3": "f2ef0b7b4b05986983dfb4ee36e02dd146a45a40476b41f095d9a9f4c86f3440",
+      "name": "LibraryVoiceResponseModel",
+      "rust_path": null
+    },
+    {
+      "blake3": "540146353fc8b232f14ec3f01fd3b2634b2009d5ccf0228db170fb902bd13729",
+      "name": "AddSharedVoiceResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::AddSharedVoiceResponse"
+    },
+    {
+      "blake3": "535f05b206ad50dd51c6e40ce290680969841d034e6e866392354a30ad9e81ca",
+      "name": "ModelInfo",
+      "rust_path": "::schematic_definitions::elevenlabs::ModelInfo"
+    },
+    {
+      "blake3": "01bfcde4b180285effb2c46180dbcd70bc1ac1c9c25b19707cdcdcaa233e1650",
+      "name": "ModelRates",
+      "rust_path": null
+    },
+    {
+      "blake3": "3b19a7d2d3908c6dc50abab339da3208d908ab2d8c88cf09048d1c6d571e7b39",
+      "name": "SingleUseTokenResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::SingleUseTokenResponse"
+    },
+    {
+      "blake3": "33c40d415a641c58fcee21aa1fc937acd454a4d91315e08f00f82e03919bbb97",
+      "name": "GetHistoryResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::GetHistoryResponse"
+    },
+    {
+      "blake3": "5b2267e4e04932e1a7f4841b85149a6710fb1a19e368ef55b752006151151479",
+      "name": "AlignmentModel",
+      "rust_path": null
+    },
+    {
+      "blake3": "390b70ee19583b8ae211965fff3a1a762576721502f25f9b39e788a48e851224",
+      "name": "FeedbackModel",
+      "rust_path": null
+    },
+    {
+      "blake3": "698ed5dbb5bc58671cff31cfbf48a3200bfd08c7469cff1aaa55d5ecc56fc788",
+      "name": "HistorySource",
+      "rust_path": null
+    },
+    {
+      "blake3": "31a43facb07a050879aaf6d66101fc9a7f4abe22970fbe53f52fc4b51de1ac74",
+      "name": "SpeechHistoryItemResponseModel",
+      "rust_path": "::schematic_definitions::elevenlabs::SpeechHistoryItemResponseModel"
+    },
+    {
+      "blake3": "c1a4c4a2f0c5fa91725cd50db1439a937a28f4589ca877fc5350345734bbf860",
+      "name": "UsageStatsResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::UsageStatsResponse"
+    },
+    {
+      "blake3": "7e44e98ac25a190c404d2e1a473289c25762539daf61f35e523acc3727f69096",
+      "name": "UserResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::UserResponse"
+    },
+    {
+      "blake3": "9d24d050cdce54ac67869b6acb3d2bebfa8b51c478537e50d4acca6433a9b47c",
+      "name": "BillingPeriod",
+      "rust_path": null
+    },
+    {
+      "blake3": "6be904d5d2838ff30c8ad7bac8f1ce0db3687690b37f65259078efb45f6afc8d",
+      "name": "Currency",
+      "rust_path": null
+    },
+    {
+      "blake3": "d70a59ef359c91a7fb876c92161a18a736476d9bdeda89d9715a6e9f7af21d40",
+      "name": "InvoiceModel",
+      "rust_path": null
+    },
+    {
+      "blake3": "13b3214045b6e788f4751688cea13b17f55851379654fd29e0da1aabc696822d",
+      "name": "SubscriptionModel",
+      "rust_path": "::schematic_definitions::elevenlabs::SubscriptionModel"
+    },
+    {
+      "blake3": "c23a0894ae0f10278896f20647b7d0ff13a2937a82bdb9034967f17ccf9e213d",
+      "name": "SubscriptionStatus",
+      "rust_path": null
+    },
+    {
+      "blake3": "8b1fc283ee9678e3e0392bafe1246e8ccdd117ae3a2af034addcf0cb8647b856",
+      "name": "ResourceResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::ResourceResponse"
+    },
+    {
+      "blake3": "a61db3784332520f2180466830fdcdeecae131476fe823ef3d0f9506470f1c24",
+      "name": "ShareOptionModel",
+      "rust_path": null
+    },
+    {
+      "blake3": "d000f25df4dd7d60bef9578aa5621a86d967daf46438ab3f5272b14ab3291785",
+      "name": "ListServiceAccountsResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::ListServiceAccountsResponse"
+    },
+    {
+      "blake3": "46bded5f12a3c1f0bf3e26f761a487205abab4aae22d80b2af27aa4ef100fac7",
+      "name": "ApiKeyModel",
+      "rust_path": null
+    },
+    {
+      "blake3": "07c99d47d356fc0150307bbec43e44f84b2c8aeb32e10e80056d2e6ae01e4ce7",
+      "name": "ServiceAccountModel",
+      "rust_path": null
+    },
+    {
+      "blake3": "d09ee154ef607b44e7824c991b5ca041ec762005e3d1f4dfe5990029173b408f",
+      "name": "ListApiKeysResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::ListApiKeysResponse"
+    },
+    {
+      "blake3": "e0ff2abc4639826ec797af99fb87fc60c33e7d58e8c74b5a18c4f5c0961123cf",
+      "name": "CreateApiKeyResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::CreateApiKeyResponse"
+    },
+    {
+      "blake3": "de084e6f67b97c09e745602e6c9a07bf7fa73b399267d6b01c96b35376dd34f7",
+      "name": "ListWebhooksResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::ListWebhooksResponse"
+    },
+    {
+      "blake3": "bcbe1f659717dec334ef904e50af59b6f33fe7cb6cfc681cbfaa94988338d178",
+      "name": "ProductModel",
+      "rust_path": null
+    },
+    {
+      "blake3": "c3bb99218f82ac55c04491b30ba9c0d3ad247c8a1cdd486e5641dc69f4792aaa",
+      "name": "WebhookModel",
+      "rust_path": null
+    },
+    {
+      "blake3": "a3f6c54e483d80721758fca9f51d07d4197bb154c074809db00dda29e1736378",
+      "name": "CreateWebhookResponse",
+      "rust_path": "::schematic_definitions::elevenlabs::CreateWebhookResponse"
+    }
+  ]
+}

@@ -46,24 +46,27 @@
 //!
 //! ## Examples
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
+//! use schematic_schema::huggingface::ListModelsRequest;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = HuggingFaceHub::new();
-//!     let data = client.list_models().await?;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = HuggingFaceHub::new();
+//! let data = client.list_models().await?;
 //!
-//!     // the whole response: status, headers, and request id as well
-//!     let response = client.list_models().full().await?;
-//!     println!("{}", response.meta);
-//!     Ok(())
-//! }
+//! // the same request, built as a typed request and sent
+//! let data = client.send(ListModelsRequest::default()).await?;
+//!
+//! // the whole response: status, headers, and request id as well
+//! let response = client.list_models().full().await?;
+//! println!("{}", response.meta);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ### Override Base URL
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
 //!
 //! let client = HuggingFaceHub::new().base_url("https://staging.example.com/v1");

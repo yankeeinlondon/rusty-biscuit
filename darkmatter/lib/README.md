@@ -334,7 +334,7 @@ The following crates play an important role in Darkmatter providing it's current
 | `markdown` | Core `Markdown` type with frontmatter, rendering, and manipulation |
 | `lifecycle` | Lifecycle-event grammar, event registry, and run engine for hosts (see [Lifecycle Events](../docs/topics/lifecycle/index.md)) |
 | `diff` | Visual diff utilities for strings and files |
-| `mermaid` | Mermaid diagram theming (terminal rendering via biscuit-terminal) |
+| `mermaid` | Mermaid diagram theming (terminal rendering via biscuit-visualized's `MermaidDiagram`) |
 | `render` | Hyperlink rendering utilities (OSC 8 terminal hyperlinks) |
 | `terminal` | ANSI code generation and color depth constants |
 | `testing` | Test utilities for terminal output verification |
@@ -706,11 +706,11 @@ let html = DarkmatterPage::new(&term).render_to_browser(&md).unwrap();
 assert!(html.contains(r#"<pre class="mermaid">"#));
 ```
 
-For terminal output, use biscuit-terminal's `MermaidDiagram`:
+For terminal output, use biscuit-visualized's `MermaidDiagram` component:
 
 ```rust
-use biscuit_terminal::components::mermaid::MermaidDiagram;
 use biscuit_terminal::terminal::Terminal;
+use biscuit_visualized::components::mermaid::MermaidDiagram;
 
 let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
 let term = Terminal::new();

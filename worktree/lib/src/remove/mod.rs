@@ -5,32 +5,41 @@
 //! ([`handoff`]). A target Git can't read is made checkable first by
 //! [`prepare`]: its worktree record is found ([`admin_entry`]), then a missing
 //! `.git` file is repaired and verified ([`repair`]) or a missing directory's
-//! surviving index is checked ([`missing`]). A contention-aware removal
-//! reports a typed [`outcome`] and keeps durable [`recovery`] state; [`usage`]
-//! is its decisive check that no other process is using the checkout,
-//! [`quarantine`] moves the checkout aside without replacing anything (and
-//! unregisters it once it is gone), and [`observation`] watches both
-//! locations while that happens and deletes the moved checkout entry by
-//! entry against its operation-start inventory. [`lifecycle`] runs those
-//! steps in order as one removal, and resumes one that stopped.
+//! surviving index is checked ([`missing`]). [`facts`] gathers everything the
+//! removal question warns about, including the programs using the checkout
+//! ([`usage`]) and its submodules' work ([`submodules`]).
+//!
+//! After the user confirms, [`lifecycle`] runs the removal: it saves a
+//! compact approval ([`recovery`]), unlocks, places the checkout
+//! ([`quarantine`] moves it aside without replacing anything, or it is
+//! deleted in place), deletes it with the plain engine ([`delete`]), which
+//! never crosses a link or a mount and waits out only temporary contention,
+//! unregisters it, and runs the branch steps, finishing an interrupted
+//! operation without asking again. Its waits, mount boundaries, and
+//! filesystem failures are injected through [`clock`], [`mounts`], and
+//! [`faults`], so tests never sleep, mount, or need privileges.
 //!
 //! Every git call addresses the repository with `git -C` and runs from the
 //! base checkout, never from inside the worktree being removed. The rules are
 //! item 3 of `2026-09-24-ux-improvements`.
 
 pub mod admin_entry;
+pub mod clock;
+pub mod lifecycle;
+pub mod delete;
+pub mod facts;
+pub mod faults;
 pub mod handoff;
 pub mod included;
 pub mod inventory;
-pub mod lifecycle;
 pub mod missing;
-pub mod observation;
-pub mod outcome;
+pub mod mounts;
 pub mod quarantine;
 pub mod recovery;
 pub mod remote;
 pub mod repair;
 pub mod safety;
+pub mod submodules;
 pub mod usage;
 
 #[cfg(test)]

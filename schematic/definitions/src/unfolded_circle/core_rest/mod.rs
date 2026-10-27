@@ -23,190 +23,101 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::SchemaRegistry;
+#[cfg(test)]
+use schematic_define::ApiRequest;
+#[cfg(test)]
+use schematic_define::ResponseShape;
+use crate::registry::assemble_module_group;
+use schematic_define::{DefinitionContext, DefinitionError};
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, FormField,
+    AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, FormField,
     RestApi, RestMethod,
 };
 
-/// Creates a schema registry containing all Unfolded Circle Core REST response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the Unfolded Circle Core REST API.
-/// All response types used by the API endpoints are registered.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::unfolded_circle::core_rest::{openapi_registry, define_unfolded_circle_core_rest_api};
-///
-/// let registry = openapi_registry();
-/// let api = define_unfolded_circle_core_rest_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("ApiResponseMessage").is_some());
-/// assert!(registry.get("SystemInfo").is_some());
-///
-/// // Registry is complete for the API
-/// assert!(registry.validate_completeness(&api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    SchemaRegistry::new()
-        .register::<LoginRequest>("LoginRequest")
-        .register::<ApiResponseMessage>("ApiResponseMessage")
-        .register::<SystemInfo>("SystemInfo")
-        .register::<BackupRestoreReportItems>("BackupRestoreReportItems")
-        .register::<ResourceItems>("ResourceItems")
-        .register::<IntegrationDriverInfo>("IntegrationDriverInfo")
-        .register::<CodeSetUploadResult>("CodeSetUploadResult")
-        .register::<CustomInstall>("CustomInstall")
+/// Assemble the APIs and ordered schemas in one destination context.
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
+    assemble_module_group("::schematic_definitions::unfolded_circle::core_rest", |ctx| {
+        ctx.register::<LoginRequest>()?;
+        ctx.register::<ApiResponseMessage>()?;
+        ctx.register::<SystemInfo>()?;
+        ctx.register::<BackupRestoreReportItems>()?;
+        ctx.register::<ResourceItems>()?;
+        ctx.register::<IntegrationDriverInfo>()?;
+        ctx.register::<CodeSetUploadResult>()?;
+        ctx.register::<CustomInstall>()?;
+        Ok(vec![build_unfolded_circle_core_rest_api(ctx)?])
+    })
 }
 
 /// Build the Unfolded Circle Core REST API definition.
 #[must_use]
-#[allow(clippy::vec_init_then_push)]
 pub fn define_unfolded_circle_core_rest_api() -> RestApi {
-    let mut endpoints = Vec::with_capacity(11);
-    endpoints.push(Endpoint {
-        id: "Login".to_string(),
-        method: RestMethod::Post,
-        path: "/pub/login".to_string(),
-        description: "Create a cookie session using username/password credentials for clients that do not use bearer tokens. Docs: /pub/login in the official Core REST reference.".to_string(),
-        request: Some(ApiRequest::json_type("LoginRequest")),
-        response: ApiResponse::json_type("ApiResponseMessage"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    });
-    endpoints.push(Endpoint {
-        id: "Logout".to_string(),
-        method: RestMethod::Post,
-        path: "/pub/logout".to_string(),
-        description: "Invalidate the active cookie session created by Login. Typical usage is explicit sign-out in long-running admin tools.".to_string(),
-        request: None,
-        response: ApiResponse::Empty,
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    });
-    endpoints.push(Endpoint {
-        id: "GetSystemInfo".to_string(),
-        method: RestMethod::Get,
-        path: "/system".to_string(),
-        description: "Return model/serial/hardware metadata for the remote. If this endpoint is polled frequently, callers should avoid storing repeated owned `String` snapshots to reduce memory churn.".to_string(),
-        request: None,
-        response: ApiResponse::json_type("SystemInfo"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    });
-    endpoints.push(Endpoint {
-        id: "ExportBackup".to_string(),
-        method: RestMethod::Get,
-        path: "/system/backup/export".to_string(),
-        description: "Download the current device backup archive as binary bytes. This endpoint maps to ApiResponse::Binary because the server returns an archive stream.".to_string(),
-        request: None,
-        response: ApiResponse::Binary,
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    });
-    endpoints.push(Endpoint {
-        id: "RestoreBackup".to_string(),
-        method: RestMethod::Put,
-        path: "/system/backup/restore".to_string(),
-        description: "Upload and restore a backup archive using multipart form-data (`file`). The response contains per-domain restore counters.".to_string(),
-        request: Some(ApiRequest::form_data(vec![FormField::file("file")])),
-        response: ApiResponse::json_type("BackupRestoreReportItems"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    });
-    endpoints.push(Endpoint {
-        id: "UploadResource".to_string(),
-        method: RestMethod::Post,
-        path: "/resources/{resource_type}".to_string(),
-        description: "Upload a custom resource for the selected resource type via multipart form-data (`file`). Valid `resource_type` values: `icon`, `background`, `sound`.".to_string(),
-        request: Some(ApiRequest::form_data(vec![FormField::file("file")])),
-        response: ApiResponse::json_type("ResourceItems"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    });
-    endpoints.push(Endpoint {
-        id: "GetResource".to_string(),
-        method: RestMethod::Get,
-        path: "/resources/{resource_type}/{resource_id}".to_string(),
-        description: "Download a single stored resource by type and identifier. Valid `resource_type` values: `icon`, `background`, `sound`. Binary response supports image/audio/file resources.".to_string(),
-        request: None,
-        response: ApiResponse::Binary,
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    });
-    endpoints.push(Endpoint {
-        id: "InstallCustomIntegration".to_string(),
-        method: RestMethod::Post,
-        path: "/intg/install".to_string(),
-        description: "Install a custom integration driver from a tar archive upload (`file`). Returned metadata includes required driver identity fields.".to_string(),
-        request: Some(ApiRequest::form_data(vec![FormField::file("file")])),
-        response: ApiResponse::json_type("IntegrationDriverInfo"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    });
-    endpoints.push(Endpoint {
-        id: "UploadCustomIrCodeSet".to_string(),
-        method: RestMethod::Post,
-        path: "/ir/codes/custom/{code_set_id}".to_string(),
-        description: "Upload an IR code CSV for a custom code-set via multipart form-data (`file`). Response reports processed/added/updated counts.".to_string(),
-        request: Some(ApiRequest::form_data(vec![FormField::file("file")])),
-        response: ApiResponse::json_type("CodeSetUploadResult"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    });
-    endpoints.push(Endpoint {
-        id: "InstallCustomComponent".to_string(),
-        method: RestMethod::Post,
-        path: "/system/install/{custom_component}".to_string(),
-        description: "Upload and install a custom UI or web-configurator component package (`file`). Valid `custom_component` values: `ui`, `web_configurator`. Returns install/activation status.".to_string(),
-        request: Some(ApiRequest::form_data(vec![FormField::file("file")])),
-        response: ApiResponse::json_type("CustomInstall"),
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    });
-    endpoints.push(Endpoint {
-        id: "QueryLogsText".to_string(),
-        method: RestMethod::Get,
-        path: "/system/logs".to_string(),
-        description: "Retrieve system logs as plain text export for diagnostics pipelines and offline inspection.".to_string(),
-        request: None,
-        response: ApiResponse::Text,
-        headers: vec![],
-        params: None,
-        oauth_scopes: None,
-    });
+    module_group().expect("valid shipped API").remove(0)
+}
 
-    RestApi {
-        name: "UnfoldedCircleCoreRest".to_string(),
-        description: "Unfolded Circle Core REST API".to_string(),
-        base_url: "http://remote.local/api".to_string(),
-        docs_url: Some("https://unfoldedcircle.github.io/core-api/rest/".to_string()),
-        auth: AuthStrategy::BearerToken { header: None },
-        auth_policy: None,
-        env_auth: vec![
+#[allow(clippy::vec_init_then_push)]
+fn build_unfolded_circle_core_rest_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
+    let mut endpoints = Vec::with_capacity(11);
+    endpoints.push(Endpoint::new("Login", RestMethod::Post, "/pub/login")
+            .describes("Create a cookie session using username/password credentials for clients that do not use bearer tokens. Docs: /pub/login in the official Core REST reference.")
+            .request_json::<LoginRequest>(ctx)
+            .returns_json::<ApiResponseMessage>(ctx)
+            .build()?);
+    endpoints.push(Endpoint::new("Logout", RestMethod::Post, "/pub/logout")
+            .describes("Invalidate the active cookie session created by Login. Typical usage is explicit sign-out in long-running admin tools.")
+            .returns_empty()
+            .build()?);
+    endpoints.push(Endpoint::new("GetSystemInfo", RestMethod::Get, "/system")
+            .describes("Return model/serial/hardware metadata for the remote. If this endpoint is polled frequently, callers should avoid storing repeated owned `String` snapshots to reduce memory churn.")
+            .returns_json::<SystemInfo>(ctx)
+            .build()?);
+    endpoints.push(Endpoint::new("ExportBackup", RestMethod::Get, "/system/backup/export")
+            .describes("Download the current device backup archive as binary bytes. This endpoint maps to ApiResponse::Binary because the server returns an archive stream.")
+            .returns_binary()
+            .build()?);
+    endpoints.push(Endpoint::new("RestoreBackup", RestMethod::Put, "/system/backup/restore")
+            .describes("Upload and restore a backup archive using multipart form-data (`file`). The response contains per-domain restore counters.")
+            .request_form(vec![FormField::file("file")])
+            .returns_json::<BackupRestoreReportItems>(ctx)
+            .build()?);
+    endpoints.push(Endpoint::new("UploadResource", RestMethod::Post, "/resources/{resource_type}")
+            .describes("Upload a custom resource for the selected resource type via multipart form-data (`file`). Valid `resource_type` values: `icon`, `background`, `sound`.")
+            .request_form(vec![FormField::file("file")])
+            .returns_json::<ResourceItems>(ctx)
+            .build()?);
+    endpoints.push(Endpoint::new("GetResource", RestMethod::Get, "/resources/{resource_type}/{resource_id}")
+            .describes("Download a single stored resource by type and identifier. Valid `resource_type` values: `icon`, `background`, `sound`. Binary response supports image/audio/file resources.")
+            .returns_binary()
+            .build()?);
+    endpoints.push(Endpoint::new("InstallCustomIntegration", RestMethod::Post, "/intg/install")
+            .describes("Install a custom integration driver from a tar archive upload (`file`). Returned metadata includes required driver identity fields.")
+            .request_form(vec![FormField::file("file")])
+            .returns_json::<IntegrationDriverInfo>(ctx)
+            .build()?);
+    endpoints.push(Endpoint::new("UploadCustomIrCodeSet", RestMethod::Post, "/ir/codes/custom/{code_set_id}")
+            .describes("Upload an IR code CSV for a custom code-set via multipart form-data (`file`). Response reports processed/added/updated counts.")
+            .request_form(vec![FormField::file("file")])
+            .returns_json::<CodeSetUploadResult>(ctx)
+            .build()?);
+    endpoints.push(Endpoint::new("InstallCustomComponent", RestMethod::Post, "/system/install/{custom_component}")
+            .describes("Upload and install a custom UI or web-configurator component package (`file`). Valid `custom_component` values: `ui`, `web_configurator`. Returns install/activation status.")
+            .request_form(vec![FormField::file("file")])
+            .returns_json::<CustomInstall>(ctx)
+            .build()?);
+    endpoints.push(Endpoint::new("QueryLogsText", RestMethod::Get, "/system/logs")
+            .describes("Retrieve system logs as plain text export for diagnostics pipelines and offline inspection.")
+            .returns_text()
+            .build()?);
+
+    {
+        RestApi::builder(ctx, "UnfoldedCircleCoreRest", "http://remote.local/api")
+            .describes("Unfolded Circle Core REST API")
+            .authentication(AuthStrategy::BearerToken { header: None }, vec![
             "UCR_CORE_API_KEY".to_string(),
             "UNFOLDED_CIRCLE_API_KEY".to_string(),
-        ],
-        env_username: Some("UCR_CORE_USER".to_string()),
-        headers: vec![],
-        endpoints,
-        module_path: Some("unfolded_circle_core_rest".to_string()),
-        request_suffix: Some("CoreRestRequest".to_string()),
-        version: None,
-        env_mapping: Some(EnvMapping {
+        ])
+            .env_username("UCR_CORE_USER".to_string())
+            .env_mapping(EnvMapping {
             bearer_token: Some(EnvList::from_strs(&[
                 "UCR_CORE_API_KEY",
                 "UNFOLDED_CIRCLE_API_KEY",
@@ -215,12 +126,13 @@ pub fn define_unfolded_circle_core_rest_api() -> RestApi {
             basic_pass: Some(EnvList::single("UCR_CORE_PASSWORD")),
             api_key: None,
             ..Default::default()
-        }),
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: None,
-        pagination_exceptions: vec![],
+        })
+            .docs_url("https://unfoldedcircle.github.io/core-api/rest/".to_string())
+            .module_path("unfolded_circle_core_rest".to_string())
+            .request_suffix("CoreRestRequest".to_string())
+            .cross_origin(CrossOrigin::same_origin())
+            .endpoints(endpoints)
+            .build()
     }
 }
 
@@ -353,12 +265,26 @@ mod tests {
         assert!(
             api.endpoints
                 .iter()
-                .any(|ep| matches!(ep.response, ApiResponse::Binary))
+                .any(|ep| matches!(ep.response[0].shape, ResponseShape::Binary))
         );
         assert!(
             api.endpoints
                 .iter()
-                .any(|ep| matches!(ep.response, ApiResponse::Text))
+                .any(|ep| matches!(ep.response[0].shape, ResponseShape::Text))
         );
     }
+    #[test]
+    fn typed_module_group_preserves_endpoint_order_and_inline_components() {
+        let group = module_group().unwrap();
+        let ids = |api: &RestApi| api.endpoints.iter().map(|ep| ep.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&group[0]), ["Login", "Logout", "GetSystemInfo", "ExportBackup", "RestoreBackup", "UploadResource", "GetResource", "InstallCustomIntegration", "UploadCustomIrCodeSet", "InstallCustomComponent", "QueryLogsText"]);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
+        }
+        for name in ["BackupRestoreReportItems", "ResourceItems"] {
+            assert!(group[0].component(name).is_none(), "container component {name} must be inline");
+        }
+    }
+
 }

@@ -7,6 +7,7 @@
 | `xx_hash` | Yes | `xxhash-rust` | XXH64 for content hashing |
 | `blake3` | No | `blake3` | Cryptographic hashing |
 | `argon2id` | No | `argon2`, `rand`, `thiserror` | Password hashing |
+| `json` | No | `serde`, `serde_json` | Canonical JSON rendering and hashing |
 
 ## xxHash API (default feature)
 
@@ -233,6 +234,20 @@ let hash1 = hash_password("same").unwrap();
 let hash2 = hash_password("same").unwrap();
 assert_ne!(hash1, hash2); // Different due to random salt
 ```
+
+## Canonical JSON API (requires `json` feature)
+
+| Function | Extra feature | Returns |
+|---|---|---|
+| `canonical_json(&Value)` | none | compact JSON `String`, object keys sorted at every depth, arrays in order |
+| `xx_hash_json(&Value)` | `xx_hash` | `u64` = `xx_hash_bytes` of the canonical bytes |
+| `blake3_hash_json(&Value)` | `blake3` | hex `String` = `blake3_hash` of the canonical bytes |
+
+- infallible; never mutates or reorders its input
+- output equals `serde_json::to_string` when objects are already sorted
+- independent of serde_json's `preserve_order`; the crate's own tests turn that
+  feature on (dev-dependency only) to prove it
+- full rules: `biscuit-hash/docs/json.md`
 
 ## Testing
 

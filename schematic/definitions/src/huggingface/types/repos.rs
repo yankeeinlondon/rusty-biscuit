@@ -25,6 +25,13 @@ pub struct CreateRepoBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub variables: Option<Vec<SpaceVariable>>,
 }
+impl schematic_define::Registration for CreateRepoBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CreateRepoBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SpaceSecret {
@@ -59,6 +66,13 @@ pub struct DeleteRepoBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub organization: Option<String>,
 }
+impl schematic_define::Registration for DeleteRepoBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("DeleteRepoBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MoveRepoBody {
@@ -69,6 +83,13 @@ pub struct MoveRepoBody {
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub repo_type: Option<RepoType>,
 }
+impl schematic_define::Registration for MoveRepoBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("MoveRepoBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateRepoSettingsBody {
@@ -77,6 +98,13 @@ pub struct UpdateRepoSettingsBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub private: Option<bool>,
 }
+impl schematic_define::Registration for UpdateRepoSettingsBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("UpdateRepoSettingsBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct UpdateSpaceSettingsRequest {

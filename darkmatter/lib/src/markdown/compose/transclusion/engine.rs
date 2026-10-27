@@ -1613,7 +1613,7 @@ impl<'a> TransclusionEngine<'a> {
                 let replaced = if effective_map.is_empty() {
                     raw
                 } else {
-                    let mut frontmatter = HashMap::new();
+                    let mut frontmatter = Map::new();
                     frontmatter.insert("replace".to_string(), Value::Object(effective_map.clone()));
                     let temp_state = EffectiveStateBuilder::new()
                         .with_frontmatter(frontmatter)

@@ -26,10 +26,11 @@ pub use device_manager::{
 };
 pub use discovery::{DeviceDiscovery, bounded_scan, build_candidate_list, local_ipv4_candidates};
 pub use envelope::{
-    EnvelopeError, IntegrationRequest, RequestEnvelope, available_entities_response,
-    device_state_event, driver_metadata_response, driver_version_response, entity_change_event,
-    entity_states_response, envelope_kind, envelope_message_name, remote_setup_abort_error,
-    result_response,
+    EnvelopeError, IntegrationRequest, RequestEnvelope, authentication_greeting,
+    authentication_response, available_entities_response, client_message_value, device_state_event,
+    driver_metadata_response, driver_version_response, entity_change_event, entity_states_response,
+    envelope_kind, envelope_message_name, remote_setup_abort_error, result_response,
+    server_message,
 };
 pub use persistent_registry::PersistentRegistry;
 pub use registry::{

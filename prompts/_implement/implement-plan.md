@@ -14,7 +14,7 @@ $schema:
 yolo: true
 commit_message: ""
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
-phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
+phase: "{{ file_exists(plan) ? frontmatter(plan, 'phase') || frontmatter(plan, 'start_phase') || 1 : null }}"
 area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
 pass_icon: "{{ loop.is_last ? '✅' : '🧑‍💻' }}"
 total_phases: |-
@@ -33,47 +33,47 @@ spec: |-
     }}
 # The implementation's log file
 log: "{{ dirname(spec || plan) + '/implementation-log.md' }}"
+# `depends_on` entries are `{date}-{name}` directories beside the spec or under
+# its `_completed/` folder. The expression language has no list iteration, so
+# the first three are checked explicitly; a longer list only warns.
+dependency_dir: "{{ spec ? dirname(dirname(spec)) : null }}"
+dependencies: "{{ spec ? frontmatter(spec, 'depends_on') || [] : [] }}"
+dependency_0: "{{ length(dependencies) > 0 ? (file_exists(dependency_dir + '/' + dependencies[0] + '/spec.md') ? dependency_dir + '/' + dependencies[0] + '/spec.md' : file_exists(dependency_dir + '/_completed/' + dependencies[0] + '/spec.md') ? dependency_dir + '/_completed/' + dependencies[0] + '/spec.md' : null) : null }}"
+dependency_1: "{{ length(dependencies) > 1 ? (file_exists(dependency_dir + '/' + dependencies[1] + '/spec.md') ? dependency_dir + '/' + dependencies[1] + '/spec.md' : file_exists(dependency_dir + '/_completed/' + dependencies[1] + '/spec.md') ? dependency_dir + '/_completed/' + dependencies[1] + '/spec.md' : null) : null }}"
+dependency_2: "{{ length(dependencies) > 2 ? (file_exists(dependency_dir + '/' + dependencies[2] + '/spec.md') ? dependency_dir + '/' + dependencies[2] + '/spec.md' : file_exists(dependency_dir + '/_completed/' + dependencies[2] + '/spec.md') ? dependency_dir + '/_completed/' + dependencies[2] + '/spec.md' : null) : null }}"
+unimplemented_dependencies: "{{ (dependency_0 && frontmatter(dependency_0, 'implemented') != true ? '- `' + dependencies[0] + '`\n' : '') + (dependency_1 && frontmatter(dependency_1, 'implemented') != true ? '- `' + dependencies[1] + '`\n' : '') + (dependency_2 && frontmatter(dependency_2, 'implemented') != true ? '- `' + dependencies[2] + '`\n' : '') }}"
 initialize:
+    # A spec built on unimplemented work would stop at its own prerequisite
+    # gate only after a full Phase 1; refuse before launching an agent.
+    - when: "unimplemented_dependencies"
+      then:
+          - message: |-
+                ⏸️  `{{parent_dir(spec)}}` depends on work that is not implemented yet:
+
+                {{unimplemented_dependencies}}
+          - error: "the spec {{spec}} lists `depends_on` entries that are not `implemented: true`; implement them first"
+    - when: "length(dependencies) > 3"
+      then:
+          - warn: "`{{parent_dir(spec)}}` lists {{length(dependencies)}} dependencies; only the first three were checked for `implemented: true`"
+    # Fail before Phase 1 rather than discover the open rulings an hour into it.
+    - when: "spec && frontmatter(spec, 'needs_rulings') == true"
+      then:
+          - message: |-
+                ⏸️  `{{parent_dir(spec)}}` still needs rulings before it can be implemented:
+
+                {{ as_ordered_list(frontmatter(spec, 'required_rulings') || []) }}
+          - error: "the spec {{spec}} sets `needs_rulings: true`; record the rulings (or set `needs_rulings: false`) before running the implementation"
     - ensure_file: "{{log}}"
     - when: "!total_phases || total_phases <= 0"
       then:
           - warn: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
           - message: "The plan `{{plan}}` does not provide metedata on how many _phases_ the plan has!"
           - error: "for a plan to be implemented using the **implement-plan** prompt, you need to ensure the plan ({{plan}}) has set either `total_phases` or `phases` Frontmatter property!"
-    # Decisions that need the author are settled before any phase runs, so a
-    # spec, plan, or paused log still waiting on one fails here, not after a
-    # phase has spent its work. The `message` stays short for chat routes; the
-    # full items go to the terminal.
-    - when: "spec && (frontmatter(spec, 'human_review') == true || frontmatter(spec, 'needs_rulings') == true)"
+    - when: "total_phases && phase > total_phases"
       then:
-          - message: "🤷  cannot implement `{{parent_dir(plan)}}`: its spec has **{{ length(frontmatter(spec, 'human_review_items') || frontmatter(spec, 'required_rulings') || []) }}** decision(s) waiting on the author"
-          - warn: |-
-                The spec {{link(spec)}} has decisions that need the author before it can be implemented:
+          - message: "every phase of `{{parent_dir(plan)}}` is already implemented (`phase` is {{phase}} of {{total_phases}})"
+          - error: "nothing to implement: the plan ({{plan}}) records `phase: {{phase}}`, past its last phase ({{total_phases}})"
 
-                {{ as_ordered_list(frontmatter(spec, 'human_review_items') || frontmatter(spec, 'required_rulings') || []) }}
-
-                Settle them (for example with the **clarify** prompt), record them in the spec, set its `human_review` and `needs_rulings` to `false`, and run the implement prompt again.
-          - error: "`{{parent_dir(plan)}}` cannot be implemented until the author settles its spec's open decisions"
-    - when: "file_exists(plan) && frontmatter(plan, 'human_review') == true"
-      then:
-          - message: "🤷  cannot implement `{{parent_dir(plan)}}`: its plan has **{{ length(frontmatter(plan, 'human_review_items') || []) }}** decision(s) waiting on the author"
-          - warn: |-
-                The plan {{link(plan)}} has decisions that need the author before it can be implemented:
-
-                {{ as_ordered_list(frontmatter(plan, 'human_review_items') || []) }}
-
-                Record your decisions in the plan's `### Decisions`, set its `human_review` to `false`, and run the implement prompt again.
-          - error: "`{{parent_dir(plan)}}` cannot be implemented until the author settles its plan's open decisions"
-    - when: "file_exists(log) && frontmatter(log, 'human_review') == true"
-      then:
-          - message: "🤷  cannot resume `{{parent_dir(plan)}}`: an earlier phase paused for **{{ length(frontmatter(log, 'human_review_items') || []) }}** decision(s) that are still waiting on the author"
-          - warn: |-
-                An earlier phase of {{link(plan)}} paused for decisions that are still waiting on the author:
-
-                {{ as_ordered_list(frontmatter(log, 'human_review_items') || []) }}
-
-                Record your decisions in {{link(log)}}, set its `human_review` to `false`, and run the implement prompt again.
-          - error: "`{{parent_dir(plan)}}` cannot resume until the author settles the decisions an earlier phase paused for"
 start:
     - message: "🎬  implementing phase **#{{phase}}** of `{{parent_dir(plan)}}` (**area:** {{ ctx.area || ctx.repo }}, **agent:** {{ctx.agent}}/{{ctx.model}})"
     # `start` (not `initialize`) because a loop re-enters each phase here; the
@@ -95,6 +95,10 @@ success:
       then:
         - warn: "the final phase of `{{parent_dir(plan)}}` finished without setting `implemented: true` on the plan and spec; check the log before treating it as complete"
         - message: "⚠️  final phase of `{{parent_dir(plan)}}` finished without `implemented: true` on the plan and spec; check the log before treating it as complete"
+    # Persisted before the commit so a rerun resumes after this phase; the
+    # loop's counter lives only in memory. Not a `shell` action: those resolve
+    # at pre-flight from the plan on disk, not this iteration's `phase`.
+    - set_frontmatter: ["{{plan}}", "phase", "{{phase + 1}}"]
     - when: "ctx.dirty_files && !commit_message"
       then:
         - message: |-
@@ -124,24 +128,6 @@ failure:
 loop:
     until: "phase >= total_phases"
     action: "increment(phase)"
-    # A phase that hit a surprise it could not decide pauses the plan (rare by
-    # design; see the prompt's "Handoff to the Next Phase"). The non-zero code
-    # stops a chained `&& just fix`, which would otherwise only report that
-    # the spec is not implemented. The `message` stays short for chat routes.
-    gate:
-        - when: "frontmatter(log, 'human_review') == true"
-          then:
-              - warn: |-
-                    implementation of `{{parent_dir(plan)}}` **paused after phase {{phase}}** (_of {{total_phases}}_): the agent found something during the implementation that needs a human decision before the next phase can start. Review items:
-
-                    {{ as_ordered_list(frontmatter(log, 'human_review_items') || []) }}
-
-                    Record your decisions in {{link(log)}}, set its `human_review` to `false`, and run the implement prompt again.
-              - message: "🤷  implementation of `{{parent_dir(plan)}}` paused after phase **{{phase}}** (_of {{total_phases}}_) for **{{ length(frontmatter(log, 'human_review_items') || []) }}** human decision(s) ({{area}}, {{ctx.agent}}/{{ctx.model}}); see `human_review_items` in its implementation log"
-              - say: "The plan in the {{area}} {{ctx.area_description}} paused after phase {{phase}} and needs your review"
-              - break:
-                    reason: "phase {{phase}} of {{total_phases}} requires human review before the plan can continue"
-                    code: 2
 ---
 ::block when="total_phases"
 # Implement Phase {{phase}} of {{total_phases}}
@@ -200,14 +186,6 @@ The agent that implemented the previous phase left this message for you:
 
 {{file_exists(log) ? frontmatter(log, 'message_to_agent') : null}}
 ::end-block
-
-::file "../_decisions.md"
-
-This phase's decisions go in the log under `## Phase {{phase}}` → `### Design Decisions`.
-The spec, the plan's `### Decisions`, and any decision files the plan points to
-were settled before this implementation started: implement their
-recommendations as written, even where a file still describes them as
-"pending" or "needing a ruling".
 
 ## Test Design Requirements
 
@@ -299,18 +277,34 @@ earlier phase is committed when it succeeds.
         ::end-block
     ::end-block
 
+### Decisions Are Yours; the Human Reviews After Implementation
+
+There is **no human in the loop between phases**. Every phase runs straight
+into the next, and a human first looks at this work in the review that follows
+the final phase. Never stop, pause, or wait for a sign-off, approval, or
+ruling, even if the plan calls a step a "human gate" or a "sign-off": produce
+the artifact, keep going, and let the review pick it up.
+
+- when you meet a choice the plan does not settle, or find the plan or spec is
+  wrong, choose the best option yourself, implement it, and keep going
+- record each such choice by appending an item to the `decisions_for_review`
+  list on the implementation log ({{log}}); keep the items earlier phases
+  added. The first review reads this list. Each item is a YAML `|-` block,
+  written without repo jargon, that states:
+    - what you decided and what the plan or spec said
+    - the alternatives and their trade-offs
+    - what would need redoing if the reviewer picks another option
+- if later work depends on a decision a human might reverse, build it on your
+  decision anyway; redoing it after review costs less than a stalled run
+- the only reason to stop is that the phase **cannot be completed at all**
+  (for example, a required credential or host is unavailable). Then fail the
+  phase: say exactly what is blocked in your final output and in the log, and
+  exit with an error, so the pipeline does not treat the run as finished
+
 ### Handoff to the Next Phase
 
-Set these properties on the implementation log ({{log}}), never on the spec or plan:
+Set this property on the implementation log ({{log}}), never on the spec or plan:
 
-- set `human_review` to `false`, except in the rare case below
-- set `human_review` to `true` **only** when this phase uncovered a fact nobody knew when the spec and plan were written (for example, an assumption the plan depends on is false in the code), that fact meets the bar in "When a human is needed", and the next phase cannot proceed on any recommendation you can make
-    - an ambiguity, a criterion that cannot be met literally, a recommendation already in the spec or plan, or a choice between reasonable options is **not** a reason: decide it and record it
-    - when you set it, also set `human_review_items`: one YAML `|-` block per item, written without jargon for a reader who does not know this repo, giving what you found, why the next phase cannot proceed without a decision, the options with pros and cons, and your recommendation
-    - the plan pauses after this phase, and its next run refuses to start until the author clears the flag
-::block when="phase == total_phases"
-    - this is the final phase, so do not use `human_review` here; a critical decision found now goes in `decisions_for_author` (see "Pipeline Refresh and Critical Decisions" below)
-::end-block
 - if something happened during the implementation that you think is important to know for the agent who will implement the next phase then set the `message_to_agent` property with that message and it will be passed to the agent; be sure you've provided enough context that what you're communicating is clear.
     - `message_to_agent` holds only your message: replace any message left by an earlier phase, and remove the property if you have nothing to pass on
 
@@ -343,32 +337,6 @@ and before your final summary, set these Frontmatter properties:
 
 The pipeline reads these flags to decide what runs next, so the plan is not
 complete until they are saved to disk.
-
-### Pipeline Refresh and Critical Decisions
-
-This implementation may be one step in a pipeline of changes: the spec has a
-`pipeline_step` frontmatter property, or another active spec (one not under
-`_completed` or `_unscheduled`) names this spec's `{date}-{name}` in its
-`depends-on`. The specs and plans later in that pipeline were written before
-this implementation, so check them against what you now know:
-
-- find the downstream specs: those with a higher `pipeline_step` (the pipeline's order is also listed in the document the spec's `pipeline_step` description names), and those whose `depends-on` names this spec; skip any already `implemented: true`
-- read each downstream spec and its plan (when it has one) against this implementation: the code as it now is, the decisions in {{log}}, and anything that turned out differently from what those documents assume
-- update them directly; you do not need anyone's approval. Correct wrong facts, symbol names, and file paths; adopt the approach this implementation established; remove work this implementation already delivered; and record new decisions they now need, following "Design Decisions" above
-    - in a plan that has started, change only phases that have not started
-    - never drop or narrow an outcome a downstream spec asks for
-    - add a short entry to each changed document's decisions section that names this spec by its `{date}-{name}` and says what changed and why
-- record the result in {{log}} under `## Pipeline Refresh`, one line per downstream spec (changed and why, or checked and unchanged), and set the log's `pipeline_refreshed` frontmatter to the `{date}-{name}` of every spec or plan you changed (an empty list when none)
-- if this spec is not part of a pipeline, write that in one line under `## Pipeline Refresh` and set `pipeline_refreshed` to `[]`
-
-A **critical** decision, in this implementation or in a downstream spec that
-this implementation's facts now force, meets the bar in "When a human is
-needed". It is rare. List each one in the log's `decisions_for_author`
-frontmatter (one YAML `|-` block per item, written without jargon, with the
-options, pros and cons, and your recommendation), and still finish the phase
-and the refresh using your recommendation. The first review of this
-implementation reads that list and opens an interactive session with the
-author to settle it. Set `decisions_for_author` to `[]` when there are none.
 ::end-block
 
 **IMPORTANT:** 

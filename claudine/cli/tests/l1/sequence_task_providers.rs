@@ -105,32 +105,36 @@ fn tasks_name_their_providers_in_a_looping_sequence_with_no_document_agent() {
     assert_eq!(run.stderr.matches("step 2/2 succeeded (via Claude)").count(), 2, "stderr:\n{}", run.stderr);
 }
 
-const PROVIDER_PRECEDENCE_FILES: &[(&str, &str)] = &[
-    ("plain.md", "Token PLAIN.\n"),
-    ("nested/inner.md", "---\nagent: goose\nsequence:\n  - name: deep\n    prompt: ../plain.md\n---\n"),
-    (
-        "seq.md",
-        "---\nagent: claude\nsequence:\n  - name: first\n    prompt: plain.md\n    with:\n      agent: goose\n  - name: outer\n    prompt: plain.md\n  - name: inner\n    sequence: nested/inner.md\n---\n",
-    ),
-];
+/// Acceptance 5, the caller row: a caller setter `agent` outranks a task's
+/// `with.agent`, and a nested file-reference sequence's own `agent` applies
+/// to its tasks ahead of the root's.
+mod a_caller_agent_outranks_with_and_a_nested_sequence_agent_applies_to_its_tasks {
+    use super::*;
 
-/// Task overlays and nested sequence defaults take precedence over the root agent.
-#[test]
-fn task_and_nested_sequence_agents_apply_ahead_of_the_root() {
-    let files = PROVIDER_PRECEDENCE_FILES;
-    let (fixture, record) = stage("seq-task-providers-precedence", files, &["claude", "goose"]);
-    let plain = run(&fixture, &record, &[]);
-    assert_eq!(plain.code, Some(0), "stderr:\n{}", plain.stderr);
-    assert_eq!(binaries(&plain), ["goose", "claude", "goose"], "stderr:\n{}", plain.stderr);
-}
+    const FILES: &[(&str, &str)] = &[
+        ("plain.md", "Token PLAIN.\n"),
+        ("nested/inner.md", "---\nagent: goose\nsequence:\n  - name: deep\n    prompt: ../plain.md\n---\n"),
+        (
+            "seq.md",
+            "---\nagent: claude\nsequence:\n  - name: first\n    prompt: plain.md\n    with:\n      agent: goose\n  - name: outer\n    prompt: plain.md\n  - name: inner\n    sequence: nested/inner.md\n---\n",
+        ),
+    ];
 
-#[test]
-fn a_caller_agent_outranks_with_for_nested_sequence_tasks() {
-    let files = PROVIDER_PRECEDENCE_FILES;
-    let (fixture, record) = stage("seq-task-providers-caller", files, &["claude", "goose"]);
-    let caller = run(&fixture, &record, &["--set", r#"{"agent":"claude"}"#]);
-    assert_eq!(caller.code, Some(0), "stderr:\n{}", caller.stderr);
-    assert_eq!(binaries(&caller), ["claude", "claude", "claude"], "stderr:\n{}", caller.stderr);
+    #[test]
+    fn without_a_caller_agent() {
+        let (fixture, record) = stage("seq-task-providers-precedence", FILES, &["claude", "goose"]);
+        let plain = run(&fixture, &record, &[]);
+        assert_eq!(plain.code, Some(0), "stderr:\n{}", plain.stderr);
+        assert_eq!(binaries(&plain), ["goose", "claude", "goose"], "stderr:\n{}", plain.stderr);
+    }
+
+    #[test]
+    fn with_a_caller_agent() {
+        let (fixture, record) = stage("seq-task-providers-caller", FILES, &["claude", "goose"]);
+        let caller = run(&fixture, &record, &["--set", r#"{"agent":"claude"}"#]);
+        assert_eq!(caller.code, Some(0), "stderr:\n{}", caller.stderr);
+        assert_eq!(binaries(&caller), ["claude", "claude", "claude"], "stderr:\n{}", caller.stderr);
+    }
 }
 
 /// Acceptance 5, model rows: switching provider drops the sequence's model,

@@ -1,18 +1,24 @@
-//! `wt remove` stopping after the checkout moved, and the retry by the
+//! `wt remove` interrupted or raced by another process, and the retry by the
 //! original name, through the real binary.
 //!
 //! A controlled writer is a `git` shim first on `wt`'s `PATH`: it runs the
 //! real Git, then, once, writes where a stray process would. The shim fires
-//! on a Git call the removal makes after the move, so the write reaches the
-//! deletion race rather than the preflight usage check. `wt` would read that
-//! call's answer (the worktree listing) in-process, so every run here sets
-//! `worktree::git::TEST_LIST_THROUGH_GIT_VAR` to make it a Git call again. Unix only: on Windows
-//! `wt` resolves `git.exe`, so a script cannot stand in; the library's
-//! lifecycle tests cover the same stops on every OS.
+//! on a chosen Git call. In a first removal those calls are, in order: the
+//! question's `git status` in the checkout, the branch checks, the
+//! lifecycle's `git worktree list` calls around the move, its last `git
+//! status` in the moved checkout just before deletion (R14), then `git
+//! worktree remove` and the branch deletion. Deletion itself runs in
+//! process, so a write fired at that last `git status` reaches the moved
+//! checkout before deletion starts. `wt` would read the worktree listings
+//! in-process, so every run here sets
+//! `worktree::git::TEST_LIST_THROUGH_GIT_VAR` to make them Git calls again.
+//! Unix only: on Windows `wt` resolves `git.exe`, so a script cannot stand
+//! in; the library's lifecycle tests cover the same cases on every OS.
 //!
 //! The same shim delivers `SIGINT` to `wt` (its parent) at a chosen Git call
-//! and then waits until `wt` acknowledges it on stderr, so the interrupt is
-//! known to have arrived before the removal goes on: no timing is assumed.
+//! and then waits until `wt` acknowledges it on stderr (or has exited), so
+//! the interrupt is known to have arrived before the removal goes on: no
+//! timing is assumed.
 //!
 //! Every run has stdin redirected and `CI`/`WT_SHELL_WRAPPER` removed, so it
 //! is non-interactive and wrapper-less, and sets `NO_COLOR`.
@@ -114,10 +120,12 @@ impl Fixture {
 
     /// A `git` shim in `bin_name` that, the first time `when` holds after a
     /// Git call, sends `SIGINT` to `wt` and waits (at most 10 s) until `wt`'s
-    /// stderr acknowledges it. Returns the `PATH` to run `wt` with.
+    /// stderr acknowledges it or `wt` has exited (an interrupt before `wt`
+    /// handles them ends it). Returns the `PATH` to run `wt` with.
     fn interrupter(&self, bin_name: &str, when: &str) -> String {
         let acknowledge = format!(
-            "kill -INT $PPID; i=0; until grep -q 'Interrupted: stopping' '{}' || [ $i -ge 1000 ]; do sleep 0.01; i=$((i+1)); done",
+            "kill -INT $PPID; i=0; until grep -q 'Interrupted: stopping' '{}' || ! kill -0 $PPID 2>/dev/null || [ $i -ge 1000 ]; \
+            do sleep 0.01; i=$((i+1)); done",
             self.stderr_file().display()
         );
         self.shim(bin_name, when, &acknowledge)
@@ -175,10 +183,12 @@ impl Fixture {
         git(&self.repo(), &["worktree", "list", "--porcelain"])
     }
 
-    /// Operation directories that still hold a journal: pending removals.
+    /// Saved operations in the removal store: pending removals. The store's
+    /// `locks` directory is not one.
     fn pending(&self) -> usize {
-        let Ok(entries) = fs::read_dir(self.repo().join(".git").join("wt-removal")) else { return 0 };
-        entries.filter_map(Result::ok).filter(|entry| entry.path().join("journal.jsonl").exists()).count()
+        let store = self.repo().join(".git").join(worktree::remove::recovery::store::STORE_DIR);
+        let Ok(entries) = fs::read_dir(store) else { return 0 };
+        entries.filter_map(Result::ok).filter(|entry| entry.file_name() != "locks").count()
     }
 }
 
@@ -186,46 +196,44 @@ fn stderr_of(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-/// The saved report a stop names on its `Full report:` line, parsed.
-fn saved_report(stderr: &str) -> serde_json::Value {
-    let path = stderr
-        .lines()
-        .find_map(|line| line.strip_prefix("Full report: "))
-        .unwrap_or_else(|| panic!("no Full report line in {stderr}"));
-    serde_json::from_str(&fs::read_to_string(path.trim()).unwrap()).unwrap()
+/// The shell condition "this Git call is the lifecycle's last `git status`,
+/// in the moved checkout": after the move, just before deletion.
+const STATUS_BEFORE_DELETION: &str = r#"case "$*" in *"/.wt-remove-"*" status "*) true;; *) false;; esac"#;
+
+/// The shell condition "this Git call is the first branch check": after the
+/// question's `git status`, before the report is printed and before `wt`
+/// handles interrupts.
+const BRANCH_CHECK: &str = r#"case "$*" in *" for-each-ref "*) true;; *) false;; esac"#;
+
+/// The shell condition "this Git call is the lifecycle's first worktree
+/// listing": after the report and the decision, before the move. `wt`'s own
+/// listing of the name runs from the base without `-C`.
+const LIFECYCLE_LISTING: &str = r#"case "$*" in "-C "*" worktree list --porcelain") true;; *) false;; esac"#;
+
+/// Text that never appears in a normal removal's output (R19, R26).
+fn assert_no_technical_output(stderr: &str) {
+    for technical in [".wt-remove-", "Retry:", "report.json", "Full report", "journal", "watch"] {
+        assert!(!stderr.contains(technical), "{technical:?} in {stderr}");
+    }
 }
 
-/// The shell condition "the checkout has been moved aside": a hidden
-/// `.wt-remove-*` sibling exists.
-fn moved_condition(wts: &Path) -> String {
-    format!("ls -d '{}'/.wt-remove-* >/dev/null 2>&1", wts.display())
-}
-
-/// The shell condition "this Git call reads an index for the lifecycle's
-/// binding": the last Git call before the move in a first removal, and
-/// before deletion in a retry. Nothing outside the lifecycle runs it.
-const BINDING_CALL: &str = r#"case "$*" in *"ls-files --stage --debug"*) true;; *) false;; esac"#;
-
-/// Ctrl-C after the checkout moved: `wt` is not killed. It stops at the next
-/// entry boundary with exit 1, prints the stopped report with its saved
-/// report and retry guidance, and keeps the moved checkout and the branch. A
-/// retry by the original name finishes the removal.
+/// Ctrl-C after the checkout moved: `wt` is not killed. Deletion sees the
+/// interrupt before its first entry, so the run ends with exit 1 and one
+/// plain sentence, keeping the moved checkout, its record, and the branch. A
+/// retry by the original name finishes it silently with the earlier
+/// approval (R19).
 #[test]
-fn an_interrupt_after_the_move_stops_with_a_report_and_a_retry_finishes() {
+fn an_interrupt_after_the_move_cancels_and_a_retry_by_name_finishes_silently() {
     let (fixture, wt) = Fixture::new("feat/x", "feat-x");
-    let path = fixture.interrupter("bin", &moved_condition(&fixture.wts()));
+    let path = fixture.interrupter("bin", STATUS_BEFORE_DELETION);
 
     let (status, stderr) = fixture.remove_to_file(&["feat-x"], &path);
 
     assert_eq!(status.signal(), None, "not killed by the signal: {stderr}");
     assert_eq!(status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("Interrupted: stopping at the next safe point"), "{stderr}");
-    assert!(stderr.contains("Removal stopped:") && stderr.contains("the removal was interrupted"), "{stderr}");
-    assert!(stderr.contains("Moved to: ") && stderr.contains("Remaining: "), "{stderr}");
-    assert!(stderr.contains("Branch feat/x: kept"), "{stderr}");
-    assert!(stderr.contains("Retry: wt remove feat-x"), "{stderr}");
-    let report = saved_report(&stderr);
-    assert_eq!(report["outcome"], "cleanup_failed", "{report}");
+    assert!(stderr.contains("The removal was cancelled; run wt remove again to finish it."), "{stderr}");
+    assert_no_technical_output(&stderr);
     let quarantine = fixture.quarantine().expect("the moved checkout is kept");
     assert_eq!(fs::read_to_string(quarantine.join("README.md")).unwrap(), "readme\n", "remaining content is kept");
     assert!(!wt.exists());
@@ -233,177 +241,188 @@ fn an_interrupt_after_the_move_stops_with_a_report_and_a_retry_finishes() {
     assert_eq!(fixture.pending(), 1);
 
     let finished = fixture.remove(&["feat-x"], None);
+
     let stderr = stderr_of(&finished);
     assert_eq!(finished.status.code(), Some(0), "{stderr}");
-    assert!(stderr.contains("Continuing an earlier removal of feat-x"), "{stderr}");
-    assert!(stderr.contains("Removed worktree feat-x"), "{stderr}");
+    assert!(stderr.contains("Removed feat-x (") && stderr.contains(" and deleted branch feat/x."), "{stderr}");
+    assert!(!stderr.contains("Delete it?") && !stderr.contains("--force"), "asks nothing: {stderr}");
+    assert_no_technical_output(&stderr);
+    assert!(finished.stdout.is_empty());
     assert!(!quarantine.exists());
+    assert!(!fixture.listed().contains("feat-x"), "{}", fixture.listed());
     assert!(!fixture.branch_exists("feat/x"));
-    assert_eq!(fixture.pending(), 0);
+    assert_eq!(fixture.pending(), 0, "completion leaves no record");
 }
 
-/// Ctrl-C during a retry of a moved checkout stops it the same way, and the
-/// next retry finishes.
+/// The shell condition "this Git call is the lifecycle's `git worktree
+/// unlock`": after the approval is saved, before anything is deleted.
+const UNLOCK: &str = r#"case "$*" in *" worktree unlock "*) true;; *) false;; esac"#;
+
+/// R9 and R19 for a link to the worktree's own checkout: its approval is
+/// saved like a checkout's, so Ctrl-C after the approved unlock keeps the
+/// link, its checkout, and the branch, and a retry by name finishes both
+/// without asking.
 #[test]
-fn an_interrupt_during_a_quarantine_retry_stops_with_a_report() {
-    let (fixture, _) = Fixture::new("feat/x", "feat-x");
-    let first = fixture.interrupter("bin", &moved_condition(&fixture.wts()));
-    assert_eq!(fixture.remove_to_file(&["feat-x"], &first).0.code(), Some(1));
-    let quarantine = fixture.quarantine().expect("the moved checkout is kept");
-    let retry = fixture.interrupter("bin-retry", BINDING_CALL);
+fn an_interrupted_own_link_removal_is_finished_by_a_retry_without_a_question() {
+    let (fixture, wt) = Fixture::new("feat/x", "feat-x");
+    git(&fixture.repo(), &["worktree", "lock", wt.to_str().unwrap()]);
+    let real = fixture.wts().join("real");
+    fs::rename(&wt, &real).unwrap();
+    std::os::unix::fs::symlink(&real, &wt).unwrap();
+    let path = fixture.interrupter("bin", UNLOCK);
 
-    let (status, stderr) = fixture.remove_to_file(&["feat-x"], &retry);
+    let (status, stderr) = fixture.remove_to_file(&["feat-x", "--force", "--force-branch"], &path);
 
-    assert_eq!(status.signal(), None, "not killed by the signal: {stderr}");
     assert_eq!(status.code(), Some(1), "{stderr}");
-    assert!(stderr.contains("Continuing an earlier removal of feat-x"), "{stderr}");
-    assert!(stderr.contains("Removal stopped:") && stderr.contains("the removal was interrupted"), "{stderr}");
-    assert!(stderr.contains("Full report: "), "{stderr}");
-    assert!(quarantine.join("README.md").is_file(), "remaining content is kept");
+    assert!(stderr.contains("The removal was cancelled; run wt remove again to finish it."), "{stderr}");
+    assert!(real.join("README.md").is_file(), "the checkout is kept");
+    assert!(fs::symlink_metadata(&wt).unwrap().file_type().is_symlink(), "the link is kept");
     assert!(fixture.branch_exists("feat/x"));
     assert_eq!(fixture.pending(), 1);
 
     let finished = fixture.remove(&["feat-x"], None);
-    assert_eq!(finished.status.code(), Some(0), "{}", stderr_of(&finished));
-    assert!(!quarantine.exists());
+
+    let stderr = stderr_of(&finished);
+    assert_eq!(finished.status.code(), Some(0), "{stderr}");
+    assert!(stderr.contains("Removed feat-x (") && stderr.contains("deleted branch feat/x"), "{stderr}");
+    assert!(!stderr.contains("Delete it?") && !stderr.contains("--force"), "asks nothing: {stderr}");
+    assert_no_technical_output(&stderr);
+    assert!(fs::symlink_metadata(&wt).is_err() && !real.exists(), "both are deleted");
+    assert!(!fixture.listed().contains("feat-x"), "{}", fixture.listed());
+    assert!(!fixture.branch_exists("feat/x"));
     assert_eq!(fixture.pending(), 0);
 }
 
-/// Ctrl-C before the move (here, while the lifecycle binds the index) stops
-/// with nothing moved and no pending removal: exit 1, the checkout and branch
-/// in place.
+/// An interrupted removal whose saved record has since become unreadable is
+/// explained by name, never resumed, and nothing more is deleted: the moved
+/// checkout, the record, and the branch stay as they were (exit 1).
 #[test]
-fn an_interrupt_before_the_move_removes_nothing() {
+fn an_unreadable_record_of_an_interrupted_removal_is_explained_and_nothing_is_deleted() {
+    use worktree::remove::recovery::store::{RECORD_FILE, STORE_DIR};
+
+    let (fixture, _wt) = Fixture::new("feat/x", "feat-x");
+    let path = fixture.interrupter("bin", STATUS_BEFORE_DELETION);
+    let (status, stderr) = fixture.remove_to_file(&["feat-x"], &path);
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    let quarantine = fixture.quarantine().expect("the moved checkout is kept");
+    let store = fixture.repo().join(".git").join(STORE_DIR);
+    let operation = fs::read_dir(&store).unwrap().filter_map(Result::ok).find(|entry| entry.file_name() != "locks").unwrap();
+    let record = operation.path().join(RECORD_FILE);
+    fs::write(&record, b"{\"record_version\": 2,").unwrap();
+
+    let output = fixture.remove(&["feat-x"], None);
+
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("Nothing was removed. The record of an earlier removal could not be read"), "{stderr}");
+    assert!(stderr.contains(&*operation.file_name().to_string_lossy()) && stderr.contains("malformed"), "{stderr}");
+    assert!(!stderr.contains("Delete it?") && !stderr.contains("not found"), "{stderr}");
+    assert!(output.stdout.is_empty());
+    assert_eq!(fs::read_to_string(quarantine.join("README.md")).unwrap(), "readme\n", "nothing more is deleted");
+    assert_eq!(fs::read(&record).unwrap(), b"{\"record_version\": 2,", "the record is kept as it was");
+    assert!(fixture.branch_exists("feat/x"));
+}
+
+/// Ctrl-C before `wt` starts removing (here, during the branch checks that
+/// precede the report) keeps the platform default: `wt` ends by the signal
+/// and nothing is saved, moved, or deleted.
+#[test]
+fn an_interrupt_before_the_removal_starts_ends_wt_and_changes_nothing() {
     let (fixture, wt) = Fixture::new("feat/x", "feat-x");
-    let path = fixture.interrupter("bin", BINDING_CALL);
+    let path = fixture.interrupter("bin", BRANCH_CHECK);
 
     let (status, stderr) = fixture.remove_to_file(&["feat-x"], &path);
 
-    assert_eq!(status.signal(), None, "not killed by the signal: {stderr}");
-    assert_eq!(status.code(), Some(1), "{stderr}");
-    assert!(stderr.contains("Nothing was removed."), "{stderr}");
-    assert!(stderr.contains("interrupted before it changed anything"), "{stderr}");
+    assert_eq!(status.signal(), Some(SIGINT), "ended by the signal: {status:?} {stderr}");
+    assert!(!stderr.contains("Removed"), "{stderr}");
     assert!(wt.join("README.md").is_file());
     assert!(fixture.quarantine().is_none());
+    assert!(fixture.listed().contains("feat-x"), "{}", fixture.listed());
     assert!(fixture.branch_exists("feat/x"));
     assert_eq!(fixture.pending(), 0);
 }
 
+/// `SIGINT`'s number, 2 on every Unix.
+const SIGINT: i32 = 2;
+
 /// A writer still using the checkout's old directory after the move (a
-/// retained working directory) writes into the moved checkout. Removal stops
-/// with exit 1 and both locations; the new file and the checkout's registration
-/// at the moved path are kept and no branch is touched. A retry by the
-/// original name finds the pending removal, lists the new file as work that
-/// needs fresh consent, and refuses without it; with `--force-worktree` it
-/// finishes the removal and the branch.
+/// retained working directory) writes into the moved checkout just before
+/// deletion. The file is deleted with the checkout (R20): no stop, exit 0,
+/// nothing left. It was written after the last `git status`, so the final
+/// line does not name it (R14 never claims to be complete).
 #[test]
-fn a_write_into_the_moved_checkout_stops_then_a_retry_needs_fresh_consent() {
+fn a_write_into_the_moved_checkout_just_before_deletion_is_deleted() {
     let (fixture, wt) = Fixture::new("feat/x", "feat-x");
     let path = fixture.writer(
-        &moved_condition(&fixture.wts()),
+        STATUS_BEFORE_DELETION,
         &format!("for q in '{}'/.wt-remove-*; do echo late > \"$q/new-work.txt\"; done", fixture.wts().display()),
     );
 
     let output = fixture.remove(&["feat-x"], Some(&path));
 
     let stderr = stderr_of(&output);
-    assert_eq!(output.status.code(), Some(1), "{stderr}");
-    assert!(output.stdout.is_empty(), "no protocol lines after a stop");
-    assert!(stderr.contains("Removal stopped:"), "{stderr}");
-    assert!(stderr.contains(&format!("Original: {}", fs::canonicalize(fixture.wts()).unwrap().join("feat-x").display()))
-        || stderr.contains(&format!("Original: {}", wt.display())), "{stderr}");
-    assert!(stderr.contains("Moved to: "), "{stderr}");
-    assert!(stderr.contains("Remaining: "), "{stderr}");
-    assert!(stderr.contains("Git registration: now points to the moved directory"), "{stderr}");
-    assert!(stderr.contains("Branch feat/x: kept"), "{stderr}");
-    assert!(stderr.contains("Stop any tasks using either path."), "{stderr}");
-    assert!(stderr.contains("Retry: wt remove feat-x"), "{stderr}");
-    let report = saved_report(&stderr);
-    assert_eq!(report["outcome"], "activity_detected", "{report}");
-    assert_eq!(report["registration"], "at_quarantine", "{report}");
-    let quarantine = fixture.quarantine().expect("the moved checkout is kept");
-    assert_eq!(fs::read_to_string(quarantine.join("new-work.txt")).unwrap(), "late\n");
-    assert!(!wt.exists(), "nothing is moved back");
-    assert!(fixture.branch_exists("feat/x"));
-    assert_eq!(fixture.pending(), 1);
-
-    // Without consent for the new file, the retry refuses and keeps it.
-    let refused = fixture.remove(&["feat-x"], None);
-    let stderr = stderr_of(&refused);
-    assert_eq!(refused.status.code(), Some(3), "{stderr}");
-    assert!(stderr.contains("Continuing an earlier removal of feat-x"), "{stderr}");
-    assert!(stderr.contains("new-work.txt"), "the new file is reported: {stderr}");
-    assert!(stderr.contains("Nothing was removed."), "{stderr}");
-    assert!(quarantine.join("new-work.txt").exists());
-    assert_eq!(fixture.pending(), 1);
-
-    let finished = fixture.remove(&["feat-x", "--force-worktree"], None);
-    let stderr = stderr_of(&finished);
-    assert_eq!(finished.status.code(), Some(0), "{stderr}");
-    assert!(stderr.contains("Removed worktree feat-x"), "{stderr}");
-    assert!(stderr.contains("Deleted branch feat/x"), "{stderr}");
-    assert!(finished.stdout.is_empty());
-    assert!(!quarantine.exists());
-    assert!(!fixture.listed().contains("feat/x"), "{}", fixture.listed());
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert!(output.stdout.is_empty());
+    assert!(stderr.contains("Removed feat-x (") && stderr.contains(" and deleted branch feat/x."), "{stderr}");
+    assert!(!stderr.contains("new-work.txt"), "{stderr}");
+    assert_no_technical_output(&stderr);
+    assert!(fs::read_dir(fixture.wts()).unwrap().next().is_none(), "nothing is left beside the worktree");
+    assert!(!wt.exists());
+    assert!(!fixture.listed().contains("feat-x"), "{}", fixture.listed());
     assert!(!fixture.branch_exists("feat/x"));
-    assert_eq!(fixture.pending(), 0, "completion closes the record");
+    assert_eq!(fixture.pending(), 0);
+}
+
+/// R14: a file created in the checkout after the question's `git status`
+/// (here at the lifecycle's first listing, after the report) is deleted with
+/// it, and the final line names it because the lifecycle's last `git status`
+/// lists it.
+#[test]
+fn a_file_created_after_the_report_is_deleted_and_named_in_the_final_line() {
+    let (fixture, wt) = Fixture::new("feat/x", "feat-x");
+    let path = fixture.writer(LIFECYCLE_LISTING, &format!("echo new > '{}'", wt.join("new.txt").display()));
+
+    let output = fixture.remove(&["feat-x"], Some(&path));
+
+    let stderr = stderr_of(&output);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert!(!stderr.contains("uncommitted file"), "the question did not show it: {stderr}");
+    assert!(
+        stderr.contains("Removed feat-x (") && stderr.contains("; also deleted 1 file changed after you answered: new.txt."),
+        "{stderr}"
+    );
+    assert!(!wt.exists());
+    assert!(fixture.quarantine().is_none());
+    assert!(!fixture.branch_exists("feat/x"));
+    assert_eq!(fixture.pending(), 0);
 }
 
 /// A process recreates the checkout's original path by absolute path right
-/// after the move. Removal stops with exit 1: the recreated content is never
-/// touched, the moved checkout is kept, and the branch is kept. A retry
-/// refuses (exit 3) while something is at the original path; once the user
-/// moves it away, the retry finishes the removal and the branch step.
+/// after the move. The recreated content is never touched; the moved
+/// checkout, its registration, and the branch are deleted, and the run says
+/// what it kept.
 #[test]
-fn recreation_at_the_original_path_stops_and_is_never_cleaned_up() {
+fn recreation_at_the_original_path_is_kept_and_the_moved_checkout_deleted() {
     let (fixture, wt) = Fixture::new("chore/refilled", "refilled");
     let leftover = wt.join("target").join("flycheck0");
     let path = fixture.writer(
-        &moved_condition(&fixture.wts()),
+        STATUS_BEFORE_DELETION,
         &format!("mkdir -p '{}' && echo built > '{}/x'", leftover.display(), leftover.display()),
     );
 
     let output = fixture.remove(&["refilled"], Some(&path));
 
     let stderr = stderr_of(&output);
-    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
     assert!(output.stdout.is_empty());
-    assert!(stderr.contains("Removal stopped:"), "{stderr}");
-    assert!(stderr.contains("(something new is here; it was not touched)"), "{stderr}");
-    assert!(stderr.contains("Moved to: "), "{stderr}");
-    assert!(stderr.contains("Branch chore/refilled: kept"), "{stderr}");
-    assert!(stderr.contains("Retry: wt remove refilled"), "{stderr}");
-    assert!(stderr.contains("Run it from the base checkout at "), "{stderr}");
-    let report = saved_report(&stderr);
-    assert_eq!(report["original_state"], "recreated", "{report}");
-    assert_eq!(fs::read_to_string(leftover.join("x")).unwrap(), "built\n");
-    let quarantine = fixture.quarantine().expect("the moved checkout is kept");
-    assert!(quarantine.join("README.md").exists());
-    assert!(fixture.branch_exists("chore/refilled"));
-    assert_eq!(fixture.pending(), 1);
-
-    let refused = fixture.remove(&["refilled", "--force-worktree", "--force-branch"], None);
-    let stderr = stderr_of(&refused);
-    assert_eq!(refused.status.code(), Some(3), "{stderr}");
-    assert!(stderr.contains("Can't continue the removal of"), "{stderr}");
-    assert!(stderr.contains("something new is at the worktree's original path"), "{stderr}");
-    assert!(stderr.contains("Nothing was deleted or repaired by this run."), "{stderr}");
+    assert!(stderr.contains("Removed refilled (") && stderr.contains(" and deleted branch chore/refilled."), "{stderr}");
+    assert!(stderr.contains("New content found at ") && stderr.contains("after the worktree was moved away was kept."), "{stderr}");
+    assert_no_technical_output(&stderr);
     assert_eq!(fs::read_to_string(leftover.join("x")).unwrap(), "built\n", "never cleaned up");
-    assert!(quarantine.join("README.md").exists(), "neither tree is cleaned up");
-    assert!(fixture.branch_exists("chore/refilled"));
-
-    let saved = fixture.root.path().join("saved");
-    fs::rename(&wt, &saved).unwrap();
-    let finished = fixture.remove(&["refilled"], None);
-    let stderr = stderr_of(&finished);
-    assert_eq!(finished.status.code(), Some(0), "{stderr}");
-    assert!(stderr.contains("Continuing an earlier removal of refilled"), "{stderr}");
-    assert!(stderr.contains("Removed worktree refilled"), "{stderr}");
-    assert!(stderr.contains("Deleted branch chore/refilled"), "{stderr}");
-    assert!(!quarantine.exists());
+    assert!(fixture.quarantine().is_none(), "the moved checkout is deleted");
+    assert!(!fixture.listed().contains("chore/refilled"), "{}", fixture.listed());
     assert!(!fixture.branch_exists("chore/refilled"));
     assert_eq!(fixture.pending(), 0);
-    assert_eq!(fs::read_to_string(saved.join("target/flycheck0/x")).unwrap(), "built\n");
 }
 
 /// A new worktree at the original path while the old removal is pending:
@@ -411,107 +430,69 @@ fn recreation_at_the_original_path_stops_and_is_never_cleaned_up() {
 #[test]
 fn a_new_worktree_at_the_original_path_is_ambiguous_with_the_pending_removal() {
     let (fixture, wt) = Fixture::new("feat/x", "feat-x");
-    let path = fixture.writer(
-        &moved_condition(&fixture.wts()),
-        &format!("for q in '{}'/.wt-remove-*; do echo late > \"$q/new-work.txt\"; done", fixture.wts().display()),
-    );
-    assert_eq!(fixture.remove(&["feat-x"], Some(&path)).status.code(), Some(1));
+    let path = fixture.interrupter("bin", STATUS_BEFORE_DELETION);
+    assert_eq!(fixture.remove_to_file(&["feat-x"], &path).0.code(), Some(1));
+    let quarantine = fixture.quarantine().expect("the moved checkout is kept");
     git(&fixture.repo(), &["worktree", "add", "-q", "-b", "feat/again", wt.to_str().unwrap(), "main"]);
 
-    let output = fixture.remove(&["feat-x", "--force-worktree", "--force-branch"], None);
+    let output = fixture.remove(&["feat-x", "--force", "--force-branch"], None);
 
     let stderr = stderr_of(&output);
     assert_eq!(output.status.code(), Some(3), "{stderr}");
-    assert!(stderr.contains("feat-x matches a pending removal and another worktree"), "{stderr}");
-    assert!(stderr.contains("worktree at ") && stderr.contains("(branch feat/again)"), "{stderr}");
-    assert!(stderr.contains("pending removal of "), "{stderr}");
+    assert!(stderr.contains("Nothing was removed."), "{stderr}");
+    assert!(stderr.contains("feat-x matches more than one worktree or unfinished removal:"), "{stderr}");
+    assert!(stderr.contains("worktree at "), "{stderr}");
+    assert!(stderr.contains("an unfinished removal of the worktree that was at "), "{stderr}");
     assert!(wt.join("README.md").exists(), "the new worktree is untouched");
-    assert!(fixture.quarantine().unwrap().join("new-work.txt").exists(), "the moved checkout is untouched");
+    assert!(quarantine.join("README.md").exists(), "the moved checkout is untouched");
     assert!(fixture.branch_exists("feat/x") && fixture.branch_exists("feat/again"));
-}
-
-/// A first removal of `feat-x` that deleted the clean tracked file
-/// `deep/sub/tracked.txt`, then stopped one level up on a directory it
-/// cannot write into (`locked/`, made writable again afterwards). Returns the
-/// moved checkout, or `None` when this user can write into a read-only
-/// directory and no such stop can be made.
-fn stopped_after_deleting_a_tracked_file(fixture: &Fixture, wt: &Path) -> Option<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-
-    for file in ["deep/sub/tracked.txt", "locked/kept.txt"] {
-        fs::create_dir_all(wt.join(file).parent().unwrap()).unwrap();
-        fs::write(wt.join(file), "committed\n").unwrap();
-    }
-    git(wt, &["add", "deep", "locked"]);
-    git(wt, &["commit", "-q", "-m", "nested files"]);
-    let locked = wt.join("locked");
-    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
-    if fs::write(locked.join("probe"), "").is_ok() {
-        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
-        eprintln!("skipped: this user can write into a read-only directory");
-        return None;
-    }
-
-    let output = fixture.remove(&["feat-x"], None);
-
-    let quarantine = fixture.quarantine();
-    for dir in [Some(wt.to_path_buf()), quarantine.clone()].into_iter().flatten() {
-        let _ = fs::set_permissions(dir.join("locked"), fs::Permissions::from_mode(0o755));
-    }
-    let stderr = stderr_of(&output);
-    assert_eq!(output.status.code(), Some(1), "{stderr}");
-    assert!(stderr.contains("Removal stopped:"), "{stderr}");
-    let quarantine = quarantine.expect("the moved checkout is kept");
-    assert!(!quarantine.join("deep/sub/tracked.txt").exists(), "deleted before the stop");
-    assert!(quarantine.join("locked/kept.txt").is_file(), "kept by the stop");
     assert_eq!(fixture.pending(), 1);
-    Some(quarantine)
 }
 
-/// The retry after a stop that deleted a tracked file: Git lists the file as
-/// an unstaged deletion, but this removal's own confirmed deletion explains
-/// it, so the noninteractive retry needs no `--force-worktree` and says how
-/// many files it did not ask about.
+/// A forced removal of a checkout with uncommitted work, interrupted after
+/// the move. The retry runs without `--force` and without a terminal, yet
+/// asks nothing and refuses nothing: the earlier approval covers the
+/// uncommitted file (R19).
 #[test]
-fn a_retry_needs_no_consent_for_files_the_removal_already_deleted() {
+fn a_retry_of_an_interrupted_removal_needs_no_consent_for_uncommitted_files() {
     let (fixture, wt) = Fixture::new("feat/x", "feat-x");
-    let Some(quarantine) = stopped_after_deleting_a_tracked_file(&fixture, &wt) else { return };
-    // An unstaged deletion and nothing staged: porcelain ` D`.
-    assert_eq!(git(&quarantine, &["diff", "--name-status"]), "D\tdeep/sub/tracked.txt");
-    assert_eq!(git(&quarantine, &["diff", "--cached", "--name-status"]), "");
+    fs::write(wt.join("notes.txt"), "uncommitted\n").unwrap();
+    let path = fixture.interrupter("bin", STATUS_BEFORE_DELETION);
+    let (status, stderr) = fixture.remove_to_file(&["feat-x", "--force"], &path);
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("1 uncommitted file will be lost: notes.txt"), "{stderr}");
+    let quarantine = fixture.quarantine().expect("the moved checkout is kept");
+    assert!(quarantine.join("notes.txt").is_file());
 
     let finished = fixture.remove(&["feat-x"], None);
 
     let stderr = stderr_of(&finished);
     assert_eq!(finished.status.code(), Some(0), "{stderr}");
-    assert!(stderr.contains("Continuing an earlier removal of feat-x"), "{stderr}");
-    assert!(stderr.contains("1 tracked file this removal already deleted is not asked about again."), "{stderr}");
-    assert!(!stderr.contains("tracked.txt"), "not listed as work to discard: {stderr}");
-    assert!(stderr.contains("Removed worktree feat-x"), "{stderr}");
+    assert!(!stderr.contains("notes.txt"), "not reported again: {stderr}");
+    assert!(!stderr.contains("Nothing was removed") && !stderr.contains("--force"), "{stderr}");
+    assert!(stderr.contains("Removed feat-x ("), "{stderr}");
     assert!(!quarantine.exists());
-    // The fixture's commit is not merged, so the branch is kept without
-    // `--force-branch`; only the checkout's consent changed.
-    assert!(fixture.branch_exists("feat/x"));
+    assert!(!fixture.branch_exists("feat/x"));
     assert_eq!(fixture.pending(), 0);
 }
 
-/// The same retry with new work in the moved checkout still asks for it:
-/// without `--force-worktree` it refuses (exit 3) and keeps everything.
+/// New work written into the moved checkout between an interrupted run and
+/// its retry is deleted by the retry, which compares no content (R19, R20).
 #[test]
-fn a_retry_with_new_work_beside_files_the_removal_already_deleted_refuses() {
-    let (fixture, wt) = Fixture::new("feat/x", "feat-x");
-    let Some(quarantine) = stopped_after_deleting_a_tracked_file(&fixture, &wt) else { return };
-    fs::write(quarantine.join("new-work.txt"), "written after the stop\n").unwrap();
+fn a_retry_deletes_new_work_written_into_the_moved_checkout_after_the_interrupt() {
+    let (fixture, _) = Fixture::new("feat/x", "feat-x");
+    let path = fixture.interrupter("bin", STATUS_BEFORE_DELETION);
+    assert_eq!(fixture.remove_to_file(&["feat-x"], &path).0.code(), Some(1));
+    let quarantine = fixture.quarantine().expect("the moved checkout is kept");
+    fs::write(quarantine.join("new-work.txt"), "written after the interrupt\n").unwrap();
 
-    let refused = fixture.remove(&["feat-x"], None);
+    let finished = fixture.remove(&["feat-x"], None);
 
-    let stderr = stderr_of(&refused);
-    assert_eq!(refused.status.code(), Some(3), "{stderr}");
-    assert!(stderr.contains("new-work.txt"), "the new file is reported: {stderr}");
-    assert!(!stderr.contains("tracked.txt"), "{stderr}");
-    assert!(stderr.contains("Nothing was removed."), "{stderr}");
-    assert_eq!(fs::read_to_string(quarantine.join("new-work.txt")).unwrap(), "written after the stop\n");
-    assert!(quarantine.join("locked/kept.txt").is_file());
-    assert!(fixture.branch_exists("feat/x"));
-    assert_eq!(fixture.pending(), 1);
+    let stderr = stderr_of(&finished);
+    assert_eq!(finished.status.code(), Some(0), "{stderr}");
+    assert!(stderr.contains("Removed feat-x ("), "{stderr}");
+    assert!(!stderr.contains("Nothing was removed"), "{stderr}");
+    assert!(!quarantine.exists());
+    assert!(!fixture.branch_exists("feat/x"));
+    assert_eq!(fixture.pending(), 0);
 }

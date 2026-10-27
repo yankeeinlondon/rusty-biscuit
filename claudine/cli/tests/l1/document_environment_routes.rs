@@ -344,58 +344,62 @@ fn re_entering_a_document_reads_its_map_without_capturing_again() {
 /// whose map changes the text is refused before it runs, naming the command.
 /// (A later task's command is approved by its shape instead, and its `>>`
 /// redirection would not be a valid template.)
-fn assert_step_approved_text(map_change: &str) {
-    let command = "echo ran-{{ env.DOC_STABLE }}>>events.log";
-    let fixture = Fixture::new("doc-env-approval", &["a"]);
-    let sequence = fixture.write_doc(
-        "seq.md",
-        &format!(
-            "---\nsequence:\n  - name: first\n    shell: '{command}'\n  - name: second\n    {}---\n",
-            appending_task("second"),
-        ),
-    );
-    let args = ["sequence", "--claude", "--yolo", sequence.to_str().unwrap()];
+mod a_step_runs_approved_text_only_while_its_map_leaves_it_unchanged {
+    use super::*;
 
-    let captured = match map_change {
-        "unchanged" => json!({}),
-        "unrelated" => fixture.map("a"),
-        "command" => json!({ "DOC_STABLE": "moved" }),
-        _ => panic!("unknown environment change: {map_change}"),
-    };
-    let run = fixture.run(&args, &[captured, fixture.map("a")]);
-    if map_change == "command" {
-        assert_ne!(run.code, Some(0), "{}", run.output);
-        assert!(fixture.events().is_empty(), "the changed command never ran: {:?}", fixture.events());
-        let collapsed = run.collapsed();
-        for expected in ["echo ran-{{ env.DOC_STABLE }}", "was approved at sequence preflight"] {
-            assert!(collapsed.contains(expected), "`{expected}` missing from:\n{}", run.output);
-        }
-    } else {
-        assert_eq!(run.code, Some(0), "{}", run.output);
+    const COMMAND: &str = "echo ran-{{ env.DOC_STABLE }}>>events.log";
+
+    /// The fixture and a two-step sequence whose first step runs
+    /// [`COMMAND`].
+    fn staged() -> (Fixture, std::path::PathBuf) {
+        let fixture = Fixture::new("doc-env-approval", &["a"]);
+        let sequence = fixture.write_doc(
+            "seq.md",
+            &format!(
+                "---\nsequence:\n  - name: first\n    shell: '{COMMAND}'\n  - name: second\n    {}---\n",
+                appending_task("second"),
+            ),
+        );
+        (fixture, sequence)
+    }
+
+    fn args(sequence: &std::path::Path) -> [&str; 4] {
+        ["sequence", "--claude", "--yolo", sequence.to_str().unwrap()]
+    }
+
+    /// The first step's map is the launch map.
+    #[test]
+    fn an_unchanged_map_runs_it() {
+        let (fixture, sequence) = staged();
+        let args = args(&sequence);
+        let unchanged = fixture.run(&args, &[json!({}), fixture.map("a")]);
+        assert_eq!(unchanged.code, Some(0), "{}", unchanged.output);
         assert_eq!(fixture.events().first().map(String::as_str), Some("ran-stable"));
     }
-}
 
-macro_rules! step_approval_environment_tests {
-    ($($test:ident => $change:literal),* $(,)?) => {
-        $(
-            #[test]
-            fn $test() {
-                assert_step_approved_text($change);
-            }
-        )*
+    /// Another variable moved; the command text did not.
+    #[test]
+    fn a_map_changed_elsewhere_runs_it() {
+        let (fixture, sequence) = staged();
+        let args = args(&sequence);
+        let identical = fixture.run(&args, &[fixture.map("a"), fixture.map("a")]);
+        assert_eq!(identical.code, Some(0), "{}", identical.output);
+        assert_eq!(fixture.events().first().map(String::as_str), Some("ran-stable"));
+    }
 
-        #[test]
-        fn step_approval_cases_cover_both_unchanged_text_states_and_changed_text() {
-            assert_eq!([$($change),*], ["unchanged", "unrelated", "command"]);
+    /// The command text changed: refused before it runs.
+    #[test]
+    fn changed_text_is_refused_before_it_runs() {
+        let (fixture, sequence) = staged();
+        let args = args(&sequence);
+        let changed = fixture.run(&args, &[json!({ "DOC_STABLE": "moved" }), fixture.map("a")]);
+        assert_ne!(changed.code, Some(0), "{}", changed.output);
+        assert!(fixture.events().is_empty(), "the changed command never ran: {:?}", fixture.events());
+        let collapsed = changed.collapsed();
+        for expected in ["echo ran-{{ env.DOC_STABLE }}", "was approved at sequence preflight"] {
+            assert!(collapsed.contains(expected), "`{expected}` missing from:\n{}", changed.output);
         }
-    };
-}
-
-step_approval_environment_tests! {
-    a_step_runs_approved_text_only_while_its_map_leaves_it_unchanged => "unchanged",
-    a_step_runs_approved_text_after_an_unrelated_environment_change => "unrelated",
-    a_step_refuses_text_changed_by_its_captured_environment => "command",
+    }
 }
 
 /// A prompt task's document, the file it transcludes, and the provider it

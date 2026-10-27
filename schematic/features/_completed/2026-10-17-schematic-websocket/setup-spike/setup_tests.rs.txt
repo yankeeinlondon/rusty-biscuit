@@ -1,0 +1,370 @@
+use std::future::Future;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
+
+use futures_util::{SinkExt, StreamExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc;
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
+use ws_setup_spike::*;
+
+type ServerWs = WebSocketStream<TcpStream>;
+
+#[derive(Debug, PartialEq, Eq)]
+enum Seen {
+    Accepted(usize),
+    FirstFrame(usize, String),
+    Frame(usize, String),
+    Eof(usize),
+}
+
+/// Accept loop on 127.0.0.1:0; `script(idx, ws, events)` runs per connection.
+async fn server<S, Fut>(script: S) -> (String, mpsc::UnboundedReceiver<Seen>)
+where
+    S: Fn(usize, ServerWs, mpsc::UnboundedSender<Seen>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    let (tx, rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        let mut idx = 0;
+        while let Ok((tcp, _)) = listener.accept().await {
+            let Ok(ws) = tokio_tungstenite::accept_async(tcp).await else { continue };
+            let _ = tx.send(Seen::Accepted(idx));
+            tokio::spawn(script(idx, ws, tx.clone()));
+            idx += 1;
+        }
+    });
+    (url, rx)
+}
+
+async fn next_text(ws: &mut ServerWs) -> Option<String> {
+    loop {
+        match ws.next().await? {
+            Ok(Message::Text(t)) => return Some(t.to_string()),
+            Ok(Message::Close(_)) | Err(_) => return None,
+            Ok(_) => {}
+        }
+    }
+}
+
+/// Opening, then challenge/response, then `after` decides the connection's fate.
+async fn challenge_script(idx: usize, mut ws: ServerWs, tx: mpsc::UnboundedSender<Seen>, drop_after: bool) {
+    if let Some(first) = next_text(&mut ws).await {
+        let _ = tx.send(Seen::FirstFrame(idx, first));
+    }
+    let _ = ws.send(Message::text(format!(r#"{{"challenge":"c{idx}"}}"#))).await;
+    if let Some(reply) = next_text(&mut ws).await {
+        let _ = tx.send(Seen::Frame(idx, reply));
+    }
+    if !drop_after {
+        while next_text(&mut ws).await.is_some() {}
+    }
+    let _ = tx.send(Seen::Eof(idx));
+}
+
+async fn wait_for<T: PartialEq + std::fmt::Debug>(rx: &mut mpsc::UnboundedReceiver<T>, want: T) -> Vec<T> {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        let mut seen = Vec::new();
+        while let Some(got) = rx.recv().await {
+            let done = got == want;
+            seen.push(got);
+            if done {
+                return seen;
+            }
+        }
+        panic!("channel closed before {want:?}");
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for {want:?}"))
+}
+
+fn drain<T>(rx: &mut mpsc::UnboundedReceiver<T>) -> Vec<T> {
+    let mut out = Vec::new();
+    while let Ok(v) = rx.try_recv() {
+        out.push(v);
+    }
+    out
+}
+
+fn opts(life: &mpsc::UnboundedSender<Lifecycle>) -> ConnectOptions {
+    ConnectOptions {
+        per_attempt_timeout: Duration::from_millis(500),
+        credential: Some(RedactedCredential::new("s3cret")),
+        lifecycle: Some(life.clone()),
+        ..ConnectOptions::default()
+    }
+}
+
+#[derive(serde::Serialize)]
+struct Opening {
+    op: &'static str,
+}
+
+/// Standard challenge responder used by the factory.
+async fn answer_challenge(mut session: SetupSession) -> Result<(), SetupError> {
+    let challenge: serde_json::Value = session.recv_json().await?;
+    let secret = session.credential().map(|c| c.expose_secret().to_owned()).unwrap_or_default();
+    session
+        .send_json(&serde_json::json!({ "answer": challenge["challenge"], "key": secret }))
+        .await
+}
+
+// (a) opening first on 3 consecutive connections; callback before Ready each time.
+#[tokio::test]
+async fn opening_first_and_setup_before_ready_on_every_dial() {
+    let (url, mut seen) = server(|idx, ws, tx| async move {
+        // Connections 0 and 1 drop after setup; 2 stays.
+        challenge_script(idx, ws, tx, idx < 2).await
+    })
+    .await;
+    let (life_tx, mut life) = mpsc::unbounded_channel();
+    let runs = Arc::new(AtomicUsize::new(0));
+    let runs_in = Arc::clone(&runs);
+    let client = connect_with_setup(url, Some(&Opening { op: "hello" }), opts(&life_tx), move |s| {
+        runs_in.fetch_add(1, Ordering::SeqCst);
+        answer_challenge(s)
+    })
+    .await
+    .unwrap();
+
+    let mut log = wait_for(&mut life, Lifecycle::Ready(2)).await;
+    assert_eq!(runs.load(Ordering::SeqCst), 3);
+    let mut events = Vec::new();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while let Some(e) = seen.recv().await {
+            let done = matches!(&e, Seen::Frame(2, _));
+            events.push(e);
+            if done { break; }
+        }
+    })
+    .await
+    .unwrap();
+    for idx in 0..3 {
+        let first = events.iter().position(|e| matches!(e, Seen::FirstFrame(i, _) if *i == idx)).unwrap();
+        assert_eq!(events[first], Seen::FirstFrame(idx, r#"{"op":"hello"}"#.into()));
+        let reply = events.iter().position(|e| matches!(e, Seen::Frame(i, _) if *i == idx)).unwrap();
+        assert!(first < reply);
+        assert!(matches!(&events[reply], Seen::Frame(_, r) if r.contains("s3cret")));
+    }
+    // Lifecycle: setup completes before Ready for every attempt.
+    drop(life_tx);
+    client.close().await;
+    log.extend(drain(&mut life));
+    for n in 0..3 {
+        let ok = log.iter().position(|e| *e == Lifecycle::SetupOk(n)).unwrap();
+        let ready = log.iter().position(|e| *e == Lifecycle::Ready(n)).unwrap();
+        assert!(ok < ready, "{log:?}");
+    }
+    assert_eq!(format!("{:?}", RedactedCredential::new("s3cret")), "RedactedCredential(<redacted>)");
+}
+
+// (b) stalled callback bounded by attempt timeout; server sees EOF.
+#[tokio::test]
+async fn stalled_setup_times_out_and_drops_stream() {
+    let (url, mut seen) = server(|idx, ws, tx| challenge_script(idx, ws, tx, false)).await;
+    let (life_tx, _life) = mpsc::unbounded_channel();
+    let mut o = opts(&life_tx);
+    o.per_attempt_timeout = Duration::from_millis(150);
+    let started = Instant::now();
+    let err = connect_with_setup(url, Some(&Opening { op: "hello" }), o, |_s| std::future::pending::<Result<(), SetupError>>())
+        .await
+        .err()
+        .unwrap();
+    let elapsed = started.elapsed();
+    assert_eq!(err, ClientError::AttemptTimeout);
+    assert!(elapsed < Duration::from_millis(600), "{elapsed:?}");
+    let _ = wait_for(&mut seen, Seen::Eof(0)).await;
+}
+
+// (b') deadline shorter than per-attempt budget wins before first Ready.
+#[tokio::test]
+async fn connect_deadline_caps_first_attempt() {
+    let (url, mut seen) = server(|idx, ws, tx| challenge_script(idx, ws, tx, false)).await;
+    let (life_tx, _life) = mpsc::unbounded_channel();
+    let mut o = opts(&life_tx);
+    o.per_attempt_timeout = Duration::from_secs(30);
+    o.connect_deadline = Some(tokio::time::Instant::now() + Duration::from_millis(100));
+    let started = Instant::now();
+    let err = connect_with_setup(url, Some(&Opening { op: "hello" }), o, |_s| std::future::pending::<Result<(), SetupError>>())
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(err, ClientError::AttemptTimeout);
+    assert!(started.elapsed() < Duration::from_millis(600));
+    let _ = wait_for(&mut seen, Seen::Eof(0)).await;
+}
+
+// (b'') session smuggled into a detached task is revoked: stream dropped, later use errors.
+#[tokio::test]
+async fn leaked_session_is_invalidated() {
+    let (url, mut seen) = server(|idx, ws, tx| challenge_script(idx, ws, tx, false)).await;
+    let (life_tx, _life) = mpsc::unbounded_channel();
+    let (leak_tx, mut leak_rx) = mpsc::unbounded_channel();
+    let mut o = opts(&life_tx);
+    o.per_attempt_timeout = Duration::from_millis(150);
+    let err = connect_with_setup(url, Some(&Opening { op: "hello" }), o, move |s| {
+        let leak_tx = leak_tx.clone();
+        async move {
+            let _ = leak_tx.send(s); // escape the callback
+            std::future::pending::<Result<(), SetupError>>().await
+        }
+    })
+    .await
+    .err()
+    .unwrap();
+    assert_eq!(err, ClientError::AttemptTimeout);
+    let _ = wait_for(&mut seen, Seen::Eof(0)).await;
+    let mut leaked = leak_rx.recv().await.unwrap();
+    assert_eq!(leaked.send_text("late".into()).await, Err(SetupError::SessionInvalid));
+    assert_eq!(leaked.recv_text().await, Err(SetupError::SessionInvalid));
+}
+
+// (c) Rejected is terminal: exactly one exchange, initial and on redial.
+#[tokio::test]
+async fn rejection_is_terminal() {
+    let (url, mut seen) = server(|idx, ws, tx| challenge_script(idx, ws, tx, false)).await;
+    let (life_tx, _life) = mpsc::unbounded_channel();
+    let err = connect_with_setup(url, Some(&Opening { op: "hello" }), opts(&life_tx), |mut s| async move {
+        let _c: serde_json::Value = s.recv_json().await?;
+        Err(SetupError::Rejected { reason: "bad key".into() })
+    })
+    .await
+    .err()
+    .unwrap();
+    assert!(matches!(err, ClientError::Setup(SetupError::Rejected { .. })));
+    let _ = wait_for(&mut seen, Seen::Eof(0)).await;
+    assert!(!drain(&mut seen).iter().any(|e| matches!(e, Seen::Accepted(n) if *n > 0)));
+}
+
+#[tokio::test]
+async fn rejection_on_redial_closes_client() {
+    let (url, mut seen) = server(|idx, ws, tx| challenge_script(idx, ws, tx, idx == 0)).await;
+    let (life_tx, mut life) = mpsc::unbounded_channel();
+    let client = connect_with_setup(url, Some(&Opening { op: "hello" }), opts(&life_tx), |mut s| async move {
+        let c: serde_json::Value = s.recv_json().await?;
+        if c["challenge"] == "c0" {
+            s.send_text("ok".into()).await
+        } else {
+            Err(SetupError::Rejected { reason: "revoked".into() })
+        }
+    })
+    .await
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), client.wait_closed()).await.unwrap();
+    let _ = wait_for(&mut life, Lifecycle::Closed).await;
+    let accepted = drain(&mut seen).iter().filter(|e| matches!(e, Seen::Accepted(_))).count();
+    assert_eq!(accepted, 2, "initial + one rejected redial, no further dial");
+}
+
+// (d) Transient consumes budget; counter resets only after setup success.
+#[tokio::test]
+async fn transient_counts_against_budget_and_resets_on_ready() {
+    // conn: 0 ok, 1 T, 2 ok, 3 T, 4 T -> closed with max_attempts = 2.
+    let (url, mut seen) = server(|idx, ws, tx| challenge_script(idx, ws, tx, true)).await;
+    let (life_tx, mut life) = mpsc::unbounded_channel();
+    let mut o = opts(&life_tx);
+    o.max_attempts = Some(2);
+    let client = connect_with_setup(url, Some(&Opening { op: "hello" }), o, |mut s| async move {
+        let c: serde_json::Value = s.recv_json().await?;
+        match c["challenge"].as_str() {
+            Some("c0" | "c2") => s.send_text("ok".into()).await,
+            _ => Err(SetupError::Transient { reason: "busy".into() }),
+        }
+    })
+    .await
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), client.wait_closed()).await.unwrap();
+    drop(life_tx);
+    let log = drain(&mut life);
+    let readies: Vec<_> = log.iter().filter_map(|e| match e { Lifecycle::Ready(n) => Some(*n), _ => None }).collect();
+    assert_eq!(readies, vec![0, 2], "{log:?}");
+    let accepted = drain(&mut seen).iter().filter(|e| matches!(e, Seen::Accepted(_))).count();
+    assert_eq!(accepted, 5, "{log:?}");
+}
+
+// (e) close during stalled setup on a redial returns promptly and drops the stream.
+#[tokio::test]
+async fn close_during_stalled_redial_setup() {
+    let (url, mut seen) = server(|idx, ws, tx| challenge_script(idx, ws, tx, idx == 0)).await;
+    let (life_tx, mut life) = mpsc::unbounded_channel();
+    let mut o = opts(&life_tx);
+    o.per_attempt_timeout = Duration::from_secs(60);
+    let client = connect_with_setup(url, Some(&Opening { op: "hello" }), o, |mut s| async move {
+        let c: serde_json::Value = s.recv_json().await?;
+        if c["challenge"] == "c0" {
+            s.send_text("ok".into()).await
+        } else {
+            std::future::pending().await
+        }
+    })
+    .await
+    .unwrap();
+    let _ = wait_for(&mut life, Lifecycle::SetupStarted(1)).await;
+    let started = Instant::now();
+    tokio::time::timeout(Duration::from_secs(1), client.close()).await.unwrap();
+    assert!(started.elapsed() < Duration::from_millis(500));
+    assert_eq!(client.state(), ConnState::Closed);
+    let _ = wait_for(&mut seen, Seen::Eof(1)).await;
+}
+
+#[tokio::test]
+async fn close_and_drop_during_backoff() {
+    for use_drop in [false, true] {
+        let (url, _seen) = server(|idx, ws, tx| challenge_script(idx, ws, tx, true)).await;
+        let (life_tx, mut life) = mpsc::unbounded_channel();
+        let mut o = opts(&life_tx);
+        o.backoff = Duration::from_secs(60);
+        let client = connect_with_setup(url, Some(&Opening { op: "hello" }), o, answer_challenge).await.unwrap();
+        wait_for(&mut life, Lifecycle::Backoff).await;
+        let started = Instant::now();
+        if use_drop {
+            drop(client);
+            let _ = wait_for(&mut life, Lifecycle::Closed).await;
+        } else {
+            tokio::time::timeout(Duration::from_secs(1), client.close()).await.unwrap();
+        }
+        assert!(started.elapsed() < Duration::from_millis(500));
+    }
+}
+
+// Bound check: the factory and client fit tokio::spawn / Send consumers.
+#[allow(dead_code)]
+fn assert_bounds() {
+    fn is_send<T: Send>(_: &T) {}
+    fn is_send_static<T: Send + 'static>() {}
+    is_send_static::<WsClient>();
+    is_send_static::<SetupSession>();
+    let fut = connect_with_setup(String::new(), None::<&()>, ConnectOptions::default(), answer_challenge);
+    is_send(&fut);
+}
+
+// Observation: does a peer close make the *next* local write fail?
+#[tokio::test]
+async fn observe_write_after_peer_close() {
+    for mode in ["tcp-drop", "close-frame"] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let (closed_tx, closed_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            if mode == "close-frame" {
+                let _ = ws.close(None).await;
+            }
+            drop(ws);
+            let _ = closed_tx.send(());
+        });
+        let (mut client, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        closed_rx.await.unwrap();
+        let mut results = Vec::new();
+        for i in 0..3 {
+            results.push(client.send(Message::text(format!("w{i}"))).await.map_err(|e| e.to_string()));
+            tokio::task::yield_now().await;
+        }
+        println!("{mode}: {results:?}");
+    }
+}

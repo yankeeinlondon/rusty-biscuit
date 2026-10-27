@@ -205,12 +205,11 @@ mod tests {
     use crate::markdown::compose::page_blocks::parser::parse_page_blocks;
     use crate::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
     use serde_json::json;
-    use std::collections::HashMap;
 
     fn state_with(data: serde_json::Value) -> EffectiveState {
-        let fm: HashMap<String, serde_json::Value> = match data {
+        let fm: serde_json::Map<String, serde_json::Value> = match data {
             serde_json::Value::Object(map) => map.into_iter().collect(),
-            _ => HashMap::new(),
+            _ => serde_json::Map::new(),
         };
         EffectiveStateBuilder::new()
             .with_frontmatter(fm)
@@ -277,7 +276,7 @@ mod tests {
         ctx.env_mut()
             .insert("AGENT".to_string(), "claude".to_string());
         let state = EffectiveStateBuilder::new()
-            .with_frontmatter(HashMap::new())
+            .with_frontmatter(serde_json::Map::new())
             .with_context(ctx)
             .build()
             .unwrap();

@@ -381,7 +381,7 @@ impl Fixture {
                 frontmatter.insert(key.clone(), value.clone());
             }
         }
-        let lookup: HashMap<String, Value> = frontmatter
+        let lookup: Map<String, Value> = frontmatter
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
@@ -6003,7 +6003,7 @@ mod late_values {
         );
         let mut fixture = Fixture::build(dir, &source).unwrap();
         // The state the second step reads: the first step's output committed.
-        let mut lookup: HashMap<String, Value> =
+        let mut lookup: Map<String, Value> =
             fixture.frontmatter.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         lookup.insert("seq".to_string(), json!({"outputs": outputs}));
         fixture.state = EffectiveStateBuilder::new()

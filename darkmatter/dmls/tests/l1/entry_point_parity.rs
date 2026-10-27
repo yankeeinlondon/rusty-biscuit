@@ -170,8 +170,7 @@ fn graph_edge(consumer: Consumer) -> (NodeKind, EdgeKind) {
 fn link_graph(graph: &WorkspaceGraph, document: &Path, consumer: Consumer, state: &DocumentState) -> Observed {
     let Some(doc_id) = graph
         .documents()
-        .iter()
-        .position(|record| matrix::identity(&record.path) == matrix::identity(document))
+        .position(|record| matrix::identity(record.path) == matrix::identity(document))
     else {
         return Observed::Unexpected(format!("{} is not indexed", document.display()));
     };
@@ -187,7 +186,7 @@ fn link_graph(graph: &WorkspaceGraph, document: &Path, consumer: Consumer, state
             match &edge.target {
                 EdgeTarget::Node(target) => {
                     let record = graph.node(*target).and_then(|target| graph.document(target.document));
-                    files.extend(record.map(|record| record.path.clone()));
+                    files.extend(record.map(|record| record.path.to_path_buf()));
                 }
                 EdgeTarget::File(path) => files.push(path.clone()),
                 EdgeTarget::Unresolved(_) => {}

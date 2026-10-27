@@ -1,6 +1,7 @@
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::artifact::OutputFormat;
 use crate::cache::VisualizationKind;
@@ -13,16 +14,34 @@ pub const CACHE_DIR_ENV: &str = "BISCUIT_VISUALIZED_CACHE_DIR";
 
 /// Backend identifiers for cache key generation.
 ///
-/// The mermaid identifier carries a `+bv<n>` suffix for biscuit-visualized's
-/// own render layer (theme overrides in `build_theme`, the gitGraph merge
-/// repair and tag spacing in `mermaid::gitgraph`, SVG post-processing in
-/// `apply_svg_overrides`). The cache key sees only the theme *name* and the
-/// instructions, not the resolved colors or layout, so bump `<n>` whenever that
-/// layer changes output — otherwise identical instructions keep serving
-/// pre-change artifacts.
-pub const MERMAID_BACKEND: &str = "mermaid-rs-renderer@0.3.x+bv3";
+/// The mermaid identifier is `merman@<first 12 characters of the pinned
+/// Merman rev>+bv<n>`, where `bv<n>` versions biscuit-visualized's own layer
+/// around Merman: the source rewrites before parsing (`mermaid::newline`,
+/// gitGraph `commitSpacing` in `mermaid::gitgraph_layout`), the SVG
+/// post-process (`mermaid::postprocess`, `mermaid::accents`), the contrast
+/// pass (`mermaid::contrast`), the embedded-font opt-in's face choice and
+/// measurement (`mermaid::embed`), and the painted
+/// background. Palette colors are not versioned here: they reach the key
+/// through the compiled design. Bump
+/// the rev with the Merman pin and `<n>` whenever that layer changes output;
+/// otherwise identical inputs keep serving pre-change artifacts. A change of
+/// backend id also keeps every artifact of an earlier backend from being
+/// served.
+pub const MERMAID_BACKEND: &str = "merman@6e6b1e6554e8+bv6";
 pub const GRAPH_BACKEND: &str = "layout-rs@0.1.x";
-pub const RASTERIZER: &str = "resvg@0.45";
+pub const RASTERIZER: &str = "resvg@0.47";
+
+#[cfg(all(test, feature = "image"))]
+thread_local! {
+    static STORED_FILES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many files (artifacts and their sidecars) this thread stored in any
+/// cache since the last call, and resets the count.
+#[cfg(all(test, feature = "image"))]
+pub(crate) fn take_stored_files() -> usize {
+    STORED_FILES.with(|stored| stored.replace(0))
+}
 
 /// File-based cache for rendered visualizations.
 ///
@@ -49,7 +68,7 @@ impl FileCache {
     /// Creates a new file cache.
     ///
     /// The cache directory is `$TMPDIR/biscuit-visualized/v1/`, or
-    /// `$BISCUIT_VISUALIZED_CACHE_DIR/v1/` when [`CACHE_DIR_ENV`] is set.
+    /// `$BISCUIT_VISUALIZED_CACHE_DIR/biscuit-visualized/v1/` when [`CACHE_DIR_ENV`] is set.
     ///
     /// ## Examples
     ///
@@ -109,8 +128,10 @@ impl FileCache {
         backend_id: &str,
         format: OutputFormat,
     ) -> String {
+        // The leading schema version invalidates every stored artifact when
+        // what a key covers changes (v2: background, row padding, PNG encoding).
         let key_string = format!(
-            "v1|{}|{}|{}|{}|{}",
+            "v2|{}|{}|{}|{}|{}",
             kind.as_str(),
             source,
             options_json,
@@ -155,11 +176,65 @@ impl FileCache {
         format: OutputFormat,
         data: &[u8],
     ) -> io::Result<PathBuf> {
+        self.store_file(kind, key, format, &format!("{}.{}", key, format.extension()), data)
+    }
+
+    /// The path of the file stored beside artifact `key` with `suffix`
+    /// (`{key}.{suffix}`, in the artifact's directory), which an artifact
+    /// keeps data about itself in.
+    #[cfg_attr(not(feature = "image"), allow(dead_code))]
+    pub(crate) fn sidecar_path(&self, kind: VisualizationKind, key: &str, format: OutputFormat, suffix: &str) -> PathBuf {
+        self.cache_dir(kind, format).join(format!("{key}.{suffix}"))
+    }
+
+    /// Stores `data` at [`sidecar_path`](Self::sidecar_path), as
+    /// [`store`](Self::store) stores an artifact.
+    #[cfg_attr(not(feature = "image"), allow(dead_code))]
+    pub(crate) fn store_sidecar(
+        &self,
+        kind: VisualizationKind,
+        key: &str,
+        format: OutputFormat,
+        suffix: &str,
+        data: &[u8],
+    ) -> io::Result<PathBuf> {
+        self.store_file(kind, key, format, &format!("{key}.{suffix}"), data)
+    }
+
+    fn store_file(
+        &self,
+        kind: VisualizationKind,
+        key: &str,
+        format: OutputFormat,
+        file_name: &str,
+        data: &[u8],
+    ) -> io::Result<PathBuf> {
+        #[cfg(all(test, feature = "image"))]
+        STORED_FILES.with(|stored| stored.set(stored.get() + 1));
         let cache_dir = self.cache_dir(kind, format);
         fs::create_dir_all(&cache_dir)?;
 
-        let path = cache_dir.join(format!("{}.{}", key, format.extension()));
-        fs::write(&path, data)?;
+        let path = cache_dir.join(file_name);
+        // Write beside the artifact and rename it into place, so a concurrent
+        // render of the same key never reads a half-written file. Every writer
+        // of a key writes the same bytes, so whichever rename wins is fine.
+        // Plain `std::fs`: on Windows its rename replaces a file another render
+        // is reading, where `tempfile`'s persist and keep fail. When a holder
+        // without delete sharing still refuses it, the key's identical bytes
+        // are already in place.
+        static STAGED: AtomicU64 = AtomicU64::new(0);
+        let staged = cache_dir.join(format!(
+            ".{key}.{}.{}.tmp",
+            std::process::id(),
+            STAGED.fetch_add(1, Ordering::Relaxed)
+        ));
+        let stored = fs::write(&staged, data).and_then(|()| fs::rename(&staged, &path));
+        if let Err(error) = stored {
+            let _ = fs::remove_file(&staged);
+            if !path.is_file() {
+                return Err(error);
+            }
+        }
 
         Ok(path)
     }

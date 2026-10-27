@@ -10,22 +10,24 @@ use super::collection::{Alternate, Pagination};
 use super::selector::ItemSelector;
 use super::strategy::{IndexBase, InputParam, MoreSignal, PageStrategy, SessionOpen, Strategy};
 use crate::params::ParamDef;
-use crate::response::ApiResponse;
+use crate::response::{ResponseShape, SuccessShape};
 use crate::types::{Endpoint, RestApi, RestMethod};
+use crate::TypeRef;
 
 /// What decided an endpoint's pagination.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ResolutionOrigin {
-    /// A row of the API's exceptions table (an override or an opt-out).
+    /// An endpoint collection override or opt-out. The variant spelling is retained
+    /// in the serialized resolution format.
     Exception,
     /// The API's default strategy, inherited by a list.
     ApiDefault,
-    /// Nothing authored applies: a list with no default and no row.
+    /// Nothing authored applies: a list with no default and no explicit collection.
     Unauthored,
 }
 
 /// Where a list's items are and what type they decode to.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ResolvedList {
     pub items: ItemSelector,
     /// `None` only when nothing names it: a wrapper or non-`Vec` root without
@@ -37,10 +39,10 @@ pub struct ResolvedList {
 // Built once per definition at generation time; boxing would only make
 // authoring and matching clumsier.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum Resolution {
-    /// Not a list: no row, and not a GET with an explicit `Vec<T>` response.
+    /// Not a list: no collection, and not a GET with an explicit `Vec<T>` response.
     NotAList,
     /// A list without pagination.
     Unpaginated {
@@ -84,56 +86,15 @@ impl Resolution {
 
 /// Resolves `endpoint`'s pagination within `api`.
 ///
-/// The order is fixed: (1) a row of `api.pagination_exceptions` for the
-/// endpoint id decides; (2) otherwise a GET endpoint whose response is an
-/// explicit `Vec<T>` is a root-array list that inherits the API default, or is
-/// unpaginated without one; (3) otherwise the endpoint is not a list. Type
-/// aliases and opaque responses are never inferred to be lists. The first row
-/// for an id wins; validation rejects a duplicate.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_define::pagination::{resolve, MoreSignal, Resolution, ResolutionOrigin, Strategy};
-/// use schematic_define::{ApiResponse, Endpoint, RestMethod};
-/// # use schematic_define::{AuthStrategy, CrossOrigin, RestApi};
-/// # let mut api = RestApi {
-/// #     name: "Forge".into(), description: String::new(), base_url: "https://forge.test".into(),
-/// #     docs_url: None, auth: AuthStrategy::None, auth_policy: None, env_auth: vec![],
-/// #     env_username: None, headers: vec![], endpoints: vec![], module_path: None,
-/// #     request_suffix: None, version: None, env_mapping: None,
-/// #     cross_origin: CrossOrigin::default(), request_id_header: None, secret_names: vec![],
-/// #     default_pagination: None, pagination_exceptions: vec![],
-/// # };
-///
-/// api.default_pagination = Some(Strategy::page_number("page", MoreSignal::NonEmptyPage).build());
-/// let releases = Endpoint {
-///     id: "ListReleases".into(),
-///     method: RestMethod::Get,
-///     path: "/releases".into(),
-///     description: String::new(),
-///     request: None,
-///     response: ApiResponse::json_type("Vec<Release>"),
-///     headers: vec![],
-///     params: None,
-///     oauth_scopes: None,
-/// };
-///
-/// let resolution = resolve(&api, &releases);
-/// assert_eq!(resolution.origin(), Some(ResolutionOrigin::ApiDefault));
-/// assert_eq!(resolution.list().unwrap().item_type.as_deref(), Some("Release"));
-/// ```
+/// The endpoint collection decides first. Without one, a GET whose only
+/// success shape is JSON typed as an explicit `Vec<T>` inherits the API default or stays unpaginated.
+/// Aliases and opaque responses require an explicit collection.
 pub fn resolve(api: &RestApi, endpoint: &Endpoint) -> Resolution {
-    let entry = api
-        .pagination_exceptions
-        .iter()
-        .find(|entry| entry.endpoint == endpoint.id);
-
-    let Some(entry) = entry else {
+    let Some(collection) = endpoint.pagination.as_ref() else {
         if endpoint.method != RestMethod::Get {
             return Resolution::NotAList;
         }
-        let Some(item_type) = root_array_item_type(&endpoint.response) else {
+        let Some(item_type) = root_array_item_type(api, &endpoint.response) else {
             return Resolution::NotAList;
         };
         let list = ResolvedList {
@@ -154,12 +115,11 @@ pub fn resolve(api: &RestApi, endpoint: &Endpoint) -> Resolution {
         };
     };
 
-    let collection = &entry.collection;
     let item_type = collection.item_type.clone().or_else(|| {
         collection
             .items
             .is_root_array()
-            .then(|| root_array_item_type(&endpoint.response))
+            .then(|| root_array_item_type(api, &endpoint.response))
             .flatten()
     });
     let list = ResolvedList {
@@ -190,21 +150,25 @@ pub fn resolve(api: &RestApi, endpoint: &Endpoint) -> Resolution {
     }
 }
 
-/// The `T` of an explicit `Vec<T>` JSON response, as written.
+/// The Rust path of `T` when `response` is one JSON shape, an array of `T`.
 ///
-/// Only the literal `Vec<..>` spelling is recognized; an alias, a qualified
-/// `std::vec::Vec`, or `serde_json::Value` is not a list without a row.
-pub fn root_array_item_type(response: &ApiResponse) -> Option<String> {
-    let ApiResponse::Json(schema) = response else {
+/// Only a root array reference qualifies; a nominal component that is itself
+/// a list (an alias or wrapper type) still needs an authored collection, and
+/// an endpoint with several success shapes is never a list.
+/// `None` also when the item does not resolve through `api`'s components.
+pub fn root_array_item_type(api: &RestApi, response: &[SuccessShape]) -> Option<String> {
+    let Some(TypeRef::Array(item)) = sole_json(response) else {
         return None;
     };
-    let inner = schema
-        .type_name
-        .trim()
-        .strip_prefix("Vec<")?
-        .strip_suffix('>')?
-        .trim();
-    (!inner.is_empty()).then(|| inner.to_owned())
+    api.rust_type(item)
+}
+
+/// The reference of an endpoint's only success shape when it is JSON.
+pub(crate) fn sole_json(response: &[SuccessShape]) -> Option<&TypeRef> {
+    match response {
+        [only] => match &only.shape { ResponseShape::Json(reference) => Some(reference), _ => None },
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -212,7 +176,7 @@ pub fn root_array_item_type(response: &ApiResponse) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// A cursor direction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Direction {
     Forward,
     Backward,
@@ -222,7 +186,7 @@ pub enum Direction {
 ///
 /// An endpoint has exactly the knobs its strategy authors; any other control
 /// does not compile on its generated call.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum Knob {
     /// `.page(n)` before iterating.
@@ -332,7 +296,7 @@ pub fn caller_knobs(resolution: &Resolution) -> Vec<Knob> {
 // ---------------------------------------------------------------------------
 
 /// The part a strategy input plays on the endpoint's own requests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ManagedRole {
     Page,
@@ -398,7 +362,7 @@ impl ManagedRole {
 }
 
 /// Where an endpoint declares a plain parameter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ParamLocation {
     Query,
     Header,
@@ -407,7 +371,7 @@ pub enum ParamLocation {
 }
 
 /// What happens to a declared parameter a strategy input also names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AdoptionOutcome {
     /// Same location and name, with a matching knob: the strategy manages it
     /// and the request struct omits it.
@@ -422,7 +386,7 @@ pub enum AdoptionOutcome {
 }
 
 /// One declared parameter that a strategy input names.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParamAdoption {
     pub role: ManagedRole,
     pub input: InputParam,

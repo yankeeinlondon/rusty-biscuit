@@ -466,9 +466,9 @@ mod tests {
     use std::collections::HashMap;
 
     fn test_state(data: Value) -> EffectiveState {
-        let fm: HashMap<String, Value> = match data {
+        let fm: serde_json::Map<String, Value> = match data {
             Value::Object(map) => map.into_iter().collect(),
-            _ => HashMap::new(),
+            _ => serde_json::Map::new(),
         };
 
         EffectiveStateBuilder::new()
@@ -557,7 +557,7 @@ mod tests {
             .insert("AGENT".to_string(), "claude".to_string());
 
         let state = EffectiveStateBuilder::new()
-            .with_frontmatter(HashMap::new())
+            .with_frontmatter(serde_json::Map::new())
             .with_context(ctx)
             .build()
             .unwrap();
@@ -578,7 +578,7 @@ mod tests {
         ctx.env_mut()
             .insert("AGENT".to_string(), "claude".to_string());
         let state = EffectiveStateBuilder::new()
-            .with_frontmatter(HashMap::new())
+            .with_frontmatter(serde_json::Map::new())
             .with_context(ctx)
             .build()
             .unwrap();

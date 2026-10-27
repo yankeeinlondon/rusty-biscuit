@@ -1238,7 +1238,7 @@ impl<'a> Loader<'a> {
         // properties under the invocation's supplied values, exactly what
         // they read when it runs; the caller's frontmatter is not their base.
         let enclosing = frontmatter.as_ref().map(|authored| {
-            let mut values: HashMap<String, Value> = authored.iter()
+            let mut values: Map<String, Value> = authored.iter()
                 .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value))).collect();
             values.extend(self.caller_setters.iter().map(|(key, value)| (key.clone(), value.clone())));
             crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(values.iter()));
@@ -2396,7 +2396,7 @@ impl<'a> Loader<'a> {
             caller_setters: &self.caller_setters,
             sequence_path: &self.source.resolved_path,
         };
-        let mut evaluate = |value: &Value, values: &HashMap<String, Value>| {
+        let mut evaluate = |value: &Value, values: &Map<String, Value>| {
             // A copy of the prompt document's state, which does not grow with
             // the sequence.
             crate::note_work!(EarlyBindingStateNodes, crate::work_counters::value_nodes(values.iter()));

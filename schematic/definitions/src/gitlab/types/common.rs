@@ -14,6 +14,13 @@ pub struct User {
     #[serde(default)]
     pub web_url: Option<String>,
 }
+impl schematic_define::Registration for User {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(User));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct References {

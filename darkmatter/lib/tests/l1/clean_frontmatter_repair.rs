@@ -1,5 +1,6 @@
-//! Raw-source frontmatter repair through the public library entry point,
-//! `darkmatter::markdown::cleanup::frontmatter::repair_frontmatter`.
+//! Raw-source frontmatter repair through the public library entry points,
+//! `darkmatter::markdown::cleanup::frontmatter::repair_frontmatter` and the
+//! `clean_document` transaction built on it.
 //!
 //! Every assertion is on observable results: the candidate text, outcome
 //! flags, diagnostics and applied repairs in document coordinates, and whether
@@ -9,12 +10,14 @@ use std::cell::Cell;
 use std::convert::Infallible;
 
 use biscuit_file::{YamlDiagnosticCode, YamlRepair};
-use darkmatter::markdown::Markdown;
-use darkmatter::markdown::cleanup::diagnostic::{CleanCode, CleanStage};
+use darkmatter::markdown::cleanup::diagnostic::{CleanCode, CleanDiagnostic, CleanStage};
 use darkmatter::markdown::cleanup::frontmatter::{
     FrontmatterRepair, FrontmatterRepairError, repair_frontmatter,
 };
+use darkmatter::markdown::cleanup::rules::MarkdownRuleOverrides;
+use darkmatter::markdown::cleanup::{CleanOutcome, CleanRequest, CleanResult, clean_document};
 use darkmatter::markdown::schemas::CleanSchemaConfig;
+use darkmatter::markdown::{Markdown, extract_frontmatter_block};
 
 /// An unquoted scalar opening with the reserved `@` indicator: unparseable,
 /// and deterministically repaired by quoting.
@@ -236,4 +239,229 @@ fn settings_yaml_falls_back_to_the_candidate_and_projects_to_authored_spans() {
     let after_discard = discarded.settings_yaml(source).expect("candidate retained");
     assert!(after_discard.from_candidate);
     assert_eq!(after_discard.yaml, settings.yaml);
+}
+
+// ---------------------------------------------------------------------------
+// Indented root mappings: the analyzer's `yaml.root-indentation` repair reaches
+// `md clean` and DMLS through the ordinary repair path, with no dispatch of
+// its own.
+// ---------------------------------------------------------------------------
+
+/// The inline-compose reproduction, widened with a comment, a trailing
+/// comment, a blank line inside the block scalar, and nested collections.
+const INDENTED_PROMPT: &str = concat!(
+    "---\n",
+    "    # Inline prompt\n",
+    "    prompt: |-\n",
+    "        Your task is to summarize.\n",
+    "\n",
+    "        Keep it short.\n",
+    "    model: sonnet   # preferred\n",
+    "    options:\n",
+    "        retries: 2\n",
+    "        tags:\n",
+    "            - fast\n",
+    "            - cheap\n",
+    "---\n",
+    "\n",
+    "# Body\n",
+    "\n",
+    "Text.\n",
+);
+
+const DEDENTED_PROMPT: &str = concat!(
+    "---\n",
+    "# Inline prompt\n",
+    "prompt: |-\n",
+    "    Your task is to summarize.\n",
+    "\n",
+    "    Keep it short.\n",
+    "model: sonnet   # preferred\n",
+    "options:\n",
+    "    retries: 2\n",
+    "    tags:\n",
+    "        - fast\n",
+    "        - cheap\n",
+    "---\n",
+    "\n",
+    "# Body\n",
+    "\n",
+    "Text.\n",
+);
+
+const ROOT_INDENTATION: CleanCode = CleanCode::Yaml(YamlDiagnosticCode::RootIndentation);
+
+fn frontmatter_value(document: &str) -> serde_yaml_ng::Value {
+    let extraction = extract_frontmatter_block(document)
+        .expect("frontmatter fences are well formed")
+        .expect("the document has frontmatter");
+    serde_yaml_ng::from_str(extraction.yaml).expect("frontmatter parses")
+}
+
+fn codes(diagnostics: &[CleanDiagnostic]) -> Vec<CleanCode> {
+    diagnostics.iter().map(|diagnostic| diagnostic.code).collect()
+}
+
+fn clean(source: &str) -> CleanResult {
+    let overrides = MarkdownRuleOverrides::default();
+    let request = CleanRequest { source, overrides: &overrides, workspace: None, document_path: None };
+    clean_document(&request, || Ok::<_, Infallible>(config())).expect("clean runs")
+}
+
+/// Every top-level key of `document`'s frontmatter starts at column 0.
+#[track_caller]
+fn assert_root_keys_at_column_zero(document: &str) {
+    let extraction = extract_frontmatter_block(document)
+        .expect("frontmatter fences are well formed")
+        .expect("the document has frontmatter");
+    let first = extraction
+        .yaml
+        .lines()
+        .find(|line| !line.trim().is_empty() && !line.trim_start().starts_with('#'))
+        .expect("a key line");
+    assert!(!first.starts_with([' ', '\t']), "first key is indented: {first:?}");
+}
+
+/// A second cleanup of `cleaned` reports no root-indentation finding and
+/// applies nothing.
+#[track_caller]
+fn assert_second_cleanup_is_stable(cleaned: &str) {
+    let again = repair(cleaned);
+    assert!(
+        !codes(&again.diagnostics).contains(&ROOT_INDENTATION),
+        "second repair re-reported the root: {:?}",
+        again.diagnostics
+    );
+    assert!(again.applied.is_empty(), "second repair applied {:?}", again.applied);
+    assert!(!again.repaired);
+    assert_eq!(again.source, cleaned);
+
+    let document = clean(cleaned);
+    assert_eq!(document.outcome, CleanOutcome::Unchanged);
+    assert!(!codes(&document.diagnostics).contains(&ROOT_INDENTATION));
+    assert!(document.applied.is_empty());
+}
+
+#[test]
+fn indented_root_reproduction_is_dedented_by_one_root_indentation_finding() {
+    let repaired = repair(INDENTED_PROMPT);
+
+    assert_eq!(repaired.source, DEDENTED_PROMPT);
+    assert!(repaired.repaired);
+    let roots: Vec<_> = repaired
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == ROOT_INDENTATION)
+        .collect();
+    assert_eq!(roots.len(), 1, "one finding for the whole root: {:?}", repaired.diagnostics);
+    let root = roots[0];
+    assert_eq!(root.stage, CleanStage::Syntax);
+    assert_eq!(root.message, "root mapping is indented by 4 spaces");
+    assert!(root.repairs.len() > 1, "one finding carries every prefix edit");
+    for edit in &root.repairs {
+        assert!(edit.replacement.is_empty(), "prefix edits only remove: {edit:?}");
+        assert!(
+            INDENTED_PROMPT[edit.span.clone()].bytes().all(|byte| byte == b' '),
+            "a prefix edit removes spaces only, in document coordinates: {:?}",
+            &INDENTED_PROMPT[edit.span.clone()]
+        );
+        assert!(repaired.applied.contains(edit), "the finding's edit was applied: {edit:?}");
+    }
+    assert_eq!(frontmatter_value(&repaired.source), frontmatter_value(INDENTED_PROMPT));
+    Markdown::try_from_content(repaired.source.clone()).expect("the cleaned document parses");
+}
+
+#[test]
+fn clean_document_applies_the_root_repair_and_keeps_the_parsed_value() {
+    let result = clean(INDENTED_PROMPT);
+
+    assert_eq!(result.outcome, CleanOutcome::Changed);
+    assert_eq!(result.text, DEDENTED_PROMPT);
+    assert_root_keys_at_column_zero(&result.text);
+    assert_eq!(frontmatter_value(&result.text), frontmatter_value(INDENTED_PROMPT));
+    let root = result
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == ROOT_INDENTATION)
+        .expect("root-indentation finding");
+    for edit in &root.repairs {
+        assert!(result.applied.contains(edit), "clean emitted the edit: {edit:?}");
+    }
+    assert_second_cleanup_is_stable(&result.text);
+}
+
+#[test]
+fn indented_root_combines_with_trailing_whitespace_and_final_blank_lines() {
+    let source = "---\n  title: Notes   \n  \n  meta:\n    owner: ken\t\n\n\n---\nBody\n";
+
+    let result = clean(source);
+
+    assert_eq!(result.outcome, CleanOutcome::Changed);
+    assert_eq!(result.text, "---\ntitle: Notes\n\nmeta:\n  owner: ken\n---\nBody\n");
+    let found = codes(&result.diagnostics);
+    assert!(found.contains(&ROOT_INDENTATION), "{found:?}");
+    assert!(found.contains(&CleanCode::Yaml(YamlDiagnosticCode::TrailingWhitespace)), "{found:?}");
+    assert_eq!(frontmatter_value(&result.text), frontmatter_value(source));
+    assert_second_cleanup_is_stable(&result.text);
+}
+
+/// The root repair itself only removes leading spaces, so it never touches a
+/// terminator. The frontmatter's LF result comes from the separate
+/// `yaml.line-ending` repair; the delimiter lines and the body keep CRLF
+/// because cleanup preserves them byte-for-byte.
+#[test]
+fn crlf_indented_root_keeps_prefix_edits_off_terminators() {
+    let source = "---\r\n    a: 1   \r\n    b: |\r\n      text\r\n---\r\n\r\nBody\r\nmore\r\n";
+
+    let result = clean(source);
+
+    assert_eq!(result.outcome, CleanOutcome::Changed);
+    assert_eq!(result.text, "---\r\na: 1\nb: |\n  text\n---\r\n\r\nBody\r\nmore\r\n");
+    let root = result
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == ROOT_INDENTATION)
+        .expect("root-indentation finding");
+    for edit in &root.repairs {
+        let removed = &source[edit.span.clone()];
+        assert!(edit.replacement.is_empty() && removed.bytes().all(|byte| byte == b' '), "{removed:?}");
+    }
+    assert!(
+        codes(&result.diagnostics).contains(&CleanCode::Yaml(YamlDiagnosticCode::LineEnding)),
+        "the LF normalization is its own finding: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(frontmatter_value(&result.text), frontmatter_value(source));
+    assert_second_cleanup_is_stable(&result.text);
+}
+
+#[test]
+fn tab_indented_root_is_recovered_then_dedented_by_the_rescan() {
+    let source = "---\n\tprompt: |-\n\t\tbody line\n\tnext: 1\n---\n\n# Body\n";
+
+    let repaired = repair(source);
+
+    assert_eq!(repaired.source, "---\nprompt: |-\n  body line\nnext: 1\n---\n\n# Body\n");
+    let found = codes(&repaired.diagnostics);
+    let tab = found
+        .iter()
+        .position(|code| *code == CleanCode::Yaml(YamlDiagnosticCode::TabIndentation))
+        .expect("tab recovery ran first");
+    let root = found
+        .iter()
+        .position(|code| *code == ROOT_INDENTATION)
+        .expect("the rescan offered the root repair");
+    assert!(tab < root, "the root repair is a rescan finding: {found:?}");
+    assert_eq!(found.iter().filter(|code| **code == ROOT_INDENTATION).count(), 1);
+    // Tab recovery reads each indentation tab as two spaces; the dedented
+    // result keeps the values Darkmatter loads from the authored block.
+    assert_eq!(
+        frontmatter_value(&repaired.source),
+        serde_yaml_ng::from_str::<serde_yaml_ng::Value>("prompt: body line\nnext: 1\n").unwrap()
+    );
+
+    let result = clean(source);
+    assert_eq!(result.outcome, CleanOutcome::Changed);
+    assert_eq!(result.text, repaired.source);
+    assert_second_cleanup_is_stable(&result.text);
 }

@@ -38,6 +38,10 @@ impl BlockError for CompositionError {
             | CompositionError::InlineHashMalformed(md)
             | CompositionError::InlineArtifactEditFailed(md)
             | CompositionError::PreFlightDiscoveryFailed(md) => md.status_block(term),
+            // `InlineBaselineUnstampable` also carries a typed Darkmatter cause
+            // but renders in the schema family below: its cause (a text-edit
+            // refusal) has no path, line, or excerpt to borrow, and the block
+            // must name the document the editor could not.
 
             // Lifecycle authoring / evaluation family.
             CompositionError::LifecycleInvalid { .. }
@@ -86,6 +90,7 @@ impl BlockError for CompositionError {
             | CompositionError::CompletionBodyUnchanged { .. }
             | CompositionError::CompletionSchemaFailed { .. }
             | CompositionError::InlineAgentFrontmatterRejected { .. }
+            | CompositionError::InlineBaselineUnstampable { .. }
             | CompositionError::UnsupportedInteractiveSchema { .. } => schema::status_block(self),
 
             // Selection / target family.
@@ -418,6 +423,9 @@ impl Diagnostic for CompositionError {
                 "document.invalid_frontmatter"
             }
             CompositionError::CompletionSchemaFailed { .. } => "composition.completion_schema",
+            // The author's document cannot start inline composition; the
+            // cause, not a finer code, names the fix.
+            CompositionError::InlineBaselineUnstampable { .. } => "composition.failed",
             CompositionError::InlineArtifactUnreadable { .. } => "io.read_failed",
             CompositionError::InlineGuardMissing { .. } => "usage.invalid_argument",
             CompositionError::SchemaLoad { .. } => "composition.schema_load",
@@ -659,6 +667,12 @@ impl Diagnostic for CompositionError {
                 base["doc"] = json!(biscuit_file::to_portable_string(path));
                 base["property"] = json!(rejection.property);
                 base["problems"] = json!([rejection.to_string()]);
+            }
+            // Keeps `composition.failed`: an author-correctable document that
+            // cannot start, whose remediation the cause names. `source_path`
+            // is the one key that code declares.
+            CompositionError::InlineBaselineUnstampable { path, .. } => {
+                base["source_path"] = json!(biscuit_file::to_portable_string(path));
             }
             // `io.read_failed` declares `path`.
             CompositionError::InlineArtifactUnreadable { path, .. } => {

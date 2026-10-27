@@ -201,49 +201,53 @@ fn playa_dry_run_prepares_nothing_and_leaves_no_audio_artifacts() {
 
 /// Every accepted `PLAYA_DRY_RUN` spelling stops the worker before it prepares
 /// anything.
-fn assert_playa_dry_run_spelling_prepares_nothing(value: &str) {
-    let fixture = CliProcessFixture::named("prewarm-playa-spellings");
-    common::launch_recorder::install(&fixture, "goose", "exit 0");
-    let document = write_document(&fixture, "doc.md", EARLY_AND_LATE);
-    let output = observed(&fixture, "record")
-        .env("PLAYA_DRY_RUN", value)
-        .args(["compose", "--goose", document.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "PLAYA_DRY_RUN={value}");
-    assert!(!record_path(&fixture).exists(), "PLAYA_DRY_RUN={value}");
-}
+mod every_accepted_playa_dry_run_spelling_prepares_nothing {
+    use super::*;
 
-/// One test per spelling, so nextest runs the spawns in parallel.
-macro_rules! playa_dry_run_spelling_tests {
-    ($($test:ident => $value:literal),* $(,)?) => {
-        /// The spellings the generated tests cover, in declaration order.
-        const PLAYA_DRY_RUN_SPELLINGS: &[&str] = &[$($value),*];
+    const SPELLINGS: [&str; 4] = ["1", "true", "TRUE", "yes"];
 
-        $(#[test]
-        fn $test() {
-            assert_playa_dry_run_spelling_prepares_nothing($value);
-        })*
-    };
-}
+    macro_rules! spelling_tests {
+        ($($test:ident => $value:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_spelling_prepares_nothing($value); })*
 
-playa_dry_run_spelling_tests! {
-    playa_dry_run_1_prepares_nothing => "1",
-    playa_dry_run_true_prepares_nothing => "true",
-    playa_dry_run_upper_true_prepares_nothing => "TRUE",
-    playa_dry_run_yes_prepares_nothing => "yes",
-}
+            #[test]
+            fn every_row_has_a_listed_test() {
+                assert_eq!(SPELLINGS, [$($value),*]);
+            }
+        };
+    }
 
-/// The spellings above are exactly the ones the pre-warm gate accepts, read
-/// from its `matches!` arm, so a spelling added there gets its own test.
-#[test]
-fn every_accepted_playa_dry_run_spelling_has_a_test() {
-    let source = include_str!("../../../lib/src/composition/lifecycle/prewarm/worker.rs");
-    let marker = "matches!(playa_dry_run, Some(";
-    let start = source.find(marker).expect("the gate's `matches!` arm") + marker.len();
-    let arm = &source[start..start + source[start..].find(')').expect("the arm's close")];
-    let accepted: Vec<&str> = arm.split('|').map(|spelling| spelling.trim().trim_matches('"')).collect();
-    assert_eq!(PLAYA_DRY_RUN_SPELLINGS, accepted.as_slice());
+    /// The rows are exactly the spellings the pre-warm gate accepts, read
+    /// from its `matches!` arm, so a spelling added there gets its own test.
+    #[test]
+    fn every_accepted_spelling_is_a_row() {
+        let source = include_str!("../../../lib/src/composition/lifecycle/prewarm/worker.rs");
+        let marker = "matches!(playa_dry_run, Some(";
+        let start = source.find(marker).expect("the gate's `matches!` arm") + marker.len();
+        let arm = &source[start..start + source[start..].find(')').expect("the arm's close")];
+        let accepted: Vec<&str> = arm.split('|').map(|spelling| spelling.trim().trim_matches('"')).collect();
+        assert_eq!(SPELLINGS.as_slice(), accepted.as_slice());
+    }
+
+    spelling_tests! {
+        one => "1",
+        lowercase_true => "true",
+        uppercase_true => "TRUE",
+        yes => "yes",
+    }
+
+    fn assert_spelling_prepares_nothing(value: &str) {
+        let fixture = CliProcessFixture::named("prewarm-playa-spellings");
+        common::launch_recorder::install(&fixture, "goose", "exit 0");
+        let document = write_document(&fixture, "doc.md", EARLY_AND_LATE);
+        let output = observed(&fixture, "record")
+            .env("PLAYA_DRY_RUN", value)
+            .args(["compose", "--goose", document.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "PLAYA_DRY_RUN={value}");
+        assert!(!record_path(&fixture).exists(), "PLAYA_DRY_RUN={value}");
+    }
 }
 
 /// Writes three prompt documents, each with a never-firing early phrase, and

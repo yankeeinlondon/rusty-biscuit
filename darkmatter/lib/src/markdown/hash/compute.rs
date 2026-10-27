@@ -636,4 +636,134 @@ mod tests {
             without_extra.compute_hash(MdHashKind::Fm, &opts),
         );
     }
+
+    /// Every frontmatter component the option-based kinds report, labeled,
+    /// excluding the keys-only hashes (asserted separately).
+    fn frontmatter_components(doc: &Markdown, opts: &MdHashOptions) -> Vec<(&'static str, String)> {
+        let ComputedHash::Fm(fm) = doc.compute_hash(MdHashKind::Fm, opts) else { panic!("expected Fm") };
+        let ComputedHash::Simple { fm: simple, .. } = doc.compute_hash(MdHashKind::Simple, opts) else {
+            panic!("expected Simple")
+        };
+        let ComputedHash::Structured { fm: structured, .. } = doc.compute_hash(MdHashKind::Structured, opts) else {
+            panic!("expected Structured")
+        };
+        let ComputedHash::Detailed(detailed) = doc.compute_hash(MdHashKind::Detailed, opts) else {
+            panic!("expected Detailed")
+        };
+        vec![
+            ("helper", hex(hash_frontmatter_map(doc.frontmatter().as_map(), opts.strict))),
+            ("legacy", hex(doc.hash_frontmatter(opts.strict))),
+            ("fm", fm),
+            ("simple", simple),
+            ("structured", structured),
+            ("detailed", detailed.frontmatter.fm),
+        ]
+    }
+
+    /// The keys-only hashes of `structured` and `detailed`.
+    fn keys_components(doc: &Markdown, opts: &MdHashOptions) -> [String; 2] {
+        let ComputedHash::Structured { fm_keys, .. } = doc.compute_hash(MdHashKind::Structured, opts) else {
+            panic!("expected Structured")
+        };
+        let ComputedHash::Detailed(detailed) = doc.compute_hash(MdHashKind::Detailed, opts) else {
+            panic!("expected Detailed")
+        };
+        [fm_keys, detailed.frontmatter.keys]
+    }
+
+    /// The body-only outputs: `body` and the body half of `simple`.
+    fn body_components(doc: &Markdown, opts: &MdHashOptions) -> [String; 2] {
+        let ComputedHash::Body(body) = doc.compute_hash(MdHashKind::Body, opts) else { panic!("expected Body") };
+        let ComputedHash::Simple { body: simple, .. } = doc.compute_hash(MdHashKind::Simple, opts) else {
+            panic!("expected Simple")
+        };
+        [body, simple]
+    }
+
+    const KEY_ORDER_BODY: &str = "# Intro\n\nWelcome.\n";
+
+    /// Documents reordering only top-level keys, only keys two levels deep, or
+    /// only keys inside an array element, each paired with its authored form.
+    const KEY_ORDER_PAIRS: [(&str, &str, &str, bool); 3] = [
+        (
+            "top-level",
+            "title: T\nmeta:\n  owner:\n    name: N\n    team: X\n",
+            "meta:\n  owner:\n    name: N\n    team: X\ntitle: T\n",
+            true,
+        ),
+        (
+            "two levels deep",
+            "title: T\nmeta:\n  owner:\n    name: N\n    team: X\n  tags: [a, b]\n",
+            "title: T\nmeta:\n  tags: [a, b]\n  owner:\n    team: X\n    name: N\n",
+            false,
+        ),
+        (
+            "inside an array element",
+            "title: T\nitems:\n  - id: 1\n    label: one\n  - id: 2\n",
+            "title: T\nitems:\n  - label: one\n    id: 1\n  - id: 2\n",
+            false,
+        ),
+    ];
+
+    #[test]
+    fn frontmatter_hash_matrix_ignores_key_order_only_when_non_strict() {
+        let non_strict = MdHashOptions::default();
+        let strict = MdHashOptions { strict: true, ..MdHashOptions::default() };
+
+        for (name, authored, reordered, top_level_moved) in KEY_ORDER_PAIRS {
+            let a = md(&format!("---\n{authored}---\n{KEY_ORDER_BODY}"));
+            let b = md(&format!("---\n{reordered}---\n{KEY_ORDER_BODY}"));
+            assert_eq!(a.frontmatter().as_map(), b.frontmatter().as_map(), "{name}: same data");
+
+            for ((label, left), (_, right)) in
+                frontmatter_components(&a, &non_strict).into_iter().zip(frontmatter_components(&b, &non_strict))
+            {
+                assert_eq!(left, right, "{name}: non-strict {label} hash ignores key order");
+            }
+            for ((label, left), (_, right)) in
+                frontmatter_components(&a, &strict).into_iter().zip(frontmatter_components(&b, &strict))
+            {
+                assert_ne!(left, right, "{name}: strict {label} hash follows author order");
+            }
+
+            assert_eq!(keys_components(&a, &non_strict), keys_components(&b, &non_strict), "{name}: non-strict keys");
+            if top_level_moved {
+                assert_ne!(keys_components(&a, &strict), keys_components(&b, &strict), "{name}: strict keys");
+            } else {
+                assert_eq!(keys_components(&a, &strict), keys_components(&b, &strict), "{name}: strict keys");
+            }
+
+            for opts in [&non_strict, &strict] {
+                assert_eq!(body_components(&a, opts), body_components(&b, opts), "{name}: body unaffected");
+            }
+        }
+    }
+
+    #[test]
+    fn non_strict_frontmatter_hash_changes_on_array_element_reorder() {
+        let a = md("---\ntitle: T\ntags: [a, b]\nitems:\n  - id: 1\n  - id: 2\n---\nBody\n");
+        let b = md("---\ntitle: T\ntags: [b, a]\nitems:\n  - id: 1\n  - id: 2\n---\nBody\n");
+        let c = md("---\ntitle: T\ntags: [a, b]\nitems:\n  - id: 2\n  - id: 1\n---\nBody\n");
+        let opts = MdHashOptions::default();
+        let fm = |doc: &Markdown| frontmatter_components(doc, &opts);
+        assert_ne!(fm(&a), fm(&b), "scalar array order is significant");
+        assert_ne!(fm(&a), fm(&c), "object array order is significant");
+    }
+
+    /// The non-strict entry format is historical: top-level keys sorted, each
+    /// entry `key:<compact canonical JSON>`, joined with the literal two
+    /// characters `\` `n`. A delimiter change or hashing the whole map at once
+    /// must fail here.
+    #[test]
+    fn non_strict_frontmatter_hash_keeps_the_historical_entry_format() {
+        let doc = md("---\nb:\n  y: 1\n  x: 2\na: [2, 1]\n---\nBody\n");
+        let expected = xx_hash(r#"a:[2,1]\nb:{"x":2,"y":1}"#);
+        assert_eq!(hash_frontmatter_map(doc.frontmatter().as_map(), false), expected);
+        assert_eq!(doc.hash_frontmatter(false), expected);
+        assert_eq!(hex(expected), "26b30b2982c8c394");
+        assert_eq!(
+            doc.compute_hash(MdHashKind::Fm, &MdHashOptions::default()),
+            ComputedHash::Fm(hex(expected)),
+        );
+    }
 }

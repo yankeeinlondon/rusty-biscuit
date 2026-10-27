@@ -17,29 +17,32 @@
 //! - `Chat` - Chat completion with SSE streaming support
 //! - `LoadModel` - Load a model into memory
 //! - `UnloadModel` - Unload a model from memory
-//! - `DownloadModel` - Download a model from HuggingFace with SSE progress
+//! - `DownloadModel` - Download a model from HuggingFace
 //! - `GetDownloadStatus` - Check the status of a download job
 //!
 //! ## Examples
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
+//! use schematic_schema::lmstudio::ListModelsRequest;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = LmStudio::new();
-//!     let data = client.list_models().await?;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = LmStudio::new();
+//! let data = client.list_models().await?;
 //!
-//!     // the whole response: status, headers, and request id as well
-//!     let response = client.list_models().full().await?;
-//!     println!("{}", response.meta);
-//!     Ok(())
-//! }
+//! // the same request, built as a typed request and sent
+//! let data = client.send(ListModelsRequest::default()).await?;
+//!
+//! // the whole response: status, headers, and request id as well
+//! let response = client.list_models().full().await?;
+//! println!("{}", response.meta);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ### Override Base URL
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
 //!
 //! let client = LmStudio::new().base_url("https://staging.example.com/v1");
@@ -95,44 +98,94 @@ impl Default for LmStudio {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::lmstudio::{ChatRequest, ChatBody};
+/// ```no_run
+/// use schematic_schema::lmstudio::ChatRequest;
 ///
-/// let body = ChatBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = ChatRequest::new(body)
-///;
+/// let body: ::schematic_definitions::lmstudio::ChatBody = Default::default();
+/// let request = ChatRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatRequest {
     /// Request body
-    pub body: ChatBody,
+    pub body: ::schematic_definitions::lmstudio::ChatBody,
 }
 impl ChatRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: ChatBody) -> Self {
+    pub fn new(body: ::schematic_definitions::lmstudio::ChatBody) -> Self {
         Self { body }
     }
 }
-impl From<ChatBody> for ChatRequest {
-    fn from(body: ChatBody) -> Self {
+impl From<::schematic_definitions::lmstudio::ChatBody> for ChatRequest {
+    fn from(body: ::schematic_definitions::lmstudio::ChatBody) -> Self {
         Self { body }
+    }
+}
+/// The end condition of the `Chat` stream.
+#[derive(Debug, Clone, Copy)]
+pub struct ChatStreamEnd;
+impl schematic_runtime::StreamEnd for ChatStreamEnd {
+    const CONDITION: schematic_runtime::EndCondition = schematic_runtime::EndCondition::EventNamed(
+        "chat.end",
+    );
+    const KEEP: bool = true;
+}
+/// The success reply of `Chat`: one variant per declared shape, chosen from the reply's status, media type, and JSON tag.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub enum ChatResponse {
+    /// returned when `stream` is false or omitted
+    ///
+    /// Chosen by media type `application/json`.
+    Json(::schematic_definitions::lmstudio::ChatResult),
+    /// returned when `stream` is true
+    ///
+    /// Chosen by media type `text/event-stream`.
+    Stream(
+        schematic_runtime::ItemStream<::schematic_definitions::lmstudio::ChatStreamEvent>,
+    ),
+}
+impl schematic_runtime::Alternatives for ChatResponse {
+    const ROUTES: &'static [schematic_runtime::Route] = &[
+        schematic_runtime::Route::new(schematic_runtime::ShapeKind::Json)
+            .media("application/json"),
+        schematic_runtime::Route::new(schematic_runtime::ShapeKind::Stream)
+            .media("text/event-stream"),
+    ];
+    async fn decode_alternative(
+        index: usize,
+        body: schematic_runtime::LiveBody,
+    ) -> Result<Self, schematic_runtime::DecodeFailure> {
+        match index {
+            0 => {
+                <schematic_runtime::Json<
+                    ::schematic_definitions::lmstudio::ChatResult,
+                > as schematic_runtime::Decode>::decode(body)
+                    .await
+                    .map(Self::Json)
+            }
+            _ => {
+                <schematic_runtime::Sse<
+                    ::schematic_definitions::lmstudio::ChatStreamEvent,
+                    ChatStreamEnd,
+                > as schematic_runtime::Decode>::decode(body)
+                    .await
+                    .map(Self::Stream)
+            }
+        }
     }
 }
 impl schematic_runtime::EndpointSpec for ChatRequest {
     type Api = LmStudioApi;
-    type Success = bytes::Bytes;
+    type Success = ChatResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Binary;
+    type Decoder = schematic_runtime::Shapes<ChatResponse>;
     const ENDPOINT_ID: &'static str = "Chat";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/api/v1/chat".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -154,26 +207,27 @@ impl schematic_runtime::EndpointSpec for ChatRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::lmstudio::ListModelsRequest;
 ///
-/// let request = ListModelsRequest::default()
-///;
+/// let request = ListModelsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListModelsRequest {
     type Api = LmStudioApi;
-    type Success = ListModelsResponse;
+    type Success = ::schematic_definitions::lmstudio::ListModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListModelsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::lmstudio::ListModelsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListModels";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/api/v1/models".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -188,44 +242,42 @@ impl schematic_runtime::EndpointSpec for ListModelsRequest {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::lmstudio::{LoadModelRequest, LoadModelBody};
+/// ```no_run
+/// use schematic_schema::lmstudio::LoadModelRequest;
 ///
-/// let body = LoadModelBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = LoadModelRequest::new(body)
-///;
+/// let body: ::schematic_definitions::lmstudio::LoadModelBody = Default::default();
+/// let request = LoadModelRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LoadModelRequest {
     /// Request body
-    pub body: LoadModelBody,
+    pub body: ::schematic_definitions::lmstudio::LoadModelBody,
 }
 impl LoadModelRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: LoadModelBody) -> Self {
+    pub fn new(body: ::schematic_definitions::lmstudio::LoadModelBody) -> Self {
         Self { body }
     }
 }
-impl From<LoadModelBody> for LoadModelRequest {
-    fn from(body: LoadModelBody) -> Self {
+impl From<::schematic_definitions::lmstudio::LoadModelBody> for LoadModelRequest {
+    fn from(body: ::schematic_definitions::lmstudio::LoadModelBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for LoadModelRequest {
     type Api = LmStudioApi;
-    type Success = LoadModelResponse;
+    type Success = ::schematic_definitions::lmstudio::LoadModelResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<LoadModelResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::lmstudio::LoadModelResponse,
+    >;
     const ENDPOINT_ID: &'static str = "LoadModel";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/api/v1/models/load".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -247,44 +299,42 @@ impl schematic_runtime::EndpointSpec for LoadModelRequest {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::lmstudio::{UnloadModelRequest, UnloadModelBody};
+/// ```no_run
+/// use schematic_schema::lmstudio::UnloadModelRequest;
 ///
-/// let body = UnloadModelBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = UnloadModelRequest::new(body)
-///;
+/// let body: ::schematic_definitions::lmstudio::UnloadModelBody = Default::default();
+/// let request = UnloadModelRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnloadModelRequest {
     /// Request body
-    pub body: UnloadModelBody,
+    pub body: ::schematic_definitions::lmstudio::UnloadModelBody,
 }
 impl UnloadModelRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: UnloadModelBody) -> Self {
+    pub fn new(body: ::schematic_definitions::lmstudio::UnloadModelBody) -> Self {
         Self { body }
     }
 }
-impl From<UnloadModelBody> for UnloadModelRequest {
-    fn from(body: UnloadModelBody) -> Self {
+impl From<::schematic_definitions::lmstudio::UnloadModelBody> for UnloadModelRequest {
+    fn from(body: ::schematic_definitions::lmstudio::UnloadModelBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for UnloadModelRequest {
     type Api = LmStudioApi;
-    type Success = UnloadModelResponse;
+    type Success = ::schematic_definitions::lmstudio::UnloadModelResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<UnloadModelResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::lmstudio::UnloadModelResponse,
+    >;
     const ENDPOINT_ID: &'static str = "UnloadModel";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/api/v1/models/unload".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -306,44 +356,43 @@ impl schematic_runtime::EndpointSpec for UnloadModelRequest {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::lmstudio::{DownloadModelRequest, DownloadModelBody};
+/// ```no_run
+/// use schematic_schema::lmstudio::DownloadModelRequest;
 ///
-/// let body = DownloadModelBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = DownloadModelRequest::new(body)
-///;
+/// let body: ::schematic_definitions::lmstudio::DownloadModelBody = Default::default();
+/// let request = DownloadModelRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DownloadModelRequest {
     /// Request body
-    pub body: DownloadModelBody,
+    pub body: ::schematic_definitions::lmstudio::DownloadModelBody,
 }
 impl DownloadModelRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: DownloadModelBody) -> Self {
+    pub fn new(body: ::schematic_definitions::lmstudio::DownloadModelBody) -> Self {
         Self { body }
     }
 }
-impl From<DownloadModelBody> for DownloadModelRequest {
-    fn from(body: DownloadModelBody) -> Self {
+impl From<::schematic_definitions::lmstudio::DownloadModelBody>
+for DownloadModelRequest {
+    fn from(body: ::schematic_definitions::lmstudio::DownloadModelBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for DownloadModelRequest {
     type Api = LmStudioApi;
-    type Success = bytes::Bytes;
+    type Success = ::schematic_definitions::lmstudio::DownloadModelResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Binary;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::lmstudio::DownloadModelResponse,
+    >;
     const ENDPOINT_ID: &'static str = "DownloadModel";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/api/v1/models/download".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -365,44 +414,43 @@ impl schematic_runtime::EndpointSpec for DownloadModelRequest {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::lmstudio::{GetDownloadStatusRequest, DownloadStatusBody};
+/// ```no_run
+/// use schematic_schema::lmstudio::GetDownloadStatusRequest;
 ///
-/// let body = DownloadStatusBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = GetDownloadStatusRequest::new(body)
-///;
+/// let body: ::schematic_definitions::lmstudio::DownloadStatusBody = Default::default();
+/// let request = GetDownloadStatusRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDownloadStatusRequest {
     /// Request body
-    pub body: DownloadStatusBody,
+    pub body: ::schematic_definitions::lmstudio::DownloadStatusBody,
 }
 impl GetDownloadStatusRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: DownloadStatusBody) -> Self {
+    pub fn new(body: ::schematic_definitions::lmstudio::DownloadStatusBody) -> Self {
         Self { body }
     }
 }
-impl From<DownloadStatusBody> for GetDownloadStatusRequest {
-    fn from(body: DownloadStatusBody) -> Self {
+impl From<::schematic_definitions::lmstudio::DownloadStatusBody>
+for GetDownloadStatusRequest {
+    fn from(body: ::schematic_definitions::lmstudio::DownloadStatusBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for GetDownloadStatusRequest {
     type Api = LmStudioApi;
-    type Success = DownloadStatusResponse;
+    type Success = ::schematic_definitions::lmstudio::DownloadStatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<DownloadStatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::lmstudio::DownloadStatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "GetDownloadStatus";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/api/v1/models/download/status".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -727,8 +775,11 @@ impl LmStudio {
     ///
     /// ## Arguments
     ///
-    /// - `body: ChatBody`: the request body
-    pub fn chat(&self, body: ChatBody) -> ChatCall<'_> {
+    /// - `body: ::schematic_definitions::lmstudio::ChatBody`: the request body
+    pub fn chat(
+        &self,
+        body: ::schematic_definitions::lmstudio::ChatBody,
+    ) -> ChatCall<'_> {
         ChatCall(self.0.send(ChatRequest::new(body)))
     }
     /// List available models
@@ -747,8 +798,11 @@ impl LmStudio {
     ///
     /// ## Arguments
     ///
-    /// - `body: LoadModelBody`: the request body
-    pub fn load_model(&self, body: LoadModelBody) -> LoadModelCall<'_> {
+    /// - `body: ::schematic_definitions::lmstudio::LoadModelBody`: the request body
+    pub fn load_model(
+        &self,
+        body: ::schematic_definitions::lmstudio::LoadModelBody,
+    ) -> LoadModelCall<'_> {
         LoadModelCall(self.0.send(LoadModelRequest::new(body)))
     }
     /// Unload a model from memory
@@ -759,11 +813,14 @@ impl LmStudio {
     ///
     /// ## Arguments
     ///
-    /// - `body: UnloadModelBody`: the request body
-    pub fn unload_model(&self, body: UnloadModelBody) -> UnloadModelCall<'_> {
+    /// - `body: ::schematic_definitions::lmstudio::UnloadModelBody`: the request body
+    pub fn unload_model(
+        &self,
+        body: ::schematic_definitions::lmstudio::UnloadModelBody,
+    ) -> UnloadModelCall<'_> {
         UnloadModelCall(self.0.send(UnloadModelRequest::new(body)))
     }
-    /// Download a model from HuggingFace with SSE progress
+    /// Download a model from HuggingFace
     ///
     /// `POST /api/v1/models/download`
     ///
@@ -771,8 +828,11 @@ impl LmStudio {
     ///
     /// ## Arguments
     ///
-    /// - `body: DownloadModelBody`: the request body
-    pub fn download_model(&self, body: DownloadModelBody) -> DownloadModelCall<'_> {
+    /// - `body: ::schematic_definitions::lmstudio::DownloadModelBody`: the request body
+    pub fn download_model(
+        &self,
+        body: ::schematic_definitions::lmstudio::DownloadModelBody,
+    ) -> DownloadModelCall<'_> {
         DownloadModelCall(self.0.send(DownloadModelRequest::new(body)))
     }
     /// Check the status of a download job
@@ -783,10 +843,10 @@ impl LmStudio {
     ///
     /// ## Arguments
     ///
-    /// - `body: DownloadStatusBody`: the request body
+    /// - `body: ::schematic_definitions::lmstudio::DownloadStatusBody`: the request body
     pub fn get_download_status(
         &self,
-        body: DownloadStatusBody,
+        body: ::schematic_definitions::lmstudio::DownloadStatusBody,
     ) -> GetDownloadStatusCall<'_> {
         GetDownloadStatusCall(self.0.send(GetDownloadStatusRequest::new(body)))
     }

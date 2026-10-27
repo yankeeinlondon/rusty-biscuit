@@ -33,6 +33,22 @@
 
 ### Production Dependencies
 
+- `url` v2 validates HTTP(S) base URLs at REST API build.
+- `schemars` v1 generates provider-neutral typed registrations with OpenAPI 3.0 settings.
+- `serde_json` v1 is an unconditional production dependency for schema component wire schemas and transfer data. Its `raw_value` feature lets the OpenAPI importer read each numeric schema keyword's exact source text before `openapiv3` narrows it to `i64`/`f64`.
+
+- [regex-syntax](https://github.com/rust-lang/regex/tree/master/regex-syntax) _v0.8_ [📄](https://docs.rs/regex-syntax)
+
+    _Parses a constraint's `pattern` into an AST so `constraints::admit_pattern` can decide whether the ECMAScript source means the same under Rust's `regex`, and rewrite `\d`/`\w` to their ASCII classes._
+
+    _Tags: regex, validation_
+
+- [regex](https://github.com/rust-lang/regex) _v1_ [📄](https://docs.rs/regex)
+
+    _Proves an admitted pattern compiles within the runtime's default size limits, so a definition never promises a pattern the generated client cannot enforce._
+
+    _Tags: regex, validation_
+
 - [serde](https://github.com/serde-rs/serde) _v1.0_ [📄](https://serde.rs)
 
     _Industry-standard serialization framework providing derive macros for automatic trait implementation._
@@ -51,19 +67,35 @@
 
     _Tags: errors, macros_
 
-### Development and Test-Tier Dependencies
+---
 
-- [serde_json](https://github.com/serde-rs/json) _v1.0_
+## schematic-definitions
 
-    _Fast JSON serialization/deserialization using serde._
+### Development Dependencies
 
-    _Tags: json, serialization_
+- [jsonschema](https://github.com/Stranger6667/jsonschema) _v0.55_ [📄](https://docs.rs/jsonschema)
+
+    _JSON Schema validator (default features off, the workspace-wide pin) used by the L1 `schema_values` test, which validates accepted and rejected instances against exported OpenAPI component schemas, offline._
+
+    _Tags: testing, json-schema_
 
 ---
 
 ## schematic-gen
 
 ### Production Dependencies
+
+- [jsonschema](https://github.com/Stranger6667/jsonschema) _v0.55_ [📄](https://docs.rs/jsonschema)
+
+    _JSON Schema validator (default features off, the workspace-wide pin). The
+    Postman exporter's example engine (`export::examples`) validates every
+    example against the API's registered schemas (Draft 2020-12, offline,
+    local references only) before emitting it; the L1 tests also validate
+    collections against the published Postman schema and exported AsyncAPI
+    documents against a vendored AsyncAPI 3.0.0 schema. A normal dependency
+    since examples are checked at generation time, not only in tests._
+
+    _Tags: json-schema, validation_
 
 - [clap](https://github.com/clap-rs/clap) _v4.5_ [📄](https://docs.rs/clap)
 
@@ -179,19 +211,13 @@
 
     _Tags: workspace, testing_
 
-- [jsonschema](https://github.com/Stranger6667/jsonschema) _v0.55_ [📄](https://docs.rs/jsonschema)
-
-    _JSON Schema validator (default features off) used by the L1 tests that validate exported Postman collections against the published schema._
-
-    _Tags: testing, json-schema_
-
 ---
 
 ## schematic-runtime
 
 Every crate below was already in the workspace graph, so adding the runtime
-adds no package to `Cargo.lock`. Every production dependency is also already
-in `schematic/schema/Cargo.lock`, so the generated crate can depend on the
+adds no package to `Cargo.lock`. The generated crate's own
+`schematic/schema/Cargo.lock` records them too, so it builds against the
 runtime offline. The runtime does not depend on `schematic-define`, and it
 keeps HTTP-library types out of its `Decode` boundary: a codec reads a byte
 stream, not a library response.
@@ -218,7 +244,7 @@ stream, not a library response.
 
 - [futures-util](https://github.com/rust-lang/futures-rs) _v0.3_ [📄](https://docs.rs/futures-util)
 
-    _Default features off; `stream::unfold` adapts the HTTP library's body reads into the `LiveBody` stream._
+    _Default features off; `stream::unfold` adapts the HTTP library's body reads into the `LiveBody` stream and drives the owned, fused SSE, NDJSON, and byte streams without a background task._
 
     _Tags: async, streams_
 
@@ -227,6 +253,18 @@ stream, not a library response.
     _`Method`, `StatusCode`, and `HeaderMap` for request parts and metadata; repeated headers stay repeated._
 
     _Tags: http, types_
+
+- [num-bigint](https://github.com/rust-num/num-bigint) _v0.4_ [📄](https://docs.rs/num-bigint)
+
+    _The arbitrary-precision mantissa of `validate::Decimal`, so numeric constraints (bounds beyond `u64`, decimal `multipleOf` divisors such as `0.1`, and number equality in `enum`, `const`, and `uniqueItems`) are exact rather than floating point._
+
+    _Tags: numbers, validation_
+
+- [regex](https://github.com/rust-lang/regex) _v1_ [📄](https://docs.rs/regex)
+
+    _Matches `validate::Pattern` rules, each compiled once per process on first use; the generator writes only patterns it has proven equivalent to the definition's._
+
+    _Tags: regex, validation_
 
 - [reqwest](https://github.com/seanmonstar/reqwest) _v0.13_ [📄](https://docs.rs/reqwest)
 
@@ -242,7 +280,7 @@ stream, not a library response.
 
 - [serde](https://github.com/serde-rs/serde) _v1_ [📄](https://serde.rs)
 
-    _`DeserializeOwned`, the bound of the `Json<T>` codec._
+    _`derive` feature: `DeserializeOwned`, the bound of the `Json<T>`, stream, and GraphQL codecs, and the derived decoding of GraphQL error entries; `Serialize` for GraphQL variables._
 
     _Tags: serialization_
 
@@ -336,7 +374,7 @@ stream, not a library response.
 
 - [schematic-runtime](../runtime) _v0.1.0_
 
-    _Sends every generated REST request (path dependency, re-exported as `schematic_schema::schematic_runtime`); the crate has no HTTP client of its own._
+    _Sends every generated REST request (path dependency, re-exported as `schematic_schema::schematic_runtime`), and selects and redacts each WebSocket handshake's credential; the crate has no HTTP client of its own._
 
     _Tags: workspace, http_
 
@@ -366,7 +404,7 @@ stream, not a library response.
 
 - [schematic-define](../define) _v0.1.0_
 
-    _Local dependency used only by the WebSocket modules (`Headers`, `ApiKeyEnv`, `EnvMapping`, `EnvList`, and the `websocket` types); the REST modules take their runtime types from `schematic-runtime`._
+    _Local dependency used only by the WebSocket modules, whose `define_api()` returns the `websocket::WebSocketApi` definition; every runtime type, including the WebSocket handshake's credentials, comes from `schematic-runtime`._
 
     _Tags: workspace_
 
@@ -425,3 +463,5 @@ stream, not a library response.
     _Compile-fail cases of the generated pager surface, run on the real generated endpoints and checked against their expected diagnostics. The generator writes this dev-dependency into the crate's manifest._
 
     _Tags: testing, compile-fail_
+
+- `schematic-gen` uses `biscuit-hash` with the `blake3` feature as a dev dependency for canonical definition and schema baseline fingerprints. This adds no runtime dependency or new external crate.

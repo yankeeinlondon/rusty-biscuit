@@ -15,8 +15,8 @@ pub use completion::{
     complete_theme_names,
 };
 pub use enums::{
-    CodeBlockOutput, ComposeOutputFormat, GraphFormat, HashKind, OutputFormat, RemoteFreshness, SchemaDetectFormat,
-    SchemaValidateFormat, ValidateOutputFormat,
+    CodeBlockOutput, ComposeOutputFormat, Feature, GraphFormat, HashKind, OutputFormat, RemoteFreshness,
+    SchemaDetectFormat, SchemaValidateFormat, ValidateOutputFormat,
 };
 pub use parsers::{
     parse_bool_str, parse_cli_fill, parse_cli_length, parse_fixed_width, parse_indent_size,

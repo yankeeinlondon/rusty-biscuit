@@ -574,9 +574,9 @@ mod resolved_values {
         ComposeContext, ResolvedShellValue, check_frontmatter_shell_value,
         execute_resolved_shell_values,
     };
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
 
-    fn state(pairs: &[(&str, Value)]) -> HashMap<String, Value> {
+    fn state(pairs: &[(&str, Value)]) -> serde_json::Map<String, Value> {
         pairs
             .iter()
             .map(|(key, value)| (key.to_string(), value.clone()))
@@ -649,9 +649,9 @@ mod resolved_values {
         let second = resolve(&repo, &authored, &authored, &[]);
         let options = options(&repo, &[&first]);
 
-        execute_resolved_shell_values(&[&first, &second], HashMap::new(), &crate::request_support::request(options.clone())).unwrap();
+        execute_resolved_shell_values(&[&first, &second], serde_json::Map::new(), &crate::request_support::request(options.clone())).unwrap();
         assert_eq!(repo.runs("runs"), 1, "values in one execution share a run");
-        execute_resolved_shell_values(&[&first], HashMap::new(), &crate::request_support::request(options.clone())).unwrap();
+        execute_resolved_shell_values(&[&first], serde_json::Map::new(), &crate::request_support::request(options.clone())).unwrap();
         assert_eq!(repo.runs("runs"), 2, "a later execution runs the command again");
     }
 
@@ -662,7 +662,7 @@ mod resolved_values {
         let options = ComposeOptions::new()
             .with_source_file(repo.path().join("doc.md"))
             .with_pre_approved_commands(HashSet::new());
-        let error = execute_resolved_shell_values(&[&value], HashMap::new(), &crate::request_support::request(options.clone())).unwrap_err();
+        let error = execute_resolved_shell_values(&[&value], serde_json::Map::new(), &crate::request_support::request(options.clone())).unwrap_err();
         assert!(error.to_string().contains("not pre-approved"), "{error}");
     }
 
@@ -731,7 +731,7 @@ mod resolved_values {
         assert!(value.commands().is_empty(), "a template-only value has no bytes");
         let options = shape_only(&repo, &template);
 
-        let error = execute_resolved_shell_values(&[&value], HashMap::new(), &crate::request_support::request(options.clone()))
+        let error = execute_resolved_shell_values(&[&value], serde_json::Map::new(), &crate::request_support::request(options.clone()))
             .unwrap_err();
         assert!(
             matches!(error, darkmatter::markdown::compose::ShellExpansionError::MissingValue { .. }),
@@ -748,7 +748,7 @@ mod resolved_values {
             .unwrap();
         let results = execute_resolved_shell_values(
             &[&value.clone().with_late_values(late)],
-            HashMap::new(),
+            serde_json::Map::new(),
             &crate::request_support::request(options),
         )
         .unwrap();

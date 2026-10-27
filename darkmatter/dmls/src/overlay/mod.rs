@@ -1122,6 +1122,9 @@ fn fallback_areas(
 /// signature of the schema configuration (extensions + strict mode).
 /// `schema.slow_validation_ms` only chooses a log level, so changing it
 /// keeps the cached bundle.
+///
+/// The config bytes are already key-order-insensitive: the tuple holds only a
+/// `bool` and a `BTreeMap`, which serializes sorted.
 fn schema_cache_key(text: &str, config: &DmlsConfig) -> u64 {
     let config_bytes =
         serde_json::to_vec(&(config.schema.strict, &config.schema.extensions)).unwrap_or_default();

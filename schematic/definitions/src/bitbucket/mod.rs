@@ -55,57 +55,21 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::SchemaRegistry;
+use crate::registry::assemble_module_group;
+use schematic_define::{DefinitionContext, DefinitionError};
+#[cfg(test)]
+use schematic_define::{ResponseShape, RestMethod};
 use schematic_define::{
-    ApiResponse, AuthStrategy, CrossOrigin, Endpoint, EndpointParams, EnvList, EnvMapping,
-    PaginationStyle, RestApi, RestMethod,
-    pagination::{Collection, LinkSource, PageSize, PaginationException, Strategy, ValueSource},
+    Endpoint, EndpointParams, EnvList, EnvMapping,
+    RestApi, Success,
+    pagination::{Collection, LinkSource, PageSize, Strategy, ValueSource},
 };
-
-/// Creates a schema registry containing all Bitbucket response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the Bitbucket API.
-/// All response types used by the API endpoints are registered, including
-/// concrete instantiations of the generic `PaginatedResponse<T>` type.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::bitbucket::{openapi_registry, define_bitbucket_api};
-///
-/// let registry = openapi_registry();
-/// let api = define_bitbucket_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("Repository").is_some());
-/// assert!(registry.get("PullRequest").is_some());
-/// assert!(registry.get("Issue").is_some());
-///
-/// // Registry is complete for the API
-/// assert!(registry.validate_completeness(&api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    SchemaRegistry::new()
-        .register::<Repository>("Repository")
-        .register::<PaginatedResponse<SourceEntry>>("PaginatedResponse<SourceEntry>")
-        .register::<PaginatedResponse<PullRequest>>("PaginatedResponse<PullRequest>")
-        .register::<PullRequest>("PullRequest")
-        .register::<PaginatedResponse<PullRequestComment>>("PaginatedResponse<PullRequestComment>")
-        .register::<PaginatedResponse<Issue>>("PaginatedResponse<Issue>")
-        .register::<Issue>("Issue")
-        .register::<PaginatedResponse<IssueComment>>("PaginatedResponse<IssueComment>")
-        .register::<PaginatedResponse<IssueChange>>("PaginatedResponse<IssueChange>")
-        .register::<PaginatedResponse<Tag>>("PaginatedResponse<Tag>")
-        .register::<Branch>("Branch")
-        .register::<Tag>("Tag")
-        .register::<PaginatedResponse<Download>>("PaginatedResponse<Download>")
-        .register::<PaginatedResponse<Repository>>("PaginatedResponse<Repository>")
-}
 
 /// Creates Bitbucket-style pagination parameters.
 fn bitbucket_pagination() -> EndpointParams {
-    EndpointParams::default().with_pagination(PaginationStyle::bitbucket())
+    EndpointParams::new()
+        .with_query_param("page", schematic_define::QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+        .with_query_param("pagelen", schematic_define::QueryParamType::Integer, false, Some("Items per page (default: 50, max: 100)"))
 }
 
 /// Bitbucket's next-link pagination: the body's `next` and `previous` URLs,
@@ -115,27 +79,6 @@ fn bitbucket_next_link() -> Strategy {
         .prev(LinkSource::body("previous"))
         .page_size(PageSize::new("pagelen").server_default(10).max(100))
         .total(ValueSource::body("size"))
-}
-
-/// One `PaginatedResponse<T>` list per endpoint, inheriting
-/// [`bitbucket_next_link`]. `page` stays a request field: a next link has no
-/// page input.
-fn bitbucket_lists() -> Vec<PaginationException> {
-    [
-        ("ListPullRequests", "PullRequest"),
-        ("ListPullRequestComments", "PullRequestComment"),
-        ("ListIssues", "Issue"),
-        ("ListIssueComments", "IssueComment"),
-        ("ListIssueChanges", "IssueChange"),
-        ("ListTags", "Tag"),
-        ("ListDownloads", "Download"),
-        ("ListWorkspaceRepos", "Repository"),
-    ]
-    .into_iter()
-    .map(|(endpoint, item)| {
-        PaginationException::new(endpoint, Collection::at("values").item_type(item))
-    })
-    .collect()
 }
 
 /// Creates the Bitbucket Cloud REST API definition.
@@ -173,272 +116,181 @@ fn bitbucket_lists() -> Vec<PaginationException> {
 /// assert_eq!(api.endpoints.len(), 15);
 /// ```
 pub fn define_bitbucket_api() -> RestApi {
-    RestApi {
-        name: "Bitbucket".to_string(),
-        description: "Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows"
-            .to_string(),
-        base_url: "https://api.bitbucket.org/2.0".to_string(),
-        docs_url: Some("https://developer.atlassian.com/cloud/bitbucket/rest/".to_string()),
-        auth: AuthStrategy::Basic,
-        auth_policy: None,
-        env_auth: vec!["BITBUCKET_APP_PASSWORD".to_string()],
-        env_username: Some("BITBUCKET_USERNAME".to_string()),
-        headers: vec![],
-        endpoints: vec![
-            // =================================================================
-            // Repository Metadata
-            // =================================================================
-            Endpoint {
-                id: "GetRepository".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}".to_string(),
-                description: "Get repository metadata including default branch and workspace info"
-                    .to_string(),
-                request: None,
-                response: ApiResponse::json_type("Repository"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            // =================================================================
-            // Directory and File Contents
-            // =================================================================
-            Endpoint {
-                id: "GetSource".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/src/{commit}/{path}".to_string(),
-                // One route serves both shapes: a directory path answers with a
-                // paginated JSON listing (`PaginatedResponse<SourceEntry>`), a
-                // file path with the raw file bytes. `Binary` is the one
-                // response that is truthful for both; the caller decodes.
-                description: "Get a directory listing (paginated JSON of SourceEntry) or the \
-                              raw content of a file at a specific commit"
-                    .to_string(),
-                request: None,
-                response: ApiResponse::Binary,
-                headers: vec![],
-                params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
-            },
-            // =================================================================
-            // Pull Requests
-            // =================================================================
-            Endpoint {
-                id: "ListPullRequests".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/pullrequests".to_string(),
-                description: "List pull requests (all states)".to_string(),
-                request: None,
-                response: ApiResponse::json_type("PaginatedResponse<PullRequest>"),
-                headers: vec![],
-                params: Some(bitbucket_pagination().with_query_param(
+    module_group().expect("valid bitbucket definitions").remove(0)
+}
+
+fn build_bitbucket_api(ctx: &mut DefinitionContext) -> Result<RestApi, DefinitionError> {
+    let endpoints = vec![
+
+            Endpoint::get("GetRepository", "/repositories/{workspace}/{repo_slug}")
+                .describes("Get repository metadata including default branch and workspace info")
+                .returns_json::<Repository>(ctx)
+                .build()?,
+
+            Endpoint::get("GetSource", "/repositories/{workspace}/{repo_slug}/src/{commit}/{path}")
+                .describes("Get a directory listing (paginated JSON of SourceEntry) or the \
+                              raw content of a file at a specific commit")
+                .returns(Success::json(ctx.register::<PaginatedResponse<SourceEntry>>()?).variant("Directory").note(
+                    "returned for a directory: its paginated listing. Bitbucket serves a file in the media type \
+                     its name implies, so a committed `.json` file also arrives as `application/json` and selects \
+                     this shape: a JSON object decodes as an empty listing, other JSON fails to decode. No header \
+                     tells the two apart; read a file's bytes with `send_raw`"))
+                .returns(Success::binary().fallback().variant("File")
+                    .note("returned for a file: its raw content, in the media type Bitbucket derives from the file name"))
+                .params(bitbucket_pagination())
+                .build()?,
+
+            Endpoint::get("ListPullRequests", "/repositories/{workspace}/{repo_slug}/pullrequests")
+                .describes("List pull requests (all states)")
+                .returns_json::<PaginatedResponse<PullRequest>>(ctx)
+                .params(bitbucket_pagination().with_query_param(
                     "state",
                     schematic_define::QueryParamType::String,
                     false,
                     Some("Filter by state (OPEN, MERGED, DECLINED, SUPERSEDED)"),
-                )),
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetPullRequest".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/pullrequests/{id}".to_string(),
-                description: "Get a single pull request by ID".to_string(),
-                request: None,
-                response: ApiResponse::json_type("PullRequest"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListPullRequestComments".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/pullrequests/{id}/comments"
-                    .to_string(),
-                description: "List comments on a pull request".to_string(),
-                request: None,
-                response: ApiResponse::json_type("PaginatedResponse<PullRequestComment>"),
-                headers: vec![],
-                params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
-            },
-            // =================================================================
-            // Issues
-            // =================================================================
-            Endpoint {
-                id: "ListIssues".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/issues".to_string(),
-                description: "List repository issues".to_string(),
-                request: None,
-                response: ApiResponse::json_type("PaginatedResponse<Issue>"),
-                headers: vec![],
-                params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetIssue".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/issues/{id}".to_string(),
-                description: "Get a single issue by ID".to_string(),
-                request: None,
-                response: ApiResponse::json_type("Issue"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListIssueComments".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/issues/{id}/comments".to_string(),
-                description: "List comments on an issue".to_string(),
-                request: None,
-                response: ApiResponse::json_type("PaginatedResponse<IssueComment>"),
-                headers: vec![],
-                params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "ListIssueChanges".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/issues/{id}/changes".to_string(),
-                description: "List change history for an issue".to_string(),
-                request: None,
-                response: ApiResponse::json_type("PaginatedResponse<IssueChange>"),
-                headers: vec![],
-                params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
-            },
-            // =================================================================
-            // Branches
-            // =================================================================
-            Endpoint {
-                id: "GetBranch".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/refs/branches/{name}".to_string(),
-                description: "Get a single branch by name (target.hash is the branch head commit)"
-                    .to_string(),
-                request: None,
-                response: ApiResponse::json_type("Branch"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            // =================================================================
-            // Tags
-            // =================================================================
-            Endpoint {
-                id: "ListTags".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/refs/tags".to_string(),
-                description: "List repository tags".to_string(),
-                request: None,
-                response: ApiResponse::json_type("PaginatedResponse<Tag>"),
-                headers: vec![],
-                params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetTag".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/refs/tags/{name}".to_string(),
-                description: "Get a single tag by name".to_string(),
-                request: None,
-                response: ApiResponse::json_type("Tag"),
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            // =================================================================
-            // Downloads
-            // =================================================================
-            Endpoint {
-                id: "ListDownloads".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/downloads".to_string(),
-                description: "List repository downloads (release artifacts)".to_string(),
-                request: None,
-                response: ApiResponse::json_type("PaginatedResponse<Download>"),
-                headers: vec![],
-                params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
-            },
-            Endpoint {
-                id: "GetDownload".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/downloads/{filename}".to_string(),
-                description: "Download a file from repository downloads".to_string(),
-                request: None,
-                response: ApiResponse::Binary,
-                headers: vec![],
-                params: None,
-                oauth_scopes: None,
-            },
-            // =================================================================
-            // Workspace Repositories
-            // =================================================================
-            Endpoint {
-                id: "ListWorkspaceRepos".to_string(),
-                method: RestMethod::Get,
-                path: "/repositories/{workspace}".to_string(),
-                description: "List repositories in a workspace".to_string(),
-                request: None,
-                response: ApiResponse::json_type("PaginatedResponse<Repository>"),
-                headers: vec![],
-                params: Some(bitbucket_pagination()),
-                oauth_scopes: None,
-            },
-        ],
-        module_path: Some("bitbucket".to_string()),
-        request_suffix: None,
-        version: None,
-        env_mapping: Some(EnvMapping {
+                ))
+                .pagination(Collection::at("values").item_type("PullRequest"))
+                .build()?,
+            Endpoint::get("GetPullRequest", "/repositories/{workspace}/{repo_slug}/pullrequests/{id}")
+                .describes("Get a single pull request by ID")
+                .returns_json::<PullRequest>(ctx)
+                .build()?,
+            Endpoint::get("ListPullRequestComments", "/repositories/{workspace}/{repo_slug}/pullrequests/{id}/comments")
+                .describes("List comments on a pull request")
+                .returns_json::<PaginatedResponse<PullRequestComment>>(ctx)
+                .params(bitbucket_pagination())
+                .pagination(Collection::at("values").item_type("PullRequestComment"))
+                .build()?,
+
+            Endpoint::get("ListIssues", "/repositories/{workspace}/{repo_slug}/issues")
+                .describes("List repository issues")
+                .returns_json::<PaginatedResponse<Issue>>(ctx)
+                .params(bitbucket_pagination())
+                .pagination(Collection::at("values").item_type("Issue"))
+                .build()?,
+            Endpoint::get("GetIssue", "/repositories/{workspace}/{repo_slug}/issues/{id}")
+                .describes("Get a single issue by ID")
+                .returns_json::<Issue>(ctx)
+                .build()?,
+            Endpoint::get("ListIssueComments", "/repositories/{workspace}/{repo_slug}/issues/{id}/comments")
+                .describes("List comments on an issue")
+                .returns_json::<PaginatedResponse<IssueComment>>(ctx)
+                .params(bitbucket_pagination())
+                .pagination(Collection::at("values").item_type("IssueComment"))
+                .build()?,
+            Endpoint::get("ListIssueChanges", "/repositories/{workspace}/{repo_slug}/issues/{id}/changes")
+                .describes("List change history for an issue")
+                .returns_json::<PaginatedResponse<IssueChange>>(ctx)
+                .params(bitbucket_pagination())
+                .pagination(Collection::at("values").item_type("IssueChange"))
+                .build()?,
+
+            Endpoint::get("GetBranch", "/repositories/{workspace}/{repo_slug}/refs/branches/{name}")
+                .describes("Get a single branch by name (target.hash is the branch head commit)")
+                .returns_json::<Branch>(ctx)
+                .build()?,
+
+            Endpoint::get("ListTags", "/repositories/{workspace}/{repo_slug}/refs/tags")
+                .describes("List repository tags")
+                .returns_json::<PaginatedResponse<Tag>>(ctx)
+                .params(bitbucket_pagination())
+                .pagination(Collection::at("values").item_type("Tag"))
+                .build()?,
+            Endpoint::get("GetTag", "/repositories/{workspace}/{repo_slug}/refs/tags/{name}")
+                .describes("Get a single tag by name")
+                .returns_json::<Tag>(ctx)
+                .build()?,
+
+            Endpoint::get("ListDownloads", "/repositories/{workspace}/{repo_slug}/downloads")
+                .describes("List repository downloads (release artifacts)")
+                .returns_json::<PaginatedResponse<Download>>(ctx)
+                .params(bitbucket_pagination())
+                .pagination(Collection::at("values").item_type("Download"))
+                .build()?,
+            Endpoint::get("GetDownload", "/repositories/{workspace}/{repo_slug}/downloads/{filename}")
+                .describes("Download a file from repository downloads")
+                .returns_binary()
+                .build()?,
+
+            Endpoint::get("ListWorkspaceRepos", "/repositories/{workspace}")
+                .describes("List repositories in a workspace")
+                .returns_json::<PaginatedResponse<Repository>>(ctx)
+                .params(bitbucket_pagination())
+                .pagination(Collection::at("values").item_type("Repository"))
+                .build()?,
+        ];
+    RestApi::builder(ctx, "Bitbucket", "https://api.bitbucket.org/2.0")
+        .describes("Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows")
+        .basic_env("BITBUCKET_USERNAME", ["BITBUCKET_APP_PASSWORD"])
+        .docs_url("https://developer.atlassian.com/cloud/bitbucket/rest/")
+        .module_path("bitbucket")
+        .env_mapping(EnvMapping {
             basic_user: Some(EnvList::new(vec!["BITBUCKET_USERNAME".to_string()])),
             basic_pass: Some(EnvList::new(vec!["BITBUCKET_APP_PASSWORD".to_string()])),
             ..Default::default()
-        }),
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: Some(bitbucket_next_link()),
-        pagination_exceptions: bitbucket_lists(),
-    }
+        })
+        .default_pagination(bitbucket_next_link())
+        .endpoints(endpoints)
+        .build()
+}
+
+/// Assemble sibling APIs and their ordered nominal schemas in one context.
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
+    assemble_module_group("::schematic_definitions::bitbucket", |ctx| {
+        ctx.register::<Repository>()?;
+        ctx.register::<PaginatedResponse<SourceEntry>>()?;
+        ctx.register::<PaginatedResponse<PullRequest>>()?;
+        ctx.register::<PullRequest>()?;
+        ctx.register::<PaginatedResponse<PullRequestComment>>()?;
+        ctx.register::<PaginatedResponse<Issue>>()?;
+        ctx.register::<Issue>()?;
+        ctx.register::<PaginatedResponse<IssueComment>>()?;
+        ctx.register::<PaginatedResponse<IssueChange>>()?;
+        ctx.register::<PaginatedResponse<Tag>>()?;
+        ctx.register::<Branch>()?;
+        ctx.register::<Tag>()?;
+        ctx.register::<PaginatedResponse<Download>>()?;
+        ctx.register::<PaginatedResponse<Repository>>()?;
+        Ok(vec![
+            build_bitbucket_api(ctx)?,
+        ])
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use schematic_define::{AuthStrategy, TypeRef};
 
     // =============================================
-    // openapi_registry() tests
+    // api.schemas tests
     // =============================================
 
     #[test]
-    fn openapi_registry_contains_all_response_types() {
-        let registry = openapi_registry();
-
-        assert!(registry.get("Repository").is_some());
-        assert!(registry.get("PaginatedResponse<SourceEntry>").is_some());
-        assert!(registry.get("PaginatedResponse<PullRequest>").is_some());
-        assert!(registry.get("PullRequest").is_some());
-        assert!(registry.get("Issue").is_some());
-        assert!(registry.get("Tag").is_some());
-        assert_eq!(registry.len(), 14);
-    }
-
-    #[test]
-    fn openapi_registry_validates_against_api() {
-        let registry = openapi_registry();
+    fn schemas_contain_all_response_types() {
         let api = define_bitbucket_api();
 
-        let result = registry.validate_completeness(&api);
-        assert!(result.is_ok(), "Registry should be complete: {:?}", result);
+        assert!(api.component("Repository").is_some());
+        assert!(api.component("PaginatedResponse<SourceEntry>").is_some());
+        assert!(api.component("PaginatedResponse<PullRequest>").is_some());
+        assert!(api.component("PullRequest").is_some());
+        assert!(api.component("Issue").is_some());
+        assert!(api.component("Tag").is_some());
+        assert_eq!(crate::registry::registered_names(&api).len(), 14);
     }
 
     #[test]
-    fn openapi_registry_converts_to_openapi_schemas() {
-        let registry = openapi_registry();
-        let openapi_schemas = registry.to_openapi_schemas();
+    fn references_resolve_in_api_schemas() {
+        let api = define_bitbucket_api();
+
+        api.validate_references().expect("every reference resolves in api.schemas");
+    }
+
+    #[test]
+    fn openapi_export_includes_api_schemas() {
+        let api = define_bitbucket_api();
+        let openapi_schemas = schematic_define::openapi::export(&api, &schematic_define::openapi::ExportOptions::new())
+            .expect("export succeeds").components.expect("components").schemas;
 
         assert!(
             openapi_schemas.len() >= 13,
@@ -474,13 +326,12 @@ mod tests {
     fn api_uses_basic_auth() {
         let api = define_bitbucket_api();
 
-        assert!(matches!(api.auth, AuthStrategy::Basic));
-        assert!(api.env_auth.contains(&"BITBUCKET_APP_PASSWORD".to_string()));
-        assert_eq!(api.env_username, Some("BITBUCKET_USERNAME".to_string()));
+        assert_eq!(api.auth, AuthStrategy::Basic { username_env: EnvList::single("BITBUCKET_USERNAME"), password_env: EnvList::single("BITBUCKET_APP_PASSWORD") });
+        assert!(api.env_auth.is_empty());
     }
 
     #[test]
-    fn api_has_sixteen_endpoints() {
+    fn api_has_fifteen_endpoints() {
         let api = define_bitbucket_api();
         assert_eq!(api.endpoints.len(), 15);
     }
@@ -497,7 +348,7 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/repositories/{workspace}/{repo_slug}");
         assert!(endpoint.request.is_none());
-        assert!(matches!(endpoint.response, ApiResponse::Json { .. }));
+        assert!(matches!(endpoint.response[0].shape, ResponseShape::Json { .. }));
     }
 
     #[test]
@@ -514,7 +365,16 @@ mod tests {
             endpoint.path,
             "/repositories/{workspace}/{repo_slug}/src/{commit}/{path}"
         );
-        assert!(matches!(endpoint.response, ApiResponse::Binary));
+        // R32a: a JSON directory listing, or any other media type as the file.
+        let shapes: Vec<_> = endpoint.response.iter()
+            .map(|shape| (&shape.shape, shape.variant.as_deref(), shape.fallback, shape.content_type.as_deref()))
+            .collect();
+        assert_eq!(shapes, [
+            (&ResponseShape::Json(TypeRef::Named("PaginatedResponse<SourceEntry>".into())), Some("Directory"), false, None),
+            (&ResponseShape::Binary, Some("File"), true, None),
+        ]);
+        assert!(endpoint.response[0].note.as_deref().is_some_and(|note| note.contains("`.json` file")), "the listing note records the R32a limitation");
+        assert!(endpoint.response[1].note.is_some());
         // No `Accept` override: it would break the JSON directory listing.
         assert!(endpoint.headers.is_empty());
         // Directory listings page through `page` / `pagelen`.
@@ -522,7 +382,7 @@ mod tests {
             .params
             .as_ref()
             .expect("Should have pagination params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|param| param.name == "pagelen"));
 
         for removed in ["ListDirectoryContents", "GetFileContentRaw"] {
             assert!(api.endpoints.iter().all(|e| e.id != removed), "{removed}");
@@ -543,7 +403,7 @@ mod tests {
         // Check state param exists
         let params = list_prs.params.as_ref().expect("Should have params");
         assert!(params.query.iter().any(|p| p.name == "state"));
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|param| param.name == "pagelen"));
 
         let get_pr = api
             .endpoints
@@ -571,7 +431,7 @@ mod tests {
             .expect("ListIssues endpoint missing");
         // No hardcoded query params - pagination is in params field
         assert!(!list_issues.path.contains("?"));
-        assert!(list_issues.params.as_ref().unwrap().has_pagination());
+        assert!(list_issues.params.as_ref().unwrap().query.iter().any(|param| param.name == "pagelen"));
 
         let get_issue = api
             .endpoints
@@ -607,7 +467,7 @@ mod tests {
         assert!(list_tags.path.contains("refs/tags"));
         // No hardcoded query params - pagination is in params field
         assert!(!list_tags.path.contains("?"));
-        assert!(list_tags.params.as_ref().unwrap().has_pagination());
+        assert!(list_tags.params.as_ref().unwrap().query.iter().any(|param| param.name == "pagelen"));
 
         let get_tag = api
             .endpoints
@@ -632,12 +492,11 @@ mod tests {
             "/repositories/{workspace}/{repo_slug}/refs/branches/{name}"
         );
         assert!(endpoint.request.is_none());
-        assert!(endpoint.oauth_scopes.is_none());
-        match &endpoint.response {
-            ApiResponse::Json(schema) => assert_eq!(schema.type_name, "Branch"),
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(reference) => assert_eq!(reference, &TypeRef::Named("Branch".into())),
             _ => panic!("Expected JSON response"),
         }
-        assert!(matches!(api.auth, AuthStrategy::Basic));
+        assert!(matches!(api.auth, AuthStrategy::Basic { .. }));
     }
 
     #[test]
@@ -668,7 +527,7 @@ mod tests {
             .find(|e| e.id == "GetDownload")
             .expect("GetDownload endpoint missing");
 
-        assert!(matches!(endpoint.response, ApiResponse::Binary));
+        assert!(matches!(endpoint.response[0].shape, ResponseShape::Binary));
     }
 
     #[test]
@@ -733,13 +592,11 @@ mod tests {
                 .find(|e| e.id == id)
                 .unwrap_or_else(|| panic!("Endpoint {} not found", id));
 
-            match &endpoint.response {
-                ApiResponse::Json(schema) => {
+            match &endpoint.response[0].shape {
+                ResponseShape::Json(reference) => {
                     assert!(
-                        schema.type_name.starts_with("PaginatedResponse<"),
-                        "Endpoint {} should return PaginatedResponse type, got {}",
-                        id,
-                        schema.type_name
+                        matches!(reference, TypeRef::Named(name) if name.starts_with("PaginatedResponse<")),
+                        "Endpoint {id} should return PaginatedResponse type, got {reference:?}",
                     );
                 }
                 _ => panic!("Endpoint {} should return JSON", id),
@@ -768,17 +625,13 @@ mod tests {
 
             // GetSource and GetDownload return Binary;
             // only assert single-item shape for JSON responses.
-            if let ApiResponse::Json(schema) = &endpoint.response {
+            if let ResponseShape::Json(reference) = &endpoint.response[0].shape {
                 assert!(
-                    !schema.type_name.starts_with("PaginatedResponse<"),
+                    !matches!(reference, TypeRef::Named(name) if name.starts_with("PaginatedResponse<")),
                     "Endpoint {} should return single item, not PaginatedResponse",
                     id
                 );
-                assert_eq!(
-                    schema.type_name, expected_type,
-                    "Endpoint {} should return {}, got {}",
-                    id, expected_type, schema.type_name
-                );
+                assert_eq!(reference, &TypeRef::Named(expected_type.into()), "Endpoint {id} should return {expected_type}");
             }
         }
     }
@@ -832,7 +685,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("Endpoint {} should have params", id));
 
             assert!(
-                params.has_pagination(),
+                params.query.iter().any(|param| param.name == "pagelen"),
                 "Endpoint {} should have pagination params",
                 id
             );
@@ -851,19 +704,17 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/repositories/{workspace}");
 
-        match &endpoint.response {
-            ApiResponse::Json(schema) => {
-                assert!(
-                    schema.type_name.contains("PaginatedResponse<Repository>"),
-                    "Expected PaginatedResponse<Repository>, got {}",
-                    schema.type_name
-                );
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(reference) => {
+                assert_eq!(reference, &TypeRef::Named("PaginatedResponse<Repository>".into()));
+                let rust_type: String = api.rust_type(reference).expect("registered component").split_whitespace().collect();
+                assert!(rust_type.contains("bitbucket::PaginatedResponse<") && rust_type.contains("bitbucket::Repository>"), "{rust_type}");
             }
             _ => panic!("Expected JSON response"),
         }
 
         let params = endpoint.params.as_ref().expect("should have params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|param| param.name == "pagelen"));
     }
 
     #[test]
@@ -879,4 +730,19 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn module_group_preserves_endpoint_and_registry_inventory() {
+        let group = module_group().unwrap();
+        assert_eq!(
+            group.iter().flat_map(|api| api.endpoints.iter().map(|endpoint| endpoint.id.as_str())).collect::<Vec<_>>(),
+            vec!["GetRepository", "GetSource", "ListPullRequests", "GetPullRequest", "ListPullRequestComments", "ListIssues", "GetIssue", "ListIssueComments", "ListIssueChanges", "GetBranch", "ListTags", "GetTag", "ListDownloads", "GetDownload", "ListWorkspaceRepos"]
+        );
+        assert_eq!(crate::registry::registered_names(&group[0]), vec!["Repository", "PaginatedResponse<SourceEntry>", "PaginatedResponse<PullRequest>", "PullRequest", "PaginatedResponse<PullRequestComment>", "PaginatedResponse<Issue>", "Issue", "PaginatedResponse<IssueComment>", "PaginatedResponse<IssueChange>", "PaginatedResponse<Tag>", "Tag", "Branch", "PaginatedResponse<Download>", "PaginatedResponse<Repository>"]);
+        for api in &group {
+            api.validate_references().unwrap();
+            assert_eq!(api.schemas, group[0].schemas);
+        }
+    }
+
 }

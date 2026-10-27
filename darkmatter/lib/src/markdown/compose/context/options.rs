@@ -2452,15 +2452,15 @@ const PATH_ENCODING_LOSSY_FALLBACK: u8 = 3;
 /// references and must not share a graph identity.
 ///
 /// Hashes every entry of the full normalized values map plus every environment
-/// value; `canonical_json_sorted` sorts object keys recursively and env pairs
+/// value; `canonical_json` sorts object keys recursively and env pairs
 /// are sorted explicitly, so the fingerprint is deterministic. The context is
 /// captured once and cloned into every `ComposeOptions::clone`, so it is also
 /// clone-stable.
 fn graph_context_fingerprint(ctx: &ComposeContext) -> u64 {
-    use super::super::cache::hashing::canonical_json_sorted;
+    use biscuit_hash::canonical_json;
     use serde_json::Value;
 
-    let values_canonical = canonical_json_sorted(&Value::Object(ctx.values().clone()));
+    let values_canonical = canonical_json(&Value::Object(ctx.values().clone()));
     let mut parts = vec![GRAPH_CONTEXT_DOMAIN.to_string(), values_canonical];
 
     let mut env_pairs: Vec<_> = ctx.env().iter().collect();
@@ -2685,17 +2685,17 @@ fn baseline_canonical_json(
     definitions: &crate::markdown::schemas::DefinitionTable,
     is_darkmatter_default: bool,
 ) -> std::borrow::Cow<'static, str> {
-    use super::super::cache::hashing::canonical_json_sorted;
+    use biscuit_hash::canonical_json;
 
     if is_darkmatter_default {
         return std::borrow::Cow::Borrowed(DEFAULT_BASELINE_CANONICAL_JSON.get_or_init(|| {
-            canonical_json_sorted(crate::markdown::schemas::darkmatter_base_json_schema_ref())
+            canonical_json(crate::markdown::schemas::darkmatter_base_json_schema_ref())
         }));
     }
 
     let json = crate::markdown::schemas::to_json_schema_with_definitions(schema, definitions)
         .unwrap_or_else(|_| serde_json::json!({"baseline_schema_error": true}));
-    std::borrow::Cow::Owned(canonical_json_sorted(&json))
+    std::borrow::Cow::Owned(canonical_json(&json))
 }
 
 /// Encodes every file-resolution input that can change candidate construction.
@@ -2903,7 +2903,7 @@ impl ComposeOptions {
             file_ref_fallback_dir,
         } = self;
 
-        use super::super::cache::hashing::canonical_json_sorted;
+        use biscuit_hash::canonical_json;
         use serde_json::Value;
 
         // Both identity domains below encode the baseline schema, and the
@@ -2957,7 +2957,7 @@ impl ComposeOptions {
         match external_state {
             Some(v) => {
                 enc.tag(1);
-                enc.str(&canonical_json_sorted(v));
+                enc.str(&canonical_json(v));
             }
             None => enc.tag(0),
         }
@@ -2965,7 +2965,7 @@ impl ComposeOptions {
         match set_overrides {
             Some(v) => {
                 enc.tag(1);
-                enc.str(&canonical_json_sorted(v));
+                enc.str(&canonical_json(v));
             }
             None => enc.tag(0),
         }
@@ -2973,7 +2973,7 @@ impl ComposeOptions {
         match data_overrides {
             Some(v) => {
                 enc.tag(1);
-                enc.str(&canonical_json_sorted(v));
+                enc.str(&canonical_json(v));
             }
             None => enc.tag(0),
         }
@@ -2983,7 +2983,7 @@ impl ComposeOptions {
         enc.count(caller_input_records.len());
         for (property, record) in caller_input_records {
             enc.str(property);
-            enc.str(&canonical_json_sorted(record.raw()));
+            enc.str(&canonical_json(record.raw()));
             encode_file_resolution_context(&mut enc, record.origin());
         }
         enc.field("caller_file_provenance");
@@ -3186,7 +3186,7 @@ impl ComposeOptions {
         match one_off_replace {
             Some(m) => {
                 enc.tag(1);
-                enc.str(&canonical_json_sorted(&Value::Object(m.clone())));
+                enc.str(&canonical_json(&Value::Object(m.clone())));
             }
             None => enc.tag(0),
         }
@@ -3417,7 +3417,7 @@ impl ComposeOptions {
         match one_off_replace {
             Some(m) => {
                 cenc.tag(1);
-                cenc.str(&canonical_json_sorted(&Value::Object(m.clone())));
+                cenc.str(&canonical_json(&Value::Object(m.clone())));
             }
             None => cenc.tag(0),
         }
@@ -3425,7 +3425,7 @@ impl ComposeOptions {
         match external_state {
             Some(v) => {
                 cenc.tag(1);
-                cenc.str(&canonical_json_sorted(v));
+                cenc.str(&canonical_json(v));
             }
             None => cenc.tag(0),
         }
@@ -3433,7 +3433,7 @@ impl ComposeOptions {
         match set_overrides {
             Some(v) => {
                 cenc.tag(1);
-                cenc.str(&canonical_json_sorted(v));
+                cenc.str(&canonical_json(v));
             }
             None => cenc.tag(0),
         }
@@ -3441,7 +3441,7 @@ impl ComposeOptions {
         match data_overrides {
             Some(v) => {
                 cenc.tag(1);
-                cenc.str(&canonical_json_sorted(v));
+                cenc.str(&canonical_json(v));
             }
             None => cenc.tag(0),
         }
@@ -3451,7 +3451,7 @@ impl ComposeOptions {
         cenc.count(caller_input_records.len());
         for (property, record) in caller_input_records {
             cenc.str(property);
-            cenc.str(&canonical_json_sorted(record.raw()));
+            cenc.str(&canonical_json(record.raw()));
             encode_file_resolution_context(&mut cenc, record.origin());
         }
         cenc.field("baseline_schema");

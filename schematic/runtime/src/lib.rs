@@ -12,6 +12,12 @@
 //!   redaction that keeps credentials out of it ([`redact`]);
 //! - the [`Decode`] boundary through which codecs read a live response body,
 //!   and the built-in codecs [`Json`], [`Text`], [`Binary`], and [`Empty`];
+//! - the [`stream`] codecs [`Sse`], [`Ndjson`], and [`ByteStream`], which
+//!   yield items as they arrive, and their [`StreamError`];
+//! - the multi-shape codec [`Shapes`], which chooses one of an endpoint's
+//!   declared [`shapes`] for a 2xx reply, and the [`ErrorRoute`] table that
+//!   chooses a declared error shape for an error status;
+//! - the [`graphql`] codec [`GraphQl`] and its failure types;
 //! - the managed [`Client`], created infallibly from an [`ApiDefinition`]
 //!   and configured by chained settings that are validated on its first send
 //!   or by [`Client::build`], optionally sharing a [`SharedTransport`];
@@ -22,13 +28,19 @@
 //!   client's settings and sends as inherent methods;
 //! - programmatic [`Credential`]s and the API's [`AuthConfig`], per-call
 //!   [`CallOptions`] for [`Client::send_raw`], and the shared [`Deadline`];
+//! - [`AuthConfig::select_handshake`] and its [`HandshakeCredential`], the
+//!   same precedence and placement for a handshake another transport sends
+//!   (generated WebSocket clients);
 //! - the [`OriginPolicy`] that governs redirects and followed links;
 //! - [`Client::send_raw`] and its [`RawResponse`], for a reply without
 //!   decoding;
 //! - the two response [`hooks`], gated by [`SupportsHooks`];
 //! - the [`pager`] for list endpoints whose definition authors a pagination
 //!   strategy: [`Call::pager`] and the generated endpoint calls' pager
-//!   controls, `pages()`, `fetch_page()`, and `collect_all()`.
+//!   controls, `pages()`, `fetch_page()`, and `collect_all()`;
+//! - [`validate`], the request-side constraint checks (exact numbers,
+//!   patterns, lengths, item counts, `enum` and `const`) and their
+//!   value-free [`Violations`](validate::Violations) report.
 //!
 //! ## The governing rule
 //!
@@ -60,6 +72,7 @@ pub mod deadline;
 mod encode;
 pub mod endpoint;
 pub mod error;
+pub mod graphql;
 pub mod hooks;
 pub mod meta;
 pub mod options;
@@ -68,21 +81,33 @@ pub mod pager;
 pub mod raw;
 pub mod redact;
 pub mod response;
+pub mod shapes;
+pub mod stream;
 pub mod transport;
+pub mod validate;
 
 pub use call::{Call, CallError, CallFuture, FullCall};
 pub use client::{ApiDefinition, Client, DEFAULT_TIMEOUT, MAX_REDIRECTS};
-pub use codec::{Binary, BodyReadError, Decode, DecodeFailure, DecodeFailureKind, Empty, Json, LiveBody, Text};
-pub use credentials::{AuthConfig, Credential, CredentialKind, CredentialPlacement, EnvFallback};
+pub use codec::{
+    Binary, BodyReadError, DEFAULT_MAX_FRAME_BYTES, Decode, DecodeFailure, DecodeFailureKind, Empty, Json, LiveBody,
+    Text,
+};
+pub use credentials::{AuthConfig, Credential, CredentialKind, CredentialPlacement, EnvFallback, HandshakeCredential};
 pub use deadline::Deadline;
-pub use endpoint::{Api, EndpointSpec, ErrorBody, FormPart, RequestBody, RequestParts};
+pub use endpoint::{
+    Address, Api, EndpointSpec, ErrorBody, ErrorRoute, FormPart, QueryDelimiter, QueryValue, RequestBody, RequestParts,
+    StatusMatch,
+};
 pub use error::{BuildError, InvalidArgument, TransportError, TransportErrorKind};
+pub use graphql::{AddressRule, GraphQl, GraphQlError, GraphQlFailure, GraphQlOperationError, Location, PathSegment};
 pub use hooks::{HookError, HookStage, SupportsHooks};
 pub use meta::{AuthMethod, RequestMeta, ResponseMeta};
 pub use options::CallOptions;
 pub use origin::OriginPolicy;
 pub use raw::{RawCompletion, RawJsonError, RawResponse};
 pub use redact::{RedactedUrl, SecretNames};
+pub use shapes::{Alternatives, JsonAlternatives, JsonTag, Route, ShapeKind, Shapes};
+pub use stream::{ByteStream, EndCondition, ItemStream, Ndjson, Scalar, Sse, StreamEnd, StreamError, UntilClose};
 pub use transport::{SharedTransport, SharedTransportBuilder};
 
 /// The HTTP method type of [`EndpointSpec::METHOD`] and [`RequestParts::method`].
@@ -103,4 +128,4 @@ pub use response::{
 /// value its generator was built against, and the generator's partial
 /// generation refuses to keep modules generated against a different value.
 /// Increment it with every change that generated code can observe.
-pub const ABI: u32 = 4;
+pub const ABI: u32 = 8;

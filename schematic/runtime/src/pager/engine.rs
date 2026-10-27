@@ -18,8 +18,11 @@ use super::error::ContinuationProblem;
 use super::json::{self, Continuation, Read};
 use super::link;
 use super::progress::{BoundaryError, BoundaryTracker, History};
-use super::spec::{CountUnit, CursorLeg, CursorSource, IndexBase, Input, ItemSelector, Kind, LinkSource, MoreSignal, Polarity, Strategy};
+use super::spec::{
+    CountUnit, CursorLeg, CursorSource, IndexBase, Input, ItemSelector, Kind, LinkSource, MoreSignal, PageSize, Polarity, Strategy,
+};
 use crate::meta::ResponseMeta;
+use crate::validate::{self, Keyword, Numeric, Violations};
 
 /// A direction of traversal. A page-number or offset strategy has only
 /// [`Forward`](Self::Forward).
@@ -239,6 +242,31 @@ impl Engine {
         matches!(self.forward, Position::Failed(_))
     }
 
+    pub(crate) fn adjust_retry_size(&mut self, plan: &mut Plan, size: u32) {
+        self.adjust_page_size(size);
+        if let Some(spec) = self.strategy.size {
+            plan.inputs.retain(|(input, _)| *input != spec.param);
+        }
+        if plan.problem.as_deref().is_some_and(|problem| problem.starts_with("the page size ")) {
+            plan.problem = None;
+        }
+        if let Some(mut sent) = self.sent {
+            self.plan_managed(plan, &mut sent);
+            self.sent = Some(sent);
+        }
+    }
+
+    /// Keep delivery facts when re-reading an already delivered page solely
+    /// to repair its continuation. The refreshed positions and total survive.
+    pub(crate) fn restore_delivery_from(&mut self, delivered: &Self) {
+        self.records = delivered.records;
+        self.items = delivered.items;
+        self.pages = delivered.pages;
+        self.boundary = delivered.boundary.clone();
+        self.forward_history = delivered.forward_history.clone();
+        self.backward_history = delivered.backward_history.clone();
+    }
+
     /// The page size the next request sends: the caller's, else the
     /// authored sendable default.
     fn effective_size(&self) -> Option<u32> {
@@ -375,13 +403,8 @@ impl Engine {
             if let Some(size) = self.effective_size()
                 && send_size
             {
-                if size < size_spec.min {
-                    plan.problem.get_or_insert(format!("the page size is below the declared minimum, {}", size_spec.min));
-                }
-                if let Some(max) = size_spec.max
-                    && size > max
-                {
-                    plan.problem.get_or_insert(format!("the page size is above the declared maximum, {max}"));
+                if let Some(problem) = size_problem(size, size_spec) {
+                    plan.problem.get_or_insert(problem);
                 }
                 plan.inputs.push((size_spec.param, Value::from(size)));
                 sent.size = Some(size);
@@ -686,6 +709,21 @@ enum LegContinuation {
     /// Some parts are present and some ended.
     Partial,
     Invalid,
+}
+
+/// The first declared bound `size` breaks, checked by the same evaluator as
+/// a request's `minimum` and `maximum` rules. An adopted size parameter is not
+/// a request field, so this is the only check its value gets.
+fn size_problem(size: u32, spec: PageSize) -> Option<String> {
+    let mut violations = Violations::new();
+    validate::check_range(size, spec.min.to_decimal(), spec.max.and_then(Numeric::to_decimal), &[], &mut violations);
+    let broke = |keyword| violations.iter().any(|violation| violation.keyword() == keyword);
+    if broke(Keyword::Minimum) {
+        return Some(format!("the page size is below the declared minimum, {}", spec.min));
+    }
+    spec.max
+        .filter(|_| broke(Keyword::Maximum))
+        .map(|max| format!("the page size is above the declared maximum, {max}"))
 }
 
 fn push_parts(plan: &mut Plan, leg: &CursorLeg, values: Vec<Value>) {

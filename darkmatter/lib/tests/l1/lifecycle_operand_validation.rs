@@ -261,7 +261,7 @@ fn template_operand_uses_the_shared_template_predicate() {
 fn text_without_a_span_interpolates_verbatim() {
     let dir = TempDir::new().unwrap();
     let state = EffectiveStateBuilder::new()
-        .with_frontmatter([("count".to_string(), json!(3))].into())
+        .with_frontmatter([("count".to_string(), json!(3))].into_iter().collect())
         .with_context(ComposeContext::capture_for_content(dir.path(), ""))
         .build()
         .unwrap();

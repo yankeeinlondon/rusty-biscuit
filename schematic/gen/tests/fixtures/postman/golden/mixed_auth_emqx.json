@@ -14,11 +14,11 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ],
               "type": "basic"
@@ -34,7 +34,21 @@
               ],
               "raw": "{{baseUrl}}/alarms"
             }
-          }
+          },
+          "response": [
+            {
+              "body": "{}",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "name": "200 OK (application/json)",
+              "status": "OK"
+            }
+          ]
         },
         {
           "name": "ListAlarms (EmqxBearer)",
@@ -43,7 +57,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ],
               "type": "bearer"
@@ -52,14 +66,28 @@
             "method": "GET",
             "url": {
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "alarms"
               ],
-              "raw": "{{baseUrl}}/alarms"
+              "raw": "{{baseUrl2}}/alarms"
             }
-          }
+          },
+          "response": [
+            {
+              "body": "{}",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "name": "200 OK (application/json)",
+              "status": "OK"
+            }
+          ]
         }
       ],
       "name": "Alarms"
@@ -73,7 +101,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{bearerToken}}"
+                  "value": "{{bearerToken_EmqxBearer}}"
                 }
               ],
               "type": "bearer"
@@ -91,14 +119,28 @@
             "method": "POST",
             "url": {
               "host": [
-                "{{baseUrl}}"
+                "{{baseUrl2}}"
               ],
               "path": [
                 "login"
               ],
-              "raw": "{{baseUrl}}/login"
+              "raw": "{{baseUrl2}}/login"
             }
-          }
+          },
+          "response": [
+            {
+              "body": "{}",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "name": "200 OK (application/json)",
+              "status": "OK"
+            }
+          ]
         }
       ],
       "name": "Login"
@@ -112,11 +154,11 @@
               "basic": [
                 {
                   "key": "username",
-                  "value": "{{username}}"
+                  "value": "{{username_EmqxBasic}}"
                 },
                 {
                   "key": "password",
-                  "value": "{{password}}"
+                  "value": "{{password_EmqxBasic}}"
                 }
               ],
               "type": "basic"
@@ -132,7 +174,21 @@
               ],
               "raw": "{{baseUrl}}/settings"
             }
-          }
+          },
+          "response": [
+            {
+              "body": "{}",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "name": "200 OK (application/json)",
+              "status": "OK"
+            }
+          ]
         }
       ],
       "name": "Settings"
@@ -145,18 +201,23 @@
       "value": "http://localhost:18083/api/v5"
     },
     {
+      "description": "Base URL for EmqxBearer",
+      "key": "baseUrl2",
+      "value": "http://localhost:18083/api/v5"
+    },
+    {
       "description": "Username for Basic authentication",
-      "key": "username",
+      "key": "username_EmqxBasic",
       "value": ""
     },
     {
       "description": "Password for Basic authentication",
-      "key": "password",
+      "key": "password_EmqxBasic",
       "value": ""
     },
     {
       "description": "Bearer token for Authorization header",
-      "key": "bearerToken",
+      "key": "bearerToken_EmqxBearer",
       "value": ""
     }
   ]

@@ -22,7 +22,8 @@
 //!     pub const DOCS_URL: Option<&'static str> = Some("https://platform.openai.com/docs");
 //!     pub fn definition() -> schematic_runtime::ApiDefinition { ... }
 //!     pub fn new() -> Self { ... }
-//!     // only when the API accepts HTTP Basic credentials:
+//!     // only when the API or an endpoint policy replacing its policy
+//!     // accepts HTTP Basic credentials:
 //!     pub fn basic_auth(self, username: impl Into<String>, password: impl Into<String>) -> Self { ... }
 //! }
 //! ```
@@ -31,7 +32,7 @@
 //! client the struct wraps, so that surface is written once, in the runtime.
 //! Generation emits only what is specific to the API.
 
-mod auth;
+pub(crate) mod auth;
 mod helpers;
 #[cfg(test)]
 mod tests;
@@ -71,20 +72,29 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
         .iter()
         .filter(|(header, _)| !header.eq_ignore_ascii_case("cookie"))
         .map(|(header, value)| quote! { .default_header(#header, #value) });
-    let basic_auth = auth::auth_config(api)
-        .accepted
-        .contains(&auth::Placement::Basic)
-        .then(|| {
-            quote! {
-                /// Sends HTTP Basic `username` and `password` when a call
-                /// supplies no credential, replacing any credential set
-                /// before.
-                #[must_use]
-                pub fn basic_auth(self, username: impl Into<String>, password: impl Into<String>) -> Self {
-                    self.credentials(schematic_runtime::Credential::basic(username, password))
-                }
+    let basic_auth = auth::accepts_basic(api).then(|| {
+        quote! {
+            /// Sends HTTP Basic `username` and `password` when a call
+            /// supplies no credential, replacing any credential set
+            /// before.
+            #[must_use]
+            pub fn basic_auth(self, username: impl Into<String>, password: impl Into<String>) -> Self {
+                self.credentials(schematic_runtime::Credential::basic(username, password))
             }
-        });
+        }
+    });
+
+    // Only an API with endpoint authentication gets the note, so every other
+    // API's output is unchanged.
+    let endpoint_auth_note = (!auth::endpoint_configs(api).is_empty()).then(|| {
+        quote! {
+            ///
+            /// A public endpoint sends no credential. An endpoint whose
+            /// definition replaces the API's authentication uses its own
+            /// placements and variables, and refuses a send that resolves no
+            /// credential instead of sending it anonymously.
+        }
+    });
 
     let client_doc = format!(" The {name} API: {}", api.description.trim());
 
@@ -129,6 +139,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
             /// A client with the API's defaults and default headers. With no
             /// credential set, a send reads the API's environment variables,
             /// and with none present it is sent anonymously.
+            #endpoint_auth_note
             pub fn new() -> Self {
                 Self(schematic_runtime::Client::new(Self::definition()) #(#default_headers)*)
             }

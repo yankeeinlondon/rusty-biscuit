@@ -99,7 +99,7 @@ mod prediction {
             let measured = measure(9, || {
                 let mut evaluate =
                     |_: &Value,
-                     _: &HashMap<String, Value>|
+                     _: &serde_json::Map<String, Value>|
                      -> Result<_, crate::composition::CompositionError> {
                         unreachable!("a literal hint is never evaluated")
                     };

@@ -77,13 +77,14 @@ pub fn run_set(
 
     md.fm_insert(prop, value)
         .map_err(|e| eyre!("Failed to set frontmatter property: {e}"))?;
+    let text = edited_text(&md, &[prop]);
 
     if save {
         let resolved = resolve_file_path(input, request.launch_context()?)?;
-        std::fs::write(&resolved, md.as_string())
+        std::fs::write(&resolved, text)
             .wrap_err_with(|| format!("Failed to write to {:?}", resolved))?;
     } else {
-        print!("{}", md.as_string());
+        print!("{text}");
     }
 
     Ok(())
@@ -136,7 +137,8 @@ pub fn run_rm(
         ));
     }
 
-    std::fs::write(&resolved, md.as_string())
+    let removed_props: Vec<&str> = removed.iter().map(String::as_str).collect();
+    std::fs::write(&resolved, edited_text(&md, &removed_props))
         .wrap_err_with(|| format!("Failed to write to {:?}", resolved))?;
 
     let remaining: Vec<String> = md.frontmatter().as_map().keys().cloned().collect();
@@ -177,6 +179,22 @@ pub fn run_rm(
     }
 
     Ok(())
+}
+
+/// The document text after `md set` / `md rm` changed `properties`.
+///
+/// Only those top-level properties are rewritten; every other byte of the
+/// loaded source (indentation, comments, quoting, line endings, the body) is
+/// kept. When the text-preserving editor refuses the source (for example an
+/// indented root mapping), the whole document is re-serialized instead, which
+/// is what these commands always did before.
+fn edited_text(md: &darkmatter::markdown::Markdown, properties: &[&str]) -> String {
+    let edited = md.as_string();
+    md.source_text()
+        .and_then(|source| {
+            darkmatter::markdown::hash::restore_properties_text(source, &edited, properties).ok()
+        })
+        .map_or(edited, |restored| restored.text)
 }
 
 /// Format a `serde_json::Value` according to the requested output format.

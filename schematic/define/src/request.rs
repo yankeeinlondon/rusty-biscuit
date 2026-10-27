@@ -12,9 +12,14 @@
 //! - [`ApiRequest::Text`] - Raw text body
 //! - [`ApiRequest::Binary`] - Raw binary body
 
+//!
+//! These constructors describe stored transfer data.
+//! REST authors use typed endpoint builders; API build rejects JSON
+//! references that do not resolve to one of the API's schema components.
+
 use serde::{Deserialize, Serialize};
 
-use crate::schema::Schema;
+use crate::TypeRef;
 
 /// The type of content a form field accepts.
 ///
@@ -78,7 +83,7 @@ pub enum FormFieldKind {
     ///
     /// The field's Content-Type is set to `application/json`.
     /// Useful for metadata accompanying file uploads.
-    Json(Schema),
+    Json(TypeRef),
 }
 
 /// Describes a single field in a multipart or URL-encoded form.
@@ -122,6 +127,11 @@ pub struct FormField {
 
     /// Human-readable description of this field.
     pub description: Option<String>,
+
+    /// Value rules for a text or JSON field, checked before the form is
+    /// encoded. File fields take none. See [`crate::constraints`].
+    #[serde(default, deserialize_with = "crate::serde_presence::non_null_map", skip_serializing_if = "Option::is_none")]
+    pub constraints: Option<Box<crate::constraints::Constraints>>,
 }
 
 impl FormField {
@@ -141,6 +151,7 @@ impl FormField {
             kind: FormFieldKind::Text,
             required: true,
             description: None,
+            constraints: None,
         }
     }
 
@@ -161,6 +172,7 @@ impl FormField {
             kind: FormFieldKind::File { accept: vec![] },
             required: true,
             description: None,
+            constraints: None,
         }
     }
 
@@ -183,6 +195,7 @@ impl FormField {
             kind: FormFieldKind::File { accept },
             required: true,
             description: None,
+            constraints: None,
         }
     }
 
@@ -207,6 +220,7 @@ impl FormField {
             },
             required: true,
             description: None,
+            constraints: None,
         }
     }
 
@@ -240,6 +254,7 @@ impl FormField {
             kind: FormFieldKind::Files { accept, min, max },
             required: true,
             description: None,
+            constraints: None,
         }
     }
 
@@ -248,18 +263,19 @@ impl FormField {
     /// ## Examples
     ///
     /// ```
-    /// use schematic_define::{FormField, FormFieldKind, Schema};
+    /// use schematic_define::{FormField, FormFieldKind, TypeRef};
     ///
-    /// let field = FormField::json("metadata", Schema::new("MetadataRequest"));
+    /// let field = FormField::json("metadata", TypeRef::Named("MetadataRequest".into()));
     /// assert!(field.required);
     /// assert!(matches!(field.kind, FormFieldKind::Json(_)));
     /// ```
-    pub fn json(name: impl Into<String>, schema: Schema) -> Self {
+    pub fn json(name: impl Into<String>, reference: TypeRef) -> Self {
         Self {
             name: name.into(),
-            kind: FormFieldKind::Json(schema),
+            kind: FormFieldKind::Json(reference),
             required: true,
             description: None,
+            constraints: None,
         }
     }
 
@@ -291,6 +307,22 @@ impl FormField {
     /// ```
     pub fn with_description(mut self, desc: impl Into<String>) -> Self {
         self.description = Some(desc.into());
+        self
+    }
+
+    /// Replaces the field's value rules; text and JSON fields only.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use schematic_define::FormField;
+    /// use schematic_define::constraints::Constraints;
+    ///
+    /// let field = FormField::text("title").constraints(Constraints::new().min_length(1).max_length(200));
+    /// assert_eq!(field.constraints.unwrap().max_length, Some(200));
+    /// ```
+    pub fn constraints(mut self, rules: crate::constraints::Constraints) -> Self {
+        self.constraints = Some(Box::new(rules));
         self
     }
 }
@@ -327,7 +359,7 @@ pub enum ApiRequest {
     /// JSON request body.
     ///
     /// Sets Content-Type to `application/json`.
-    Json(Schema),
+    Json(TypeRef),
 
     /// Multipart form-data request.
     ///
@@ -365,41 +397,23 @@ pub enum ApiRequest {
 }
 
 impl ApiRequest {
-    /// Creates a JSON request with the given schema.
-    ///
-    /// Use this when you have a pre-built [`Schema`] with a module path.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use schematic_define::{ApiRequest, Schema};
-    ///
-    /// let schema = Schema::with_path("CreateUser", "crate::models");
-    /// let request = ApiRequest::json(schema);
-    /// ```
-    pub fn json(schema: Schema) -> Self {
-        Self::Json(schema)
+    /// Creates a JSON request with the given reference.
+    pub fn json(reference: TypeRef) -> Self {
+        Self::Json(reference)
     }
 
-    /// Creates a JSON request with just a type name.
-    ///
-    /// This is the most common way to specify a JSON request. The type
-    /// name should match a struct in the generated or imported code.
+    /// Creates a JSON request naming one schema component.
     ///
     /// ## Examples
     ///
     /// ```
-    /// use schematic_define::ApiRequest;
+    /// use schematic_define::{ApiRequest, TypeRef};
     ///
     /// let request = ApiRequest::json_type("CreateUserRequest");
-    ///
-    /// // Verify the schema was created correctly
-    /// if let ApiRequest::Json(schema) = request {
-    ///     assert_eq!(schema.type_name, "CreateUserRequest");
-    /// }
+    /// assert_eq!(request, ApiRequest::Json(TypeRef::Named("CreateUserRequest".into())));
     /// ```
-    pub fn json_type(type_name: impl Into<String>) -> Self {
-        Self::Json(Schema::new(type_name))
+    pub fn json_type(component: impl Into<String>) -> Self {
+        Self::Json(TypeRef::Named(component.into()))
     }
 
     /// Creates a multipart form-data request.
@@ -478,15 +492,6 @@ impl ApiRequest {
         Self::Binary {
             content_type: content_type.into(),
         }
-    }
-}
-
-/// Provides backward compatibility for code using `Schema` directly.
-///
-/// Converts a [`Schema`] to [`ApiRequest::Json`].
-impl From<Schema> for ApiRequest {
-    fn from(schema: Schema) -> Self {
-        ApiRequest::Json(schema)
     }
 }
 
@@ -572,16 +577,15 @@ mod tests {
 
     #[test]
     fn form_field_json_creates_json_kind() {
-        let schema = Schema::new("Metadata");
-        let field = FormField::json("meta", schema);
+        let field = FormField::json("meta", TypeRef::Named("Metadata".into()));
         assert!(matches!(field.kind, FormFieldKind::Json(_)));
     }
 
     #[test]
     fn api_request_json_type() {
         let request = ApiRequest::json_type("CreateUserRequest");
-        if let ApiRequest::Json(schema) = request {
-            assert_eq!(schema.type_name, "CreateUserRequest");
+        if let ApiRequest::Json(reference) = request {
+            assert_eq!(reference, TypeRef::Named("CreateUserRequest".into()));
         } else {
             panic!("Expected Json variant");
         }
@@ -633,14 +637,6 @@ mod tests {
         } else {
             panic!("Expected Binary variant");
         }
-    }
-
-    #[test]
-    fn api_request_from_schema() {
-        let schema = Schema::new("TestRequest");
-        let request: ApiRequest = schema.into();
-
-        assert!(matches!(request, ApiRequest::Json(_)));
     }
 
     #[test]
@@ -710,10 +706,10 @@ mod tests {
 
     #[test]
     fn integration_mixed_endpoint_types() {
-        use crate::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+        use crate::{SuccessShape, AuthStrategy, Endpoint, RestApi, RestMethod};
 
         // Create an API with mixed request types
-        let api = RestApi {
+        let api = RestApi { rate_limit: None, retry_guidance: None, errors: vec![], graphql: None, unchecked_compositions: false,
             name: "FileService".to_string(),
             description: "File upload and management service".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
@@ -721,23 +717,22 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             auth_policy: None,
             env_auth: vec!["FILE_SERVICE_API_KEY".to_string()],
-            env_username: None,
             headers: vec![],
             endpoints: vec![
                 // JSON endpoint
-                Endpoint {
+                Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "CreateFolder".to_string(),
                     method: RestMethod::Post,
                     path: "/folders".to_string(),
                     description: "Create a new folder".to_string(),
                     request: Some(ApiRequest::json_type("CreateFolderRequest")),
-                    response: ApiResponse::json_type("Folder"),
+                    response: vec![SuccessShape::json_type("Folder")],
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    cross_origin: None, pagination: None,
                 },
                 // FormData endpoint with file upload
-                Endpoint {
+                Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "UploadFile".to_string(),
                     method: RestMethod::Post,
                     path: "/folders/{folder_id}/files".to_string(),
@@ -747,36 +742,36 @@ mod tests {
                         FormField::text("name")
                             .optional()
                             .with_description("Override filename"),
-                        FormField::json("metadata", Schema::new("FileMetadata")).optional(),
+                        FormField::json("metadata", TypeRef::Named("FileMetadata".into())).optional(),
                     ])),
-                    response: ApiResponse::json_type("File"),
+                    response: vec![SuccessShape::json_type("File")],
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    cross_origin: None, pagination: None,
                 },
                 // GET endpoint with no request body
-                Endpoint {
+                Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "ListFiles".to_string(),
                     method: RestMethod::Get,
                     path: "/folders/{folder_id}/files".to_string(),
                     description: "List files in a folder".to_string(),
                     request: None,
-                    response: ApiResponse::json_type("ListFilesResponse"),
+                    response: vec![SuccessShape::json_type("ListFilesResponse")],
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    cross_origin: None, pagination: None,
                 },
                 // Binary download
-                Endpoint {
+                Endpoint { request_constraints: None, rate_limit: None, retry_guidance: None, deprecated: false, auth: None, errors: vec![], no_declared_errors: false,
                     id: "DownloadFile".to_string(),
                     method: RestMethod::Get,
                     path: "/files/{file_id}/content".to_string(),
                     description: "Download file content".to_string(),
                     request: None,
-                    response: ApiResponse::Binary,
+                    response: vec![SuccessShape::binary()],
                     headers: vec![],
                     params: None,
-                    oauth_scopes: None,
+                    cross_origin: None, pagination: None,
                 },
             ],
             module_path: None,
@@ -787,8 +782,8 @@ mod tests {
             request_id_header: None,
             secret_names: vec![],
             default_pagination: None,
-            pagination_exceptions: vec![],
-        };
+            schemas: vec![],
+            };
 
         assert_eq!(api.name, "FileService");
         assert_eq!(api.endpoints.len(), 4);
@@ -868,22 +863,5 @@ mod tests {
             let parsed: ApiRequest = serde_json::from_str(&json).expect("Should deserialize");
             assert_eq!(variant, parsed);
         }
-    }
-
-    #[test]
-    fn integration_backward_compatibility_from_schema() {
-        // Code that used Schema directly should still work via From trait
-        let schema = Schema::new("LegacyRequest");
-        let request: ApiRequest = schema.into();
-
-        if let ApiRequest::Json(s) = &request {
-            assert_eq!(s.type_name, "LegacyRequest");
-        } else {
-            panic!("From<Schema> should create ApiRequest::Json");
-        }
-
-        // Verify it serializes correctly
-        let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("LegacyRequest"));
     }
 }

@@ -347,9 +347,9 @@ All WebSocket messages use JSON format with the following structure:
 | ---------------- | --------------- | --------------------------------------------------- |
 | `ping`           | Client → Server | Application-level ping                              |
 | `pong`           | Server → Client | Ping response                                       |
-| `get_version`    | Client → Server | Request version information                         |
+| `version`        | Client → Server | Request version information                         |
 | `version_info`   | Server → Client | Version information response                        |
-| `get_system`     | Client → Server | Request system information                          |
+| `system`         | Client → Server | Request system information                          |
 | `system_info`    | Server → Client | System information response                         |
 | `system_cmd`     | Client → Server | Execute system command (STANDBY, REBOOT, POWER_OFF) |
 | `get_power_mode` | Client → Server | Get power mode and battery info                     |
@@ -713,7 +713,7 @@ async fn check_api_version(ws: &mut WebSocket) -> Result<Version, Error> {
     let request = json!({
         "kind": "req",
         "id": generate_id(),
-        "msg": "get_version",
+        "msg": "version",
         "msg_data": {}
     });
     

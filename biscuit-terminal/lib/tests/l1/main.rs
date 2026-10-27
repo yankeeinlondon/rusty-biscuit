@@ -13,8 +13,9 @@ mod layout_matrix_support;
 
 mod compose_parity;
 mod filesystem_parity;
-#[cfg(feature = "image")]
-mod graph_expression_parity;
+mod graphics_probe_matrix;
+mod graphics_route_matrix;
+mod graphics_tmux_matrix;
 #[cfg(feature = "image")]
 mod horizontal_rule_parity;
 mod html_page_example;
@@ -25,15 +26,15 @@ mod level1_apple_terminal_prose;
 mod level1_clipboard;
 #[cfg(unix)]
 mod level1_cursor;
+mod level1_graphics_probe;
 mod level1_mode_2027;
+mod level1_osc4_palette;
 #[cfg(unix)]
 mod level1_osc_queries;
 mod level1_query_budget;
 mod level1_terminal_init;
 mod level1_terminal_osc_cache;
 mod list_parity;
-#[cfg(feature = "image")]
-mod mermaid_parity;
 mod metrics_tree_parity;
 mod ordered_list_parity;
 // Also compiled privately by each `*_parity` module (`#[path]`, with
@@ -57,6 +58,7 @@ mod render_comparison;
 mod render_tree_code_context;
 mod render_tree_comment_nodes;
 mod render_tree_component_parity;
+mod render_tree_diagram_hook;
 mod section_parity;
 mod status_block_parity;
 mod status_parity;

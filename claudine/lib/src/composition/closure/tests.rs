@@ -990,3 +990,84 @@ fn encodes_a_quoted_flow_target_beside_a_plain_scalar_holding_a_quote() {
         }
     }
 }
+
+// -- baseline rehearsal -----------------------------------------------------
+
+/// The Darkmatter text editors require top-level keys at column 0, so a
+/// baseline whose whole root mapping is indented can never be stamped.
+const INDENTED_BASELINE: &str = concat!(
+    "---\n",
+    "    prompt: Summarize the notes\n",
+    "    title: Notes\n",
+    "---\n",
+    "Old body\n",
+);
+
+fn rehearsal_now() -> DateTime<Utc> {
+    "2026-10-20T12:00:00Z".parse().unwrap()
+}
+
+#[test]
+fn rehearsal_refuses_an_indented_baseline_with_the_editors_reason() {
+    let original = INDENTED_BASELINE.to_string();
+
+    let error = rehearse_inline_baseline(&original, rehearsal_now()).unwrap_err();
+
+    let MarkdownError::FrontmatterTextEdit { reason } = &error else {
+        panic!("expected a refused frontmatter edit, got {error:?}");
+    };
+    assert!(reason.contains("indented by 4 spaces"), "{reason}");
+    assert!(reason.contains("md clean --save"), "{reason}");
+    assert_eq!(original, INDENTED_BASELINE, "the rehearsal never edits its input");
+}
+
+#[test]
+fn rehearsal_accepts_a_column_zero_baseline_with_every_managed_property() {
+    let original = concat!(
+        "---\n",
+        "prompt: Summarize the notes\n",
+        "hash: a000000000000000-b000000000000000\n",
+        "last_updated: 2026-01-01\n",
+        "---\n",
+        "Old body\n",
+    );
+
+    rehearse_inline_baseline(original, rehearsal_now()).unwrap();
+}
+
+#[test]
+fn rehearsal_accepts_a_column_zero_baseline_with_only_a_prompt() {
+    let original = "---\nprompt: Summarize the notes\n---\nOld body\n";
+
+    rehearse_inline_baseline(original, rehearsal_now()).unwrap();
+}
+
+/// A baseline that passes the rehearsal can still be made uneditable by the
+/// agent: the closure refuses the indented candidate, and the rollback puts
+/// the exact pre-run bytes back.
+#[test]
+fn a_rehearsed_baseline_still_refuses_and_rolls_back_an_agent_indented_candidate() {
+    let dir = TempDir::new().unwrap();
+    let original = "---\nprompt: Summarize the notes\ntitle: Notes\n---\nOld body\n";
+    rehearse_inline_baseline(original, rehearsal_now()).unwrap();
+    let agent_wrote = concat!(
+        "---\n",
+        "    prompt: Summarize the notes\n",
+        "    title: Notes\n",
+        "---\n",
+        "Agent body\n",
+    );
+    let (file, plan) = agent_run(&dir, original, agent_wrote);
+
+    let error = reconcile_inline_artifact_with_evidence(&plan, rehearsal_now(), false).unwrap_err();
+
+    let CompositionError::InlineArtifactEditFailed(MarkdownError::FrontmatterTextEdit { reason }) =
+        &error
+    else {
+        panic!("expected a refused frontmatter edit, got {error:?}");
+    };
+    assert!(reason.contains("indented by 4 spaces"), "{reason}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), agent_wrote, "nothing written");
+    restore_inline_baseline(&plan).unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+}

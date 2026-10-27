@@ -1,7 +1,7 @@
 //! Authorization code flow with PKCE support.
 
 use oauth2::{AuthorizationCode, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, Scope};
-use schematic_define::PkceRequirement;
+use schematic_define::OAuth2GrantType;
 
 use crate::error::OAuthError;
 use crate::manager::{extract_tokens, OAuth2Manager};
@@ -15,9 +15,10 @@ impl OAuth2Manager {
     ///
     /// ## Errors
     ///
-    /// Returns `OAuthError::Configuration` if the authorization URL is not set
-    /// on the provider config.
+    /// Returns `OAuthError::Configuration` if the provider does not declare the
+    /// authorization-code grant.
     pub fn begin_authorization(&self) -> Result<AuthorizationSession, OAuthError> {
+        self.require_grant(OAuth2GrantType::AuthorizationCodePkce, "the authorization-code flow")?;
         let mut auth_request = self
             .client
             .authorize_url(CsrfToken::new_random)
@@ -27,14 +28,9 @@ impl OAuth2Manager {
             auth_request = auth_request.add_scope(Scope::new(scope.clone()));
         }
 
-        let use_pkce = match self.config.provider.pkce {
-            PkceRequirement::Required | PkceRequirement::Supported => true,
-            PkceRequirement::NotUsed => false,
-            // `PkceRequirement` is `#[non_exhaustive]`, so this arm is mandatory.
-            // Default an unknown future variant to PKCE-enabled rather than
-            // silently downgrading to no PKCE, which would be a security regression.
-            _ => true,
-        };
+        // Every `PkceRequirement`, `Supported` included, sends a challenge: a
+        // provider that merely supports PKCE still gains its protection.
+        let use_pkce = self.config.provider.pkce().is_some();
 
         let pkce_verifier = if use_pkce {
             let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
@@ -59,6 +55,8 @@ impl OAuth2Manager {
     ///
     /// ## Errors
     ///
+    /// - `OAuthError::Configuration` if the provider does not declare the
+    ///   authorization-code grant.
     /// - `OAuthError::StateMismatch` if the CSRF state does not match.
     /// - `OAuthError::TokenExchange` if the token endpoint returns an error.
     pub async fn exchange_code(
@@ -67,6 +65,7 @@ impl OAuth2Manager {
         state: &str,
         session: &AuthorizationSession,
     ) -> Result<StoredTokens, OAuthError> {
+        self.require_grant(OAuth2GrantType::AuthorizationCodePkce, "the authorization-code flow")?;
         if state != session.csrf_state {
             return Err(OAuthError::StateMismatch {
                 expected: session.csrf_state.clone(),

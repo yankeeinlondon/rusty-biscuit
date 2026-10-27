@@ -1,13 +1,13 @@
 //! The `wt list` graph and verbose rendering.
 //!
 //! [`worktree::graph`] gathers the facts; this module hands them to
-//! biscuit-terminal's [`GitGraph`], which owns the lane/tag rule, elision,
+//! biscuit-visualized's [`GitGraph`], which owns the lane/tag rule, elision,
 //! sizing, and the Mermaid text, and formats the commit details `wt list -v`
 //! prints. See `worktree/docs/git-graph.md`.
 
 use std::collections::HashSet;
 
-use biscuit_terminal::components::git_graph::{self as terminal, GitGraph, GraphPullRequest};
+use biscuit_visualized::components::git_graph::{self as terminal, GitGraph, GraphPullRequest};
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::terminal_image::ImageWidth;
 use chrono::{DateTime, Local, Timelike};
@@ -197,5 +197,7 @@ fn parse_conventional(message: &str) -> Option<(String, Option<String>, String)>
     None
 }
 
-#[cfg(test)]
-mod tests;
+lib_target_tests! {
+    #[cfg(test)]
+    mod tests;
+}

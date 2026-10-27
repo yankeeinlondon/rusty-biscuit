@@ -89,6 +89,13 @@ pub struct PullRequest {
     pub links: Option<HashMap<String, Link>>,
 }
 
+impl schematic_define::Registration for PullRequest {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("PullRequest");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 impl PullRequest {
     /// Returns `true` if the PR is open.
     pub fn is_open(&self) -> bool {
@@ -239,6 +246,13 @@ pub struct PullRequestComment {
     /// HATEOAS links.
     #[serde(default)]
     pub links: Option<HashMap<String, Link>>,
+}
+
+impl schematic_define::Registration for PullRequestComment {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("PullRequestComment");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Parent comment reference.

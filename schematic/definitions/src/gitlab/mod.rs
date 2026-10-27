@@ -47,64 +47,12 @@ mod types;
 
 pub use types::*;
 
-use crate::registry::SchemaRegistry;
-#[cfg(test)]
-use schematic_define::RestMethod;
+use crate::registry::assemble_module_group;
 use schematic_define::{
-    ApiKeyEnv, AuthStrategy, CrossOrigin, Endpoint, EnvList, EnvMapping, RestApi,
-    pagination::{
-        Collection, LinkSource, MoreSignal, PageSize, PaginationException, Strategy, ValueSource,
-    },
+    ApiKeyEnv, EnvList, EnvMapping, AuthStrategy, DefinitionError, Endpoint,
+    RestApi,
+    pagination::{Collection, LinkSource, MoreSignal, PageSize, Strategy, ValueSource},
 };
-
-/// Creates a schema registry containing all GitLab response types.
-///
-/// This registry can be used to generate OpenAPI schemas for the GitLab API.
-/// All response types used by the API endpoints are registered.
-///
-/// ## Examples
-///
-/// ```
-/// use schematic_definitions::gitlab::{openapi_registry, define_gitlab_api};
-///
-/// let registry = openapi_registry();
-/// let api = define_gitlab_api();
-///
-/// // Registry contains all response types
-/// assert!(registry.get("Project").is_some());
-/// assert!(registry.get("MergeRequest").is_some());
-/// assert!(registry.get("Issue").is_some());
-///
-/// // Registry is complete for the API
-/// assert!(registry.validate_completeness(&api).is_ok());
-/// ```
-#[must_use]
-pub fn openapi_registry() -> SchemaRegistry {
-    SchemaRegistry::new()
-        .register::<TreeItem>("TreeItem")
-        .register::<Vec<TreeItem>>("Vec<TreeItem>")
-        .register::<FileContent>("FileContent")
-        .register::<MergeRequest>("MergeRequest")
-        .register::<Vec<MergeRequest>>("Vec<MergeRequest>")
-        .register::<Commit>("Commit")
-        .register::<Vec<Commit>>("Vec<Commit>")
-        .register::<MergeRequestChanges>("MergeRequestChanges")
-        .register::<Issue>("Issue")
-        .register::<Vec<Issue>>("Vec<Issue>")
-        .register::<Note>("Note")
-        .register::<Vec<Note>>("Vec<Note>")
-        .register::<User>("User")
-        .register::<Vec<User>>("Vec<User>")
-        .register::<Branch>("Branch")
-        .register::<Tag>("Tag")
-        .register::<Vec<Tag>>("Vec<Tag>")
-        .register::<Release>("Release")
-        .register::<Vec<Release>>("Vec<Release>")
-        .register::<Project>("Project")
-        .register::<Vec<Project>>("Vec<Project>")
-        .register::<Pipeline>("Pipeline")
-        .register::<Vec<Pipeline>>("Vec<Pipeline>")
-}
 
 /// GitLab's page size: `per_page`, at most 100, 20 when omitted.
 fn gitlab_page_size() -> PageSize {
@@ -170,43 +118,48 @@ fn gitlab_keyset() -> Strategy {
 /// assert_eq!(api.endpoints.len(), 19);
 /// ```
 pub fn define_gitlab_api() -> RestApi {
-    let endpoints: Vec<Endpoint> = vec![
-        endpoints::projects::all(),
-        endpoints::branches::all(),
-        endpoints::merge_requests::all(),
-        endpoints::issues::all(),
-        endpoints::releases::all(),
-        endpoints::pipelines::all(),
+    module_group().expect("valid gitlab definition").remove(0)
+}
+
+/// Assemble the API and its schemas from one ordered registration context.
+pub fn module_group() -> Result<Vec<RestApi>, DefinitionError> {
+    assemble_module_group("::schematic_definitions::gitlab", |ctx| {
+        ctx.register::<TreeItem>()?;
+        ctx.register::<FileContent>()?;
+        ctx.register::<MergeRequest>()?;
+        ctx.register::<Commit>()?;
+        ctx.register::<MergeRequestChanges>()?;
+        ctx.register::<Issue>()?;
+        ctx.register::<Note>()?;
+        ctx.register::<User>()?;
+        ctx.register::<Branch>()?;
+        ctx.register::<Tag>()?;
+        ctx.register::<Release>()?;
+        ctx.register::<Project>()?;
+        ctx.register::<Pipeline>()?;
+        let endpoints: Vec<Endpoint> = vec![
+        endpoints::projects::all(ctx)?,
+        endpoints::branches::all(ctx)?,
+        endpoints::merge_requests::all(ctx)?,
+        endpoints::issues::all(ctx)?,
+        endpoints::releases::all(ctx)?,
+        endpoints::pipelines::all(ctx)?,
     ]
     .into_iter()
     .flatten()
     .collect();
-
-    RestApi {
-        name: "GitLab".to_string(),
-        description: "GitLab REST API v4 for repository, MR, issue, and release workflows"
-            .to_string(),
-        base_url: "https://gitlab.com/api/v4".to_string(),
-        docs_url: Some("https://docs.gitlab.com/api/rest/".to_string()),
-        auth: AuthStrategy::ApiKey {
+        let api = RestApi::builder(ctx, "GitLab", "https://gitlab.com/api/v4")
+            .describes("GitLab REST API v4 for repository, MR, issue, and release workflows")
+            .authentication(AuthStrategy::ApiKey {
             header: "PRIVATE-TOKEN".to_string(),
             value_prefix: None,
-        },
-        auth_policy: None,
-        env_auth: vec![
+        }, vec![
             "GITLAB_TOKEN".to_string(),
             "GITLAB_PRIVATE_TOKEN".to_string(),
-        ],
-        env_username: None,
-        headers: vec![(
-            "User-Agent".to_string(),
-            "schematic-gitlab-client".to_string(),
-        )],
-        endpoints,
-        module_path: Some("gitlab".to_string()),
-        request_suffix: None,
-        version: None,
-        env_mapping: Some(EnvMapping {
+        ])
+            .docs_url("https://docs.gitlab.com/api/rest/")
+            .module_path("gitlab".to_string())
+            .env_mapping(EnvMapping {
             api_key: Some(ApiKeyEnv {
                 header: "PRIVATE-TOKEN".to_string(),
                 names: EnvList::new(vec![
@@ -215,75 +168,69 @@ pub fn define_gitlab_api() -> RestApi {
                 ]),
             }),
             ..Default::default()
-        }),
-        cross_origin: CrossOrigin::same_origin(),
-        request_id_header: None,
-        secret_names: vec![],
-        default_pagination: Some(gitlab_page_number()),
-        pagination_exceptions: vec![
-            // Unverified: believed paginated, but no source confirms it.
-            PaginationException::new("ListIssueParticipants", Collection::root().unpaginated()),
-            PaginationException::new(
-                "ListRepositoryTree",
-                Collection::root().or_paginate("keyset", gitlab_keyset()),
-            ),
-            PaginationException::new(
-                "ListGroupProjects",
-                Collection::root().or_paginate("keyset", gitlab_keyset()),
-            ),
-        ],
-    }
+        })
+            .default_pagination(gitlab_page_number())
+            .header(
+            "User-Agent".to_string(),
+            "schematic-gitlab-client".to_string(),
+        )
+            .endpoints(endpoints)
+            .build()?;
+        Ok(vec![api])
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use schematic_define::QueryParamType;
+    use schematic_define::{ResponseShape, RestMethod, TypeRef};
+    use schematic_define::pagination::{resolve, Resolution};
 
     // =============================================
-    // openapi_registry() tests
+    // api.schemas tests
     // =============================================
 
     #[test]
-    fn openapi_registry_contains_all_response_types() {
-        let registry = openapi_registry();
-
-        assert!(registry.get("Project").is_some());
-        assert!(registry.get("Vec<Project>").is_some());
-        assert!(registry.get("TreeItem").is_some());
-        assert!(registry.get("Vec<TreeItem>").is_some());
-        assert!(registry.get("FileContent").is_some());
-        assert!(registry.get("MergeRequest").is_some());
-        assert!(registry.get("Vec<MergeRequest>").is_some());
-        assert!(registry.get("Issue").is_some());
-        assert!(registry.get("Tag").is_some());
-        assert!(registry.get("Release").is_some());
-        assert!(registry.get("Pipeline").is_some());
-        assert_eq!(registry.len(), 23);
-    }
-
-    #[test]
-    fn openapi_registry_validates_against_api() {
-        let registry = openapi_registry();
+    fn schemas_contain_all_response_types() {
         let api = define_gitlab_api();
 
-        let result = registry.validate_completeness(&api);
-        assert!(result.is_ok(), "Registry should be complete: {:?}", result);
+        assert!(api.component("Project").is_some());
+        assert!(api.component("Vec<Project>").is_none());
+        assert!(api.component("TreeItem").is_some());
+        assert!(api.component("Vec<TreeItem>").is_none());
+        assert!(api.component("FileContent").is_some());
+        assert!(api.component("MergeRequest").is_some());
+        assert!(api.component("Vec<MergeRequest>").is_none());
+        assert!(api.component("Issue").is_some());
+        assert!(api.component("Tag").is_some());
+        assert!(api.component("Release").is_some());
+        assert!(api.component("Pipeline").is_some());
+        assert_eq!(crate::registry::registered_names(&api).len(), 13);
     }
 
     #[test]
-    fn openapi_registry_converts_to_openapi_schemas() {
-        let registry = openapi_registry();
-        let openapi_schemas = registry.to_openapi_schemas();
+    fn references_resolve_in_api_schemas() {
+        let api = define_gitlab_api();
+
+        api.validate_references().expect("every reference resolves in api.schemas");
+    }
+
+    #[test]
+    fn openapi_export_includes_api_schemas() {
+        let api = define_gitlab_api();
+        let openapi_schemas = schematic_define::openapi::export(&api, &schematic_define::openapi::ExportOptions::new())
+            .expect("export succeeds").components.expect("components").schemas;
 
         assert!(
-            openapi_schemas.len() >= 22,
-            "expected at least 22 schemas, got {}",
+            openapi_schemas.len() >= 13,
+            "expected at least 13 schemas, got {}",
             openapi_schemas.len()
         );
         assert!(openapi_schemas.contains_key("Project"));
-        assert!(openapi_schemas.contains_key("Vec<Project>"));
+        assert!(!openapi_schemas.contains_key("Vec<Project>"));
         assert!(openapi_schemas.contains_key("MergeRequest"));
-        assert!(openapi_schemas.contains_key("Vec<MergeRequest>"));
+        assert!(!openapi_schemas.contains_key("Vec<MergeRequest>"));
         assert!(openapi_schemas.contains_key("Issue"));
         assert!(openapi_schemas.contains_key("Pipeline"));
     }
@@ -348,16 +295,16 @@ mod tests {
             "Path should not contain query params"
         );
         assert!(endpoint.request.is_none());
-        match &endpoint.response {
-            schematic_define::ApiResponse::Json(schema) => {
-                assert!(schema.type_name.starts_with("Vec<"));
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(schema) => {
+                assert!(matches!(schema, TypeRef::Array(_)));
             }
             _ => panic!("Expected JSON response"),
         }
 
         // Verify pagination and query params are in params
         let params = endpoint.params.as_ref().expect("params should be set");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
         assert!(params.query.iter().any(|p| p.name == "recursive"));
         assert!(params.query.iter().any(|p| p.name == "git_ref"));
         assert!(params.query.iter().any(|p| p.name == "path"));
@@ -374,7 +321,15 @@ mod tests {
 
         assert_eq!(endpoint.method, RestMethod::Get);
         assert!(endpoint.path.contains("/repository/files/"));
-        assert!(endpoint.path.contains("ref={git_ref}"));
+        assert_eq!(endpoint.path, "/projects/{id}/repository/files/{file_path}");
+        let query = &endpoint.params.as_ref().unwrap().query;
+        assert_eq!(query.len(), 1);
+        let git_ref = &query[0];
+        assert_eq!(git_ref.name, "ref");
+        assert_eq!(git_ref.rust_name.as_deref(), Some("git_ref"));
+        assert!(git_ref.required);
+        assert_eq!(git_ref.param_type, QueryParamType::String);
+        assert!(matches!(&endpoint.response[0].shape, ResponseShape::Json(schema) if *schema == TypeRef::Named("FileContent".into())));
     }
 
     #[test]
@@ -391,7 +346,7 @@ mod tests {
             "Path should not contain query params"
         );
         let list_params = list.params.as_ref().expect("params should be set");
-        assert!(list_params.has_pagination());
+        assert!(list_params.query.iter().any(|p| p.name == "page"));
         assert!(list_params.query.iter().any(|p| p.name == "state"));
 
         let get = api
@@ -412,7 +367,7 @@ mod tests {
             "Path should not contain query params"
         );
         let commits_params = commits.params.as_ref().expect("params should be set");
-        assert!(commits_params.has_pagination());
+        assert!(commits_params.query.iter().any(|p| p.name == "page"));
 
         let changes = api
             .endpoints
@@ -432,7 +387,7 @@ mod tests {
             "Path should not contain query params"
         );
         let list_params = list.params.as_ref().expect("params should be set");
-        assert!(list_params.has_pagination());
+        assert!(list_params.query.iter().any(|p| p.name == "page"));
         assert!(list_params.query.iter().any(|p| p.name == "state"));
 
         let get = api.endpoints.iter().find(|e| e.id == "GetIssue").unwrap();
@@ -449,7 +404,7 @@ mod tests {
             "Path should not contain query params"
         );
         let notes_params = notes.params.as_ref().expect("params should be set");
-        assert!(notes_params.has_pagination());
+        assert!(notes_params.query.iter().any(|p| p.name == "page"));
 
         let participants = api
             .endpoints
@@ -499,10 +454,9 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/projects/{id}/repository/branches/{branch}");
         assert!(endpoint.request.is_none());
-        assert!(endpoint.oauth_scopes.is_none());
-        match &endpoint.response {
-            schematic_define::ApiResponse::Json(schema) => {
-                assert_eq!(schema.type_name, "Branch");
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(schema) => {
+                assert!(*schema == TypeRef::Named("Branch".into()));
             }
             _ => panic!("Expected JSON response"),
         }
@@ -561,13 +515,13 @@ mod tests {
 
         for id in list_endpoints {
             let endpoint = api.endpoints.iter().find(|e| e.id == id).unwrap();
-            match &endpoint.response {
-                schematic_define::ApiResponse::Json(schema) => {
+            match &endpoint.response[0].shape {
+                ResponseShape::Json(schema) => {
                     assert!(
-                        schema.type_name.starts_with("Vec<"),
-                        "Endpoint {} should return Vec type, got {}",
+                        matches!(schema, TypeRef::Array(_)),
+                        "Endpoint {} should return Vec type, got {:?}",
                         id,
-                        schema.type_name
+                        schema
                     );
                 }
                 _ => panic!("Endpoint {} should return JSON", id),
@@ -593,10 +547,10 @@ mod tests {
 
         for id in single_endpoints {
             let endpoint = api.endpoints.iter().find(|e| e.id == id).unwrap();
-            match &endpoint.response {
-                schematic_define::ApiResponse::Json(schema) => {
+            match &endpoint.response[0].shape {
+                ResponseShape::Json(schema) => {
                     assert!(
-                        !schema.type_name.starts_with("Vec<"),
+                        !matches!(schema, TypeRef::Array(_)),
                         "Endpoint {} should return single item, not Vec",
                         id
                     );
@@ -614,8 +568,6 @@ mod tests {
 
     #[test]
     fn list_endpoints_use_gitlab_pagination() {
-        use schematic_define::params::PaginationStyle;
-
         let api = define_gitlab_api();
 
         let paginated_endpoints = [
@@ -638,26 +590,18 @@ mod tests {
                 .unwrap_or_else(|| panic!("Endpoint {} should have params", id));
 
             assert!(
-                params.has_pagination(),
+                params.query.iter().any(|p| p.name == "page"),
                 "Endpoint {} should have pagination",
                 id
             );
 
             // Verify GitLab pagination style (page + per_page)
-            match &params.pagination {
-                Some(PaginationStyle::PageNumber {
-                    page_param,
-                    per_page_param,
-                    default_per_page,
-                    max_per_page,
-                }) => {
-                    assert_eq!(page_param, "page", "Endpoint {} page_param", id);
-                    assert_eq!(per_page_param, "per_page", "Endpoint {} per_page_param", id);
-                    assert_eq!(*default_per_page, 100, "Endpoint {} default_per_page", id);
-                    assert_eq!(*max_per_page, 100, "Endpoint {} max_per_page", id);
-                }
-                _ => panic!("Endpoint {} should use PageNumber pagination", id),
-            }
+            assert!(params.query.iter().any(|p| p.name == "per_page"));
+            let resolution = resolve(&api, endpoint);
+            assert!(matches!(resolution, Resolution::Paginated { .. }));
+            let knobs = schematic_define::pagination::caller_knobs(&resolution);
+            assert!(knobs.iter().any(|k| matches!(k, schematic_define::pagination::Knob::StartPage { .. })));
+            assert!(knobs.iter().any(|k| matches!(k, schematic_define::pagination::Knob::PageSize { param, .. } if param == "per_page")));
         }
     }
 
@@ -673,9 +617,9 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/projects/{id}");
 
-        match &endpoint.response {
-            schematic_define::ApiResponse::Json(schema) => {
-                assert_eq!(schema.type_name, "Project");
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(schema) => {
+                assert!(*schema == TypeRef::Named("Project".into()));
             }
             _ => panic!("Expected JSON response"),
         }
@@ -693,15 +637,15 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/projects/{id}/pipelines");
 
-        match &endpoint.response {
-            schematic_define::ApiResponse::Json(schema) => {
-                assert!(schema.type_name.starts_with("Vec<"));
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(schema) => {
+                assert!(matches!(schema, TypeRef::Array(_)));
             }
             _ => panic!("Expected JSON response"),
         }
 
         let params = endpoint.params.as_ref().expect("should have params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
         assert!(params.query.iter().any(|p| p.name == "status"));
         assert!(params.query.iter().any(|p| p.name == "source"));
         assert!(params.query.iter().any(|p| p.name == "git_ref"));
@@ -719,15 +663,15 @@ mod tests {
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/groups/{id}/projects");
 
-        match &endpoint.response {
-            schematic_define::ApiResponse::Json(schema) => {
-                assert!(schema.type_name.starts_with("Vec<"));
+        match &endpoint.response[0].shape {
+            ResponseShape::Json(schema) => {
+                assert!(matches!(schema, TypeRef::Array(_)));
             }
             _ => panic!("Expected JSON response"),
         }
 
         let params = endpoint.params.as_ref().expect("should have params");
-        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "page"));
         assert!(params.query.iter().any(|p| p.name == "archived"));
         assert!(params.query.iter().any(|p| p.name == "visibility"));
         assert!(params.query.iter().any(|p| p.name == "include_subgroups"));
@@ -738,10 +682,6 @@ mod tests {
         let api = define_gitlab_api();
 
         for endpoint in &api.endpoints {
-            // GetRepositoryFile is allowed to have ?ref= as a path parameter
-            if endpoint.id == "GetRepositoryFile" {
-                continue;
-            }
 
             assert!(
                 !endpoint.path.contains("per_page="),
@@ -760,4 +700,15 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn typed_module_group_preserves_endpoint_order_and_completeness() {
+        let group = module_group().unwrap();
+        assert_eq!(group.len(), 1);
+        let api = &group[0];
+        assert_eq!(api.endpoints.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["ListRepositoryTree", "GetRepositoryFile", "GetProject", "ListGroupProjects", "GetBranch", "ListMergeRequests", "GetMergeRequest", "ListMergeRequestCommits", "ListMergeRequestChanges", "ListIssues", "GetIssue", "ListIssueNotes", "ListIssueParticipants", "ListTags", "GetTag", "ListReleases", "GetRelease", "GetLatestRelease", "ListProjectPipelines"]);
+        assert_eq!(crate::registry::registered_names(&group[0]), vec!["TreeItem", "FileContent", "MergeRequest", "User", "Commit", "MergeRequestChanges", "Issue", "Note", "Branch", "Tag", "Release", "Project", "Pipeline"]);
+        api.validate_references().unwrap();
+        assert!(api.endpoints.iter().all(|e| !e.path.contains('?')));
+    }
+
 }

@@ -52,6 +52,43 @@ Key clap patterns:
 - `clap::ValueEnum` for enum flag values
 - `clap_complete` with `derive` + `unstable-ext` features for shell completions
 
+### The `--feature` convention
+
+Named opt-ins share one flag across this repository's CLIs:
+
+- `--feature <NAME>` is repeatable and comma-separated (`--feature a --feature
+  b` == `--feature a,b`); names are case-insensitive; repeating one is harmless.
+- Each CLI declares its names in a `ValueEnum` (kebab-case). An unknown or
+  empty name (`--feature a,,b`, `--feature ""`) is a usage error (exit 2)
+  listing the valid names, and completion offers them.
+- When two named features overlap, the more restrictive one wins.
+- clap gives all of this from `#[arg(long = "feature", value_enum,
+  value_delimiter = ',', ignore_case = true, action = ArgAction::Append)]` on a
+  `Vec<Feature>`; clap rejects empty elements itself. Lower the list onto the
+  options in one helper so adding a name is one variant plus one match arm.
+  Reference: `md` (`darkmatter/cli/src/args/enums.rs` `Feature`,
+  `render::apply_features`; docs in `darkmatter/docs/cli/render.md#features`).
+- Names that several CLIs share live once, in the library that owns their
+  meaning, as a `ValueEnum` behind its `clap` feature, with the fold beside
+  it. The Mermaid text-fallback names (`no-mermaid-fallbacks`,
+  `no-mermaid-partial-fallbacks`, `no-mermaid-partial-warning`) are
+  `biscuit_visualized::components::MermaidFallbackFeature`, folded by
+  `MermaidFallbackPolicy::from_features`. A CLI whose only features are shared
+  uses that enum directly (`bt`: a flattened `MermaidFeatureArgs` in
+  `biscuit-terminal/cli/src/args.rs`); a CLI with its own names adds variants
+  to its `Feature` enum and maps them onto the shared one (`md`:
+  `Feature::mermaid_fallback()`).
+- A flag beats the environment: lower each feature onto an *explicit* library
+  setting, and leave the setting unset when no feature names it, so an
+  environment variable (here `MERMAID_FALLBACK`) still applies.
+- A feature that only matters in some mode is accepted, with no effect, outside
+  it (`md`'s fallback features without `--mermaid`; `bt git-graph`, whose
+  diagram has no text drawing), and docs say so. Names a CLI does not declare
+  are usage errors (`bt --feature no-mermaid-rendering`).
+- Document each CLI's names in its CLI reference page (`md`:
+  `darkmatter/docs/cli/render.md#features`; `bt`:
+  `biscuit-terminal/docs/cli.md#--feature`).
+
 ## Output Standards
 
 See [cli-best-practices.md](cli-best-practices.md) for the full standards reference.

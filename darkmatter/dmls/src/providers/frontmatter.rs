@@ -947,11 +947,11 @@ fn file_path_completions(ctx: &DocumentContext, offset: usize, partial: &str) ->
     };
     let start = offset - partial.len();
     let mut out = Vec::new();
-    for record in ctx.graph.documents().iter().filter(|record| !record.dependency) {
+    for record in ctx.graph.documents().filter(|record| !record.dependency) {
         if record.path == ctx.path {
             continue;
         }
-        let relative = relativize(base_dir, &record.path);
+        let relative = relativize(base_dir, record.path);
         if !partial.is_empty() && !relative.starts_with(partial) {
             continue;
         }

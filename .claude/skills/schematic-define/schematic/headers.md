@@ -2,10 +2,9 @@
 
 The `Headers` builder provides a fluent API for constructing HTTP headers with secure credential handling.
 
-**Scope.** Generated **WebSocket** clients carry a `Headers` in their public
-`headers` field and send `headers.build()` when connecting. Generated **REST**
-clients do not use `Headers` at all: they send through `schematic-runtime`,
-which takes `Credential`s (see "Generated Clients" below).
+**Scope.** No generated client uses `Headers`: REST and WebSocket clients
+both take `schematic_runtime::Credential`s and resolve them through the
+runtime (see "Generated Clients" below). `Headers` is a standalone builder.
 
 ## Quick Start
 
@@ -185,17 +184,15 @@ if builder.has_authorization() {
 
 ### WebSocket clients
 
-A generated WebSocket client creates its `Headers` with the API's
-`EnvMapping` attached but does not resolve it. Set explicit auth, or call
-`from_env()` / `try_from_env()`, before connecting:
+A generated WebSocket client selects one handshake credential per explicit
+connect (options `credential` → `credentials`/`api_key` → first non-empty
+env variable of the mapping → anonymous) and reuses it on redials:
 
 ```rust
 use schematic_schema::elevenlabs_ws::ElevenLabsTTSWs;
 
-let mut api = ElevenLabsTTSWs::new();
-api.headers = api.headers.clone().use_api_key(key, "xi-api-key"); // explicit
-// or
-api.headers = api.headers.clone().try_from_env()?;               // from the mapping
+let api = ElevenLabsTTSWs::new().api_key(key); // explicit
+let api = ElevenLabsTTSWs::new();              // reads the mapping on connect
 ```
 
 ### REST clients

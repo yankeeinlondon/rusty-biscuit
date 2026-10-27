@@ -32,13 +32,16 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 openapiv3 = "2"
 indexmap = "2"
+# Validates every Postman example against the API's registered schemas
+# before it is emitted (offline, local references only).
+jsonschema = { version = "0.55", default-features = false }
 biscuit-test-harness = { path = "../../biscuit-test-harness", optional = true }
 test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 
 [dev-dependencies]
+biscuit-hash = { path = "../../biscuit-hash/lib", default-features = false, features = ["blake3"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 tempfile = "3.15"
-jsonschema = { version = "0.55", default-features = false }
 # The Level 1 layout gate (`tests/l1/test_layout.rs`) calls
 # `test_toolkit::test_layout`. The optional normal dependency above only
 # exists under `terminal-tests`.
@@ -72,3 +75,6 @@ l2-backends = ["tmux"]
 sidecars = ["backend-proof", "harness-broker"]
 features = ["terminal-tests"]
 local-features = []
+# R43's parity test re-derives sniff's check-status query from its source
+# (`fresh_output_compile::the_parity_document_is_sniffs_check_status_query`).
+source-inputs = ["sniff/lib/src/remote/check_status.rs"]

@@ -1,0 +1,1851 @@
+{
+  "asyncapi": "3.0.0",
+  "channels": {
+    "CoreEvents": {
+      "address": "/events",
+      "description": "General asynchronous event channel optimized for event consumers and telemetry-style subscribers.",
+      "messages": {
+        "Auth": {
+          "$ref": "#/components/messages/CoreEvents.Auth"
+        },
+        "AuthRequired": {
+          "$ref": "#/components/messages/CoreEvents.AuthRequired"
+        },
+        "Authentication": {
+          "$ref": "#/components/messages/CoreEvents.Authentication"
+        },
+        "EventEnvelope": {
+          "$ref": "#/components/messages/CoreEvents.EventEnvelope"
+        },
+        "Ping": {
+          "$ref": "#/components/messages/CoreEvents.Ping"
+        },
+        "Pong": {
+          "$ref": "#/components/messages/CoreEvents.Pong"
+        },
+        "RequestEnvelope": {
+          "$ref": "#/components/messages/CoreEvents.RequestEnvelope"
+        },
+        "ResponseEnvelope": {
+          "$ref": "#/components/messages/CoreEvents.ResponseEnvelope"
+        },
+        "Result": {
+          "$ref": "#/components/messages/CoreEvents.Result"
+        },
+        "System": {
+          "$ref": "#/components/messages/CoreEvents.System"
+        },
+        "SystemInfo": {
+          "$ref": "#/components/messages/CoreEvents.SystemInfo"
+        },
+        "Version": {
+          "$ref": "#/components/messages/CoreEvents.Version"
+        },
+        "VersionInfo": {
+          "$ref": "#/components/messages/CoreEvents.VersionInfo"
+        }
+      },
+      "x-schematic-role": "client"
+    },
+    "CoreIntegrations": {
+      "address": "/intg",
+      "description": "Integration management channel for discovery, setup, and driver lifecycle events. See Core API integration WebSocket documentation for message semantics.",
+      "messages": {
+        "Auth": {
+          "$ref": "#/components/messages/CoreIntegrations.Auth"
+        },
+        "AuthRequired": {
+          "$ref": "#/components/messages/CoreIntegrations.AuthRequired"
+        },
+        "Authentication": {
+          "$ref": "#/components/messages/CoreIntegrations.Authentication"
+        },
+        "EventEnvelope": {
+          "$ref": "#/components/messages/CoreIntegrations.EventEnvelope"
+        },
+        "Ping": {
+          "$ref": "#/components/messages/CoreIntegrations.Ping"
+        },
+        "Pong": {
+          "$ref": "#/components/messages/CoreIntegrations.Pong"
+        },
+        "RequestEnvelope": {
+          "$ref": "#/components/messages/CoreIntegrations.RequestEnvelope"
+        },
+        "ResponseEnvelope": {
+          "$ref": "#/components/messages/CoreIntegrations.ResponseEnvelope"
+        },
+        "Result": {
+          "$ref": "#/components/messages/CoreIntegrations.Result"
+        },
+        "System": {
+          "$ref": "#/components/messages/CoreIntegrations.System"
+        },
+        "SystemInfo": {
+          "$ref": "#/components/messages/CoreIntegrations.SystemInfo"
+        },
+        "Version": {
+          "$ref": "#/components/messages/CoreIntegrations.Version"
+        },
+        "VersionInfo": {
+          "$ref": "#/components/messages/CoreIntegrations.VersionInfo"
+        }
+      },
+      "x-schematic-role": "client"
+    },
+    "CoreProfiles": {
+      "address": "/profiles",
+      "description": "Profile-focused channel for querying and tracking profile updates without subscribing to all general events.",
+      "messages": {
+        "Auth": {
+          "$ref": "#/components/messages/CoreProfiles.Auth"
+        },
+        "AuthRequired": {
+          "$ref": "#/components/messages/CoreProfiles.AuthRequired"
+        },
+        "Authentication": {
+          "$ref": "#/components/messages/CoreProfiles.Authentication"
+        },
+        "EventEnvelope": {
+          "$ref": "#/components/messages/CoreProfiles.EventEnvelope"
+        },
+        "Ping": {
+          "$ref": "#/components/messages/CoreProfiles.Ping"
+        },
+        "Pong": {
+          "$ref": "#/components/messages/CoreProfiles.Pong"
+        },
+        "RequestEnvelope": {
+          "$ref": "#/components/messages/CoreProfiles.RequestEnvelope"
+        },
+        "ResponseEnvelope": {
+          "$ref": "#/components/messages/CoreProfiles.ResponseEnvelope"
+        },
+        "Result": {
+          "$ref": "#/components/messages/CoreProfiles.Result"
+        },
+        "System": {
+          "$ref": "#/components/messages/CoreProfiles.System"
+        },
+        "SystemInfo": {
+          "$ref": "#/components/messages/CoreProfiles.SystemInfo"
+        },
+        "Version": {
+          "$ref": "#/components/messages/CoreProfiles.Version"
+        },
+        "VersionInfo": {
+          "$ref": "#/components/messages/CoreProfiles.VersionInfo"
+        }
+      },
+      "x-schematic-role": "client"
+    },
+    "CoreWs": {
+      "address": "/ws",
+      "description": "Primary command/event channel for Core system control. Use this channel for RPC-style commands and asynchronous events documented in the Core WS docs.",
+      "messages": {
+        "Auth": {
+          "$ref": "#/components/messages/CoreWs.Auth"
+        },
+        "AuthRequired": {
+          "$ref": "#/components/messages/CoreWs.AuthRequired"
+        },
+        "Authentication": {
+          "$ref": "#/components/messages/CoreWs.Authentication"
+        },
+        "EventEnvelope": {
+          "$ref": "#/components/messages/CoreWs.EventEnvelope"
+        },
+        "Ping": {
+          "$ref": "#/components/messages/CoreWs.Ping"
+        },
+        "Pong": {
+          "$ref": "#/components/messages/CoreWs.Pong"
+        },
+        "RequestEnvelope": {
+          "$ref": "#/components/messages/CoreWs.RequestEnvelope"
+        },
+        "ResponseEnvelope": {
+          "$ref": "#/components/messages/CoreWs.ResponseEnvelope"
+        },
+        "Result": {
+          "$ref": "#/components/messages/CoreWs.Result"
+        },
+        "System": {
+          "$ref": "#/components/messages/CoreWs.System"
+        },
+        "SystemInfo": {
+          "$ref": "#/components/messages/CoreWs.SystemInfo"
+        },
+        "Version": {
+          "$ref": "#/components/messages/CoreWs.Version"
+        },
+        "VersionInfo": {
+          "$ref": "#/components/messages/CoreWs.VersionInfo"
+        }
+      },
+      "x-schematic-role": "client"
+    }
+  },
+  "components": {
+    "messages": {
+      "CoreEvents.Auth": {
+        "description": "Message-based auth request (`msg=auth`).",
+        "name": "Auth",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsAuthMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "auth"
+          }
+        ]
+      },
+      "CoreEvents.AuthRequired": {
+        "description": "Server challenge for message-based auth (`msg=auth_required`).",
+        "name": "AuthRequired",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsAuthRequired"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "event"
+          },
+          {
+            "field": "msg",
+            "value": "auth_required"
+          }
+        ]
+      },
+      "CoreEvents.Authentication": {
+        "description": "Authentication outcome (`msg=authentication`) returned after auth request.",
+        "name": "Authentication",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsAuthenticationMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "authentication"
+          }
+        ]
+      },
+      "CoreEvents.EventEnvelope": {
+        "description": "Generic event envelope `{kind=event,msg,cat,ts,msg_data}`.",
+        "name": "EventEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsEventEnvelope"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "event"
+          }
+        ]
+      },
+      "CoreEvents.Ping": {
+        "description": "Typed ping request (`msg=ping`).",
+        "name": "Ping",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsPingMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "ping"
+          }
+        ]
+      },
+      "CoreEvents.Pong": {
+        "description": "Typed pong response (`msg=pong`).",
+        "name": "Pong",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsPongMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "pong"
+          }
+        ]
+      },
+      "CoreEvents.RequestEnvelope": {
+        "description": "Generic request envelope `{kind=req,id,msg,msg_data}`.",
+        "name": "RequestEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsRequestEnvelope"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          }
+        ]
+      },
+      "CoreEvents.ResponseEnvelope": {
+        "description": "Generic response envelope `{kind=resp,req_id,msg,code,msg_data}`.",
+        "name": "ResponseEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsResponseEnvelope"
+        },
+        "x-schematic-fallback": true
+      },
+      "CoreEvents.Result": {
+        "description": "Typed generic command result (`msg=result`).",
+        "name": "Result",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsResultMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "result"
+          }
+        ]
+      },
+      "CoreEvents.System": {
+        "description": "Typed system-info request (`msg=system`).",
+        "name": "System",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsSystemMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "system"
+          }
+        ]
+      },
+      "CoreEvents.SystemInfo": {
+        "description": "Typed system-info response (`msg=system_info`).",
+        "name": "SystemInfo",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsSystemInfoMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "system_info"
+          }
+        ]
+      },
+      "CoreEvents.Version": {
+        "description": "Typed version request (`msg=version`).",
+        "name": "Version",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsVersionMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "version"
+          }
+        ]
+      },
+      "CoreEvents.VersionInfo": {
+        "description": "Typed version response (`msg=version_info`).",
+        "name": "VersionInfo",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsVersionInfoMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "version_info"
+          }
+        ]
+      },
+      "CoreIntegrations.Auth": {
+        "description": "Message-based auth request (`msg=auth`).",
+        "name": "Auth",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsAuthMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "auth"
+          }
+        ]
+      },
+      "CoreIntegrations.AuthRequired": {
+        "description": "Server challenge for message-based auth (`msg=auth_required`).",
+        "name": "AuthRequired",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsAuthRequired"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "event"
+          },
+          {
+            "field": "msg",
+            "value": "auth_required"
+          }
+        ]
+      },
+      "CoreIntegrations.Authentication": {
+        "description": "Authentication outcome (`msg=authentication`) returned after auth request.",
+        "name": "Authentication",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsAuthenticationMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "authentication"
+          }
+        ]
+      },
+      "CoreIntegrations.EventEnvelope": {
+        "description": "Generic event envelope `{kind=event,msg,cat,ts,msg_data}`.",
+        "name": "EventEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsEventEnvelope"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "event"
+          }
+        ]
+      },
+      "CoreIntegrations.Ping": {
+        "description": "Typed ping request (`msg=ping`).",
+        "name": "Ping",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsPingMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "ping"
+          }
+        ]
+      },
+      "CoreIntegrations.Pong": {
+        "description": "Typed pong response (`msg=pong`).",
+        "name": "Pong",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsPongMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "pong"
+          }
+        ]
+      },
+      "CoreIntegrations.RequestEnvelope": {
+        "description": "Generic request envelope `{kind=req,id,msg,msg_data}`.",
+        "name": "RequestEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsRequestEnvelope"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          }
+        ]
+      },
+      "CoreIntegrations.ResponseEnvelope": {
+        "description": "Generic response envelope `{kind=resp,req_id,msg,code,msg_data}`.",
+        "name": "ResponseEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsResponseEnvelope"
+        },
+        "x-schematic-fallback": true
+      },
+      "CoreIntegrations.Result": {
+        "description": "Typed generic command result (`msg=result`).",
+        "name": "Result",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsResultMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "result"
+          }
+        ]
+      },
+      "CoreIntegrations.System": {
+        "description": "Typed system-info request (`msg=system`).",
+        "name": "System",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsSystemMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "system"
+          }
+        ]
+      },
+      "CoreIntegrations.SystemInfo": {
+        "description": "Typed system-info response (`msg=system_info`).",
+        "name": "SystemInfo",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsSystemInfoMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "system_info"
+          }
+        ]
+      },
+      "CoreIntegrations.Version": {
+        "description": "Typed version request (`msg=version`).",
+        "name": "Version",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsVersionMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "version"
+          }
+        ]
+      },
+      "CoreIntegrations.VersionInfo": {
+        "description": "Typed version response (`msg=version_info`).",
+        "name": "VersionInfo",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsVersionInfoMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "version_info"
+          }
+        ]
+      },
+      "CoreProfiles.Auth": {
+        "description": "Message-based auth request (`msg=auth`).",
+        "name": "Auth",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsAuthMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "auth"
+          }
+        ]
+      },
+      "CoreProfiles.AuthRequired": {
+        "description": "Server challenge for message-based auth (`msg=auth_required`).",
+        "name": "AuthRequired",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsAuthRequired"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "event"
+          },
+          {
+            "field": "msg",
+            "value": "auth_required"
+          }
+        ]
+      },
+      "CoreProfiles.Authentication": {
+        "description": "Authentication outcome (`msg=authentication`) returned after auth request.",
+        "name": "Authentication",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsAuthenticationMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "authentication"
+          }
+        ]
+      },
+      "CoreProfiles.EventEnvelope": {
+        "description": "Generic event envelope `{kind=event,msg,cat,ts,msg_data}`.",
+        "name": "EventEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsEventEnvelope"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "event"
+          }
+        ]
+      },
+      "CoreProfiles.Ping": {
+        "description": "Typed ping request (`msg=ping`).",
+        "name": "Ping",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsPingMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "ping"
+          }
+        ]
+      },
+      "CoreProfiles.Pong": {
+        "description": "Typed pong response (`msg=pong`).",
+        "name": "Pong",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsPongMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "pong"
+          }
+        ]
+      },
+      "CoreProfiles.RequestEnvelope": {
+        "description": "Generic request envelope `{kind=req,id,msg,msg_data}`.",
+        "name": "RequestEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsRequestEnvelope"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          }
+        ]
+      },
+      "CoreProfiles.ResponseEnvelope": {
+        "description": "Generic response envelope `{kind=resp,req_id,msg,code,msg_data}`.",
+        "name": "ResponseEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsResponseEnvelope"
+        },
+        "x-schematic-fallback": true
+      },
+      "CoreProfiles.Result": {
+        "description": "Typed generic command result (`msg=result`).",
+        "name": "Result",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsResultMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "result"
+          }
+        ]
+      },
+      "CoreProfiles.System": {
+        "description": "Typed system-info request (`msg=system`).",
+        "name": "System",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsSystemMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "system"
+          }
+        ]
+      },
+      "CoreProfiles.SystemInfo": {
+        "description": "Typed system-info response (`msg=system_info`).",
+        "name": "SystemInfo",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsSystemInfoMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "system_info"
+          }
+        ]
+      },
+      "CoreProfiles.Version": {
+        "description": "Typed version request (`msg=version`).",
+        "name": "Version",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsVersionMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "version"
+          }
+        ]
+      },
+      "CoreProfiles.VersionInfo": {
+        "description": "Typed version response (`msg=version_info`).",
+        "name": "VersionInfo",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsVersionInfoMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "version_info"
+          }
+        ]
+      },
+      "CoreWs.Auth": {
+        "description": "Message-based auth request (`msg=auth`).",
+        "name": "Auth",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsAuthMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "auth"
+          }
+        ]
+      },
+      "CoreWs.AuthRequired": {
+        "description": "Server challenge for message-based auth (`msg=auth_required`).",
+        "name": "AuthRequired",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsAuthRequired"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "event"
+          },
+          {
+            "field": "msg",
+            "value": "auth_required"
+          }
+        ]
+      },
+      "CoreWs.Authentication": {
+        "description": "Authentication outcome (`msg=authentication`) returned after auth request.",
+        "name": "Authentication",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsAuthenticationMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "authentication"
+          }
+        ]
+      },
+      "CoreWs.EventEnvelope": {
+        "description": "Generic event envelope `{kind=event,msg,cat,ts,msg_data}`.",
+        "name": "EventEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsEventEnvelope"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "event"
+          }
+        ]
+      },
+      "CoreWs.Ping": {
+        "description": "Typed ping request (`msg=ping`).",
+        "name": "Ping",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsPingMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "ping"
+          }
+        ]
+      },
+      "CoreWs.Pong": {
+        "description": "Typed pong response (`msg=pong`).",
+        "name": "Pong",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsPongMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "pong"
+          }
+        ]
+      },
+      "CoreWs.RequestEnvelope": {
+        "description": "Generic request envelope `{kind=req,id,msg,msg_data}`.",
+        "name": "RequestEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsRequestEnvelope"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          }
+        ]
+      },
+      "CoreWs.ResponseEnvelope": {
+        "description": "Generic response envelope `{kind=resp,req_id,msg,code,msg_data}`.",
+        "name": "ResponseEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsResponseEnvelope"
+        },
+        "x-schematic-fallback": true
+      },
+      "CoreWs.Result": {
+        "description": "Typed generic command result (`msg=result`).",
+        "name": "Result",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsResultMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "result"
+          }
+        ]
+      },
+      "CoreWs.System": {
+        "description": "Typed system-info request (`msg=system`).",
+        "name": "System",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsSystemMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "system"
+          }
+        ]
+      },
+      "CoreWs.SystemInfo": {
+        "description": "Typed system-info response (`msg=system_info`).",
+        "name": "SystemInfo",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsSystemInfoMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "system_info"
+          }
+        ]
+      },
+      "CoreWs.Version": {
+        "description": "Typed version request (`msg=version`).",
+        "name": "Version",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsVersionMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "req"
+          },
+          {
+            "field": "msg",
+            "value": "version"
+          }
+        ]
+      },
+      "CoreWs.VersionInfo": {
+        "description": "Typed version response (`msg=version_info`).",
+        "name": "VersionInfo",
+        "payload": {
+          "$ref": "#/components/schemas/CoreWsVersionInfoMessage"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "kind",
+            "value": "resp"
+          },
+          {
+            "field": "msg",
+            "value": "version_info"
+          }
+        ]
+      }
+    },
+    "schemas": {
+      "CoreWsAuthMessage": {
+        "description": "Payload type `CoreWsAuthMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "CoreWsAuthRequired": {
+        "description": "Payload type `CoreWsAuthRequired`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "CoreWsAuthenticationMessage": {
+        "description": "Payload type `CoreWsAuthenticationMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "CoreWsEventEnvelope": {
+        "description": "Payload type `CoreWsEventEnvelope`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "CoreWsPingMessage": {
+        "description": "Payload type `CoreWsPingMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "CoreWsPongMessage": {
+        "description": "Payload type `CoreWsPongMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "CoreWsRequestEnvelope": {
+        "description": "Payload type `CoreWsRequestEnvelope`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "CoreWsResponseEnvelope": {
+        "description": "Payload type `CoreWsResponseEnvelope`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "CoreWsResultMessage": {
+        "description": "Payload type `CoreWsResultMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "CoreWsSystemInfoMessage": {
+        "description": "Payload type `CoreWsSystemInfoMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "CoreWsSystemMessage": {
+        "description": "Payload type `CoreWsSystemMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "CoreWsVersionInfoMessage": {
+        "description": "Payload type `CoreWsVersionInfoMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "CoreWsVersionMessage": {
+        "description": "Payload type `CoreWsVersionMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      }
+    },
+    "securitySchemes": {
+      "apiKey": {
+        "in": "header",
+        "name": "API-KEY",
+        "type": "httpApiKey"
+      }
+    }
+  },
+  "defaultContentType": "application/json",
+  "info": {
+    "description": "Unfolded Circle Core WebSocket API",
+    "externalDocs": {
+      "url": "https://unfoldedcircle.github.io/core-api/ws/"
+    },
+    "title": "UnfoldedCircleCoreWs",
+    "version": "1.0.0"
+  },
+  "operations": {
+    "CoreEvents.receive.AuthRequired": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreEvents/messages/AuthRequired"
+        }
+      ]
+    },
+    "CoreEvents.receive.Authentication": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreEvents/messages/Authentication"
+        }
+      ]
+    },
+    "CoreEvents.receive.EventEnvelope": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreEvents/messages/EventEnvelope"
+        }
+      ]
+    },
+    "CoreEvents.receive.Pong": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreEvents/messages/Pong"
+        }
+      ]
+    },
+    "CoreEvents.receive.ResponseEnvelope": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreEvents/messages/ResponseEnvelope"
+        }
+      ]
+    },
+    "CoreEvents.receive.Result": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreEvents/messages/Result"
+        }
+      ]
+    },
+    "CoreEvents.receive.SystemInfo": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreEvents/messages/SystemInfo"
+        }
+      ]
+    },
+    "CoreEvents.receive.VersionInfo": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreEvents/messages/VersionInfo"
+        }
+      ]
+    },
+    "CoreEvents.send.Auth": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreEvents/messages/Auth"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreEvents"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreEvents/messages/Authentication"
+          }
+        ]
+      }
+    },
+    "CoreEvents.send.Ping": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreEvents/messages/Ping"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreEvents"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreEvents/messages/Pong"
+          }
+        ]
+      }
+    },
+    "CoreEvents.send.RequestEnvelope": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreEvents/messages/RequestEnvelope"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreEvents"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreEvents/messages/ResponseEnvelope"
+          }
+        ]
+      }
+    },
+    "CoreEvents.send.System": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreEvents/messages/System"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreEvents"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreEvents/messages/SystemInfo"
+          }
+        ]
+      }
+    },
+    "CoreEvents.send.Version": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreEvents"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreEvents/messages/Version"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreEvents"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreEvents/messages/VersionInfo"
+          }
+        ]
+      }
+    },
+    "CoreIntegrations.receive.AuthRequired": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreIntegrations"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreIntegrations/messages/AuthRequired"
+        }
+      ]
+    },
+    "CoreIntegrations.receive.Authentication": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreIntegrations"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreIntegrations/messages/Authentication"
+        }
+      ]
+    },
+    "CoreIntegrations.receive.EventEnvelope": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreIntegrations"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreIntegrations/messages/EventEnvelope"
+        }
+      ]
+    },
+    "CoreIntegrations.receive.Pong": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreIntegrations"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreIntegrations/messages/Pong"
+        }
+      ]
+    },
+    "CoreIntegrations.receive.ResponseEnvelope": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreIntegrations"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreIntegrations/messages/ResponseEnvelope"
+        }
+      ]
+    },
+    "CoreIntegrations.receive.Result": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreIntegrations"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreIntegrations/messages/Result"
+        }
+      ]
+    },
+    "CoreIntegrations.receive.SystemInfo": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreIntegrations"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreIntegrations/messages/SystemInfo"
+        }
+      ]
+    },
+    "CoreIntegrations.receive.VersionInfo": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreIntegrations"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreIntegrations/messages/VersionInfo"
+        }
+      ]
+    },
+    "CoreIntegrations.send.Auth": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreIntegrations"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreIntegrations/messages/Auth"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreIntegrations"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreIntegrations/messages/Authentication"
+          }
+        ]
+      }
+    },
+    "CoreIntegrations.send.Ping": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreIntegrations"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreIntegrations/messages/Ping"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreIntegrations"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreIntegrations/messages/Pong"
+          }
+        ]
+      }
+    },
+    "CoreIntegrations.send.RequestEnvelope": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreIntegrations"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreIntegrations/messages/RequestEnvelope"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreIntegrations"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreIntegrations/messages/ResponseEnvelope"
+          }
+        ]
+      }
+    },
+    "CoreIntegrations.send.System": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreIntegrations"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreIntegrations/messages/System"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreIntegrations"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreIntegrations/messages/SystemInfo"
+          }
+        ]
+      }
+    },
+    "CoreIntegrations.send.Version": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreIntegrations"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreIntegrations/messages/Version"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreIntegrations"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreIntegrations/messages/VersionInfo"
+          }
+        ]
+      }
+    },
+    "CoreProfiles.receive.AuthRequired": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreProfiles"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreProfiles/messages/AuthRequired"
+        }
+      ]
+    },
+    "CoreProfiles.receive.Authentication": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreProfiles"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreProfiles/messages/Authentication"
+        }
+      ]
+    },
+    "CoreProfiles.receive.EventEnvelope": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreProfiles"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreProfiles/messages/EventEnvelope"
+        }
+      ]
+    },
+    "CoreProfiles.receive.Pong": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreProfiles"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreProfiles/messages/Pong"
+        }
+      ]
+    },
+    "CoreProfiles.receive.ResponseEnvelope": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreProfiles"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreProfiles/messages/ResponseEnvelope"
+        }
+      ]
+    },
+    "CoreProfiles.receive.Result": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreProfiles"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreProfiles/messages/Result"
+        }
+      ]
+    },
+    "CoreProfiles.receive.SystemInfo": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreProfiles"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreProfiles/messages/SystemInfo"
+        }
+      ]
+    },
+    "CoreProfiles.receive.VersionInfo": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreProfiles"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreProfiles/messages/VersionInfo"
+        }
+      ]
+    },
+    "CoreProfiles.send.Auth": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreProfiles"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreProfiles/messages/Auth"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreProfiles"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreProfiles/messages/Authentication"
+          }
+        ]
+      }
+    },
+    "CoreProfiles.send.Ping": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreProfiles"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreProfiles/messages/Ping"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreProfiles"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreProfiles/messages/Pong"
+          }
+        ]
+      }
+    },
+    "CoreProfiles.send.RequestEnvelope": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreProfiles"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreProfiles/messages/RequestEnvelope"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreProfiles"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreProfiles/messages/ResponseEnvelope"
+          }
+        ]
+      }
+    },
+    "CoreProfiles.send.System": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreProfiles"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreProfiles/messages/System"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreProfiles"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreProfiles/messages/SystemInfo"
+          }
+        ]
+      }
+    },
+    "CoreProfiles.send.Version": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreProfiles"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreProfiles/messages/Version"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreProfiles"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreProfiles/messages/VersionInfo"
+          }
+        ]
+      }
+    },
+    "CoreWs.receive.AuthRequired": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreWs"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreWs/messages/AuthRequired"
+        }
+      ]
+    },
+    "CoreWs.receive.Authentication": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreWs"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreWs/messages/Authentication"
+        }
+      ]
+    },
+    "CoreWs.receive.EventEnvelope": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreWs"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreWs/messages/EventEnvelope"
+        }
+      ]
+    },
+    "CoreWs.receive.Pong": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreWs"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreWs/messages/Pong"
+        }
+      ]
+    },
+    "CoreWs.receive.ResponseEnvelope": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreWs"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreWs/messages/ResponseEnvelope"
+        }
+      ]
+    },
+    "CoreWs.receive.Result": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreWs"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreWs/messages/Result"
+        }
+      ]
+    },
+    "CoreWs.receive.SystemInfo": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreWs"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreWs/messages/SystemInfo"
+        }
+      ]
+    },
+    "CoreWs.receive.VersionInfo": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/CoreWs"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreWs/messages/VersionInfo"
+        }
+      ]
+    },
+    "CoreWs.send.Auth": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreWs"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreWs/messages/Auth"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreWs"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreWs/messages/Authentication"
+          }
+        ]
+      }
+    },
+    "CoreWs.send.Ping": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreWs"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreWs/messages/Ping"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreWs"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreWs/messages/Pong"
+          }
+        ]
+      }
+    },
+    "CoreWs.send.RequestEnvelope": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreWs"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreWs/messages/RequestEnvelope"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreWs"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreWs/messages/ResponseEnvelope"
+          }
+        ]
+      }
+    },
+    "CoreWs.send.System": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreWs"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreWs/messages/System"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreWs"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreWs/messages/SystemInfo"
+          }
+        ]
+      }
+    },
+    "CoreWs.send.Version": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/CoreWs"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/CoreWs/messages/Version"
+        }
+      ],
+      "reply": {
+        "channel": {
+          "$ref": "#/channels/CoreWs"
+        },
+        "messages": [
+          {
+            "$ref": "#/channels/CoreWs/messages/VersionInfo"
+          }
+        ]
+      }
+    }
+  },
+  "servers": {
+    "default": {
+      "host": "remote.local",
+      "protocol": "ws",
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/apiKey"
+        }
+      ]
+    }
+  }
+}

@@ -1,5 +1,5 @@
 //! Every API family of the pagination inventory, authored as a fixture with an
-//! API default and an exceptions table, with its resolved strategies and
+//! API default and endpoint collections, with its resolved strategies and
 //! caller knobs asserted.
 //!
 //! Ported from the pagination prototype's `inventory.rs`. These fixtures prove
@@ -10,11 +10,11 @@
 
 mod pagination_support;
 
-use pagination_support::{api, get, post, resolution, row, with_query};
+use pagination_support::{api, get, post, registered, resolution, with_query};
 use schematic_define::RestApi;
 use schematic_define::pagination::{
     Collection, CursorSource, Direction, IndexBase, InputParam, ItemSelector, Knob, LinkSource,
-    MoreSignal, PageSize, PageStrategy, PaginationError, PaginationException, Polarity,
+    MoreSignal, PageSize, PageStrategy, PaginationError, Polarity,
     Resolution, ResolutionOrigin, Strategy, ValueSource, caller_knobs, validate_pagination,
 };
 
@@ -36,12 +36,12 @@ fn github() -> RestApi {
         get("ListWorkflowRuns", &format!("{repo}/actions/runs"), "WorkflowRunsResponse"),
         get("GetGitTree", &format!("{repo}/git/trees/{{sha}}"), "GitTree"),
     ];
-    github.pagination_exceptions = vec![row(
+    { let (id, collection) = (
         "ListWorkflowRuns",
         Collection::at("workflow_runs")
             .item_type("WorkflowRun")
             .paginate(default.clone().total(ValueSource::body("total_count"))),
-    )];
+    );  github.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
     github.default_pagination = Some(default);
     github
 }
@@ -71,12 +71,12 @@ fn gitlab() -> RestApi {
         get("ListGroupProjects", "/groups/{id}/projects", "Vec<Project>"),
         get("ListMergeRequestChanges", &format!("{project}/merge_requests/{{iid}}/changes"), "MergeRequestChanges"),
     ];
-    gitlab.pagination_exceptions = vec![
+    for (id, collection) in [
         // Unverified: left unpaginated.
-        row("ListIssueParticipants", Collection::root().unpaginated()),
-        row("ListRepositoryTree", Collection::root().or_paginate("keyset", gitlab_keyset())),
-        row("ListGroupProjects", Collection::root().or_paginate("keyset", gitlab_keyset())),
-    ];
+        ("ListIssueParticipants", Collection::root().unpaginated()),
+        ("ListRepositoryTree", Collection::root().or_paginate("keyset", gitlab_keyset())),
+        ("ListGroupProjects", Collection::root().or_paginate("keyset", gitlab_keyset())),
+    ] { gitlab.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection); };
     gitlab
 }
 
@@ -104,11 +104,11 @@ fn gitea() -> RestApi {
         get("GetGitTree", &format!("{repo}/git/trees/{{sha}}"), "GitTree"),
         get("GetTagReference", &format!("{repo}/git/refs/{{git_ref}}"), "Vec<GitRef>"),
     ];
-    gitea.pagination_exceptions = vec![
-        row("GetGitTree", tree()),
+    for (id, collection) in [
+        ("GetGitTree", tree()),
         // Root array, but a prefix match the server never pages.
-        row("GetTagReference", Collection::root().unpaginated()),
-    ];
+        ("GetTagReference", Collection::root().unpaginated()),
+    ] { gitea.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection); };
     gitea
 }
 
@@ -134,7 +134,7 @@ fn bitbucket() -> RestApi {
     for (id, path, item) in lists {
         // `page` stays a request field: a next link has no page input.
         bitbucket.endpoints.push(with_query(get(id, &path, "Paginated"), &["page", "pagelen"]));
-        bitbucket.pagination_exceptions.push(row(id, Collection::at("values").item_type(item)));
+        { let (id, collection) = (id, Collection::at("values").item_type(item)); bitbucket.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection); };
     }
     bitbucket
 }
@@ -142,7 +142,7 @@ fn bitbucket() -> RestApi {
 fn anthropic() -> RestApi {
     let mut anthropic = api("Anthropic");
     anthropic.endpoints = vec![get("ListModels", "/models", "ListModelsResponse")];
-    anthropic.pagination_exceptions = vec![row(
+    { let (id, collection) = (
         "ListModels",
         Collection::at("data").item_type("ModelInfo").paginate(
             Strategy::cursor("after_id", CursorSource::body("last_id"))
@@ -151,7 +151,7 @@ fn anthropic() -> RestApi {
                 .page_size(PageSize::new("limit").server_default(20).max(1000))
                 .resumable(),
         ),
-    )];
+    );  anthropic.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection);  };
     anthropic
 }
 
@@ -198,17 +198,17 @@ fn openai() -> RestApi {
         post("SearchVectorStore", "/vector_stores/{id}/search", "VectorStoreSearchResultsPage"),
     ];
     let data = |item: &str| Collection::at("data").item_type(item);
-    openai.pagination_exceptions = vec![
-        row("ListBatches", data("Batch")),
-        row("ListVectorStores", data("VectorStore").paginate(bidirectional)),
-        row("ListFineTuningEvents", data("FineTuningJobEvent").paginate(events)),
-        row("ListRoles", data("Role").paginate(s7)),
-        row("UsageCompletions", data("UsageBucket").paginate(s8)),
-        row("UsageCosts", data("UsageBucket").paginate(s8_no_limit)),
-        row("ListModels", data("Model").unpaginated()),
+    for (id, collection) in [
+        ("ListBatches", data("Batch")),
+        ("ListVectorStores", data("VectorStore").paginate(bidirectional)),
+        ("ListFineTuningEvents", data("FineTuningJobEvent").paginate(events)),
+        ("ListRoles", data("Role").paginate(s7)),
+        ("UsageCompletions", data("UsageBucket").paginate(s8)),
+        ("UsageCosts", data("UsageBucket").paginate(s8_no_limit)),
+        ("ListModels", data("Model").unpaginated()),
         // Provider gap: no documented request input continues the reply.
-        row("SearchVectorStore", data("SearchResult").unpaginated()),
-    ];
+        ("SearchVectorStore", data("SearchResult").unpaginated()),
+    ] { openai.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection); };
     openai
 }
 
@@ -220,8 +220,8 @@ fn elevenlabs() -> RestApi {
         get("ListModels", "/v1/models", "Vec<ModelInfo>"),
         get("ListWebhooks", "/v1/workspace/webhooks", "Webhooks"),
     ];
-    elevenlabs.pagination_exceptions = vec![
-        row(
+    for (id, collection) in [
+        (
             "GetHistory",
             Collection::at("history").item_type("HistoryItem").paginate(
                 Strategy::cursor("start_after_history_item_id", CursorSource::body("last_history_item_id"))
@@ -229,7 +229,7 @@ fn elevenlabs() -> RestApi {
                     .page_size(PageSize::new("page_size").server_default(100).max(1000)),
             ),
         ),
-        row(
+        (
             "ListSharedVoices",
             Collection::at("voices").item_type("SharedVoice").paginate(
                 Strategy::page_number("page", MoreSignal::has_more("has_more"))
@@ -237,7 +237,7 @@ fn elevenlabs() -> RestApi {
                     .page_size(PageSize::new("page_size").server_default(30).max(100)),
             ),
         ),
-    ];
+    ] { elevenlabs.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection); };
     elevenlabs
 }
 
@@ -251,10 +251,10 @@ fn emqx(name: &str) -> RestApi {
     );
     for (id, path) in [("ListClients", "/clients"), ("ListSubscriptions", "/subscriptions"), ("ListBanned", "/banned")] {
         emqx.endpoints.push(get(id, path, "Paged"));
-        emqx.pagination_exceptions.push(row(id, Collection::at("data").item_type("serde_json::Value")));
+        { let (id, collection) = (id, Collection::at("data").item_type("serde_json::Value")); emqx.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection); };
     }
     emqx.endpoints.push(get("ListNodes", "/nodes", "Vec<Node>"));
-    emqx.pagination_exceptions.push(row("ListNodes", Collection::root().unpaginated()));
+    { let (id, collection) = ("ListNodes", Collection::root().unpaginated()); emqx.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection); };
     emqx
 }
 
@@ -262,23 +262,23 @@ fn huggingface() -> RestApi {
     let mut hf = api("HuggingFaceHub");
     for (id, path) in [("ListModels", "/models"), ("ListDatasets", "/datasets")] {
         hf.endpoints.push(with_query(get(id, path, "Vec<Repo>"), &["search", "limit"]));
-        hf.pagination_exceptions.push(row(
+        { let (id, collection) = (
             id,
             Collection::root().paginate(Strategy::next_link(LinkSource::link_header("next")).page_size(PageSize::new("limit"))),
-        ));
+        ); hf.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection); };
     }
     hf.endpoints.push(get("ListModelCommits", "/models/{+repo_id}/commits/{revision}", "Vec<Commit>"));
-    hf.pagination_exceptions.push(row(
+    { let (id, collection) = (
         "ListModelCommits",
         Collection::root().paginate(Strategy::page_number("p", MoreSignal::NonEmptyPage).zero_based().page_size(PageSize::new("limit"))),
-    ));
+    ); hf.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection); };
     hf.endpoints.push(get("ListModelDiscussions", "/models/{+repo_id}/discussions", "Discussions"));
-    hf.pagination_exceptions.push(row(
+    { let (id, collection) = (
         "ListModelDiscussions",
         Collection::at("discussions")
             .item_type("Discussion")
             .paginate(Strategy::page_number("p", MoreSignal::total_items(ValueSource::body("count"))).zero_based()),
-    ));
+    ); hf.endpoints.iter_mut().find(|endpoint| endpoint.id == id).expect("known endpoint").pagination = Some(collection); };
     hf
 }
 
@@ -293,7 +293,7 @@ fn unpaginated_apis() -> Vec<RestApi> {
         single("LmStudio", vec![get("ListModels", "/api/v1/models", "Models")]),
         single("Ollama", vec![get("ListModels", "/api/tags", "Tags")]),
         single("Eversolo", vec![get("GetInputAndOutputList", "/ZidooMusicControl/v2/getInputAndOutputList", "InputOutput")]),
-        // A write that returns an array is not a list without a row.
+        // A write that returns an array is not a list without an explicit collection.
         single("UnfoldedCircle", vec![post("UploadResource", "/resources/{type}", "Vec<ResourceItem>")]),
     ]
 }
@@ -337,20 +337,21 @@ fn size_knob(param: &str, server_default: Option<u32>, max: Option<u32>) -> Knob
 #[test]
 fn every_inventory_fixture_is_valid() {
     for api in all_apis() {
-        assert_eq!(validate_pagination(&api), vec![], "{}", api.name);
+        assert_eq!(validate_pagination(&registered(api.clone())), vec![], "{}", api.name);
     }
 }
 
 #[test]
-fn every_authored_strategy_and_row_round_trips_through_serde() {
+fn every_authored_strategy_and_collection_round_trips_through_serde() {
     for api in all_apis() {
         if let Some(default) = &api.default_pagination {
             let json = serde_json::to_string(default).unwrap();
             assert_eq!(&serde_json::from_str::<Strategy>(&json).unwrap(), default, "{}", api.name);
         }
-        let json = serde_json::to_string(&api.pagination_exceptions).unwrap();
-        let back: Vec<PaginationException> = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, api.pagination_exceptions, "{}", api.name);
+        let collections: Vec<_> = api.endpoints.iter().map(|endpoint| endpoint.pagination.clone()).collect();
+        let json = serde_json::to_string(&collections).unwrap();
+        let back: Vec<Option<Collection>> = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, collections, "{}", api.name);
     }
 }
 
@@ -512,8 +513,8 @@ fn openai_strategies_by_override_and_adopted_parameters() {
 fn openai_cursor_without_resume_cannot_adopt_after() {
     let mut fixture = openai();
     let s7_not_resumable = Strategy::cursor("after", CursorSource::body("next")).more_when(MoreSignal::has_more("has_more"));
-    fixture.pagination_exceptions[3] = row("ListRoles", Collection::at("data").item_type("Role").paginate(s7_not_resumable));
-    let errors: Vec<PaginationError> = validate_pagination(&fixture).into_iter().map(|d| d.error).collect();
+    fixture.endpoints.iter_mut().find(|endpoint| endpoint.id == "ListRoles").unwrap().pagination = Some(Collection::at("data").item_type("Role").paginate(s7_not_resumable));
+    let errors: Vec<PaginationError> = validate_pagination(&registered(fixture.clone())).into_iter().map(|d| d.error).collect();
     assert_eq!(errors, vec![PaginationError::AdoptionWithoutKnob("after".into())]);
 }
 

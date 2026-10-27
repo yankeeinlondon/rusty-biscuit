@@ -1,10 +1,13 @@
 //! Server-role WebSocket host generation.
 //!
-//! Generates `XxxWsHost` structs and typed handler traits
-//! for APIs where the generated code acts as the WebSocket server.
+//! Generates the `XxxWsHost` server, its `{ApiName}EventHub` connection
+//! registry, and the `WsHandler` trait for endpoints with a `Host` or `Both`
+//! role. Host input is the endpoint's client-message enum and host output its
+//! server-message enum; nothing here assumes a particular protocol.
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
+use schematic_define::websocket::FrameFormat;
 
 use super::plan::{EndpointPlan, EndpointRole, WsAuthStrategy, WsRuntimePlan};
 
@@ -22,8 +25,8 @@ pub fn generate_ws_host_module(plan: &WsRuntimePlan) -> TokenStream {
         return TokenStream::new();
     }
 
-    let host_struct = generate_host_struct(plan);
-    let handler_trait = generate_handler_trait(plan, &host_endpoints);
+    let host_struct = generate_host_struct(plan, &host_endpoints);
+    let handler_trait = generate_handler_trait(&host_endpoints);
 
     quote! {
         #host_struct
@@ -31,18 +34,179 @@ pub fn generate_ws_host_module(plan: &WsRuntimePlan) -> TokenStream {
     }
 }
 
-fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
-    let base = plan.api_name.strip_suffix("Ws").unwrap_or(&plan.api_name);
+/// The PascalCase API name the client and host structs use.
+fn api_base(plan: &WsRuntimePlan) -> &str {
+    plan.api_name.strip_suffix("Ws").unwrap_or(&plan.api_name)
+}
+
+fn to_snake_case(name: &str) -> String {
+    let mut out = String::new();
+    for (index, ch) in name.chars().enumerate() {
+        if ch.is_uppercase() && index > 0 {
+            out.push('_');
+        }
+        out.extend(ch.to_lowercase());
+    }
+    out
+}
+
+/// The handler's method names for one endpoint: `handle_message` and
+/// `on_authenticated` for a single-endpoint host, endpoint-specific names
+/// otherwise so each method's message types stay unambiguous.
+fn handler_methods(ep: &EndpointPlan, single: bool) -> (proc_macro2::Ident, proc_macro2::Ident) {
+    if single {
+        (format_ident!("handle_message"), format_ident!("on_authenticated"))
+    } else {
+        let snake = to_snake_case(&ep.id);
+        (
+            format_ident!("handle_{}_message", snake),
+            format_ident!("on_{}_authenticated", snake),
+        )
+    }
+}
+
+fn generate_host_struct(plan: &WsRuntimePlan, endpoints: &[&EndpointPlan]) -> TokenStream {
+    let base = api_base(plan);
     let struct_name = format_ident!("{}WsHost", base);
-    let (accept_expr, auth_helpers, emit_initial_authentication) =
-        generate_accept_and_auth_helpers(plan);
+    let hub_name = format_ident!("{}EventHub", base);
+    let (credential_check, auth_helpers) = generate_credential_check(plan);
+    let single = endpoints.len() == 1;
+
+    let encode_frame = match plan.frame_format {
+        FrameFormat::JsonText => quote! {
+            serde_json::to_string(message).map(|text| tokio_tungstenite::tungstenite::Message::Text(text.into()))
+        },
+        FrameFormat::JsonBinary | FrameFormat::RawBinary | FrameFormat::Mixed => quote! {
+            serde_json::to_vec(message).map(|bytes| tokio_tungstenite::tungstenite::Message::Binary(bytes.into()))
+        },
+    };
+
+    let route_variants = endpoints.iter().map(|ep| format_ident!("{}", ep.id));
+    let route_ids = endpoints.iter().map(|ep| {
+        let variant = format_ident!("{}", ep.id);
+        let id = &ep.id;
+        quote! { Self::#variant => #id, }
+    });
+    let route_body = if single {
+        let variant = format_ident!("{}", endpoints[0].id);
+        quote! {
+            let _ = path;
+            Some(HostRoute::#variant)
+        }
+    } else {
+        let checks = endpoints.iter().map(|ep| {
+            let variant = format_ident!("{}", ep.id);
+            let template = &ep.path;
+            quote! {
+                if path_matches(#template, path) {
+                    return Some(HostRoute::#variant);
+                }
+            }
+        });
+        quote! {
+            #(#checks)*
+            None
+        }
+    };
+    let outbound_impls = endpoints.iter().map(|ep| {
+        let message = format_ident!("{}ServerMessage", ep.id);
+        let id = &ep.id;
+        quote! {
+            impl HostOutbound for #message {
+                const ENDPOINT: &'static str = #id;
+            }
+        }
+    });
+    let hook_arms = endpoints.iter().map(|ep| {
+        let variant = format_ident!("{}", ep.id);
+        let (_, hook) = handler_methods(ep, single);
+        quote! {
+            HostRoute::#variant => handler
+                .#hook(context.clone())
+                .await
+                .map(|message| encode_frame(&message)),
+        }
+    });
+    let dispatch_arms = endpoints.iter().map(|ep| {
+        let variant = format_ident!("{}", ep.id);
+        let client_message = format_ident!("{}ClientMessage", ep.id);
+        let (handle, _) = handler_methods(ep, single);
+        quote! {
+            HostRoute::#variant => match decoded.and_then(#client_message::decode) {
+                Ok(message) => match handler.#handle(message, context.clone()).await {
+                    Some(reply) => hub.send_to_connection(connection_id, reply).await,
+                    None => Ok(()),
+                },
+                Err(error) => {
+                    handler.on_error(error, context.clone()).await;
+                    Ok(())
+                }
+            },
+        }
+    });
+    let path_matcher = if single {
+        TokenStream::new()
+    } else {
+        quote! {
+            /// Whether request path `path` fits endpoint path `template`, a
+            /// `{name}` segment matching any one non-empty segment.
+            fn path_matches(template: &str, path: &str) -> bool {
+                let template: Vec<&str> = template.split('/').collect();
+                let path: Vec<&str> = path.split('/').collect();
+                template.len() == path.len()
+                    && template.iter().zip(&path).all(|(expected, actual)| {
+                        (expected.starts_with('{') && expected.ends_with('}') && !actual.is_empty())
+                            || expected == actual
+                    })
+            }
+        }
+    };
+    let hub_doc = format!("Connection registry and event fan-out for [`{struct_name}`].");
 
     quote! {
         const HOST_OUTBOUND_CAPACITY: usize = 64;
 
+        /// Encodes one outbound message as this API's frame format.
+        fn encode_frame<M: serde::Serialize + ?Sized>(
+            message: &M,
+        ) -> Result<tokio_tungstenite::tungstenite::Message, super::ws_shared::WsError> {
+            Ok(#encode_frame?)
+        }
+
+        /// The host endpoint a connection was upgraded on.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        enum HostRoute {
+            #(#route_variants,)*
+        }
+
+        impl HostRoute {
+            fn id(self) -> &'static str {
+                match self {
+                    #(#route_ids)*
+                }
+            }
+        }
+
+        /// The endpoint serving request path `path`.
+        fn route(path: &str) -> Option<HostRoute> {
+            #route_body
+        }
+
+        #path_matcher
+
+        /// A server message one endpoint of this host sends; implemented by
+        /// each host endpoint's server-message enum.
+        pub trait HostOutbound: serde::Serialize {
+            /// The endpoint whose connections receive this message.
+            const ENDPOINT: &'static str;
+        }
+
+        #(#outbound_impls)*
+
         #[derive(Debug)]
         struct HostConnection {
-            sender: tokio::sync::mpsc::Sender<serde_json::Value>,
+            endpoint: &'static str,
+            sender: tokio::sync::mpsc::Sender<tokio_tungstenite::tungstenite::Message>,
             subscribed: bool,
         }
 
@@ -61,20 +225,27 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
             }
         }
 
-        /// Shared connection registry and event broadcaster for integration hosts.
+        #[doc = #hub_doc]
+        ///
+        /// Typed sends reach only connections of the message's endpoint;
+        /// the `_value` methods send a JSON value to any connection. A
+        /// connection whose outbound queue is full or closed is removed.
         #[derive(Clone, Debug, Default)]
-        pub struct UnfoldedCircleEventHub {
+        pub struct #hub_name {
             state: std::sync::Arc<HostState>,
         }
 
-        impl UnfoldedCircleEventHub {
+        impl #hub_name {
             /// Create a new empty hub.
             #[must_use]
             pub fn new() -> Self {
                 Self::default()
             }
 
-            async fn register_connection(&self) -> (u64, tokio::sync::mpsc::Receiver<serde_json::Value>) {
+            async fn register_connection(
+                &self,
+                endpoint: &'static str,
+            ) -> (u64, tokio::sync::mpsc::Receiver<tokio_tungstenite::tungstenite::Message>) {
                 use std::sync::atomic::Ordering;
 
                 let connection_id = self
@@ -86,55 +257,13 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
                 self.state.connections.write().await.insert(
                     connection_id,
                     HostConnection {
+                        endpoint,
                         sender,
                         subscribed: false,
                     },
                 );
 
                 (connection_id, receiver)
-            }
-
-            async fn connection_sender(
-                &self,
-                connection_id: u64,
-            ) -> Option<tokio::sync::mpsc::Sender<serde_json::Value>> {
-                self.state
-                    .connections
-                    .read()
-                    .await
-                    .get(&connection_id)
-                    .map(|connection| connection.sender.clone())
-            }
-
-            async fn stale_connection_ids(
-                &self,
-                only_subscribed: bool,
-                message: &serde_json::Value,
-            ) -> (usize, Vec<u64>) {
-                let senders: Vec<(u64, tokio::sync::mpsc::Sender<serde_json::Value>)> = self
-                    .state
-                    .connections
-                    .read()
-                    .await
-                    .iter()
-                    .filter(|(_, connection)| !only_subscribed || connection.subscribed)
-                    .map(|(connection_id, connection)| (*connection_id, connection.sender.clone()))
-                    .collect();
-
-                let mut delivered = 0;
-                let mut stale = Vec::new();
-
-                for (connection_id, sender) in senders {
-                    match sender.try_send(message.clone()) {
-                        Ok(()) => delivered += 1,
-                        Err(tokio::sync::mpsc::error::TrySendError::Full(_))
-                        | Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                            stale.push(connection_id);
-                        }
-                    }
-                }
-
-                (delivered, stale)
             }
 
             /// Mark a connection as subscribed to unsolicited events.
@@ -152,26 +281,63 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
                 self.state.connections.write().await.remove(&connection_id);
             }
 
-            /// Send a message to a single connection.
-            ///
-            /// Slow or disconnected clients are removed to prevent stalled fan-out.
+            /// Send a message to a single connection of the message's endpoint.
             ///
             /// ## Errors
             ///
-            /// Returns [`super::ws_shared::WsError::Disconnected`] if the connection no
-            /// longer exists or the outbound queue has closed. Returns
-            /// [`super::ws_shared::WsError::BackpressureFull`] if the connection's
-            /// outbound queue is full.
-            pub async fn send_to_connection(
+            /// [`super::ws_shared::WsError::Disconnected`] if the connection no
+            /// longer exists or its queue has closed,
+            /// [`super::ws_shared::WsError::BackpressureFull`] if its queue is
+            /// full, [`super::ws_shared::WsError::Protocol`] if it belongs to
+            /// another endpoint, and [`super::ws_shared::WsError::Serde`] if the
+            /// message does not serialize.
+            pub async fn send_to_connection<M: HostOutbound>(
+                &self,
+                connection_id: u64,
+                message: M,
+            ) -> Result<(), super::ws_shared::WsError> {
+                let frame = encode_frame(&message)?;
+                self.enqueue(connection_id, Some(M::ENDPOINT), frame).await
+            }
+
+            /// Send a JSON value to a single connection, bypassing the
+            /// declared messages.
+            ///
+            /// ## Errors
+            ///
+            /// As [`Self::send_to_connection`], without the endpoint check.
+            pub async fn send_value_to_connection(
                 &self,
                 connection_id: u64,
                 message: serde_json::Value,
             ) -> Result<(), super::ws_shared::WsError> {
-                let Some(sender) = self.connection_sender(connection_id).await else {
-                    return Err(super::ws_shared::WsError::Disconnected);
+                let frame = encode_frame(&message)?;
+                self.enqueue(connection_id, None, frame).await
+            }
+
+            async fn enqueue(
+                &self,
+                connection_id: u64,
+                endpoint: Option<&'static str>,
+                frame: tokio_tungstenite::tungstenite::Message,
+            ) -> Result<(), super::ws_shared::WsError> {
+                let sender = {
+                    let connections = self.state.connections.read().await;
+                    let Some(connection) = connections.get(&connection_id) else {
+                        return Err(super::ws_shared::WsError::Disconnected);
+                    };
+                    if let Some(endpoint) = endpoint
+                        && connection.endpoint != endpoint
+                    {
+                        return Err(super::ws_shared::WsError::Protocol(format!(
+                            "connection {connection_id} is a `{}` connection, not `{endpoint}`",
+                            connection.endpoint
+                        )));
+                    }
+                    connection.sender.clone()
                 };
 
-                match sender.try_send(message) {
+                match sender.try_send(frame) {
                     Ok(()) => Ok(()),
                     Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
                         self.remove_connection(connection_id).await;
@@ -186,23 +352,75 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
                 }
             }
 
-            /// Broadcast a message to all currently connected clients.
-            pub async fn broadcast(&self, message: serde_json::Value) -> usize {
-                let (delivered, stale) = self.stale_connection_ids(false, &message).await;
-
-                if !stale.is_empty() {
-                    let mut connections = self.state.connections.write().await;
-                    for connection_id in stale {
-                        connections.remove(&connection_id);
-                    }
-                }
-
-                delivered
+            /// Broadcast a message to every connection of its endpoint,
+            /// returning how many received it.
+            ///
+            /// ## Errors
+            ///
+            /// [`super::ws_shared::WsError::Serde`] if the message does not
+            /// serialize; nothing is sent.
+            pub async fn broadcast<M: HostOutbound>(
+                &self,
+                message: M,
+            ) -> Result<usize, super::ws_shared::WsError> {
+                let frame = encode_frame(&message)?;
+                Ok(self.fan_out(Some(M::ENDPOINT), false, frame).await)
             }
 
-            /// Broadcast a message only to clients that previously subscribed.
-            pub async fn broadcast_to_subscribers(&self, message: serde_json::Value) -> usize {
-                let (delivered, stale) = self.stale_connection_ids(true, &message).await;
+            /// [`Self::broadcast`] to subscribed connections only.
+            ///
+            /// ## Errors
+            ///
+            /// As [`Self::broadcast`].
+            pub async fn broadcast_to_subscribers<M: HostOutbound>(
+                &self,
+                message: M,
+            ) -> Result<usize, super::ws_shared::WsError> {
+                let frame = encode_frame(&message)?;
+                Ok(self.fan_out(Some(M::ENDPOINT), true, frame).await)
+            }
+
+            /// Broadcast a JSON value to every connection.
+            pub async fn broadcast_value(&self, message: serde_json::Value) -> usize {
+                match encode_frame(&message) {
+                    Ok(frame) => self.fan_out(None, false, frame).await,
+                    Err(_) => 0,
+                }
+            }
+
+            /// Broadcast a JSON value to every subscribed connection.
+            pub async fn broadcast_value_to_subscribers(&self, message: serde_json::Value) -> usize {
+                match encode_frame(&message) {
+                    Ok(frame) => self.fan_out(None, true, frame).await,
+                    Err(_) => 0,
+                }
+            }
+
+            async fn fan_out(
+                &self,
+                endpoint: Option<&'static str>,
+                only_subscribed: bool,
+                frame: tokio_tungstenite::tungstenite::Message,
+            ) -> usize {
+                let senders: Vec<(u64, tokio::sync::mpsc::Sender<tokio_tungstenite::tungstenite::Message>)> = self
+                    .state
+                    .connections
+                    .read()
+                    .await
+                    .iter()
+                    .filter(|(_, connection)| !only_subscribed || connection.subscribed)
+                    .filter(|(_, connection)| endpoint.is_none_or(|endpoint| connection.endpoint == endpoint))
+                    .map(|(connection_id, connection)| (*connection_id, connection.sender.clone()))
+                    .collect();
+
+                let mut delivered = 0;
+                let mut stale = Vec::new();
+                for (connection_id, sender) in senders {
+                    match sender.try_send(frame.clone()) {
+                        Ok(()) => delivered += 1,
+                        Err(_) => stale.push(connection_id),
+                    }
+                }
 
                 if !stale.is_empty() {
                     let mut connections = self.state.connections.write().await;
@@ -215,16 +433,18 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
             }
         }
 
-        /// Per-connection host context exposed to request handlers.
+        /// Per-connection host context exposed to handlers.
         #[derive(Clone, Debug)]
         pub struct WsConnectionContext {
             connection_id: u64,
-            hub: UnfoldedCircleEventHub,
+            credential_verified: bool,
+            hub: #hub_name,
         }
 
         impl WsConnectionContext {
-            pub fn new(connection_id: u64, hub: UnfoldedCircleEventHub) -> Self {
-                Self { connection_id, hub }
+            /// A context for `connection_id` whose upgrade checked no credential.
+            pub fn new(connection_id: u64, hub: #hub_name) -> Self {
+                Self { connection_id, credential_verified: false, hub }
             }
 
             /// Returns the unique connection id assigned by the host.
@@ -233,9 +453,17 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
                 self.connection_id
             }
 
+            /// Whether the upgrade presented a credential the host checked
+            /// and accepted. `false` when the host has no credential
+            /// configured and accepted the upgrade without one.
+            #[must_use]
+            pub fn credential_verified(&self) -> bool {
+                self.credential_verified
+            }
+
             /// Returns a clone of the shared event hub.
             #[must_use]
-            pub fn event_hub(&self) -> UnfoldedCircleEventHub {
+            pub fn event_hub(&self) -> #hub_name {
                 self.hub.clone()
             }
 
@@ -248,12 +476,19 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
             ///
             /// ## Errors
             ///
-            /// Propagates queueing errors from the underlying event hub.
-            pub async fn send(
-                &self,
-                message: serde_json::Value,
-            ) -> Result<(), super::ws_shared::WsError> {
+            /// As the hub's `send_to_connection`.
+            pub async fn send<M: HostOutbound>(&self, message: M) -> Result<(), super::ws_shared::WsError> {
                 self.hub.send_to_connection(self.connection_id, message).await
+            }
+
+            /// Send a JSON value directly to the current connection,
+            /// bypassing the declared messages.
+            ///
+            /// ## Errors
+            ///
+            /// As the hub's `send_value_to_connection`.
+            pub async fn send_value(&self, message: serde_json::Value) -> Result<(), super::ws_shared::WsError> {
+                self.hub.send_value_to_connection(self.connection_id, message).await
             }
         }
 
@@ -263,11 +498,23 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
         impl #struct_name {
             #auth_helpers
 
-            /// Create a new shared event hub for integrations that need unsolicited
-            /// event delivery.
+            fn upgrade_error_response(
+                status: tokio_tungstenite::tungstenite::http::StatusCode,
+                message: &str,
+            ) -> tokio_tungstenite::tungstenite::handshake::server::ErrorResponse {
+                tokio_tungstenite::tungstenite::http::Response::builder()
+                    .status(status)
+                    .body(Some(message.to_string()))
+                    .unwrap_or_else(|_| {
+                        tokio_tungstenite::tungstenite::http::Response::new(Some(message.to_string()))
+                    })
+            }
+
+            /// Create a new shared event hub for hosts that send unsolicited
+            /// events.
             #[must_use]
-            pub fn new_event_hub() -> UnfoldedCircleEventHub {
-                UnfoldedCircleEventHub::new()
+            pub fn new_event_hub() -> #hub_name {
+                #hub_name::new()
             }
 
             /// Serve WebSocket connections on the given TCP listener.
@@ -275,14 +522,14 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
                 listener: tokio::net::TcpListener,
                 handler: std::sync::Arc<H>,
             ) -> Result<(), super::ws_shared::WsError> {
-                Self::serve_with_hub(listener, handler, UnfoldedCircleEventHub::new()).await
+                Self::serve_with_hub(listener, handler, #hub_name::new()).await
             }
 
             /// Serve WebSocket connections with a caller-provided event hub.
             pub async fn serve_with_hub<H: WsHandler + 'static>(
                 listener: tokio::net::TcpListener,
                 handler: std::sync::Arc<H>,
-                hub: UnfoldedCircleEventHub,
+                hub: #hub_name,
             ) -> Result<(), super::ws_shared::WsError> {
                 loop {
                     let (stream, _) = listener.accept().await
@@ -290,8 +537,25 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
                     let handler = handler.clone();
                     let hub = hub.clone();
                     tokio::spawn(async move {
-                        if let Ok(ws_stream) = #accept_expr {
-                            Self::handle_connection(ws_stream, handler, hub).await;
+                        let mut accepted = None;
+                        let upgrade = tokio_tungstenite::accept_hdr_async(
+                            stream,
+                            |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                             response: tokio_tungstenite::tungstenite::handshake::server::Response| {
+                                let Some(endpoint) = route(request.uri().path()) else {
+                                    return Err(Self::upgrade_error_response(
+                                        tokio_tungstenite::tungstenite::http::StatusCode::NOT_FOUND,
+                                        "Unknown WebSocket endpoint",
+                                    ));
+                                };
+                                let verified = #credential_check;
+                                accepted = Some((endpoint, verified));
+                                Ok(response)
+                            },
+                        )
+                        .await;
+                        if let (Ok(ws_stream), Some((endpoint, verified))) = (upgrade, accepted) {
+                            Self::handle_connection(ws_stream, endpoint, verified, handler, hub).await;
                         }
                     });
                 }
@@ -302,7 +566,7 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
                 addr: impl tokio::net::ToSocketAddrs,
                 handler: std::sync::Arc<H>,
             ) -> Result<(), super::ws_shared::WsError> {
-                Self::serve_addr_with_hub(addr, handler, UnfoldedCircleEventHub::new()).await
+                Self::serve_addr_with_hub(addr, handler, #hub_name::new()).await
             }
 
             /// Serve WebSocket connections on the given address with a caller-provided
@@ -310,31 +574,55 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
             pub async fn serve_addr_with_hub<H: WsHandler + 'static>(
                 addr: impl tokio::net::ToSocketAddrs,
                 handler: std::sync::Arc<H>,
-                hub: UnfoldedCircleEventHub,
+                hub: #hub_name,
             ) -> Result<(), super::ws_shared::WsError> {
                 let listener = tokio::net::TcpListener::bind(addr).await
                     .map_err(|e| super::ws_shared::WsError::Protocol(e.to_string()))?;
                 Self::serve_with_hub(listener, handler, hub).await
             }
 
+            /// Serves one upgraded connection: the post-authentication hook's
+            /// message is written first, then inbound messages are decoded
+            /// and dispatched until the peer leaves.
             async fn handle_connection<H: WsHandler>(
                 ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+                endpoint: HostRoute,
+                credential_verified: bool,
                 handler: std::sync::Arc<H>,
-                hub: UnfoldedCircleEventHub,
+                hub: #hub_name,
             ) {
                 use futures_util::{SinkExt, StreamExt};
                 use tokio_tungstenite::tungstenite::Message;
 
-                let (connection_id, mut outbound_rx) = hub.register_connection().await;
+                let (connection_id, mut outbound_rx) = hub.register_connection(endpoint.id()).await;
+                let context = WsConnectionContext {
+                    connection_id,
+                    credential_verified,
+                    hub: hub.clone(),
+                };
                 let (mut write, mut read) = ws_stream.split();
 
-                let writer = tokio::spawn(async move {
-                    while let Some(message) = outbound_rx.recv().await {
-                        let Ok(text) = serde_json::to_string(&message) else {
-                            continue;
-                        };
+                // Written directly, before the writer task starts, so it
+                // precedes every queued or replied message.
+                let greeting = match endpoint {
+                    #(#hook_arms)*
+                };
+                if let Some(frame) = greeting {
+                    let written = match frame {
+                        Ok(frame) => write.send(frame).await.map_err(super::ws_shared::WsError::from),
+                        Err(error) => Err(error),
+                    };
+                    if let Err(error) = written {
+                        hub.remove_connection(connection_id).await;
+                        let _ = write.close().await;
+                        handler.on_error(error, context).await;
+                        return;
+                    }
+                }
 
-                        if write.send(Message::Text(text.into())).await.is_err() {
+                let writer = tokio::spawn(async move {
+                    while let Some(frame) = outbound_rx.recv().await {
+                        if write.send(frame).await.is_err() {
                             break;
                         }
                     }
@@ -342,47 +630,19 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
                     let _ = write.close().await;
                 });
 
-                if #emit_initial_authentication
-                    && hub
-                        .send_to_connection(connection_id, Self::authentication_success_response())
-                        .await
-                        .is_err()
-                {
-                    hub.remove_connection(connection_id).await;
-                    let _ = writer.await;
-                    return;
-                }
-
                 while let Some(msg_result) = read.next().await {
-                    match msg_result {
-                        Ok(Message::Text(text)) => {
-                            match serde_json::from_str::<serde_json::Value>(text.as_ref()) {
-                                Ok(request) => {
-                                    let context = WsConnectionContext::new(connection_id, hub.clone());
-                                    if let Some(response) = handler.handle_message(request, context).await {
-                                        if hub.send_to_connection(connection_id, response).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                }
-                                Err(_) => {}
-                            }
-                        }
-                        Ok(Message::Binary(data)) => {
-                            match serde_json::from_slice::<serde_json::Value>(data.as_ref()) {
-                                Ok(request) => {
-                                    let context = WsConnectionContext::new(connection_id, hub.clone());
-                                    if let Some(response) = handler.handle_message(request, context).await {
-                                        if hub.send_to_connection(connection_id, response).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                }
-                                Err(_) => {}
-                            }
-                        }
+                    let raw = match msg_result {
+                        Ok(Message::Text(text)) => super::ws_shared::WsRawFrame::Text(text.to_string()),
+                        Ok(Message::Binary(data)) => super::ws_shared::WsRawFrame::Binary(data.to_vec()),
                         Ok(Message::Close(_)) | Err(_) => break,
-                        _ => {}
+                        Ok(_) => continue,
+                    };
+                    let decoded = super::ws_shared::WsInboundFrame::parse(raw);
+                    let replied = match endpoint {
+                        #(#dispatch_arms)*
+                    };
+                    if replied.is_err() {
+                        break;
                     }
                 }
 
@@ -393,9 +653,9 @@ fn generate_host_struct(plan: &WsRuntimePlan) -> TokenStream {
     }
 }
 
-fn generate_accept_and_auth_helpers(
-    plan: &WsRuntimePlan,
-) -> (TokenStream, TokenStream, TokenStream) {
+/// The expression deciding an upgrade's credential (`bool`, early-returning
+/// the rejection from the routing callback) and the host's auth helpers.
+fn generate_credential_check(plan: &WsRuntimePlan) -> (TokenStream, TokenStream) {
     let (strategy, env_auth) = match &plan.auth {
         WsAuthStrategy::HeaderBased { strategy, env_auth } => (strategy, env_auth.as_slice()),
         WsAuthStrategy::MessageBased {
@@ -403,79 +663,87 @@ fn generate_accept_and_auth_helpers(
             env_auth,
             ..
         } => (header_strategy, env_auth.as_slice()),
-        WsAuthStrategy::None => {
-            return (
-                quote! { tokio_tungstenite::accept_async(stream).await },
-                TokenStream::new(),
-                quote! { false },
-            );
-        }
+        WsAuthStrategy::None => return (quote! { false }, TokenStream::new()),
     };
 
-    match strategy {
+    let validate_fn = match strategy {
         schematic_define::AuthStrategy::ApiKey { header, .. } => {
-            let header_name = header.clone();
-            let env_names = env_auth.to_vec();
-            let common_helpers = super::shared::generate_host_common_auth_helpers(&env_names);
-            let validate_fn = super::shared::generate_host_validate_raw_header(
-                &header_name,
-                "Invalid authentication header",
-            );
-
-            (
-                quote! {
-                    tokio_tungstenite::accept_hdr_async(stream, Self::validate_upgrade_request)
-                        .await
-                },
-                quote! {
-                    #common_helpers
-                    #validate_fn
-                },
-                quote! { !Self::auth_is_required() },
-            )
+            super::shared::generate_host_validate_raw_header(header, "Invalid authentication header")
         }
         schematic_define::AuthStrategy::BearerToken { header } => {
-            let header_name = header
-                .clone()
-                .unwrap_or_else(|| "Authorization".to_string());
-            let env_names = env_auth.to_vec();
-            let common_helpers = super::shared::generate_host_common_auth_helpers(&env_names);
-            let validate_fn = super::shared::generate_host_validate_bearer_header(&header_name);
-
-            (
-                quote! {
-                    tokio_tungstenite::accept_hdr_async(stream, Self::validate_upgrade_request)
-                        .await
-                },
-                quote! {
-                    #common_helpers
-                    #validate_fn
-                },
-                quote! { !Self::auth_is_required() },
-            )
+            let header_name = header.clone().unwrap_or_else(|| "Authorization".to_string());
+            super::shared::generate_host_validate_bearer_header(&header_name)
         }
-        _ => (
-            quote! { tokio_tungstenite::accept_async(stream).await },
-            TokenStream::new(),
-            quote! { false },
-        ),
-    }
+        _ => return (quote! { false }, TokenStream::new()),
+    };
+    let common_helpers = super::shared::generate_host_common_auth_helpers(env_auth);
+    (
+        quote! { Self::check_upgrade_credential(request)? },
+        quote! {
+            #common_helpers
+            #validate_fn
+        },
+    )
 }
 
-fn generate_handler_trait(_plan: &WsRuntimePlan, _endpoints: &[&EndpointPlan]) -> TokenStream {
-    quote! {
-            /// Handler trait for WebSocket host connections.
-            ///
-            /// Implement this trait to handle incoming WebSocket messages.
-    pub trait WsHandler: Send + Sync {
-        /// Handle an incoming message, optionally returning a response.
-        fn handle_message(
-            &self,
-            message: serde_json::Value,
-            context: WsConnectionContext,
-        ) -> impl std::future::Future<Output = Option<serde_json::Value>> + Send;
-    }
+fn generate_handler_trait(endpoints: &[&EndpointPlan]) -> TokenStream {
+    let single = endpoints.len() == 1;
+    let methods = endpoints.iter().map(|ep| {
+        let (handle, hook) = handler_methods(ep, single);
+        let client_message = format_ident!("{}ClientMessage", ep.id);
+        let server_message = format_ident!("{}ServerMessage", ep.id);
+        let handle_doc = format!(
+            "Handles one decoded message from a `{}` connection, optionally returning a reply.",
+            ep.id
+        );
+        let hook_doc = format!(
+            "Runs once per `{}` connection after its upgrade is accepted (and its credential, \
+             if the host checks one, verified) and before any message is read. A returned \
+             message is written first; if that write fails the connection is closed and \
+             the error goes to [`WsHandler::on_error`]. The default sends nothing.",
+            ep.id
+        );
+        quote! {
+            #[doc = #handle_doc]
+            fn #handle(
+                &self,
+                message: #client_message,
+                context: WsConnectionContext,
+            ) -> impl std::future::Future<Output = Option<#server_message>> + Send;
+
+            #[doc = #hook_doc]
+            fn #hook(
+                &self,
+                context: WsConnectionContext,
+            ) -> impl std::future::Future<Output = Option<#server_message>> + Send {
+                let _ = context;
+                async { None }
+            }
         }
+    });
+
+    quote! {
+        /// Handler trait for WebSocket host connections.
+        ///
+        /// Messages arrive decoded as the endpoint's client-message enum;
+        /// replies are its server-message enum.
+        pub trait WsHandler: Send + Sync {
+            #(#methods)*
+
+            /// Receives a connection's errors: an inbound frame that did not
+            /// decode (the connection stays open), or a failed
+            /// post-authentication write (the connection is closed). The
+            /// default ignores them.
+            fn on_error(
+                &self,
+                error: super::ws_shared::WsError,
+                context: WsConnectionContext,
+            ) -> impl std::future::Future<Output = ()> + Send {
+                let _ = (error, context);
+                async {}
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -494,6 +762,8 @@ mod tests {
             request_id_type: RequestIdType::U64,
             supports_reconnect: false,
             auth: WsAuthStrategy::None,
+            handshake_auth: Default::default(),
+            headers: vec![],
             endpoints: vec![EndpointPlan {
                 id: "Intg".to_string(),
                 path: "/intg".to_string(),
@@ -504,7 +774,10 @@ mod tests {
                 client_messages: vec![],
                 server_messages: vec![],
                 bidirectional_messages: vec!["Msg".to_string()],
+                messages: vec![],
                 lifecycle_open: None,
+                open_credential_field: None,
+                has_setup: false,
                 lifecycle_close: None,
                 lifecycle_keepalive: None,
                 has_lifecycle_open: false,
@@ -544,7 +817,7 @@ mod tests {
         let tokens = generate_ws_host_module(&plan);
         let code = tokens.to_string();
         assert!(code.contains("accept_hdr_async"));
-        assert!(code.contains("validate_upgrade_request"));
+        assert!(code.contains("check_upgrade_credential"));
     }
 
     #[test]

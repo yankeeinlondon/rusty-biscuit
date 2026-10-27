@@ -5,7 +5,9 @@ use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::components::terminal_image::parse_width_spec;
-use biscuit_terminal::discovery::detection::ImageSupport;
+use biscuit_terminal::discovery::detection::{
+    GraphicsRoute, ImageSupport, RouteInputs, resolve_graphics_route,
+};
 use biscuit_terminal::terminal::Terminal;
 use sniff::remote::blocking::credential_env;
 use worktree::WorktreeError;
@@ -262,6 +264,7 @@ fn ff_notice(result: &FfResult) -> Option<FfNotice> {
         }
         FfRefusal::Changed => FfNotice::Changed,
         FfRefusal::UnavailableHolder(path) => FfNotice::UnavailableHolder(path.clone()),
+        FfRefusal::RemovingHolder { path, name } => FfNotice::RemovingHolder { path: path.clone(), name: name.clone() },
         FfRefusal::Other => FfNotice::Failed,
     })
 }
@@ -274,11 +277,7 @@ pub fn run(
     process_start: Instant,
 ) -> Result<(), WorktreeError> {
     let stderr_is_tty = std::io::stderr().is_terminal();
-    let image_support = if stderr_is_tty {
-        detect_image_support_from_env()
-    } else {
-        ImageSupport::None
-    };
+    let image_support = stderr_graphics_route(stderr_is_tty).image_support();
     let terminal = Terminal::default();
     let timings = run_pipeline(
         width_spec,
@@ -525,35 +524,22 @@ fn render_verbose(data: &worktree::graph::VerboseData, terminal: &Terminal) -> S
 ///
 /// `Terminal::default()` calls `is_tty()` which checks stdout. When the shell
 /// wrapper captures stdout via `$()`, stdout is a pipe and image support is
-/// suppressed. This builds a terminal that uses stderr for the TTY check and
-/// detects image support from `$TERM_PROGRAM` env vars instead.
+/// suppressed. This builds a terminal whose graphics route is resolved for
+/// stderr instead.
 fn image_terminal(_base: &Terminal) -> Terminal {
     let stderr_is_tty = std::io::stderr().is_terminal();
-    let img_support = if stderr_is_tty {
-        detect_image_support_from_env()
-    } else {
-        ImageSupport::None
-    };
     Terminal::builder()
         .is_tty(stderr_is_tty)
-        .image_support(img_support)
+        .graphics_route(stderr_graphics_route(stderr_is_tty))
         .build()
 }
 
-fn detect_image_support_from_env() -> ImageSupport {
-    match std::env::var("TERM_PROGRAM").as_deref() {
-        Ok("ghostty") | Ok("kitty") | Ok("WezTerm") | Ok("Warp") | Ok("WarpTerminal")
-        | Ok("konsole") | Ok("wast") => ImageSupport::Kitty,
-        Ok("iTerm.app") => ImageSupport::ITerm,
-        _ => {
-            if std::env::var("KITTY_WINDOW_ID").is_ok() {
-                ImageSupport::Kitty
-            } else {
-                ImageSupport::None
-            }
-        }
-    }
+/// The graphics route for output written to stderr.
+fn stderr_graphics_route(stderr_is_tty: bool) -> GraphicsRoute {
+    resolve_graphics_route(&RouteInputs::from_process().with_output_is_tty(stderr_is_tty))
 }
 
-#[cfg(test)]
-mod tests;
+lib_target_tests! {
+    #[cfg(test)]
+    mod tests;
+}

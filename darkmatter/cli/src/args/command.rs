@@ -2,7 +2,7 @@ use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use crate::args::policy::{self, PolicyCommand, PolicySelector, PolicyValueParser, PolicyVerb};
 use crate::args::{
-    CodeBlockOutput, ComposeOutputFormat, HashKind, OutputFormat, RemoteFreshness, SchemaTarget, ValidateTarget,
+    CodeBlockOutput, ComposeOutputFormat, Feature, HashKind, OutputFormat, RemoteFreshness, SchemaTarget, ValidateTarget,
     complete_compose_args, complete_fixed_width_values, complete_indent_values,
     complete_markdown_files, complete_theme_names, parse_fixed_width, parse_indent_size,
     parse_theme_name,
@@ -45,6 +45,18 @@ pub enum Command {
             add = ArgValueCompleter::new(|current: &std::ffi::OsStr| policy::complete(PolicyCommand::Render, PolicyVerb::Deny, current))
         )]
         deny: Vec<PolicySelector>,
+
+        /// Turn on a named feature (repeatable and comma-separated; names are
+        /// case-insensitive)
+        #[arg(
+            long = "feature",
+            value_name = "NAME",
+            value_enum,
+            value_delimiter = ',',
+            ignore_case = true,
+            action = clap::ArgAction::Append
+        )]
+        features: Vec<Feature>,
     },
 
     /// Clean up markdown formatting.

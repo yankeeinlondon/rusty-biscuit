@@ -12,8 +12,11 @@ last_updated: 2026-03-10
 ---
 # OAuth Integration with Schematic
 
-> Note
-> This document started as a forward-looking design analysis on 2026-03-10. The current runtime model now uses `AuthPolicy` for accepted explicit auth methods, `EnvMapping` for env fallback, and `SchematicError::AuthenticationRequired` for missing credentials. OAuth token acquisition itself lives in `schematic-oauth`; generated clients only accept an already-obtained token, typically through `.oauth_token(...)` or explicit `Headers`.
+> Historical design research from 2026-03-10. Its constructor and runtime sketches
+> are not current contracts. Use [definition builders](../../definition-builders.md)
+> and [runtime credentials](../../runtime/README.md) for current authentication.
+> OAuth token acquisition lives in `schematic-oauth`; REST clients accept the token
+> through runtime credentials. Anonymous requests do not require credentials.
 
 This document analyzes the integration points, definition patterns, code generation challenges, and version considerations for adding OAuth authentication support to the schematic ecosystem.
 

@@ -6,9 +6,9 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use schematic_define::{ApiRequest, Endpoint, FormField, FormFieldKind};
+use schematic_define::{ApiRequest, Endpoint, FormField, FormFieldKind, RestApi};
 
-use crate::codegen::request_structs::shared::{param_field_name, type_name_to_tokens};
+use crate::codegen::request_structs::shared::{json_type_name, param_field_name, type_name_to_tokens};
 
 /// Returns the generated form body type name for an endpoint, if it has one.
 pub(super) fn form_body_type_name(endpoint: &Endpoint) -> Option<String> {
@@ -38,7 +38,7 @@ fn is_multipart(endpoint: &Endpoint) -> bool {
 /// Generates the `{EndpointId}Form` struct and its body-conversion method.
 ///
 /// Returns an empty stream for endpoints whose body is not a form.
-pub(super) fn generate_form_struct(endpoint: &Endpoint) -> TokenStream {
+pub(super) fn generate_form_struct(api: &RestApi, endpoint: &Endpoint) -> TokenStream {
     let (Some(type_name), Some(fields)) = (form_body_type_name(endpoint), form_fields(endpoint))
     else {
         return quote! {};
@@ -47,8 +47,8 @@ pub(super) fn generate_form_struct(endpoint: &Endpoint) -> TokenStream {
     let struct_name = format_ident!("{}", type_name);
     let multipart = is_multipart(endpoint);
 
-    let declarations = fields.iter().map(|field| declare_field(field, multipart));
-    let parts = fields.iter().map(|field| build_part(field, multipart));
+    let declarations = fields.iter().map(|field| declare_field(api, field, multipart));
+    let parts = fields.iter().map(|field| build_part(field, multipart, &quote! { self }, false));
 
     let doc = format!(
         " Body for the `{}` endpoint, sent as `{}`.",
@@ -94,7 +94,7 @@ pub(super) fn generate_form_struct(endpoint: &Endpoint) -> TokenStream {
 }
 
 /// Emits the struct field declaration for one form field.
-fn declare_field(field: &FormField, multipart: bool) -> TokenStream {
+fn declare_field(api: &RestApi, field: &FormField, multipart: bool) -> TokenStream {
     let name = format_ident!("{}", param_field_name(&field.name));
     let wire_name = &field.name;
     let rename = if param_field_name(&field.name) == field.name {
@@ -110,8 +110,14 @@ fn declare_field(field: &FormField, multipart: bool) -> TokenStream {
         }
         None => quote! {},
     };
+    let rules = field.constraints.as_deref().map(crate::codegen::value_rules::rule_doc_lines).unwrap_or_default();
+    let doc = match (doc.is_empty(), rules.is_empty()) {
+        (_, true) => doc,
+        (true, false) => quote! { #(#[doc = #rules])* },
+        (false, false) => quote! { #doc #[doc = ""] #(#[doc = #rules])* },
+    };
 
-    let base = field_base_type(field, multipart);
+    let base = field_base_type(api, field, multipart);
 
     // Optional fields are `Option<T>` so `Default` can construct the struct and
     // omitted parts are skipped rather than sent empty.
@@ -132,7 +138,7 @@ fn declare_field(field: &FormField, multipart: bool) -> TokenStream {
 ///
 /// URL-encoded forms cannot carry files, so every field there is a string
 /// regardless of how the definition described it.
-fn field_base_type(field: &FormField, multipart: bool) -> TokenStream {
+fn field_base_type(api: &RestApi, field: &FormField, multipart: bool) -> TokenStream {
     if !multipart {
         return quote! { String };
     }
@@ -140,23 +146,53 @@ fn field_base_type(field: &FormField, multipart: bool) -> TokenStream {
     match &field.kind {
         FormFieldKind::File { .. } => quote! { crate::shared::FormFile },
         FormFieldKind::Files { .. } => quote! { Vec<crate::shared::FormFile> },
-        FormFieldKind::Json(schema) => type_name_to_tokens(&schema.type_name),
+        FormFieldKind::Json(reference) => type_name_to_tokens(&json_type_name(api, reference)),
         _ => quote! { String },
     }
 }
 
-/// Emits the statement that appends one field's value to the body parts.
-fn build_part(field: &FormField, multipart: bool) -> TokenStream {
+/// The statements of a request's `into_parts` that build the multipart
+/// parts of its `body` into `parts`, sending each field named in `checked`
+/// from the `serde_json::Value` already bound to `checked_{field}` (the
+/// value its rules were checked against) rather than serializing it again.
+pub(super) fn generate_checked_form_parts(endpoint: &Endpoint, checked: &[String]) -> TokenStream {
+    let Some(fields) = form_fields(endpoint) else { return quote! {} };
+    let parts = fields.iter().map(|field| {
+        let is_checked = checked.contains(&param_field_name(&field.name));
+        build_part(field, true, &quote! { self.body }, is_checked)
+    });
+    quote! {
+        let mut parts = Vec::new();
+        #(#parts)*
+    }
+}
+
+/// Emits the statement that appends one field's value, read from
+/// `receiver`, to the body parts; a `checked` JSON field is read from its
+/// `checked_{field}` binding instead.
+fn build_part(field: &FormField, multipart: bool, receiver: &TokenStream, checked: bool) -> TokenStream {
     let name = format_ident!("{}", param_field_name(&field.name));
     let wire_name = &field.name;
 
+    let source = if checked {
+        let binding = format_ident!("checked_{}", param_field_name(&field.name));
+        quote! { #binding }
+    } else {
+        quote! { #receiver.#name }
+    };
     let push = |value: TokenStream| {
         if field.required {
-            quote! { { let value = self.#name; #value } }
+            quote! { { let value = #source; #value } }
         } else {
-            quote! { if let Some(value) = self.#name { #value } }
+            quote! { if let Some(value) = #source { #value } }
         }
     };
+
+    if checked {
+        return push(quote! {
+            parts.push(schematic_runtime::FormPart::Json { name: #wire_name.to_string(), value: value.to_string() });
+        });
+    }
 
     if !multipart {
         return push(quote! { parts.push((#wire_name.to_string(), value)); });

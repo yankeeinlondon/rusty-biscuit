@@ -1,4 +1,4 @@
-use crate::args::LayoutArgs;
+use crate::args::{LayoutArgs, MermaidFeatureArgs};
 use crate::commands::mermaid::{build_mermaid_diagram, display_mermaid};
 use crate::commands::shared::{print_example_command_with_terminal, terminal_for_render};
 use crate::commands::{CliContext, Run};
@@ -28,6 +28,9 @@ pub struct StateDiagramArgs {
 
     #[command(flatten)]
     pub layout: LayoutArgs,
+
+    #[command(flatten)]
+    pub features: MermaidFeatureArgs,
 
     #[arg(long)]
     pub inverse: bool,
@@ -88,9 +91,11 @@ impl Run for StateDiagramArgs {
         let width_str = self.width.as_ref().map(|w| w.to_string());
         let diagram = build_mermaid_diagram(
             &instructions,
+            eff_title,
             self.inverse,
             width_str.as_deref(),
             &self.layout,
+            &self.features,
         )?;
         let terminal = terminal_for_render(ctx.plain);
         display_mermaid(

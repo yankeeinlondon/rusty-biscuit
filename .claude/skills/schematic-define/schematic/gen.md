@@ -22,7 +22,24 @@ schematic-gen import --input <FILE> [--api-name <NAME>] [--module-path <PATH>] \
 schematic-gen --api <NAME> --output <DIR>
 ```
 
-**Available APIs**: `anthropic`, `openai`, `elevenlabs`, `huggingface`, `lmstudio`, `ollama-native`, `ollama-openai`, `emqx-basic`, `emqx-bearer`, `all`
+**Available APIs**: every REST registration's `key` in `REGISTRATIONS`
+(`definitions/src/registry/inventory.rs`) in registration order, then `all`
+(`pipeline::available_apis`); for example `anthropic`, `ollama-native`,
+`emqx-bearer`, `unfolded-circle-core-rest`. Selecting one member generates its
+whole module group. WebSocket APIs have no `--api` key; `generate` packages
+them from the same inventory.
+
+### `just` recipes (run in `schematic/`)
+
+| Recipe | Does |
+|---|---|
+| `generate` | every API to `schema/src`, `openapi/`, `postman/` (with environments), then `export-asyncapi` to `asyncapi/` |
+| `generate-one <key>` | one API's module group to `schema/src`, `openapi/`, `postman/`, keeping every other module |
+| `generate-openapi` / `generate-postman` | `generate --api all` with only that export (`--no-postman` / `--no-openapi`) |
+| `generate-asyncapi` | only `export-asyncapi --output asyncapi` |
+| `check-drift` | committed artifacts equal fresh output; the real APIs compile offline |
+| `doctest` | doctests of the schematic crates, then `doctest-schema` (the generated crate: default features, then `emqx` alone) |
+| `test-schema` / `lint-schema` | nextest / clippy `-D warnings` on the generated crate (excluded from the workspace) |
 
 ## OpenAPI Import
 
@@ -48,7 +65,7 @@ schematic-gen import --input api.yaml --output generated/src --strict
 | `--module-path` | Override module path for generated code |
 | `--output` | Output directory for generated code |
 | `--dry-run` | Print generated code without writing files |
-| `--strict` | Fail on any warning-level diagnostic |
+| `--strict` | Fail on any WARN or ERROR diagnostic (INFO never fails) |
 
 ### What Gets Generated
 
@@ -65,8 +82,9 @@ API Definition (RestApi)
         ▼
 ┌──────────────────┐
 │ Phase 1: Codegen │  generate_api_struct(), generate_request_struct(),
-│                  │  generate_request_helpers(), generate_paginated_trait(),
-│                  │  generate_endpoint_methods(), ModuleDocBuilder
+│                  │  generate_request_helpers(), pagination impls,
+│                  │  GraphQL operation requests, generate_endpoint_methods(),
+│                  │  ModuleDocBuilder
 └────────┬─────────┘
          │
          ▼
@@ -97,7 +115,7 @@ API Definition (RestApi)
 schema/src/
 ├── lib.rs           # Module declarations, SCHEMATIC_RUNTIME_ABI + compile-time check, `pub use schematic_runtime`
 ├── prelude.rs       # Each API's client struct, plus runtime Call, CallError, CallOptions, Credential, Response, ...
-├── shared.rs        # encode_cookie_value, combine_cookie_headers, FormFile, Paginated
+├── shared.rs        # encode_cookie_value, combine_cookie_headers, FormFile
 ├── ws_shared.rs     # WebSocket support shared by the *_ws modules
 ├── anthropic.rs     # A module under 2000 lines stays one file
 ├── lmstudio.rs
@@ -114,7 +132,18 @@ schema/src/
 APIs that share a `module_path` (e.g., Ollama Native + OpenAI, EMQX Basic + Bearer)
 are combined into a single module file. Each API gets its own client struct, tag
 type, and request suffix to avoid naming collisions. Stale `.rs` files from previous
-generations are automatically cleaned up.
+generations are automatically cleaned up. The combined module's docs open with a
+sentence naming every API, then give each a `## {Api}` section with the docs its
+own module would have (`ModuleDocBuilder::markdown`, headings one level deeper).
+
+Every code example the generator writes is a `no_run` doctest (request types,
+module docs, crate Quick Start, prelude); never emit a `text` fence for Rust. The
+module, Quick Start, and prelude examples come from
+`codegen::module_docs::client_example_lines` (endpoint method, then
+`client.send({Name}Request::new(..))`, async wrapper in hidden `#` lines); the
+crate-root and prelude copies are gated on the example API's module feature.
+`just doctest-schema` compiles them with default features and with `emqx`
+alone; `generated_docs::slow_*` does the same in a fresh crate.
 
 ## Generated Code Components
 
@@ -122,11 +151,20 @@ Generated REST code only describes requests; the hand-written
 `schematic-runtime` sends them. The generated `Cargo.toml` depends on
 `schematic-runtime` (path `../runtime`), not on `reqwest`.
 
+The manifest declares one Cargo feature per module group (named for the
+module, default = all), built by `cargo_gen::ModuleFeatures::new(registry,
+registrations)` from the whole registry on every run, partial or full.
+`lib.rs` gates each `pub mod`, `prelude.rs` each re-export, and both their doc
+lines, with `#[cfg(feature = "<module>")]`; `ws_shared` compiles under any
+WebSocket feature. `futures-util`, `thiserror`, and `tokio-tungstenite` are
+optional, enabled only by WebSocket module features. Feature selections are
+proven by the `slow_` test `module_features::slow_feature_selections_compile_only_their_module_groups`.
+
 ### `lib.rs` and the Shared Module
 
 ```rust
 // lib.rs: the runtime ABI this crate was generated for, checked at compile time
-pub const SCHEMATIC_RUNTIME_ABI: u32 = 3;
+pub const SCHEMATIC_RUNTIME_ABI: u32 = 8;
 const _: () = assert!(schematic_runtime::ABI == SCHEMATIC_RUNTIME_ABI, "...; regenerate the crate ...");
 pub use schematic_runtime;
 
@@ -135,8 +173,10 @@ pub fn encode_cookie_value(value: &str) -> String;      // RFC 6265 %XX encoding
 pub fn combine_cookie_headers(headers: &mut Vec<(String, String)>, cookies: &[(String, String)])
     -> Result<(), schematic_runtime::InvalidArgument>;   // folds cookies into one `Cookie` header
 pub struct FormFile { .. }                               // multipart file part
-pub trait Paginated {}                                   // marker for paginated endpoints
 ```
+
+A paginated endpoint implements the runtime's `schematic_runtime::pager::Paginated`
+directly; the shared module defines no pagination trait.
 
 Generated code defines no error type: an awaited call reports
 `schematic_runtime::CallError<E>` (`.full()`: a `Response` envelope or
@@ -163,8 +203,8 @@ impl GetUserRequest {
 impl schematic_runtime::EndpointSpec for GetUserRequest {
     type Api = MyApi;
     type Success = User;
-    type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<User>; // Text / Binary / Empty per ApiResponse
+    type Failure = schematic_runtime::NoDeclaredError; // from the effective error table
+    type Decoder = schematic_runtime::Json<User>;      // per success shape(s); see responses.md
 
     const ENDPOINT_ID: &'static str = "GetUser";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
@@ -181,6 +221,44 @@ impl schematic_runtime::EndpointSpec for GetUserRequest {
     }
 }
 ```
+
+### Value rules
+
+A request whose parameters, form fields, body root, or reached components
+carry value rules (`codegen/value_rules/`) gets:
+
+- `pub fn validate(&self) -> Result<(), schematic_runtime::validate::Violations>`;
+- the same checks at the top of `into_parts`, returned together as one
+  `InvalidArgument` before the path is built: parameters on typed values
+  (path, query, header, cookie; arrays by count, then each item, then
+  `uniqueItems`/`enum` through JSON), then text bodies and text form fields,
+  then JSON bodies and multipart JSON fields. A checked JSON body is
+  `serde_json::to_value` once, checked, and that `Value` is sent (keys in
+  sorted order); an unchecked one keeps `to_string(&self.body)`;
+- plans as `static`s in one private `{api_snake}_value_rules` module per API
+  (`COMPONENT_{n}_{NAME}`, `{REQUEST}_{LOCATION}_{FIELD}`, `PATTERN_{n}`);
+  a component reached by several requests is emitted once and recursion is
+  `Plan::reference(&ITS_OWN_STATIC)`; `prune` drops what checks nothing,
+  except that a declared property beside a surviving `values` plan stays as
+  `Plan::new()`, since the runtime gives an unlisted key the `values` plan;
+- rustdoc: per-parameter "Value rules checked before sending: ..." / "Not
+  checked: ..." lines and a `## Value rules` section on the request.
+
+Skipped as the Rust type's own: Schemars integer-width bounds
+(`is_width_bound`) and string `enum`/`const` that are a unit enum's value set
+or a Rust enum's variant/tag. `validate_rust_client` reports `type-constraint`
+from `value_rules::api_findings`: **error** for a rule beneath a composition
+(wherever it sits; **warning** instead when `RestApi::unchecked_compositions`
+is set and compositions are its only blocker), beneath an untraversed keyword (positional `items` list, `prefixItems` — a
+tuple —, `contains`, `patternProperties`, `propertyNames`, `if`/`then`/`else`,
+`dependentSchemas`, `additionalItems`, `unevaluated*`), or beside an
+unresolved `$ref`; **warning** for `format` (not `int32`/
+`int64`/`float`/`double`), a component pattern outside the subset or an
+endpoint one marked unenforced (an invalid pattern, or an unmarked endpoint
+one outside the subset, is only the `constraint_problems` error), and, with
+the opt-in, a composition rule (OpenAI opts in through its overlay:
+`CreateResponse` has 50, `Getinputtokencounts` 50, `CreateConversation` 13, pinned in `output_validation::UNCHECKED_VALUE_RULES`).
+Pager-adopted parameters are not request fields; the pager checks them.
 
 ### API Client Struct
 
@@ -227,24 +305,24 @@ struct, named after the endpoint id in snake case (`ListReleases` →
 order, and a call type named like the request with `Request` replaced by
 `Call` (`ListReleasesCall`). The call type wraps
 `schematic_runtime::Call`, has one setter per optional value (the request field
-name without `with_`), forwards `.anonymous()`, `.credential(..)`,
+name without `with_`; a parameter the pager adopts, such as GitHub's
+`per_page` on `list_releases`, has no setter: use `.page_size(..)`), forwards `.anonymous()`, `.credential(..)`,
 `.deadline(&d)`, `.full()`, and `.build()`, and implements `IntoFuture`:
 
 ```rust
 // GitHub, from schematic/schema/src/github/requests.rs (abridged)
 impl GitHub {
-    pub fn list_releases(&self, owner: impl Into<String>, repo: impl Into<String>)
-        -> ListReleasesCall<'_>;
+    pub fn get_git_tree(&self, owner: impl Into<String>, repo: impl Into<String>,
+        tree_sha: impl Into<String>) -> GetGitTreeCall<'_>;
 }
-pub struct ListReleasesCall<'a>(schematic_runtime::Call<'a, GitHubApi, ListReleasesRequest>);
-impl<'a> ListReleasesCall<'a> {
-    pub fn page(self, value: i64) -> Self;       // request.with_page(value)
-    pub fn per_page(self, value: i64) -> Self;   // request.with_per_page(value)
+pub struct GetGitTreeCall<'a>(schematic_runtime::Call<'a, GitHubApi, GetGitTreeRequest>);
+impl<'a> GetGitTreeCall<'a> {
+    pub fn recursive(self, value: bool) -> Self; // request.with_recursive(value)
     // anonymous, credential, deadline, full, build; `full` comes after the
     // setters, which its `FullCall` does not have
 }
 
-let releases = github.list_releases("owner", "repo").per_page(10).await?;
+let tree = github.get_git_tree("owner", "repo", "main").recursive(true).await?;
 // Result<Success, CallError<Failure>>; CallError is #[non_exhaustive]
 ```
 
@@ -267,6 +345,59 @@ rename list for shipped definitions is pinned by
 `schematic/docs/generation/validation.md`; calling them:
 `schematic/docs/runtime/calling-an-api.md`.
 
+## Postman export
+
+Topic page: `schematic/docs/io/export-postman.md`. Non-obvious facts:
+- Examples come from `export::examples::ExampleSource` over
+  `RestApi::schemas` (the registered schemas, never the OpenAPI conversion),
+  with `nullable: true` read as a `null` type and every candidate validated
+  by `jsonschema` 0.55 (a normal dependency of `schematic-gen`) through one
+  prepared `Registry` per API. Cost: all 644 shipped references in ~0.7 s
+  debug; do not compile a validator per reference from the full document
+  (OpenAI took >5 s that way).
+- A value that cannot be built is never emitted: the body stays empty and
+  `validate_postman` reports `example-value` (built by
+  `export::postman::export_diagnostics`, i.e. a second collection build).
+  Shipped APIs report none; `postman_runnable::every_shipped_example_validates`
+  validates every body, saved response, and stream frame independently.
+- Parameter variables are location-prefixed (`path_owner`, `query_page`,
+  `header_X-Id`, `cookie_session`) and declared on the collection;
+  cookies merge into one `Cookie` header. Shared-module members get their
+  own `baseUrl{N}` and API-name-suffixed credentials
+  (`bearerToken_EmqxBearer`), so a shared module with any auth has
+  request-level auth.
+- Environments (`{module}.postman_environment.json`) are written only with
+  `--postman-environment` (the `just` recipes pass it) and are drift-checked;
+  without the flag a complete run neither writes nor deletes them.
+- Golden fixtures: `BLESS_POSTMAN_GOLDEN=1` with the `postman_golden` filter.
+
+## AsyncAPI export and import
+
+Topic page: `schematic/docs/io/asyncapi.md`. Non-obvious facts:
+- `export-asyncapi` (not `generate`; `just generate`/`generate-asyncapi` run
+  it) writes one 3.0 document per WebSocket registration to
+  `schematic/asyncapi/{module}.json` (`{module}.{snake_api}.json` when a
+  module is shared); `export::asyncapi::asyncapi_documents` is the naming
+  rule. Diagnostics use `Output::AsyncApi` + `Feature::WebSocketDefinition`.
+- Documents are always client-perspective (`send` = client message); the
+  role rides in `x-schematic-role` and never flips a direction. Other
+  extensions: `x-schematic-{selectors,fallback,heartbeat,param,value-prefix,
+  bearer-header}` (names are `export::asyncapi::X_*`).
+- Not exported (asserted per API by `asyncapi_round_trip`): env metadata,
+  lifecycle roles, correlation and auth-flow hints, API runtime hints. The
+  three Unfolded Circle APIs re-import without correlation and then fail
+  `lower_to_plan` (`responds_with needs ... correlation`). Payload schemas
+  are unconstrained `{}` (no WS `JsonSchema` derives).
+- The importer is `asyncapi_import` (+ `reader`, `extensions`, `v3`):
+  version-dispatched; any malformed standard field is a located ERROR that
+  fails the import with nothing written (`import_asyncapi_text` writes
+  nothing; `run_import_asyncapi` persists `{module}.definition.json`,
+  `.models.json`, and the report through `prepare_export_output`). Auth is
+  the *applied* server security only. Imported endpoints/messages come back
+  in key order: compare with `common::asyncapi::canonical`.
+- Exports are validated offline against the vendored
+  `gen/tests/fixtures/asyncapi/spec-json-schemas/3.0.0.json` (Draft 7).
+
 ## Validation
 
 `generate` validates the whole batch once per output (Rust, OpenAPI, Postman)
@@ -279,14 +410,25 @@ Grouped OpenAPI documents are built in memory for every module before any is
 written (`export::openapi::build_openapi_grouped`); a later group member's
 clashing `operationId` gets its API-name prefix, and the final
 `operation_id_diagnostics` scan rejects any duplicate that remains.
+Every Rust run also lowers the five shipped WebSocket definitions
+(`output::ws_modules::validate_ws_definition_modules`) and reports their
+findings on the Rust output as `feature=websocket-definition`, the message
+starting with the definition path (`endpoints/{id}/path/...`): an error
+blocks the Rust output (no WS module is dropped silently any more), a
+warning does not (for example a `base_url` whose last segment repeats the
+endpoint path's first segment), and info notes print only with `-v`. Test a
+fixture `WebSocketApi` with `validate_ws_apis` / `render_ws_api_module`;
+the fresh-output guard compiles a rendered fixture module through
+`FreshCrate::add_module` (Bearer host; handshake path/query encoding).
+WebSocket definition rules: `websocket.md`.
 Full rules: `schematic/docs/generation/validation.md`.
 
 ```bash
-$ schematic-gen validate --api gitea
-[WARN] severity=warning api=Gitea endpoint=GetGitTreeRecursive feature=query-in-path output=rust: ...
-  [PASS] rust
-  [PASS] openapi
-  [PASS] postman
+$ schematic-gen validate --api example
+[ERROR] severity=error api=Example endpoint=ReadTree feature=query-in-path output=rust: ...
+  [FAIL] rust
+  [FAIL] openapi
+  [FAIL] postman
 ```
 
 ## Generator Modules
@@ -295,16 +437,30 @@ $ schematic-gen validate --api gitea
 |--------|----------|---------|
 | `codegen/api_struct/` | `generate_api_struct()` | API client struct, `{Api}Api` tag and its `Api` impl, the `api_client!` invocation, constants, `definition()`, `new()`, `basic_auth()` for Basic APIs; `auth.rs` translates the effective auth policy into `AuthConfig`, `helpers.rs` builds the rest of `definition()` |
 | `codegen/request_structs/` | `generate_request_struct()` | Per-endpoint structs; `endpoint_spec.rs` emits the `EndpointSpec` impl, `into_parts.rs` its `into_parts` body, `named_params.rs` header/cookie parameter fields, `form.rs` form structs |
+| `codegen/value_rules/` | `ApiValueRules`, `api_findings()` | Compiles request rules into `schematic_runtime::validate` plans, emits the per-API plans module, and lists unenforced rules (diagnostics, rustdoc) |
 | `codegen/shared.rs` | `generate_request_helpers()` | Request helpers of the generated `shared.rs`: `encode_cookie_value`, `combine_cookie_headers`, `FormFile` |
-| `codegen/traits.rs` | `generate_paginated_trait()`, `generate_paginated_impl()` | `Paginated` marker trait and its impls |
+| `codegen/pagination/` | `paginated_impl()`, `operation_paginated_impl()` | `impl schematic_runtime::pager::Paginated` and capability markers for endpoints and GraphQL operations |
+| `codegen/responses.rs` | `success_code()`, `failure_code()`, `api_error_body_impls()` | `Success`/`Decoder`/`Failure`, `{Id}Response`/`{Id}Error` enums, stream end markers, `ERRORS` |
+| `codegen/graphql.rs` | `generate_operation_request()` | One request struct per GraphQL operation |
 | `codegen/module_docs.rs` | `ModuleDocBuilder` | Module documentation |
 | `import_pipeline.rs` | `run_import()` | OpenAPI import orchestration |
 | `model_gen.rs` | `generate_models()` | Generate types.rs from ModelCatalog |
 
-`codegen/client/`, `codegen/error.rs`, `codegen/request_enum.rs`,
-`codegen/variant.rs`, and `api_struct/{constructors,fields,request_method,variant}.rs`
-are still on disk but no `mod` declares them, so they are not compiled; edits
-there change nothing.
+`codegen/responses.rs` turns `Endpoint::success_shapes()` and
+`RestApi::effective_errors` into each `EndpointSpec`'s `Success`/`Decoder`/
+`Failure`, the `{Id}Response`/`{Id}Error` enums, stream end markers, and
+`ERRORS`; `api_error_body_impls` emits one `ErrorBody<{Api}Api>` per JSON
+error type per API module (the trait takes the API marker because registered
+types live in `schematic-definitions`, outside the orphan rule's reach).
+`codegen/graphql.rs` emits one request struct per GraphQL operation
+(`ADDRESS = Address::GraphQl`, a `Paginated` impl with
+`page_root = graphql::page_data` when it declares pagination) and the
+definition's `.graphql(&[..])` rules. The success, failure, and GraphQL
+shapes are summarized in [`responses.md`](./responses.md).
+
+`api_struct/{constructors,fields,request_method,variant}.rs` are still on disk
+but no `mod` declares them, so they are not compiled; edits there change
+nothing.
 
 ## Library API
 
@@ -329,6 +485,7 @@ generate_and_write_all(&apis, output_dir, dry_run)?;
 use schematic_gen::output::{RustOutputRequest, Selection, prepare_rust_output};
 let prepared = prepare_rust_output(&RustOutputRequest {
     registry: &all_apis,                 // every API, registry order
+    registrations: registrations(),      // WebSocket modules to package
     selection: Selection::Apis(&[&api]), // or Selection::All
     output_dir,
     manifest_dir: Some(schema_dir),      // writes Cargo.toml too
@@ -389,6 +546,7 @@ crates outside the checkout and compiles them offline:
 |---------------------------------|--------|
 | `slow_fixture_apis_compile_and_send_offline` | fixture APIs send through the runtime: wire bytes, credentials, codecs, hooks, definition settings |
 | `slow_generated_types_reject_misuse_at_compile_time` | wrong success type, another API's request, mutator on a text endpoint, removed APIs fail to compile |
+| `check_status_parity_preserves_every_sniff_fixture` | the GraphQL fixture operation reproduces every sniff check-status fixture (R43); `the_parity_document_is_sniffs_check_status_query` (fast) guards its document |
 | `slow_a_runtime_of_another_abi_fails_the_build_with_a_readable_message` | the `lib.rs` ABI assert fires with its message |
 | `slow_real_apis_compile_offline` | all 18 real APIs compile |
 | `slow_query_wire_matches_pre_split_baseline` | query request lines match `tests/fixtures/wire_baseline/query_request_lines.txt` |
@@ -414,6 +572,8 @@ grep -rn "type Decoder" schematic/schema/src/
 | Scenario | Failure Mode | Detection |
 |----------|--------------|-----------|
 | Binary endpoint modeled as JSON | `MalformedSuccess` in the envelope (body kept); callers see the wrong success type | `grep "type Decoder"` |
+| Streaming endpoint modeled as `Binary` | Caller gets one buffered body instead of `ItemStream<T>` | `grep "type Decoder"` (expect `Sse`/`Ndjson`) |
+| Registered type named `{Id}Response` / `{Id}Error` | `generated-name-collision` | `schematic-gen validate` |
 | Module path mismatch | Compile error: unresolved import | `just test-fresh-output` |
 | Shared module missing `request_suffix` | Compile error: duplicate struct names | `just test-fresh-output` |
 | Generated crate built against another runtime ABI | Compile error naming both ABIs | Regenerate with the matching `schematic-gen` |

@@ -1,0 +1,47 @@
+# Spike S1: today's biscuit-visualized (mermaid-rs-renderer + our corrections)
+# versus Merman, over the comparison corpus (R-S1..R-S6, R-S9).
+#
+# Standalone, NOT a member of the rusty-biscuit workspace (empty `[workspace]`).
+# Build with CARGO_TARGET_DIR outside the repository:
+#   CARGO_TARGET_DIR=/tmp/s1-target cargo run --release -- --os macos
+#
+# Features exist only to measure each renderer's build weight on its own
+# (`--no-default-features --features current` / `--features merman`).
+[package]
+name = "s1-comparison"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+default = ["current", "merman"]
+current = ["dep:biscuit-visualized", "dep:tempfile"]
+merman = ["dep:merman"]
+# Build-weight information only (R-S6, D15); never used for the gallery.
+elk = ["merman", "merman/layout-elk"]
+
+[dependencies]
+biscuit-visualized = { path = "../../../../src", features = ["image"], optional = true }
+# Pinned to the same commit as spike S0 (D10).
+merman = { git = "https://github.com/Latias94/merman.git", rev = "482fcde7faffb05a466f198085d615e604075d97", default-features = false, features = [
+    "svg",
+    "all-diagrams",
+    "layout-cytoscape",
+    # Native text measurement on real font files ("Merman (real fonts)" column).
+    "native-fonts",
+], optional = true }
+# The rasterizer biscuit-visualized uses today; both columns go through it.
+resvg = "0.45"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = { version = "3", optional = true }
+# The OS's own answer for generic families (fontconfig, CoreText, DirectWrite):
+# step 3 of the font resolution chain. Same version Merman pins.
+fontique = { version = "0.12.0", default-features = false, features = ["system"] }
+# OS/2 sFamilyClass / PANOSE classification (step 4); the version resvg 0.45 uses.
+ttf-parser = "0.25"
+
+[profile.release]
+debug = false

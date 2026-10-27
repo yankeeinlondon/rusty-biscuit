@@ -161,68 +161,44 @@ fn plain_launch_directory_under_home_wins_for_both_forms() {
     }
 }
 
-fn assert_home_local_tier(
-    repository: bool,
-    local_prompts: bool,
-    reference: &str,
-    metadata_schema: &str,
-    document_library: &str,
-) {
-    let (fixture, launch) = stage_at("prompt-tiers-launch-is-home", &[], repository);
-    write(&fixture.home().join("schemas/claudine.yaml"), metadata_schema);
-    write(&fixture.home().join("schemas/document.yaml"), document_library);
-    assert_eq!(launch, fixture.home());
-    write(&launch.join("probe.md"), "Tier=[local-root]\n");
-    let expected = if local_prompts {
+/// Ruling 1: when the launch directory, or its repository, *is* `$HOME`,
+/// containment alone would make `~/.claudine/prompts` local; its explicit
+/// user tier keeps it behind the local root's own `~/probe.md`.
+mod local_root_file_wins_over_user_prompt_tier_when_the_local_tree_is_home {
+    use super::*;
+
+    #[test]
+    fn launch_directory_is_home() {
+        assert_local_root_wins("prompt-tiers-launch-is-home", false);
+    }
+
+    #[test]
+    fn repository_is_home() {
+        assert_local_root_wins("prompt-tiers-repo-is-home", true);
+    }
+
+    fn assert_local_root_wins(prefix: &str, repository: bool) {
+        let (fixture, launch) = stage_at(prefix, &[], repository);
+        fixture.seed_inline_metadata_schema(
+            include_str!("../../../schemas/inline-compose.yaml"),
+            include_str!("../../../schemas/document.yaml"),
+        );
+        assert_eq!(launch, fixture.home());
+        write(&launch.join("probe.md"), "Tier=[local-root]\n");
+        let stdout = compose_dry_run(&fixture, &launch, "@probe.md");
+        assert!(stdout.contains("Tier=[local-root]"), "{prefix}: {stdout}");
+        assert!(!stdout.contains("Tier=[user]"), "{prefix}: {stdout}");
+
+        // A local convention directory still wins, too.
         write(&launch.join("prompts").join("probe.md"), "Tier=[local-prompts]\n");
-        "Tier=[local-prompts]"
-    } else {
-        "Tier=[local-root]"
-    };
-    let stdout = compose_dry_run(&fixture, &launch, reference);
-    assert!(stdout.contains(expected), "{reference}: {stdout}");
-    assert!(!stdout.contains("Tier=[user]"), "{reference}: {stdout}");
-}
-
-macro_rules! home_local_tier_tests {
-    ($($test:ident => ($repository:literal, $prompts:literal, $reference:literal)),* $(,)?) => {
-        $(
-            #[test]
-            fn $test() {
-                assert_home_local_tier(
-                    $repository,
-                    $prompts,
-                    $reference,
-                    include_str!("../../../schemas/inline-compose.yaml"),
-                    include_str!("../../../schemas/document.yaml"),
-                );
-            }
-        )*
-
-        #[test]
-        fn home_local_tier_cases_cover_both_launch_layouts_and_reference_forms() {
-            assert_eq!(
-                [$(($repository, $prompts, $reference)),*],
-                [
-                    (false, false, "@probe.md"),
-                    (false, true, "@probe.md"),
-                    (false, true, "@prompts/probe.md"),
-                    (true, false, "@probe.md"),
-                    (true, true, "@probe.md"),
-                    (true, true, "@prompts/probe.md"),
-                ],
+        for reference in ["@probe.md", "@prompts/probe.md"] {
+            let stdout = compose_dry_run(&fixture, &launch, reference);
+            assert!(
+                stdout.contains("Tier=[local-prompts]"),
+                "{prefix} {reference}: {stdout}"
             );
         }
-    };
-}
-
-home_local_tier_tests! {
-    local_root_file_wins_over_user_prompt_tier_when_the_local_tree_is_home => (false, false, "@probe.md"),
-    local_prompts_win_for_concise_form_when_launch_is_home => (false, true, "@probe.md"),
-    local_prompts_win_for_path_form_when_launch_is_home => (false, true, "@prompts/probe.md"),
-    local_root_file_wins_when_repository_is_home => (true, false, "@probe.md"),
-    local_prompts_win_for_concise_form_when_repository_is_home => (true, true, "@probe.md"),
-    local_prompts_win_for_path_form_when_repository_is_home => (true, true, "@prompts/probe.md"),
+    }
 }
 
 /// Write one single-transclusion document per reference form into `dir`,
@@ -266,63 +242,64 @@ fn nested_magic_reference_in_a_user_prompt_resolves_from_the_launch_tree() {
     }
 }
 
-fn assert_nested_reference_in_another_repository(
-    form: &str,
-    winner: &str,
-    metadata_schema: &str,
-    document_library: &str,
-) {
-    // Ruling 2 across repositories: `@` follows the launch tree; `&` and `^`
-    // keep the source document's repository; `./` and bare stay beside it.
-    let (fixture, launch) = stage("prompt-tiers-nested-other-repo", true);
-    write(&fixture.home().join("schemas/claudine.yaml"), metadata_schema);
-    write(&fixture.home().join("schemas/document.yaml"), document_library);
-    let other = fixture.cwd().join("other");
-    std::fs::create_dir_all(&other).unwrap();
-    assert!(init_git_repo(&other), "git init failed at {}", other.display());
-    let other_prompts = other.join("prompts");
-    write(&launch.join("snippet.md"), "Snippet=[launch]\n");
-    write(&other.join("snippet.md"), "Snippet=[source-repo]\n");
-    write(&other_prompts.join("snippet.md"), "Snippet=[source-dir]\n");
+/// Ruling 2 across repositories: `@` follows the launch tree; `&` and `^`
+/// keep the source document's repository; `./` and bare stay beside it.
+mod nested_magic_reference_in_another_repository_resolves_from_the_launch_tree {
+    use super::*;
 
-    let (reference, document) = stage_transclusion_routers(&other_prompts, &[form]).pop().unwrap();
-    let stdout = compose_dry_run(&fixture, &launch, document.to_str().unwrap());
-    assert!(
-        stdout.contains(&format!("Snippet=[{winner}]")),
-        "`::file {reference}` should resolve to the {winner} copy: {stdout}"
-    );
-}
+    /// Each reference form and the copy it must resolve to.
+    const ROWS: [(&str, &str); 5] = [
+        ("@", "launch"),
+        ("&", "source-repo"),
+        ("^", "source-repo"),
+        ("./", "source-dir"),
+        ("", "source-dir"),
+    ];
 
-macro_rules! nested_other_repository_tests {
-    ($($test:ident => ($form:literal, $winner:literal)),* $(,)?) => {
-        $(
+    macro_rules! form_tests {
+        ($($test:ident => $form:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_form_resolves($form); })*
+
             #[test]
-            fn $test() {
-                assert_nested_reference_in_another_repository(
-                    $form,
-                    $winner,
-                    include_str!("../../../schemas/inline-compose.yaml"),
-                    include_str!("../../../schemas/document.yaml"),
-                );
+            fn every_row_has_a_listed_test() {
+                let rows: Vec<&str> = ROWS.iter().map(|(form, _)| *form).collect();
+                assert_eq!(rows, [$($form),*]);
             }
-        )*
+        };
+    }
 
-        #[test]
-        fn nested_other_repository_cases_cover_every_reference_form() {
-            assert_eq!(
-                [$(($form, $winner)),*],
-                [("@", "launch"), ("&", "source-repo"), ("^", "source-repo"), ("./", "source-dir"), ("", "source-dir")],
-            );
-        }
-    };
-}
+    form_tests! {
+        magic => "@",
+        repository => "&",
+        repository_root => "^",
+        explicit_relative => "./",
+        bare => "",
+    }
 
-nested_other_repository_tests! {
-    nested_magic_reference_in_another_repository_resolves_from_the_launch_tree => ("@", "launch"),
-    nested_repo_reference_in_another_repository_resolves_from_its_source => ("&", "source-repo"),
-    nested_tree_reference_in_another_repository_resolves_from_its_source => ("^", "source-repo"),
-    nested_relative_reference_in_another_repository_resolves_from_its_source_directory => ("./", "source-dir"),
-    nested_bare_reference_in_another_repository_resolves_from_its_source_directory => ("", "source-dir"),
+    fn assert_form_resolves(form: &str) {
+        let (_, winner) = ROWS.iter().find(|(row, _)| *row == form).expect("a listed row");
+        let (fixture, launch) = stage("prompt-tiers-nested-other-repo", true);
+        fixture.seed_inline_metadata_schema(
+            include_str!("../../../schemas/inline-compose.yaml"),
+            include_str!("../../../schemas/document.yaml"),
+        );
+        let other = fixture.cwd().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        assert!(init_git_repo(&other), "git init failed at {}", other.display());
+        let other_prompts = other.join("prompts");
+        write(&launch.join("snippet.md"), "Snippet=[launch]\n");
+        write(&other.join("snippet.md"), "Snippet=[source-repo]\n");
+        write(&other_prompts.join("snippet.md"), "Snippet=[source-dir]\n");
+
+        let [(reference, document)]: [(String, PathBuf); 1] = stage_transclusion_routers(&other_prompts, &[form])
+            .try_into()
+            .expect("one router");
+        let stdout = compose_dry_run(&fixture, &launch, document.to_str().unwrap());
+        assert!(
+            stdout.contains(&format!("Snippet=[{winner}]")),
+            "`::file {reference}` should resolve to the {winner} copy: {stdout}"
+        );
+    }
 }
 
 /// Search-root lines of a rendered `@` miss, as `(path below the fixture

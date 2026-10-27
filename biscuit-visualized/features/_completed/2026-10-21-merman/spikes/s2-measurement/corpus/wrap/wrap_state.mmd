@@ -1,0 +1,10 @@
+stateDiagram-v2
+  [*] --> Waiting
+  Waiting --> Processing : a transition label that is fairly long and descriptive
+  Processing --> Done : first line<br/>second line
+  state "A state with a long description that should wrap in the box" as Long
+  Done --> Long
+  note right of Long
+    A note with a long text that goes on and on
+    and an explicit second line
+  end note

@@ -43,6 +43,13 @@ pub struct SubscriptionInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rh: Option<u8>,
 }
+impl schematic_define::Registration for SubscriptionInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("SubscriptionInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Paginated response for subscriptions list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -54,6 +61,13 @@ pub struct ListSubscriptionsResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<PaginationMeta>,
 }
+impl schematic_define::Registration for ListSubscriptionsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListSubscriptionsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Topic information.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -65,6 +79,13 @@ pub struct TopicInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub node: Option<String>,
 }
+impl schematic_define::Registration for TopicInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("TopicInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Paginated response for topics list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -76,6 +97,13 @@ pub struct ListTopicsResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<PaginationMeta>,
 }
+impl schematic_define::Registration for ListTopicsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListTopicsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Retained message information.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -103,6 +131,13 @@ pub struct RetainedMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from_username: Option<String>,
 }
+impl schematic_define::Registration for RetainedMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("RetainedMessage");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Paginated response for retained messages list.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -114,6 +149,13 @@ pub struct ListRetainedResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<PaginationMeta>,
 }
+impl schematic_define::Registration for ListRetainedResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListRetainedResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Request body for publishing a message.
 ///
@@ -159,6 +201,13 @@ pub struct PublishBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_properties: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for PublishBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("PublishBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Request body for batch publishing.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -166,6 +215,13 @@ pub struct PublishBatchBody {
     /// List of messages to publish.
     pub messages: Vec<PublishBody>,
 }
+impl schematic_define::Registration for PublishBatchBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("PublishBatchBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

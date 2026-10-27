@@ -2187,6 +2187,64 @@ fn inline_artifact_edit_failed_publishes_the_markdown_error() {
     );
 }
 
+fn indented_root_refusal() -> MarkdownError {
+    MarkdownError::FrontmatterTextEdit {
+        reason: "frontmatter root mapping is indented by 4 spaces; text-preserving edits require \
+                 top-level keys at column 0 (run `md clean --save <file>` to fix)"
+            .to_string(),
+    }
+}
+
+fn unstampable_baseline() -> CompositionError {
+    CompositionError::InlineBaselineUnstampable {
+        path: PathBuf::from("docs/run.md"),
+        source: Box::new(indented_root_refusal()),
+    }
+}
+
+/// The launch refusal names the document the editor could not (its reason
+/// spells `<file>` literally) and keeps the editor's actionable reason.
+#[test]
+fn inline_baseline_unstampable_renders_the_path_and_the_editor_reason() {
+    use biscuit_terminal::terminal::Terminal;
+    let err = unstampable_baseline();
+    let term = Terminal::new_optimistic(80);
+
+    let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+
+    let prose = rendered.replace('┃', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(prose.contains("docs/run.md"), "{prose}");
+    assert!(prose.contains("did not start"), "{prose}");
+    assert!(prose.contains("indented by 4 spaces"), "{prose}");
+    assert!(prose.contains("md clean --save <file>"), "{prose}");
+    let display = err.to_string();
+    assert!(display.contains("inline-compose cannot start"), "{display}");
+    assert!(display.contains("docs/run.md"), "{display}");
+    assert!(display.contains("indented by 4 spaces"), "{display}");
+}
+
+#[test]
+fn inline_baseline_unstampable_owns_composition_failed_with_its_path() {
+    let err = unstampable_baseline();
+
+    assert_eq!(err.role(), crate::diagnostics::DiagnosticRole::Semantic);
+    assert_eq!(err.code(), "composition.failed");
+    assert_eq!(err.detail(), serde_json::json!({ "source_path": "docs/run.md" }));
+}
+
+/// The cause is boxed for `result_large_err`, so the chain publishes
+/// `Box<MarkdownError>`; the typed refusal is still reachable through it.
+#[test]
+fn inline_baseline_unstampable_retains_the_typed_markdown_cause() {
+    let err = unstampable_baseline();
+
+    let cause = (&err as &(dyn std::error::Error + 'static))
+        .source()
+        .and_then(|c| c.downcast_ref::<Box<MarkdownError>>())
+        .expect("the chain carries the boxed Darkmatter cause");
+    assert!(matches!(cause.as_ref(), MarkdownError::FrontmatterTextEdit { reason } if reason.contains("indented")));
+}
+
 // -- Staged for batches 4 and 5 ---------------------------------------------
 //
 // These variants have no call site yet; their consuming batches add them. The
@@ -2377,6 +2435,7 @@ fn every_batch_3_variant_projects_a_catalog_shaped_detail() {
             source: std::io::Error::other("denied"),
         },
         CompositionError::InlineArtifactEditFailed(markdown_error()),
+        unstampable_baseline(),
         CompositionError::InlineArtifactUnreadable {
             path: PathBuf::from("/repo/run.md"),
             source: std::io::Error::other("gone"),

@@ -164,6 +164,11 @@ frontmatter shell expansion, and shells in early catch handlers are forbidden;
 not initialize. Sequence includes must exist before the sequence starts. See
 [initialization ordering](./docs/topics/composition.md#documents-that-declare-initialize).
 
+`inline-compose` refuses, before composing or launching anything, a document
+whose frontmatter it could not stamp afterwards, such as one whose top-level
+keys are indented; `md clean --save <file>` fixes the indentation. See the
+[launch-time baseline check](./docs/topics/composition.md#launch-time-baseline-check).
+
 Loop initialization and its catch handlers can read the full bootstrap
 frontmatter, including derived fields. Mapping-based `set` writes made during
 loop initialization persist into subsequent iterations. An absent destination

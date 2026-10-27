@@ -29,7 +29,7 @@ use biscuit_terminal::utils::color::{BasicColor, Color, RgbColor};
 use biscuit_terminal::utils::wrap_policy::WordWrap;
 use worktree::default_target::DefaultTarget;
 
-pub use biscuit_terminal::components::git_graph::GraphOmission;
+pub use biscuit_visualized::components::git_graph::GraphOmission;
 pub use worktree::graph::{ForkedOffLine, MergedElsewhere};
 use worktree::listing::{
     BranchComparisons, Caption, CaptionState, Comparison, MergeState, ParentComparison, TreeNode,
@@ -82,7 +82,7 @@ pub struct TableFacts<'a> {
 }
 
 /// What a drawn graph left out or drew without a merge, from its
-/// [`GitGraphPlan`](biscuit_terminal::components::git_graph::GitGraphPlan)
+/// [`GitGraphPlan`](biscuit_visualized::components::git_graph::GitGraphPlan)
 /// and [`GraphFacts`](worktree::graph::GraphFacts).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct GraphOmissions {
@@ -199,6 +199,9 @@ pub enum FfNotice {
     /// Git can't read the worktree that has the branch checked out (its path
     /// as Git records it).
     UnavailableHolder(PathBuf),
+    /// The worktree that has the branch checked out is under removal (its
+    /// path as Git records it, and the name the removal was started with).
+    RemovingHolder { path: PathBuf, name: String },
     Failed,
 }
 
@@ -291,7 +294,7 @@ pub fn render_status(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> O
 
 /// The closing notes: the `--ff` result or the §9 suggestion, then the §5
 /// credentials line, then the §8 notice, then what the graph left out, then
-/// one note per unavailable worktree, in table row order;
+/// one note per unavailable worktree or one under removal, in table row order;
 /// `None` when there is nothing to say.
 pub fn render_notes(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<String> {
     let local = Prose::escape_text(facts.default_branch);
@@ -313,6 +316,13 @@ pub fn render_notes(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<Strin
             ))
             .copyable(path.to_string_lossy())
             .markup("."),
+            FfNotice::RemovingHolder { path, name } => Note::from(format!(
+                "{local} wasn't fast-forwarded: the worktree that has it checked out, "
+            ))
+            .copyable(path.to_string_lossy())
+            .markup(", is being removed; ")
+            .then(finish_removal(name))
+            .markup(" finishes that."),
             FfNotice::Failed => format!("{local} wasn't fast-forwarded: Git couldn't complete the update.").into(),
         });
     }
@@ -787,7 +797,9 @@ pub fn legend_markup(facts: &TableFacts<'_>) -> Vec<String> {
     // Git does not mark a checkout it reads through a replacement link, so
     // such a row gets its own wording rather than a claim Git can't read it.
     let unavailable = |marked: bool| {
-        rows.iter().any(|status| status.availability.is_unavailable() && status.entry.prunable.is_some() == marked)
+        rows.iter().any(|status| {
+            status.removal.is_none() && status.availability.is_unavailable() && status.entry.prunable.is_some() == marked
+        })
     };
     let meaning = match (unavailable(true), unavailable(false)) {
         (true, false) => Some("git can't read worktree"),
@@ -798,7 +810,12 @@ pub fn legend_markup(facts: &TableFacts<'_>) -> Vec<String> {
     if let Some(meaning) = meaning {
         worktree.push(format!("{UNAVAILABLE_MARK} <dim>{meaning}</dim>"));
     }
-    if rows.iter().any(|status| !status.availability.is_unavailable() && status.dirty == DirtyStatus::Unknown) {
+    if rows.iter().any(|status| status.removal.is_some()) {
+        worktree.push(format!("{REMOVAL_MARK} <dim>being removed</dim>"));
+    }
+    if rows.iter().any(|status| {
+        status.removal.is_none() && !status.availability.is_unavailable() && status.dirty == DirtyStatus::Unknown
+    }) {
         worktree.push(format!("{} <dim>couldn't check</dim>", dirty_dot(DirtyStatus::Unknown)));
     }
     let mut lines = vec![worktree.join("    ")];
@@ -1093,10 +1110,20 @@ fn connector_markup(glyph: &str, state: Option<MergeState>, parent_deleted: bool
 /// The Worktree column's glyph for an unavailable checkout.
 const UNAVAILABLE_MARK: &str = "<red>✕</red>";
 
-/// A row's Worktree glyph: [`UNAVAILABLE_MARK`] when the checkout is
-/// unavailable, whatever its dirtiness, otherwise [`dirty_dot`].
+/// The Worktree column's glyph for a checkout under removal.
+const REMOVAL_MARK: &str = "<yellow>⊘</yellow>";
+
+/// A row's Worktree glyph: [`REMOVAL_MARK`] when the checkout is under
+/// removal, [`UNAVAILABLE_MARK`] when it is unavailable, whatever its
+/// dirtiness, otherwise [`dirty_dot`].
 fn worktree_marker(status: &WorktreeStatus) -> &'static str {
-    if status.availability.is_unavailable() { UNAVAILABLE_MARK } else { dirty_dot(status.dirty) }
+    if status.removal.is_some() {
+        REMOVAL_MARK
+    } else if status.availability.is_unavailable() {
+        UNAVAILABLE_MARK
+    } else {
+        dirty_dot(status.dirty)
+    }
 }
 
 /// Single-column text glyphs.
@@ -1116,6 +1143,13 @@ fn dirty_dot(dirty: DirtyStatus) -> &'static str {
 fn unavailable_note(status: &WorktreeStatus, statuses: &[WorktreeStatus]) -> Option<Note> {
     let entry = &status.entry;
     let label = Prose::escape_text(&display_name(entry));
+    if let Some(name) = &status.removal {
+        return Some(
+            Note::from(format!("{label}: a <i>wt remove</i> of it has not finished; "))
+                .then(finish_removal(name))
+                .markup(" finishes it."),
+        );
+    }
     let path = || Note::default().copyable(entry.path.to_string_lossy());
     // Without a name that selects the row, the command is named but not
     // spelled out, and a closing sentence says why.
@@ -1146,15 +1180,10 @@ fn unavailable_note(status: &WorktreeStatus, statuses: &[WorktreeStatus]) -> Opt
     Some(text)
 }
 
-/// Prose markup for why `entry`, in [`Availability::Other`], can't be used:
-/// what was observed, after "Git can't read this worktree" when Git marks it
-/// `prunable`. A link Git still reads through gets no such claim.
-pub(crate) fn unavailable_reason(entry: &WorktreeEntry, condition: &OtherCondition) -> String {
-    reason_note(entry, condition, Note::default().copyable(entry.path.to_string_lossy())).to_markup()
-}
-
-/// [`unavailable_reason`] as a [`Note`], with `path` showing the entry's
-/// path.
+/// Why `entry`, in [`Availability::Other`], can't be used, with `path`
+/// showing the entry's path: what was observed, after "Git can't read this
+/// worktree" when Git marks it `prunable`. A link Git still reads through
+/// gets no such claim.
 fn reason_note(entry: &WorktreeEntry, condition: &OtherCondition, path: Note) -> Note {
     let observed = observed_condition(entry, condition, path);
     if entry.prunable.is_some() { Note::from("Git can't read this worktree: ").then(observed) } else { observed }
@@ -1252,6 +1281,15 @@ fn command_badge(command: &str) -> String {
 }
 
 /// [`command_badge`] whose command [`notes_list`] keeps whole.
+/// `wt remove <name>` for a removal started as `name`, as a badge when
+/// [`shell_word`] can spell `name`.
+fn finish_removal(name: &str) -> Note {
+    match shell_word(name) {
+        Some(word) => copyable_badge(format!("wt remove {word}")),
+        None => Note::from("<i>wt remove</i> with the name it was started with"),
+    }
+}
+
 fn copyable_badge(command: String) -> Note {
     Note::from("<inverse> ").copyable(command).markup(" </inverse>")
 }

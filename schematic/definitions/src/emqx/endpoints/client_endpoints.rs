@@ -1,62 +1,33 @@
-use schematic_define::{ApiRequest, ApiResponse, Endpoint, RestMethod};
+use super::super::*;
+use schematic_define::{DefinitionContext, DefinitionError};
+use schematic_define::{Endpoint, RestMethod};
 
 /// Client management endpoints (list, get, disconnect, subscribe, unsubscribe).
-pub fn client_endpoints() -> Vec<Endpoint> {
-    vec![
-        Endpoint {
-            id: "ListClients".to_string(),
-            method: RestMethod::Get,
-            path: "/clients".to_string(),
-            description: "List connected MQTT clients with pagination".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ListClientsResponse"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetClient".to_string(),
-            method: RestMethod::Get,
-            path: "/clients/{clientid}".to_string(),
-            description: "Get detailed information about a specific client".to_string(),
-            request: None,
-            response: ApiResponse::json_type("ClientInfo"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "DisconnectClient".to_string(),
-            method: RestMethod::Delete,
-            path: "/clients/{clientid}".to_string(),
-            description: "Forcefully disconnect a client from the broker".to_string(),
-            request: None,
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "SubscribeClient".to_string(),
-            method: RestMethod::Post,
-            path: "/clients/{clientid}/subscribe".to_string(),
-            description: "Create a subscription for a connected client".to_string(),
-            request: Some(ApiRequest::json_type("SubscribeBody")),
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "UnsubscribeClient".to_string(),
-            method: RestMethod::Post,
-            path: "/clients/{clientid}/unsubscribe".to_string(),
-            description: "Remove a subscription from a connected client".to_string(),
-            request: Some(ApiRequest::json_type("SubscribeBody")),
-            response: ApiResponse::Empty,
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-    ]
+pub fn client_endpoints(ctx: &mut DefinitionContext) -> Result<Vec<Endpoint>, DefinitionError> {
+    Ok(vec![
+        Endpoint::new("ListClients", RestMethod::Get, "/clients")
+            .describes("List connected MQTT clients with pagination")
+            .returns_json::<ListClientsResponse>(ctx)
+            .pagination(schematic_define::pagination::Collection::at("data").item_type("ClientInfo").unpaginated())
+            .build()?,
+        Endpoint::new("GetClient", RestMethod::Get, "/clients/{clientid}")
+            .describes("Get detailed information about a specific client")
+            .returns_json::<ClientInfo>(ctx)
+            .build()?,
+        Endpoint::new("DisconnectClient", RestMethod::Delete, "/clients/{clientid}")
+            .describes("Forcefully disconnect a client from the broker")
+            .returns_empty()
+            .build()?,
+        Endpoint::new("SubscribeClient", RestMethod::Post, "/clients/{clientid}/subscribe")
+            .describes("Create a subscription for a connected client")
+            .request_json::<SubscribeBody>(ctx)
+            .returns_empty()
+            .build()?,
+        Endpoint::new("UnsubscribeClient", RestMethod::Post, "/clients/{clientid}/unsubscribe")
+            .describes("Remove a subscription from a connected client")
+            .request_json::<SubscribeBody>(ctx)
+            .returns_empty()
+            .build()?,
+    ])
+
 }

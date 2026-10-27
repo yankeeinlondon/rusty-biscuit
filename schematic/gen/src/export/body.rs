@@ -26,7 +26,10 @@ pub enum ExportBody {
         content_type: String,
     },
     /// Binary body.
-    Binary,
+    Binary {
+        /// Content type.
+        content_type: String,
+    },
 }
 
 /// A form field for export.
@@ -81,10 +84,9 @@ pub enum FormFieldExportKind {
 ///
 /// ```
 /// use schematic_define::request::ApiRequest;
-/// use schematic_define::Schema;
 /// use schematic_gen::export::body::{ExportBody, map_body};
 ///
-/// let body = map_body(&ApiRequest::Json(Schema::new("TestRequest")));
+/// let body = map_body(&ApiRequest::json_type("TestRequest"));
 /// assert_eq!(body, ExportBody::Json { content_type: "application/json".to_string() });
 /// ```
 pub fn map_body(request: &ApiRequest) -> ExportBody {
@@ -101,9 +103,13 @@ pub fn map_body(request: &ApiRequest) -> ExportBody {
         ApiRequest::Text { content_type } => ExportBody::Text {
             content_type: content_type.clone(),
         },
-        ApiRequest::Binary { .. } => ExportBody::Binary,
+        ApiRequest::Binary { content_type } => ExportBody::Binary {
+            content_type: content_type.clone(),
+        },
         // Handle any future variants by defaulting to binary
-        _ => ExportBody::Binary,
+        _ => ExportBody::Binary {
+            content_type: "application/octet-stream".to_string(),
+        },
     }
 }
 
@@ -138,12 +144,12 @@ fn map_form_field_kind(kind: &FormFieldKind) -> FormFieldExportKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::Schema;
+    use schematic_define::TypeRef;
 
     #[test]
     fn map_body_json() {
         assert_eq!(
-            map_body(&ApiRequest::Json(Schema::new("TestRequest"))),
+            map_body(&ApiRequest::json_type("TestRequest")),
             ExportBody::Json {
                 content_type: "application/json".to_string()
             }
@@ -168,7 +174,9 @@ mod tests {
             map_body(&ApiRequest::Binary {
                 content_type: "application/octet-stream".to_string()
             }),
-            ExportBody::Binary
+            ExportBody::Binary {
+                content_type: "application/octet-stream".to_string()
+            }
         );
     }
 
@@ -297,7 +305,7 @@ mod tests {
         let request = ApiRequest::FormData {
             fields: vec![schematic_define::request::FormField::json(
                 "metadata",
-                Schema::new("MetadataRequest"),
+                TypeRef::Named("MetadataRequest".into()),
             )],
         };
         let body = map_body(&request);

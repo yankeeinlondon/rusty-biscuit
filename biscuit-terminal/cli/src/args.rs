@@ -1,5 +1,6 @@
 use crate::commands::*;
 use biscuit_terminal::utils::layout;
+use biscuit_visualized::components::{MermaidFallbackFeature, MermaidFallbackPolicy};
 use clap::{Args as ClapArgs, Parser, Subcommand};
 
 /// Shell type for completion script generation.
@@ -35,6 +36,30 @@ pub struct LayoutArgs {
     /// Alignment
     #[arg(long, visible_alias = "align", value_enum)]
     pub alignment: Option<layout::Alignment>,
+}
+
+/// Shared `--feature` arguments for the Mermaid diagram commands.
+#[derive(ClapArgs, Debug, Clone, Default)]
+pub struct MermaidFeatureArgs {
+    /// Named opt-in for the text fallback used when images are unavailable
+    /// (repeatable, comma-separated, case-insensitive)
+    #[arg(
+        long = "feature",
+        value_name = "NAME",
+        value_enum,
+        value_delimiter = ',',
+        ignore_case = true,
+        action = clap::ArgAction::Append
+    )]
+    pub features: Vec<MermaidFallbackFeature>,
+}
+
+impl MermaidFeatureArgs {
+    /// The fallback policy these flags select. With no flag every setting
+    /// stays unset, so `MERMAID_FALLBACK` still applies.
+    pub fn fallback_policy(&self) -> MermaidFallbackPolicy {
+        MermaidFallbackPolicy::from_features(self.features.iter().copied())
+    }
 }
 
 /// Terminal information utility

@@ -185,6 +185,14 @@ pub(crate) fn same_location(a: &Path, b: &Path) -> bool {
     }
 }
 
+/// Whether `a` and `b` name the same directory entry: the same final
+/// component in the same parent. Unlike [`same_location`] the final
+/// component is never followed, so a link or a file at either is compared as
+/// itself.
+pub(crate) fn same_entry(a: &Path, b: &Path) -> bool {
+    a.file_name().is_some() && a.file_name() == b.file_name() && a.parent().zip(b.parent()).is_some_and(|(a, b)| same_location(a, b))
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;

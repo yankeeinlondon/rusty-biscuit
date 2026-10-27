@@ -29,24 +29,27 @@
 //!
 //! ## Examples
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
+//! use schematic_schema::unfolded_circle_core_rest::GetSystemInfoCoreRestRequest;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = UnfoldedCircleCoreRest::new();
-//!     let data = client.get_system_info().await?;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = UnfoldedCircleCoreRest::new();
+//! let data = client.get_system_info().await?;
 //!
-//!     // the whole response: status, headers, and request id as well
-//!     let response = client.get_system_info().full().await?;
-//!     println!("{}", response.meta);
-//!     Ok(())
-//! }
+//! // the same request, built as a typed request and sent
+//! let data = client.send(GetSystemInfoCoreRestRequest::default()).await?;
+//!
+//! // the whole response: status, headers, and request id as well
+//! let response = client.get_system_info().full().await?;
+//! println!("{}", response.meta);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ### Override Base URL
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
 //!
 //! let client = UnfoldedCircleCoreRest::new().base_url("https://staging.example.com/v1");
@@ -110,44 +113,47 @@ impl Default for UnfoldedCircleCoreRest {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::unfolded_circle_core_rest::{LoginCoreRestRequest, LoginRequest};
+/// ```no_run
+/// use schematic_schema::unfolded_circle_core_rest::LoginCoreRestRequest;
 ///
-/// let body = LoginRequest {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = LoginCoreRestRequest::new(body)
-///;
+/// let body: ::schematic_definitions::unfolded_circle::core_rest::LoginRequest = Default::default();
+/// let request = LoginCoreRestRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LoginCoreRestRequest {
     /// Request body
-    pub body: LoginRequest,
+    pub body: ::schematic_definitions::unfolded_circle::core_rest::LoginRequest,
 }
 impl LoginCoreRestRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: LoginRequest) -> Self {
+    pub fn new(
+        body: ::schematic_definitions::unfolded_circle::core_rest::LoginRequest,
+    ) -> Self {
         Self { body }
     }
 }
-impl From<LoginRequest> for LoginCoreRestRequest {
-    fn from(body: LoginRequest) -> Self {
+impl From<::schematic_definitions::unfolded_circle::core_rest::LoginRequest>
+for LoginCoreRestRequest {
+    fn from(
+        body: ::schematic_definitions::unfolded_circle::core_rest::LoginRequest,
+    ) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for LoginCoreRestRequest {
     type Api = UnfoldedCircleCoreRestApi;
-    type Success = ApiResponseMessage;
+    type Success = ::schematic_definitions::unfolded_circle::core_rest::ApiResponseMessage;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ApiResponseMessage>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::unfolded_circle::core_rest::ApiResponseMessage,
+    >;
     const ENDPOINT_ID: &'static str = "Login";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/pub/login".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -169,11 +175,10 @@ impl schematic_runtime::EndpointSpec for LoginCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::LogoutCoreRestRequest;
 ///
-/// let request = LogoutCoreRestRequest::default()
-///;
+/// let request = LogoutCoreRestRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LogoutCoreRestRequest {}
@@ -188,7 +193,7 @@ impl schematic_runtime::EndpointSpec for LogoutCoreRestRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/pub/logout".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -203,26 +208,27 @@ impl schematic_runtime::EndpointSpec for LogoutCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::GetSystemInfoCoreRestRequest;
 ///
-/// let request = GetSystemInfoCoreRestRequest::default()
-///;
+/// let request = GetSystemInfoCoreRestRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetSystemInfoCoreRestRequest {}
 impl schematic_runtime::EndpointSpec for GetSystemInfoCoreRestRequest {
     type Api = UnfoldedCircleCoreRestApi;
-    type Success = SystemInfo;
+    type Success = ::schematic_definitions::unfolded_circle::core_rest::SystemInfo;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SystemInfo>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::unfolded_circle::core_rest::SystemInfo,
+    >;
     const ENDPOINT_ID: &'static str = "GetSystemInfo";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/system".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -237,11 +243,10 @@ impl schematic_runtime::EndpointSpec for GetSystemInfoCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::ExportBackupCoreRestRequest;
 ///
-/// let request = ExportBackupCoreRestRequest::default()
-///;
+/// let request = ExportBackupCoreRestRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExportBackupCoreRestRequest {}
@@ -256,7 +261,7 @@ impl schematic_runtime::EndpointSpec for ExportBackupCoreRestRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/system/backup/export".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -287,15 +292,11 @@ impl RestoreBackupForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::{RestoreBackupCoreRestRequest, RestoreBackupForm};
 ///
-/// let body = RestoreBackupForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = RestoreBackupCoreRestRequest::new(body)
-///;
+/// let body: RestoreBackupForm = Default::default();
+/// let request = RestoreBackupCoreRestRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RestoreBackupCoreRestRequest {
@@ -315,16 +316,22 @@ impl From<RestoreBackupForm> for RestoreBackupCoreRestRequest {
 }
 impl schematic_runtime::EndpointSpec for RestoreBackupCoreRestRequest {
     type Api = UnfoldedCircleCoreRestApi;
-    type Success = BackupRestoreReportItems;
+    type Success = ::std::vec::Vec<
+        ::schematic_definitions::unfolded_circle::core_rest::BackupRestoreReportItem,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<BackupRestoreReportItems>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<
+            ::schematic_definitions::unfolded_circle::core_rest::BackupRestoreReportItem,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "RestoreBackup";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::PUT;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/system/backup/restore".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -355,15 +362,11 @@ impl UploadResourceForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::{UploadResourceCoreRestRequest, UploadResourceForm};
 ///
-/// let body = UploadResourceForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = UploadResourceCoreRestRequest::new("resource_type_value", body)
-///;
+/// let body: UploadResourceForm = Default::default();
+/// let request = UploadResourceCoreRestRequest::new("resource_type_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UploadResourceCoreRestRequest {
@@ -383,9 +386,15 @@ impl UploadResourceCoreRestRequest {
 }
 impl schematic_runtime::EndpointSpec for UploadResourceCoreRestRequest {
     type Api = UnfoldedCircleCoreRestApi;
-    type Success = ResourceItems;
+    type Success = ::std::vec::Vec<
+        ::schematic_definitions::unfolded_circle::core_rest::ResourceItem,
+    >;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ResourceItems>;
+    type Decoder = schematic_runtime::Json<
+        ::std::vec::Vec<
+            ::schematic_definitions::unfolded_circle::core_rest::ResourceItem,
+        >,
+    >;
     const ENDPOINT_ID: &'static str = "UploadResource";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -394,7 +403,7 @@ impl schematic_runtime::EndpointSpec for UploadResourceCoreRestRequest {
         let path = format!(
             "/resources/{}", urlencoding::encode(& self.resource_type.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -409,11 +418,10 @@ impl schematic_runtime::EndpointSpec for UploadResourceCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::GetResourceCoreRestRequest;
 ///
-/// let request = GetResourceCoreRestRequest::new("resource_type_value", "resource_id_value")
-///;
+/// let request = GetResourceCoreRestRequest::new("resource_type_value", "resource_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetResourceCoreRestRequest {
@@ -448,7 +456,7 @@ impl schematic_runtime::EndpointSpec for GetResourceCoreRestRequest {
             "/resources/{}/{}", urlencoding::encode(& self.resource_type.to_string()),
             urlencoding::encode(& self.resource_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -479,15 +487,11 @@ impl InstallCustomIntegrationForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::{InstallCustomIntegrationCoreRestRequest, InstallCustomIntegrationForm};
 ///
-/// let body = InstallCustomIntegrationForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = InstallCustomIntegrationCoreRestRequest::new(body)
-///;
+/// let body: InstallCustomIntegrationForm = Default::default();
+/// let request = InstallCustomIntegrationCoreRestRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InstallCustomIntegrationCoreRestRequest {
@@ -507,16 +511,18 @@ impl From<InstallCustomIntegrationForm> for InstallCustomIntegrationCoreRestRequ
 }
 impl schematic_runtime::EndpointSpec for InstallCustomIntegrationCoreRestRequest {
     type Api = UnfoldedCircleCoreRestApi;
-    type Success = IntegrationDriverInfo;
+    type Success = ::schematic_definitions::unfolded_circle::core_rest::IntegrationDriverInfo;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<IntegrationDriverInfo>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::unfolded_circle::core_rest::IntegrationDriverInfo,
+    >;
     const ENDPOINT_ID: &'static str = "InstallCustomIntegration";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/intg/install".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -547,15 +553,11 @@ impl UploadCustomIrCodeSetForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::{UploadCustomIrCodeSetCoreRestRequest, UploadCustomIrCodeSetForm};
 ///
-/// let body = UploadCustomIrCodeSetForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = UploadCustomIrCodeSetCoreRestRequest::new("code_set_id_value", body)
-///;
+/// let body: UploadCustomIrCodeSetForm = Default::default();
+/// let request = UploadCustomIrCodeSetCoreRestRequest::new("code_set_id_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UploadCustomIrCodeSetCoreRestRequest {
@@ -575,9 +577,11 @@ impl UploadCustomIrCodeSetCoreRestRequest {
 }
 impl schematic_runtime::EndpointSpec for UploadCustomIrCodeSetCoreRestRequest {
     type Api = UnfoldedCircleCoreRestApi;
-    type Success = CodeSetUploadResult;
+    type Success = ::schematic_definitions::unfolded_circle::core_rest::CodeSetUploadResult;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CodeSetUploadResult>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::unfolded_circle::core_rest::CodeSetUploadResult,
+    >;
     const ENDPOINT_ID: &'static str = "UploadCustomIrCodeSet";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -586,7 +590,7 @@ impl schematic_runtime::EndpointSpec for UploadCustomIrCodeSetCoreRestRequest {
         let path = format!(
             "/ir/codes/custom/{}", urlencoding::encode(& self.code_set_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -617,15 +621,11 @@ impl InstallCustomComponentForm {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::{InstallCustomComponentCoreRestRequest, InstallCustomComponentForm};
 ///
-/// let body = InstallCustomComponentForm {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = InstallCustomComponentCoreRestRequest::new("custom_component_value", body)
-///;
+/// let body: InstallCustomComponentForm = Default::default();
+/// let request = InstallCustomComponentCoreRestRequest::new("custom_component_value", body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InstallCustomComponentCoreRestRequest {
@@ -648,9 +648,11 @@ impl InstallCustomComponentCoreRestRequest {
 }
 impl schematic_runtime::EndpointSpec for InstallCustomComponentCoreRestRequest {
     type Api = UnfoldedCircleCoreRestApi;
-    type Success = CustomInstall;
+    type Success = ::schematic_definitions::unfolded_circle::core_rest::CustomInstall;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CustomInstall>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::unfolded_circle::core_rest::CustomInstall,
+    >;
     const ENDPOINT_ID: &'static str = "InstallCustomComponent";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
@@ -660,7 +662,7 @@ impl schematic_runtime::EndpointSpec for InstallCustomComponentCoreRestRequest {
             "/system/install/{}", urlencoding::encode(& self.custom_component
             .to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -675,11 +677,10 @@ impl schematic_runtime::EndpointSpec for InstallCustomComponentCoreRestRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::unfolded_circle_core_rest::QueryLogsTextCoreRestRequest;
 ///
-/// let request = QueryLogsTextCoreRestRequest::default()
-///;
+/// let request = QueryLogsTextCoreRestRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct QueryLogsTextCoreRestRequest {}
@@ -694,7 +695,7 @@ impl schematic_runtime::EndpointSpec for QueryLogsTextCoreRestRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/system/logs".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -1331,8 +1332,11 @@ impl UnfoldedCircleCoreRest {
     ///
     /// ## Arguments
     ///
-    /// - `body: LoginRequest`: the request body
-    pub fn login(&self, body: LoginRequest) -> LoginCoreRestCall<'_> {
+    /// - `body: ::schematic_definitions::unfolded_circle::core_rest::LoginRequest`: the request body
+    pub fn login(
+        &self,
+        body: ::schematic_definitions::unfolded_circle::core_rest::LoginRequest,
+    ) -> LoginCoreRestCall<'_> {
         LoginCoreRestCall(self.0.send(LoginCoreRestRequest::new(body)))
     }
     /// Invalidate the active cookie session created by Login. Typical usage is explicit sign-out in long-running admin tools.

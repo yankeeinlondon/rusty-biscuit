@@ -15,34 +15,20 @@ review: "{{ dirname(spec) + '/' + 'review-' + iteration + '.md' }}"
 log: {{ dirname(spec) + '/log.md' }}
 # is the review "production ready"?
 ready: "{{ review && file_exists(review) ? frontmatter(review, 'ready') : null }}"
-# findings and observations on a ready review, before its follow-up pass
-# marks the review `implemented`
-followups: |-
-    {{
-        ready == true && frontmatter(review, 'implemented') != true
-            ? length(frontmatter(review, 'findings') || []) + length(frontmatter(review, 'observations') || [])
-            : 0
-    }}
-
 design: "{{ file_exists(dirname(review) + '/design.md') ? dirname(review) + '/design.md' : null }}"
 yolo: true
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 
 initialize:
     - ensure_file: '{{log}}'
+    - when: "review && file_exists(review) && !is_empty(frontmatter(review, 'human_in_the_loop')) && frontmatter(review, 'human_resolved') != true"
+      then:
+          - warn: "{{basename(review)}} is waiting on a human: run `just fix {{spec}}` in a terminal to record the rulings before repairing it"
+          - error: "{{basename(review)}} is waiting on a human"
 
 start:
     message: "🏃 implementing _findings_ from review #{{ file_index(review) }} in `{{ parent_dir(review) }}` (_using_ {{ctx.agent}}/{{ctx.model}} _in_ {{ctx.area || ctx.repo}})"
 success:
-    - when: "ready == true && frontmatter(review, 'implemented') == true && frontmatter(review, 'human_review') != true"
-      then:
-          - message: "🧹  follow-up pass for review #{{ file_index(review) }} of `{{ parent_dir(review) }}` fixed every remaining finding and observation"
-    - when: "ready == true && frontmatter(review, 'implemented') == true && frontmatter(review, 'human_review') == true"
-      then:
-          - message: |-
-                🧹  follow-up pass for review #{{ file_index(review) }} of `{{ parent_dir(review) }}` fixed every remaining finding and observation; confirm or reverse these decisions:
-
-                {{ as_ordered_list(frontmatter(review, 'human_review_items') || []) }}
     - when: "ready == true && frontmatter(review, 'implemented') != true"
       then:
           - message: "review #{{ file_index(review) }} of `{{ parent_dir(review) }}` is production ready; no repair was needed"
@@ -129,31 +115,7 @@ In order to track progress of this task we are using the '{{log}}' as a log file
 > - be sure to use the Markdown H2/H3 headings recommended so that the document has the right structure
 
 ::block when="ready"
-The review marked the {{feature_or_fix}} **production ready**, so no further review will run. What it still lists is cheapest to fix now, while the code is fresh, and must not be lost if it is not.
-
-- add to the log file ({{log}}) under `## Follow-up Pass for Review #{{iteration}}`:
-    - `- the review found in '{{review}}' indicated that the specification is **production ready**`
-    - `- the specification can be found at '{{spec}}'`
-
-::block when="followups > 0"
-### Follow-up pass
-
-This is one pass with no review after it, so it ends with every item fixed and proven by a test. Nothing is left behind: a defect the review found and this pass did not fix is a defect in this implementation.
-
-In the log, build a `### Finding Ledger` table (`| ID | Finding | Disposition | Evidence or reason |`) with one row for every finding in the review's `findings` list and every entry in its `observations` list, then:
-
-- **fix every finding and every observation that describes a defect**, whatever its size and whether or not it sits in code this spec added or changed. Name the defect class and fix its sibling sites too, with a test for each; a fixed instance whose sibling is left is still open. Before repairing an observation the review did not reproduce, reproduce it with a test first
-- an observation that describes no defect (a note, a wrong label nobody reads, a remark about future work) needs no repair: record it as **no action** with a one-sentence reason
-- this pass runs non-interactively, so never stop to ask. When a repair needs a decision the spec does not settle, such as two reasonable fixes with different user-visible results, make it: choose the option that best fits the spec, the area's `docs/`, and existing behavior, and implement it with tests. Record the decision, the alternatives considered, why you chose it, and its downsides in the ledger row. A recorded decision is settled: do not add it to `human_review_items` or set `human_review` for it. Never defer, narrow, or drop a finding's repair to avoid a decision
-- never create a backlog, follow-up, or `_unscheduled` spec for open work
-- run the focused tests for each repair, then `just test` and `just lint` once in each affected package area after the final change
-
-Finish by setting the review's `implemented` to `true` and `implemented_by` to `{{ ctx.agent }}/{{ ctx.model }}`, so later repair steps in the loop do not repeat this pass, and report what was fixed and every decision you made for the author to confirm.
-::end-block
-
-::block when="followups == 0"
-The review has no open follow-ups: it listed none, or its follow-up pass already ran. Explain the current state of this review/implement cycle and exit.
-::end-block
+The review marked the {{feature_or_fix}} **production ready**: a ready review has no findings, so there is nothing to repair. Explain the current state of this review/implement cycle and exit.
 ::end-block
 
 
@@ -260,12 +222,43 @@ is new surface the next review can find an edge in, but the harm itself is
 never left in place.
 
 Fix every finding in this cycle, high, medium, and low, whatever the size of
-the repair: the cycle is complete only when every finding is fixed. When a repair needs a decision the spec does not settle, make it as
-the follow-up pass does (the best fit with the spec, `docs/`, and existing
-behavior), and record it in the ledger for the author to confirm; never leave
-it for later and never stop to ask. Repair every observation that describes
-a defect in this cycle too, with a test, exactly as the follow-up pass does: a
-later review does not carry observations forward, so one left now is lost.
+the repair, and whether or not it sits in code this spec added or changed:
+the cycle is complete only when every finding is fixed. Before repairing a
+finding the review did not reproduce, reproduce it with a test first. Never
+create a backlog, follow-up, or `_unscheduled` spec for open work.
+
+This cycle runs non-interactively, so never stop to ask. When a repair needs a
+decision the spec does not settle, such as two reasonable fixes with different
+user-visible results, make it: choose the option that best fits the spec, the
+area's `docs/`, and existing behavior, and implement it with tests. Record the
+decision, the alternatives, and why in the ledger row, add a one-line summary
+to the review's `human_review_items`, and set its `human_review` to `true`, so
+the author can confirm or reverse it afterward. When the spec pre-authorizes
+bounded implementer autonomy and the choice meets its conditions, also amend
+the spec as that decision directs.
+
+A finding is **blocked** only when it waits on an item in the review's
+`human_in_the_loop` that has no ruling yet, or on a prerequisite this cycle
+cannot produce (an unavailable host or account). A review that calls a
+finding blocked, or a decision "the author's", without such an item does not
+block it: the review asked for no ruling, so you make the decision as above
+and repair the finding. Recording the same finding as blocked in two
+consecutive cycles stops the loop and costs the author a cycle; do not do it
+for anything you could decide.
+
+::block when="review && file_exists(review) && !is_empty(frontmatter(review, 'human_in_the_loop'))"
+**The author has ruled on this review's `human_in_the_loop` items** under its
+`## Human rulings` heading. A ruling has the same authority as the spec and
+wins where they disagree. Before any code change, add each ruling that
+requires a change to the ledger as a **high** row titled `carry out ruling on
+item N: {short description}`, and carry it out like any other finding: code,
+tests, `docs/`, skills, and, where the ruling changes a decision or an
+acceptance criterion, the spec (mark the decision amended by the ruling, with
+its date). Rulings cannot be disputed. A ruling that cannot be carried out as
+written, or conflicts with another, is **unresolved** with the reason; do not
+guess. A ruling that confirms existing behavior adds no row. Findings the
+rulings unblock are repaired in this same cycle.
+::end-block
 
 ::block when="review && file_exists(review) && frontmatter(review, 'recurrence') == true"
 **This review reports a recurring finding class.** Its `## Recurrence` section

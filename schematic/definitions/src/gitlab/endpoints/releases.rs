@@ -1,66 +1,35 @@
+use super::super::*;
 use schematic_define::{
-    ApiResponse, Endpoint,
-    params::{EndpointParams, PaginationStyle},
+    Endpoint,
+    params::{EndpointParams, QueryParamType},
 };
 
 /// Returns all tag and release endpoints (list tags, get tag, list releases, get release, latest release).
-pub fn all() -> Vec<Endpoint> {
-    vec![
-        Endpoint {
-            id: "ListTags".to_string(),
-            method: schematic_define::RestMethod::Get,
-            path: "/projects/{id}/repository/tags".to_string(),
-            description: "List repository tags (check `release` field for release tags)"
-                .to_string(),
-            request: None,
-            response: ApiResponse::json_vec_type("Tag"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitlab())),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetTag".to_string(),
-            method: schematic_define::RestMethod::Get,
-            path: "/projects/{id}/repository/tags/{tag_name}".to_string(),
-            description: "Get a single tag by name".to_string(),
-            request: None,
-            response: ApiResponse::json_type("Tag"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "ListReleases".to_string(),
-            method: schematic_define::RestMethod::Get,
-            path: "/projects/{id}/releases".to_string(),
-            description: "List releases".to_string(),
-            request: None,
-            response: ApiResponse::json_vec_type("Release"),
-            headers: vec![],
-            params: Some(EndpointParams::default().with_pagination(PaginationStyle::gitlab())),
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetRelease".to_string(),
-            method: schematic_define::RestMethod::Get,
-            path: "/projects/{id}/releases/{tag_name}".to_string(),
-            description: "Get a single release by tag name".to_string(),
-            request: None,
-            response: ApiResponse::json_type("Release"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-        Endpoint {
-            id: "GetLatestRelease".to_string(),
-            method: schematic_define::RestMethod::Get,
-            path: "/projects/{id}/releases/permalink/latest".to_string(),
-            description: "Get the latest release".to_string(),
-            request: None,
-            response: ApiResponse::json_type("Release"),
-            headers: vec![],
-            params: None,
-            oauth_scopes: None,
-        },
-    ]
+pub fn all(ctx: &mut schematic_define::DefinitionContext) -> Result<Vec<Endpoint>, schematic_define::DefinitionError> {
+    Ok(vec![
+        Endpoint::get("ListTags", "/projects/{id}/repository/tags")
+                .describes("List repository tags (check `release` field for release tags)")
+                .returns_json::<Vec<Tag>>(ctx)
+                .params(EndpointParams::default().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)")))
+                .build()?,
+        Endpoint::get("GetTag", "/projects/{id}/repository/tags/{tag_name}")
+                .describes("Get a single tag by name")
+                .returns_json::<Tag>(ctx)
+                .build()?,
+        Endpoint::get("ListReleases", "/projects/{id}/releases")
+                .describes("List releases")
+                .returns_json::<Vec<Release>>(ctx)
+                .params(EndpointParams::default().with_query_param("page", QueryParamType::Integer, false, Some("Page number (1-indexed, default: 1)"))
+                        .with_query_param("per_page", QueryParamType::Integer, false, Some("Items per page (default: 100, max: 100)")))
+                .build()?,
+        Endpoint::get("GetRelease", "/projects/{id}/releases/{tag_name}")
+                .describes("Get a single release by tag name")
+                .returns_json::<Release>(ctx)
+                .build()?,
+        Endpoint::get("GetLatestRelease", "/projects/{id}/releases/permalink/latest")
+                .describes("Get the latest release")
+                .returns_json::<Release>(ctx)
+                .build()?,
+    ])
 }

@@ -69,9 +69,12 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             show,
             indent,
             deny,
+            features,
         } => {
             let policy = policy::resolve_for(PolicyCommand::Render, &[], &deny, &[], None)?;
-            run_render(input.as_ref(), output, show, indent, policy.denies("style"), cli, request)?;
+            // `md --feature a render --feature b` turns on both.
+            let features = [cli.features.as_slice(), features.as_slice()].concat();
+            run_render(input.as_ref(), output, show, indent, policy.denies("style"), &features, cli, request)?;
         }
         CliCommand::Clean {
             input,

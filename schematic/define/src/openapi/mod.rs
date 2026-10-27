@@ -2,7 +2,8 @@
 //!
 //! This module provides types and utilities for working with OpenAPI 3.x specifications.
 //! It supports both importing OpenAPI documents and exporting schematic's REST API
-//! definitions to OpenAPI format with vendor extensions for round-trip fidelity.
+//! definitions to OpenAPI format, with `x-schematic` vendor extensions carrying
+//! the Schematic metadata standard OpenAPI cannot express.
 //!
 //! ## Core Types
 //!
@@ -10,6 +11,8 @@
 //!
 //! - [`OpenApiSource`] - Input source for OpenAPI documents (file, string, bytes, or parsed)
 //! - [`OpenApiError`] - Errors that can occur during OpenAPI processing
+//! - [`classify_responses`] - One operation's responses as response model v2
+//!   success shapes and error entries
 //!
 //! ### Export
 //!
@@ -22,7 +25,11 @@
 //!
 //! - [`SchematicDocExtension`] - Document-level `x-schematic` extension
 //! - [`SchematicOpExtension`] - Operation-level `x-schematic` extension
-//! - [`SchematicSchemaExtension`] - Schema-level `x-schematic` extension
+//! - [`AuthDetail`], [`ParamDetail`] - Auth and parameter details neither
+//!   standard field can carry
+//!
+//! The importer reads both extensions back for the supported subset; see
+//! `schematic/docs/io/openapi-extensions.md`.
 //!
 //! ## Examples
 //!
@@ -54,15 +61,15 @@
 //!
 //! ```text
 //! use schematic_define::openapi::{export, ExportOptions, ExportFormat, serialize};
-//! use schematic_definitions::openai::{define_openai_api, openapi_registry};
+//! use schematic_definitions::openai::define_openai_api;
 //!
+//! // Component schemas come from the API's own `schemas`.
 //! let api = define_openai_api();
-//! let registry = openapi_registry();
 //! let options = ExportOptions::new()
 //!     .with_version("1.0.0")
 //!     .with_format(ExportFormat::Yaml);
 //!
-//! let doc = export(&api, &registry, &options)?;
+//! let doc = export(&api, &options)?;
 //! let yaml_str = serialize(&doc, ExportFormat::Yaml)?;
 //! ```
 //!
@@ -83,13 +90,14 @@ mod options;
 mod source;
 
 pub use error::OpenApiError;
-pub use export::{SchemaRegistryLike, export, extract_path_params, map_security};
+pub use export::{HeaderGap, HeaderGapReason, export, extract_path_params, header_gaps, map_security};
 pub use extensions::{
-    AuthExtension, SchematicDocExtension, SchematicOpExtension, SchematicSchemaExtension,
+    AuthDetail, EXTENSION_VERSION, ParamDetail, SchematicDocExtension, SchematicOpExtension,
 };
 pub use import::{
     BaseUrlPolicy, ContentPreference, DiagnosticSeverity, OpenApiDiagnostic, OpenApiImport,
-    OpenApiImportOptions, OpenApiImportResult, RefResolver,
+    OpenApiImportOptions, OpenApiImportResult, RefResolver, ResponseClassification,
+    classify_responses,
 };
 pub use options::{ExportFormat, ExportOptions, serialize};
 pub use source::OpenApiSource;

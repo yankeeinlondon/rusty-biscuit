@@ -87,97 +87,143 @@ fn source_doc(workspace: &CliProcessFixture, name: &str, source: &str) -> std::p
 // Data-file formats
 // ============================================================================
 
-/// The plan every data-format row must produce.
-const SAME_PLAN: [&str; 2] = ["one", "two"];
-
 /// The five supported data formats are one code path above the loader, so a
-/// format that parses must produce the same plan as any other. Each row is
-/// asserted against the one [`SAME_PLAN`] rather than an expectation of its
-/// own, which is what makes a future format-specific divergence visible.
-fn assert_source_produces_the_same_plan(doc: &str, data_file: &str, data: &str, source: &str) {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    write(&workspace, data_file, data);
-    let doc = source_doc(&workspace, doc, source);
-    assert_eq!(
-        composed_steps(&workspace, &doc, &[]),
-        SAME_PLAN,
-        "`{source}` should normalize to the same plan as every other format"
-    );
-}
+/// format that parses must produce the same plan as any other. Every row
+/// asserts that one shared plan rather than an expectation of its own, which
+/// is what makes a future format-specific divergence visible.
+mod yaml_json_json5_jsonl_and_ndjson_sources_produce_the_same_plan {
+    use super::*;
 
-/// One test per data format, so nextest runs the spawns in parallel.
-macro_rules! same_plan_tests {
-    ($($test:ident => ($doc:literal, $data_file:literal, $data:expr, $source:literal)),* $(,)?) => {
-        /// Each generated test's data file, in declaration order.
-        const SAME_PLAN_DATA_FILES: &[&str] = &[$($data_file),*];
-
-        $(#[test]
-        fn $test() {
-            assert_source_produces_the_same_plan($doc, $data_file, $data, $source);
-        })*
-    };
-}
-
-same_plan_tests! {
-    a_yaml_source_produces_the_same_plan =>
-        ("yaml.md", "d.yaml", "wrap:\n  items:\n    - one\n    - two\n", "\"d.yaml -> wrap.items\""),
-    a_json_source_produces_the_same_plan =>
-        ("json.md", "d.json", r#"{"wrap": {"items": ["one", "two"]}}"#, "\"d.json -> wrap.items\""),
-    a_json5_source_produces_the_same_plan =>
-        ("json5.md", "d.json5", "{ wrap: { items: ['one', 'two'] } } // trailing comment\n", "\"d.json5 -> wrap.items\""),
-    // JSONL/NDJSON are always a list at the root, so they take an operator
-    // but never an offset.
-    a_jsonl_source_produces_the_same_plan =>
-        ("jsonl.md", "d.jsonl", "{\"label\": \"one\"}\n{\"label\": \"two\"}\n", "\"d.jsonl::name(label)\""),
-    an_ndjson_source_produces_the_same_plan =>
-        ("ndjson.md", "d.ndjson", "{\"label\": \"one\"}\n{\"label\": \"two\"}\n", "\"d.ndjson::name(label)\""),
-}
-
-/// Every source format the loader classifies has a same-plan row, and both
-/// line-delimited extensions keep theirs.
-#[test]
-fn every_source_format_has_a_same_plan_test() {
-    use claudine::composition::sequence::data::SourceFormat;
-
-    // Exhaustive on purpose: a new format fails to compile here until it has
-    // a row above.
-    let all = [
-        SourceFormat::Yaml,
-        SourceFormat::Json,
-        SourceFormat::Json5,
-        SourceFormat::LineDelimited,
+    /// Each format's document name and its `sequence:` source. JSONL/NDJSON
+    /// are always a list at the root, so they take an operator but never an
+    /// offset.
+    const ROWS: [(&str, &str); 5] = [
+        ("yaml.md", "\"d.yaml -> wrap.items\""),
+        ("json.md", "\"d.json -> wrap.items\""),
+        ("json5.md", "\"d.json5 -> wrap.items\""),
+        ("jsonl.md", "\"d.jsonl::name(label)\""),
+        ("ndjson.md", "\"d.ndjson::name(label)\""),
     ];
-    for format in all {
-        match format {
-            SourceFormat::Yaml | SourceFormat::Json | SourceFormat::Json5 | SourceFormat::LineDelimited => {}
+
+    macro_rules! format_tests {
+        ($($test:ident => $name:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_row_produces_the_shared_plan($name); })*
+
+            #[test]
+            fn every_row_has_a_listed_test() {
+                let rows: Vec<&str> = ROWS.iter().map(|(name, _)| *name).collect();
+                assert_eq!(rows, [$($name),*]);
+            }
+        };
+    }
+
+    format_tests! {
+        yaml => "yaml.md",
+        json => "json.md",
+        json5 => "json5.md",
+        jsonl => "jsonl.md",
+        ndjson => "ndjson.md",
+    }
+
+    /// Every source format the loader classifies has a row, and both
+    /// line-delimited extensions keep theirs.
+    #[test]
+    fn every_source_format_has_a_row() {
+        use claudine::composition::sequence::data::SourceFormat;
+
+        let data_files: Vec<String> =
+            ROWS.iter().map(|(name, _)| format!("d.{}", name.trim_end_matches(".md"))).collect();
+        // Exhaustive on purpose: a new format fails to compile here until it
+        // has a row above.
+        let all = [
+            SourceFormat::Yaml,
+            SourceFormat::Json,
+            SourceFormat::Json5,
+            SourceFormat::LineDelimited,
+        ];
+        for format in all {
+            match format {
+                SourceFormat::Yaml | SourceFormat::Json | SourceFormat::Json5 | SourceFormat::LineDelimited => {}
+            }
+            assert!(
+                data_files.iter().any(|file| SourceFormat::for_path(Path::new(file)) == format),
+                "{format:?} has no same-plan row"
+            );
         }
-        assert!(
-            SAME_PLAN_DATA_FILES.iter().any(|file| SourceFormat::for_path(Path::new(file)) == format),
-            "{format:?} has no same-plan test"
+        assert_eq!(data_files, ["d.yaml", "d.json", "d.json5", "d.jsonl", "d.ndjson"]);
+    }
+
+    fn assert_row_produces_the_shared_plan(name: &str) {
+        let (_, source) = ROWS.iter().find(|(row, _)| *row == name).expect("a listed row");
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        write(&workspace, "d.yaml", "wrap:\n  items:\n    - one\n    - two\n");
+        write(&workspace, "d.json", r#"{"wrap": {"items": ["one", "two"]}}"#);
+        write(
+            &workspace,
+            "d.json5",
+            "{ wrap: { items: ['one', 'two'] } } // trailing comment\n",
+        );
+        write(
+            &workspace,
+            "d.jsonl",
+            "{\"label\": \"one\"}\n{\"label\": \"two\"}\n",
+        );
+        write(
+            &workspace,
+            "d.ndjson",
+            "{\"label\": \"one\"}\n{\"label\": \"two\"}\n",
+        );
+
+        let doc = source_doc(&workspace, name, source);
+        assert_eq!(
+            composed_steps(&workspace, &doc, &[]),
+            ["one", "two"],
+            "`{source}` should normalize to the same plan as every other format"
         );
     }
-    assert_eq!(SAME_PLAN_DATA_FILES, ["d.yaml", "d.json", "d.json5", "d.jsonl", "d.ndjson"]);
 }
 
-macro_rules! named_source_case {
-    ($name:ident, $source:literal, [$($expected:literal),+]) => {
-        #[test]
-        fn $name() {
-            let workspace = CliProcessFixture::named("sequence-sources-cli");
-            write(
-                &workspace,
-                "d.yaml",
-                "colors:\n  data:\n    - color: blue\n      rank: 5\n    - color: green\n      rank: 3\n",
-            );
-            let doc = source_doc(&workspace, "source.md", $source);
-            assert_eq!(composed_steps(&workspace, &doc, &[]), [$($expected),+]);
-        }
-    };
-}
+/// `map` renames (the source key is gone), `name` copies (it is retained),
+/// and `template` computes. All three answer the same produce-a-name
+/// question, which is why v1 allows exactly one per reference.
+mod the_three_operators_each_produce_a_usable_name {
+    use super::*;
 
-named_source_case!(the_three_operators_each_produce_a_usable_name, "\"d.yaml -> colors.data::map(color, name)\"", ["blue", "green"]);
-named_source_case!(the_name_operator_produces_a_usable_name, "\"d.yaml -> colors.data::name(color)\"", ["blue", "green"]);
-named_source_case!(the_template_operator_produces_a_usable_name, "\"d.yaml -> colors.data::template(color + '-' + rank)\"", ["blue-5", "green-3"]);
+    fn operator_steps(name: &str, source: &str) -> Vec<String> {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        write(
+            &workspace,
+            "d.yaml",
+            "colors:\n  data:\n    - color: blue\n      rank: 5\n    - color: green\n      rank: 3\n",
+        );
+        let doc = source_doc(&workspace, name, source);
+        composed_steps(&workspace, &doc, &[])
+    }
+
+    #[test]
+    fn map() {
+        assert_eq!(
+            operator_steps("map.md", "\"d.yaml -> colors.data::map(color, name)\""),
+            ["blue", "green"]
+        );
+    }
+
+    #[test]
+    fn name() {
+        assert_eq!(
+            operator_steps("name.md", "\"d.yaml -> colors.data::name(color)\""),
+            ["blue", "green"]
+        );
+    }
+
+    #[test]
+    fn template() {
+        assert_eq!(
+            operator_steps("template.md", "\"d.yaml -> colors.data::template(color + '-' + rank)\""),
+            ["blue-5", "green-3"]
+        );
+    }
+}
 
 #[test]
 fn map_removes_the_source_key_while_name_retains_it() {
@@ -208,128 +254,159 @@ fn map_removes_the_source_key_while_name_retains_it() {
 /// Every classified string form reaches the sequence through the same
 /// `biscuit_file::ListFormat` classifier. Driving them through the CLI proves
 /// the wiring, not just the classifier's own unit tests.
-fn assert_string_list_form_classifies(name: &str, raw: &str, expected: &[&str]) {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    let doc = write(
-        &workspace,
-        &format!("{name}.md"),
-        &format!("---\nraw: {raw}\nsequence: \"{{{{ raw }}}}\"\n---\nStep {{{{ seq.name }}}}.\n"),
-    );
-    assert_eq!(
-        composed_steps(&workspace, &doc, &[]),
-        expected,
-        "`{name}` did not classify as expected"
-    );
-}
+mod every_string_list_form_classifies_through_the_real_invocation_path {
+    use super::*;
 
-/// One test per string form, so nextest runs the spawns in parallel. `$raw`
-/// is the frontmatter scalar as authored; `$format` is what it must classify
-/// as once YAML has read it.
-macro_rules! string_list_form_tests {
-    ($($test:ident => ($name:literal, $raw:literal, $format:ident, [$($expected:literal),* $(,)?])),* $(,)?) => {
-        /// Each generated test's authored scalar and its intended format.
-        const STRING_LIST_FORMS: &[(&str, biscuit_file::ListFormat)] =
-            &[$(($raw, biscuit_file::ListFormat::$format)),*];
-
-        $(#[test]
-        fn $test() {
-            assert_string_list_form_classifies($name, $raw, &[$($expected),*]);
-        })*
-    };
-}
-
-string_list_form_tests! {
-    the_csv_string_form_classifies_through_the_real_invocation_path =>
-        ("csv", "\"alpha, beta, gamma\"", Csv, ["alpha", "beta", "gamma"]),
-    the_tsv_string_form_classifies_through_the_real_invocation_path =>
-        ("tsv", "\"alpha\tbeta\"", Tsv, ["alpha", "beta"]),
-    // YAML's `\n` escape: a raw newline inside a double-quoted scalar folds
-    // to a space, which would classify as space-separated instead.
-    the_lines_string_form_classifies_through_the_real_invocation_path =>
-        ("lines", "\"alpha\\nbeta\"", LineSeparated, ["alpha", "beta"]),
-    the_spaces_string_form_classifies_through_the_real_invocation_path =>
-        ("spaces", "\"alpha beta gamma\"", SpaceSeparated, ["alpha", "beta", "gamma"]),
-    the_scalar_string_form_classifies_through_the_real_invocation_path =>
-        ("scalar", "\"solo\"", Scalar, ["solo"]),
-}
-
-/// Each string-form row classifies as the format it names, and every
-/// `ListFormat` has a row here or in `markdown_list_markers_win_over_line_splitting`.
-#[test]
-fn every_list_format_has_a_string_form_test() {
-    use biscuit_file::{ListFormat, Yaml};
-
-    for (raw, format) in STRING_LIST_FORMS {
-        let yaml = Yaml::from_str(format!("raw: {raw}")).unwrap();
-        let value = yaml.value().get("raw").and_then(|v| v.as_str()).unwrap().to_string();
-        assert_eq!(ListFormat::classify(&value), *format, "row {raw:?} reads as {value:?}");
-    }
-
-    // Exhaustive on purpose: a new format fails to compile here until it has
-    // a test.
-    let all = [
-        ListFormat::MarkdownOrdered,
-        ListFormat::MarkdownUnordered,
-        ListFormat::LineSeparated,
-        ListFormat::Tsv,
-        ListFormat::Csv,
-        ListFormat::SpaceSeparated,
-        ListFormat::Scalar,
+    /// Each form's name, its raw frontmatter value, and the steps it must
+    /// classify into.
+    const ROWS: [(&str, &str, &[&str]); 5] = [
+        ("csv", "\"alpha, beta, gamma\"", &["alpha", "beta", "gamma"]),
+        ("tsv", "\"alpha\tbeta\"", &["alpha", "beta"]),
+        // YAML's `\n` escape: a raw newline inside a double-quoted scalar
+        // folds to a space, which would classify as space-separated instead.
+        ("lines", "\"alpha\\nbeta\"", &["alpha", "beta"]),
+        ("spaces", "\"alpha beta gamma\"", &["alpha", "beta", "gamma"]),
+        ("scalar", "\"solo\"", &["solo"]),
     ];
-    for format in all {
-        let covered = match format {
-            ListFormat::MarkdownOrdered | ListFormat::MarkdownUnordered => true,
-            ListFormat::LineSeparated
-            | ListFormat::Tsv
-            | ListFormat::Csv
-            | ListFormat::SpaceSeparated
-            | ListFormat::Scalar => STRING_LIST_FORMS.iter().any(|(_, row)| *row == format),
+
+    macro_rules! form_tests {
+        ($($test:ident => $name:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_form_classifies($name); })*
+
+            #[test]
+            fn every_row_has_a_listed_test() {
+                let rows: Vec<&str> = ROWS.iter().map(|(name, _, _)| *name).collect();
+                assert_eq!(rows, [$($name),*]);
+            }
         };
-        assert!(covered, "{format:?} has no string-form test");
+    }
+
+    form_tests! {
+        csv => "csv",
+        tsv => "tsv",
+        lines => "lines",
+        spaces => "spaces",
+        scalar => "scalar",
+    }
+
+    /// Each row classifies as the format it names once YAML has read it, and
+    /// every `ListFormat` has a row here or in
+    /// `markdown_list_markers_win_over_line_splitting`.
+    #[test]
+    fn every_list_format_has_a_row() {
+        use biscuit_file::{ListFormat, Yaml};
+
+        let intended = |name: &str| match name {
+            "csv" => ListFormat::Csv,
+            "tsv" => ListFormat::Tsv,
+            "lines" => ListFormat::LineSeparated,
+            "spaces" => ListFormat::SpaceSeparated,
+            "scalar" => ListFormat::Scalar,
+            _ => panic!("row {name} names no format"),
+        };
+        for (name, raw, _) in ROWS {
+            let yaml = Yaml::from_str(format!("raw: {raw}")).unwrap();
+            let value = yaml.value().get("raw").and_then(|v| v.as_str()).unwrap().to_string();
+            assert_eq!(ListFormat::classify(&value), intended(name), "row {name} reads as {value:?}");
+        }
+
+        // Exhaustive on purpose: a new format fails to compile here until it
+        // has a test.
+        let all = [
+            ListFormat::MarkdownOrdered,
+            ListFormat::MarkdownUnordered,
+            ListFormat::LineSeparated,
+            ListFormat::Tsv,
+            ListFormat::Csv,
+            ListFormat::SpaceSeparated,
+            ListFormat::Scalar,
+        ];
+        for format in all {
+            let covered = match format {
+                ListFormat::MarkdownOrdered | ListFormat::MarkdownUnordered => true,
+                ListFormat::LineSeparated
+                | ListFormat::Tsv
+                | ListFormat::Csv
+                | ListFormat::SpaceSeparated
+                | ListFormat::Scalar => ROWS.iter().any(|(name, _, _)| intended(name) == format),
+            };
+            assert!(covered, "{format:?} has no string-form row");
+        }
+    }
+
+    fn assert_form_classifies(name: &str) {
+        let (_, raw, expected) = ROWS.iter().find(|(row, _, _)| *row == name).expect("a listed row");
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let doc = write(
+            &workspace,
+            &format!("{name}.md"),
+            &format!("---\nraw: {raw}\nsequence: \"{{{{ raw }}}}\"\n---\nStep {{{{ seq.name }}}}.\n"),
+        );
+        assert_eq!(
+            composed_steps(&workspace, &doc, &[]),
+            *expected,
+            "`{name}` did not classify as expected"
+        );
     }
 }
 
-#[test]
-fn markdown_list_markers_win_over_line_splitting() {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    // Both bodies are multi-line, so line-separation would also "work" — the
-    // marker precedence rule is what strips the bullets and numbers.
-    let unordered = write(
-        &workspace,
-        "ul.md",
-        "---\nraw: |\n  - alpha\n  - beta\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
-    );
-    assert_eq!(composed_steps(&workspace, &unordered, &[]), ["alpha", "beta"]);
+// Both bodies are multi-line, so line-separation would also "work" — the
+// marker precedence rule is what strips the bullets and numbers.
+mod markdown_list_markers_win_over_line_splitting {
+    use super::*;
 
-    let ordered = write(
-        &workspace,
-        "ol.md",
-        "---\nraw: |\n  1. alpha\n  2. beta\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
-    );
-    assert_eq!(composed_steps(&workspace, &ordered, &[]), ["alpha", "beta"]);
+    #[test]
+    fn unordered() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let unordered = write(
+            &workspace,
+            "ul.md",
+            "---\nraw: |\n  - alpha\n  - beta\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
+        );
+        assert_eq!(composed_steps(&workspace, &unordered, &[]), ["alpha", "beta"]);
+    }
+
+    #[test]
+    fn ordered() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let ordered = write(
+            &workspace,
+            "ol.md",
+            "---\nraw: |\n  1. alpha\n  2. beta\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
+        );
+        assert_eq!(composed_steps(&workspace, &ordered, &[]), ["alpha", "beta"]);
+    }
 }
 
-#[test]
-fn quoted_csv_delimiters_and_crlf_survive_classification() {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    // A naive `split(',')` would produce four entries here, and a naive line
-    // split would leave a trailing `\r` on every name.
-    let doc = write(
-        &workspace,
-        "quoted.md",
-        "---\nraw: \"\\\"alpha, with comma\\\", beta\"\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
-    );
-    assert_eq!(
-        composed_steps(&workspace, &doc, &[]),
-        ["alpha, with comma", "beta"]
-    );
+mod quoted_csv_delimiters_and_crlf_survive_classification {
+    use super::*;
 
-    let crlf = write(
-        &workspace,
-        "crlf.md",
-        "---\nraw: \"alpha\\r\\nbeta\"\nsequence: \"{{ raw }}\"\n---\nStep [{{ seq.name }}].\n",
-    );
-    assert_eq!(composed_steps(&workspace, &crlf, &[]), ["[alpha]", "[beta]"]);
+    /// A naive `split(',')` would produce four entries here.
+    #[test]
+    fn quoted_delimiters() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let doc = write(
+            &workspace,
+            "quoted.md",
+            "---\nraw: \"\\\"alpha, with comma\\\", beta\"\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
+        );
+        assert_eq!(
+            composed_steps(&workspace, &doc, &[]),
+            ["alpha, with comma", "beta"]
+        );
+    }
+
+    /// A naive line split would leave a trailing `\r` on every name.
+    #[test]
+    fn crlf() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let crlf = write(
+            &workspace,
+            "crlf.md",
+            "---\nraw: \"alpha\\r\\nbeta\"\nsequence: \"{{ raw }}\"\n---\nStep [{{ seq.name }}].\n",
+        );
+        assert_eq!(composed_steps(&workspace, &crlf, &[]), ["[alpha]", "[beta]"]);
+    }
 }
 
 // ============================================================================
@@ -339,26 +416,34 @@ fn quoted_csv_delimiters_and_crlf_survive_classification() {
 /// Foreign data is lenient where an authored inline list is strict: scalars
 /// coerce and a nameless object gets an ordinal name. `sequence_errors_cli.rs`
 /// pins the strict half of the same boundary.
-#[test]
-fn a_foreign_source_coerces_scalars_and_names_nameless_objects() {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    let scalars = write(
-        &workspace,
-        "scalars.md",
-        "---\nraw:\n  - 1\n  - 2.5\n  - true\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
-    );
-    assert_eq!(composed_steps(&workspace, &scalars, &[]), ["1", "2.5", "true"]);
+mod a_foreign_source_coerces_scalars_and_names_nameless_objects {
+    use super::*;
 
-    let objects = write(
-        &workspace,
-        "objects.md",
-        "---\nraw:\n  - name: alpha\n  - topic: parsing\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
-    );
-    assert_eq!(
-        composed_steps(&workspace, &objects, &[]),
-        ["alpha", "2"],
-        "a nameless object takes its one-based ordinal"
-    );
+    #[test]
+    fn scalars_coerce() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let scalars = write(
+            &workspace,
+            "scalars.md",
+            "---\nraw:\n  - 1\n  - 2.5\n  - true\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
+        );
+        assert_eq!(composed_steps(&workspace, &scalars, &[]), ["1", "2.5", "true"]);
+    }
+
+    #[test]
+    fn nameless_objects_take_their_ordinal() {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        let objects = write(
+            &workspace,
+            "objects.md",
+            "---\nraw:\n  - name: alpha\n  - topic: parsing\nsequence: \"{{ raw }}\"\n---\nStep {{ seq.name }}.\n",
+        );
+        assert_eq!(
+            composed_steps(&workspace, &objects, &[]),
+            ["alpha", "2"],
+            "a nameless object takes its one-based ordinal"
+        );
+    }
 }
 
 #[test]
@@ -389,46 +474,86 @@ fn a_shell_expanded_source_becomes_a_classified_list() {
 // `FileReference` families
 // ============================================================================
 
-macro_rules! authoring_reference_case {
-    ($name:ident, $relative:literal, $source:literal, $expected:literal) => {
-        #[test]
-        fn $name() {
-            let workspace = CliProcessFixture::named("sequence-sources-cli");
-            write(&workspace, $relative, concat!("items:\n  - ", $expected, "\n"));
-            let doc = source_doc(&workspace, "reference.md", $source);
-            assert_eq!(composed_steps(&workspace, &doc, &[]), [$expected]);
-        }
-    };
-}
+/// Resolution is delegated to `biscuit_file::FileReference::resolve_from` with
+/// the *authoring document's* directory, so the families below work without the
+/// sequence code reimplementing any of them — including the two that a
+/// hand-rolled suffix splitter would break: a path holding a space, and a path
+/// holding an `@`. The home-pinned case uses the same explicit request-context
+/// seam because native Windows home discovery cannot be isolated by overriding
+/// environment variables in a child process.
+mod file_references_resolve_from_the_authoring_document {
+    use super::*;
 
-authoring_reference_case!(file_references_resolve_from_the_authoring_document, "nested/data.yaml", "\"nested/data.yaml -> items\"", "nested-hit");
-authoring_reference_case!(spaced_file_references_resolve_from_the_authoring_document, "my data/data.yaml", "\"my data/data.yaml -> items\"", "spaced-hit");
-authoring_reference_case!(at_file_references_resolve_from_the_authoring_document, "a@b/data.yaml", "\"a@b/data.yaml -> items\"", "at-hit");
+    /// Each family's document name, its `sequence:` source, and the one step
+    /// its data file holds.
+    const ROWS: [(&str, &str, &str); 3] = [
+        ("relative.md", "\"nested/data.yaml -> items\"", "nested-hit"),
+        ("spaced.md", "\"my data/data.yaml -> items\"", "spaced-hit"),
+        ("at.md", "\"a@b/data.yaml -> items\"", "at-hit"),
+    ];
 
-#[test]
-fn home_file_references_resolve_through_the_captured_request_context() {
-    let workspace = CliProcessFixture::named("sequence-sources-cli");
-    write(&workspace, "tilde.yaml", "items:\n  - tilde-hit\n");
-    let doc = source_doc(&workspace, "tilde.md", "\"~/tilde.yaml -> items\"");
-    let request_context = biscuit_file::FileResolutionContext::new(workspace.cwd())
-        .with_home_dir(workspace.cwd())
-        .with_source_path(&doc);
-    let source = claudine::composition::resolve_composition_source_in_context(
-        doc.to_str().unwrap(),
-        &request_context,
-    )
-    .unwrap();
-    let plan = claudine::composition::resolve_sequence_plan_with(
-        &source,
-        claudine::composition::SequenceSourceOptions {
-            shell_runner: None,
-            file_resolution_context: &request_context,
-        },
-    )
-    .unwrap()
-    .expect("tilde fixture declares a sequence");
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].name, "tilde-hit");
+    macro_rules! family_tests {
+        ($($test:ident => $name:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_family_resolves($name); })*
+
+            #[test]
+            fn every_row_has_a_listed_test() {
+                let rows: Vec<&str> = ROWS.iter().map(|(name, _, _)| *name).collect();
+                assert_eq!(rows, [$($name),*]);
+            }
+        };
+    }
+
+    family_tests! {
+        relative => "relative.md",
+        path_with_a_space => "spaced.md",
+        path_with_an_at_sign => "at.md",
+    }
+
+    fn workspace() -> CliProcessFixture {
+        let workspace = CliProcessFixture::named("sequence-sources-cli");
+        write(&workspace, "nested/data.yaml", "items:\n  - nested-hit\n");
+        write(&workspace, "my data/data.yaml", "items:\n  - spaced-hit\n");
+        write(&workspace, "a@b/data.yaml", "items:\n  - at-hit\n");
+        write(&workspace, "tilde.yaml", "items:\n  - tilde-hit\n");
+        workspace
+    }
+
+    fn assert_family_resolves(name: &str) {
+        let (_, source, expected) = ROWS.iter().find(|(row, _, _)| *row == name).expect("a listed row");
+        let workspace = workspace();
+        let doc = source_doc(&workspace, name, source);
+        assert_eq!(
+            composed_steps(&workspace, &doc, &[]),
+            [*expected],
+            "`{source}` did not resolve"
+        );
+    }
+
+    #[test]
+    fn home_pinned() {
+        let workspace = workspace();
+        let doc = source_doc(&workspace, "tilde.md", "\"~/tilde.yaml -> items\"");
+        let request_context = biscuit_file::FileResolutionContext::new(workspace.cwd())
+            .with_home_dir(workspace.cwd())
+            .with_source_path(&doc);
+        let source = claudine::composition::resolve_composition_source_in_context(
+            doc.to_str().unwrap(),
+            &request_context,
+        )
+        .unwrap();
+        let plan = claudine::composition::resolve_sequence_plan_with(
+            &source,
+            claudine::composition::SequenceSourceOptions {
+                shell_runner: None,
+                file_resolution_context: &request_context,
+            },
+        )
+        .unwrap()
+        .expect("tilde fixture declares a sequence");
+        assert_eq!(plan.steps.len(), 1);
+        assert_eq!(plan.steps[0].name, "tilde-hit");
+    }
 }
 
 #[test]

@@ -53,6 +53,13 @@ pub struct NodeInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub load: Option<Vec<f64>>,
 }
+impl schematic_define::Registration for NodeInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("NodeInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Response from `/nodes` endpoint - list of cluster nodes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -60,6 +67,13 @@ pub struct ListNodesResponse {
     /// List of nodes in the cluster.
     pub data: Vec<NodeInfo>,
 }
+impl schematic_define::Registration for ListNodesResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListNodesResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Cluster status information.
 ///
@@ -81,6 +95,13 @@ pub struct ClusterStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stopped: Option<Vec<String>>,
 }
+impl schematic_define::Registration for ClusterStatus {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ClusterStatus");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Listener configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -108,6 +129,13 @@ pub struct ListenerInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_connections: Option<u64>,
 }
+impl schematic_define::Registration for ListenerInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListenerInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Response for listeners list.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -115,6 +143,13 @@ pub struct ListListenersResponse {
     /// List of configured listeners.
     pub data: Vec<ListenerInfo>,
 }
+impl schematic_define::Registration for ListListenersResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListListenersResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Broker metrics.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -163,6 +198,13 @@ pub struct MetricsInfo {
     #[serde(flatten)]
     pub extra: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for MetricsInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("MetricsInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Response for metrics list.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -170,6 +212,13 @@ pub struct ListMetricsResponse {
     /// List of per-node metrics.
     pub data: Vec<MetricsInfo>,
 }
+impl schematic_define::Registration for ListMetricsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListMetricsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Broker statistics.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -198,6 +247,13 @@ pub struct StatsInfo {
     #[serde(flatten)]
     pub extra: Option<serde_json::Value>,
 }
+impl schematic_define::Registration for StatsInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("StatsInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Response for stats list.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -205,6 +261,13 @@ pub struct ListStatsResponse {
     /// List of per-node stats.
     pub data: Vec<StatsInfo>,
 }
+impl schematic_define::Registration for ListStatsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListStatsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Alarm information.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -236,6 +299,13 @@ pub struct AlarmInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<u64>,
 }
+impl schematic_define::Registration for AlarmInfo {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("AlarmInfo");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// Response for alarms list.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -243,6 +313,13 @@ pub struct ListAlarmsResponse {
     /// List of alarms.
     pub data: Vec<AlarmInfo>,
 }
+impl schematic_define::Registration for ListAlarmsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ListAlarmsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

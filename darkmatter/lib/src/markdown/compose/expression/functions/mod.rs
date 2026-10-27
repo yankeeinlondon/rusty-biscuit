@@ -1164,7 +1164,8 @@ mod tests {
         }
 
         /// Unquoted keys and single-quoted strings are the `biscuit-file`
-        /// formatter's idiom; a key needing quotes keeps them.
+        /// formatter's idiom; a key needing quotes keeps them. Keys keep the
+        /// author's order (`serde_json`'s `preserve_order`).
         #[test]
         fn as_json5_uses_the_formatter_object_idiom() {
             let items = list(json!([{ "package": "darkmatter", "dev deps": ["renderable"] }]));

@@ -73,7 +73,7 @@ pub fn analyze_yaml(source: &str) -> YamlAnalysis {
     let map = SourceMap::new(source);
     let mut diagnostics = match &outcome {
         YamlParseOutcome::Parsed(value) => {
-            let drafts = s1_candidates(source, &map);
+            let drafts = s1_candidates(source, &map, value);
             prove_drafts(source, value, drafts)
                 .into_iter()
                 .map(Draft::into_diagnostic)
@@ -90,13 +90,18 @@ pub fn analyze_yaml(source: &str) -> YamlAnalysis {
     YamlAnalysis::new(source, outcome, diagnostics)
 }
 
-/// A candidate diagnostic plus its single candidate repair, before the
-/// safety proof has run.
+/// A candidate diagnostic plus its candidate repairs, before the safety
+/// proof has run.
+///
+/// A draft is proven as a unit: every repair it carries applies together or
+/// the whole draft is dropped. Most drafts carry one repair; the root
+/// dedent carries one prefix removal per line, none of which is
+/// parse-equivalent alone.
 struct Draft {
     code: YamlDiagnosticCode,
     span: SourceSpan,
     message: String,
-    repair: YamlRepair,
+    repairs: Vec<YamlRepair>,
 }
 
 impl Draft {
@@ -111,11 +116,11 @@ impl Draft {
             code,
             span: span.clone(),
             message: message.to_string(),
-            repair: YamlRepair {
+            repairs: vec![YamlRepair {
                 span,
                 replacement: replacement.to_string(),
                 explanation: explanation.to_string(),
-            },
+            }],
         }
     }
 
@@ -125,21 +130,22 @@ impl Draft {
             span: self.span,
             classification: YamlCertainty::Deterministic,
             message: self.message,
-            repairs: vec![self.repair],
+            repairs: self.repairs,
         }
     }
 }
 
 /// Generates every S1 candidate for parseable input: source normalization
 /// (BOM, line endings, trailing whitespace, final newline) and
-/// parse-equivalent whitespace cleanup (mapping colons, sequence markers,
-/// flow collections).
-fn s1_candidates(source: &str, map: &SourceMap) -> Vec<Draft> {
+/// parse-equivalent whitespace cleanup (root indentation, mapping colons,
+/// sequence markers, flow collections).
+fn s1_candidates(source: &str, map: &SourceMap, value: &Value) -> Vec<Draft> {
     let mut drafts = Vec::new();
     bom_candidate(source, &mut drafts);
     line_ending_candidates(source, &mut drafts);
     let superfluous = final_newline_candidates(source, map, &mut drafts);
     trailing_whitespace_candidates(source, map, superfluous.as_ref(), &mut drafts);
+    root_indentation_candidate(source, map, value, &mut drafts);
     block_whitespace_candidates(source, map, &mut drafts);
     flow_whitespace_candidates(source, map, &mut drafts);
     drafts
@@ -156,28 +162,31 @@ fn prove_drafts(source: &str, original: &Value, drafts: Vec<Draft>) -> Vec<Draft
     if drafts.is_empty() {
         return drafts;
     }
-    let repairs: Vec<YamlRepair> = drafts.iter().map(|draft| draft.repair.clone()).collect();
-    let combined = apply_edit_set(source, &repairs);
-    if combined.audit.rejected.is_empty() && parses_equal(&combined.source, original) {
+    if proves_equal(source, original, &drafts) {
         return drafts;
     }
     let mut survivors = Vec::new();
     for draft in drafts {
-        let single = apply_edit_set(source, std::slice::from_ref(&draft.repair));
-        if single.audit.rejected.is_empty() && parses_equal(&single.source, original) {
+        if proves_equal(source, original, std::slice::from_ref(&draft)) {
             survivors.push(draft);
         }
     }
-    if survivors.len() <= 1 {
-        return survivors;
-    }
-    let repairs: Vec<YamlRepair> = survivors.iter().map(|draft| draft.repair.clone()).collect();
-    let combined = apply_edit_set(source, &repairs);
-    if combined.audit.rejected.is_empty() && parses_equal(&combined.source, original) {
+    if survivors.len() <= 1 || proves_equal(source, original, &survivors) {
         survivors
     } else {
         Vec::new()
     }
+}
+
+/// Applies every repair of `drafts` together and reports whether the edit
+/// set applied without rejection and reparsed to `original`.
+fn proves_equal(source: &str, original: &Value, drafts: &[Draft]) -> bool {
+    let repairs: Vec<YamlRepair> = drafts
+        .iter()
+        .flat_map(|draft| draft.repairs.iter().cloned())
+        .collect();
+    let patched = apply_edit_set(source, &repairs);
+    patched.audit.rejected.is_empty() && parses_equal(&patched.source, original)
 }
 
 fn parses_equal(source: &str, expected: &Value) -> bool {
@@ -263,9 +272,7 @@ fn tab_indentation_recovery(source: &str) -> Option<Vec<YamlDiagnostic>> {
         return None;
     }
     let expected = parse_value(&normalized).ok()?;
-    let repairs: Vec<YamlRepair> = drafts.iter().map(|draft| draft.repair.clone()).collect();
-    let patched = apply_edit_set(source, &repairs);
-    if !patched.audit.rejected.is_empty() || !parses_equal(&patched.source, &expected) {
+    if !proves_equal(source, &expected, &drafts) {
         return None;
     }
     Some(drafts.into_iter().map(Draft::into_diagnostic).collect())
@@ -387,6 +394,102 @@ fn trailing_whitespace_candidates(
             "remove the trailing whitespace",
         ));
     }
+}
+
+/// A nonempty block root mapping indented as a whole moves to column 0.
+///
+/// The repair is one draft carrying a leading-prefix removal per line, so the
+/// lines are proven together: dedenting only some of them would change the
+/// structure. It is offered only when the first content line is an ordinary
+/// `key: value` entry; documents with markers or directives, and roots that
+/// open with a complex key (`?`), a tag, an anchor, or an alias, are left
+/// alone rather than guessing where their root starts.
+///
+/// The common indent is the smallest leading ASCII-space count across
+/// nonblank, non-comment lines. Comments with at least that many spaces are
+/// dedented with their neighbors; less-indented comments are kept. Inside a
+/// block scalar a whitespace-only line also loses up to that many spaces,
+/// because spaces past the content indent are scalar text. Other
+/// whitespace-only lines belong to the trailing-whitespace repair, and lines
+/// starting inside a flow collection or a quoted scalar keep their
+/// indentation, which their own whitespace repairs and folding already own.
+fn root_indentation_candidate(
+    source: &str,
+    map: &SourceMap,
+    value: &Value,
+    drafts: &mut Vec<Draft>,
+) {
+    if !value.as_mapping().is_some_and(|mapping| !mapping.is_empty()) || !map.markers().is_empty() {
+        return;
+    }
+    let bytes = source.as_bytes();
+    let lines = map.lines();
+    let Some(first) = lines.iter().position(|line| line.kind == LineKind::Content) else {
+        return;
+    };
+    let entry = map.entry(first);
+    let key_opens_ordinarily = entry.dash.is_none()
+        && entry.mapping.as_ref().is_some_and(|mapping| {
+            !matches!(bytes[mapping.key.start], b'?' | b'!' | b'&' | b'*' | b'%' | b'[' | b'{')
+        });
+    if !key_opens_ordinarily {
+        return;
+    }
+    let leading_spaces = |span: &SourceSpan| {
+        bytes[span.clone()]
+            .iter()
+            .take_while(|byte| **byte == b' ')
+            .count()
+    };
+    let is_blank = |span: &SourceSpan| {
+        bytes[span.clone()]
+            .iter()
+            .all(|byte| matches!(byte, b' ' | b'\t'))
+    };
+    let common = lines
+        .iter()
+        .filter(|line| {
+            matches!(line.kind, LineKind::Content | LineKind::BlockContent) && !is_blank(&line.content)
+        })
+        .map(|line| leading_spaces(&line.content))
+        .min()
+        .unwrap_or(0);
+    if common == 0 {
+        return;
+    }
+    let mut repairs = Vec::new();
+    for line in lines {
+        let spaces = leading_spaces(&line.content);
+        let removed = match line.kind {
+            LineKind::Content => common,
+            LineKind::Comment if spaces >= common => common,
+            LineKind::BlockContent => spaces.min(common),
+            _ => 0,
+        };
+        if removed == 0 {
+            continue;
+        }
+        let span = line.content.start..line.content.start + removed;
+        if line.kind == LineKind::Content
+            && (map.in_flow(span.start) || map.quoted_intersects(&span))
+        {
+            continue;
+        }
+        repairs.push(YamlRepair {
+            span,
+            replacement: String::new(),
+            explanation: format!("remove {common} spaces of root indentation"),
+        });
+    }
+    let (Some(head), Some(tail)) = (repairs.first(), repairs.last()) else {
+        return;
+    };
+    drafts.push(Draft {
+        code: YamlDiagnosticCode::RootIndentation,
+        span: head.span.start..tail.span.end,
+        message: format!("root mapping is indented by {common} spaces"),
+        repairs,
+    });
 }
 
 /// Whitespace around block mapping colons and sequence markers:

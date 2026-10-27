@@ -5,18 +5,28 @@ $schema:
     iteration: number -> the review's iteration number
     review: file -> the review file which will be created based on this prompt's execution
     spec_name: string -> the name of the spec (which is really just the spec's folder name)
+    next_spec: file(match(**/*spec*.md)) -> if the current spec is part of a multi-spec/multi-plan process then this points to the NEXT spec in the sequence
+    next_plan: file(match(**/*plan*.md)) -> if the current spec is part of a multi-spec/multi-plan process then this points to the NEXT plan in the sequence
+    human_in_the_loop: string[] -> filled out with review items when it has determined that a human review is required
 description: |-
     Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.
 
     > **Note:** the caller _can_ pass in the **iteration** number but it should be detected automatically.
 
-    **First Review:** in the first review cycle, the very first thing we consider is whether the implementation surfaced a critical decision the author must make.
+    There are two special cases in the review cycle that can be activated:
 
-    - if it did, this review is repurposed to document those decisions; `just fix` then opens an interactive session with the author to settle them
-    - if it did not, this review is conducted like a normal review that compares the implementation against what was specified
+    1. **First Review**
 
-    Refreshing later specs in a multi-spec pipeline is not done here: the implementation's final phase does it.
+        When we are in the first review cycle, the very first thing we will consider is whether there is a need for human-in-the-loop review.
 
+        - if there is then this review will be repurposed to focus on getting the review feedback from the caller
+        - if there is not then this review will be conducted like a normal review that compares the implementation against what was specified
+    
+    2. **Next-spec refresh** (_in a multi-spec pipeline_)
+
+        In the first review -- but _only_ when a `next_spec` is passed and no human ruling is pending -- the next spec and plan are
+        refreshed against what this spec actually built, and the outcome is recorded as `next_spec_refresh` on the review file.
+    
 dir: "{{dirname(spec)}}"
 design: |-
     {{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}
@@ -28,12 +38,31 @@ review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
 # repo-relative `dir`.
 previous_review: "{{ iteration > 1 ? replace(spec, basename(spec), 'review-' + (iteration - 1) + '.md') : null }}"
 spec_name: "{{ parent_dir(spec) }}"
-log: "{{ dirname(spec) + '/implementation-log.md' }}"
+next_plan: |-
+    {{
+        next_spec
+            ? replace(next_spec, "spec","plan")
+            : null
+    }}
+
 
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
+initialize:
+    # Reviewing before the author has ruled would review code the rulings are
+    # about to change.
+    - when: "previous_review && file_exists(previous_review) && !is_empty(frontmatter(previous_review, 'human_in_the_loop')) && frontmatter(previous_review, 'human_resolved') != true"
+      then:
+          - warn: "{{basename(previous_review)}} is waiting on a human: run `just fix {{spec}}` in a terminal to record the rulings"
+          - error: "{{basename(previous_review)}} is waiting on a human"
 start:
     message: "🏃‍♂️ starting review #{{iteration}} of `{{parent_dir(spec)}}` (_{{feature_or_fix}} in the **{{ctx.area || ctx.repo}}**_)"
 success:
+    - when: "!is_empty(frontmatter(review, 'human_in_the_loop'))"
+      then:
+          - message: |-
+                🛑  review #{{iteration}} of `{{parent_dir(spec)}}` in **{{ctx.area || ctx.repo}}** needs your rulings before the cycle can continue:
+
+                {{ as_ordered_list(frontmatter(review, 'human_in_the_loop') || []) }}
     - when: "frontmatter(review,'ready') == true"
       then:
           - success: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in **{{ctx.area}}** finished and deemed code to be **production ready**"
@@ -72,13 +101,31 @@ failure:
         💥 {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in **{{ ctx.area || ctx.repo }}** failed to complete ({{err.msg}})!
     effect: phase-jump-3
 finalize:
-    - when: "!err && file_exists(review) && is_array(frontmatter(review, 'human_in_the_loop')) && length(frontmatter(review, 'human_in_the_loop')) > 0"
-      then:
-          - info: |-
-                the first review after the implementation of {{ link(spec) }} found decisions that need the author:
+    # Read the refresh outcome after the agent writes the review file.
+    - when: "!err && next_spec && file_exists(review) && frontmatter(review, 'next_spec_refresh') == 'refreshed'"
+      message: |-
+        - the next spec in the pipeline, `{{parent_dir(next_spec)}}`, and its plan were refreshed:
 
-                {{ as_ordered_list(frontmatter(review, 'human_in_the_loop')) }}
-          - message: "🤷  the first review of `{{spec_name}}` found **{{ length(frontmatter(review, 'human_in_the_loop')) }}** decision(s) that need the author; `just fix` opens an interactive session to settle them"
+        {{ frontmatter(review, 'next_spec_refresh_summary') }}
+      info: |-
+        - the next spec in the pipeline, {{link(next_spec)}}, and its plan were refreshed:
+
+        {{ frontmatter(review, 'next_spec_refresh_summary') }}
+    - when: "!err && next_spec && file_exists(review) && frontmatter(review, 'next_spec_refresh') == 'not-needed'"
+      message: |-
+        - the next spec in the pipeline, `{{parent_dir(next_spec)}}`, was checked and needed no refresh
+      info: |-
+        - the next spec in the pipeline, {{link(next_spec)}}, was checked and needed no refresh
+    - when: "!err && next_spec && file_exists(review) && frontmatter(review, 'next_spec_refresh') == 'blocked'"
+      message: |-
+        - refreshing the next spec in the pipeline, `{{parent_dir(next_spec)}}`, hit a blocking decision:
+
+        {{ frontmatter(review, 'next_spec_refresh_summary') }}
+      info: |-
+        - refreshing the next spec in the pipeline, {{link(next_spec)}}, hit a blocking decision:
+
+        {{ frontmatter(review, 'next_spec_refresh_summary') }}
+      stop: null
 ---
 # Review of {{title_case(without_date(parent_dir(spec)))}}
 
@@ -110,7 +157,7 @@ implementation, not evidence.
 Write a `## Previous Finding Verification` table with these columns: finding ID
 and title, required instances, outcome, verification evidence, and what remains.
 Include every finding from the previous review and any still-open finding from
-earlier reviews. Observations are not findings and are not carried.
+earlier reviews.
 
 - Use outcomes **verified fixed**, **partially fixed**, **regressed**, **still
   blocked**, **newly unblocked**, or **unresolved**. A finding is verified fixed
@@ -122,62 +169,92 @@ earlier reviews. Observations are not findings and are not carried.
   Findings` with its original ID and what remains. Any open finding, whatever
   its priority, keeps `ready: false` (see "What blocks readiness"); a pending
   human review alone does not.
+
+If an earlier review in this directory has a `## Human rulings` section, each
+ruling there is the author's decision, with the same authority as the spec;
+where a ruling and the spec disagree, the ruling wins. A ruling that requires
+a change is a **high** finding until the change is done (cite it as
+"review-N.md, item M"). Never ask about a ruled item again.
 ::end-block
 
 ## Task
 
 ::block when="iteration == 1"
-### Choose Course of Action
+### Gather the implementer's decisions
 
-You are in the first review cycle after the implementation. The implementing
-agents were told to decide rather than ask, to record every decision (with the
-alternatives, why, and the downsides) in the implementation log, and to list a
-truly critical decision in the log's `decisions_for_author`. So the very first
-thing you do is:
+The implementation ran unattended and was told to decide rather than stop.
+Before comparing it with the spec, have two sub-agents read, in parallel, the
+implementation log in `{{dir}}` (starting with its `decisions_for_review`
+frontmatter list and any "Decided during implementation" heading) and the spec
+(including any decision that pre-authorizes bounded implementer autonomy).
+Each returns lists, not prose:
 
-- have two sub-agents review:
-    - the implementation log ({{log}}), including its `decisions_for_author` frontmatter
-    - the spec file
-- both sub-agents should be instructed to:
-    - find any decisions which were made by the agent during the implementation
-    - find any decision that the agent flagged for the author
-    - find any requested scope that was deferred, narrowed, or left "blocked on a ruling"
+- every decision the implementer made where the spec did not dictate the answer
+- every decision it flagged for the author
+- every piece of work it deferred, and why
 
-Deferred scope is never a question for the author: deferring requested scope is
-forbidden, so each instance is a **high finding** in this review, and the
-repair implements it.
-
-::file ../_decisions.md
-
-Then choose one of these courses of action:
-
-1. **Human review:** at least one decision meets the bar in "When a human is needed" above (an item in `decisions_for_author` is a candidate; check it against the bar rather than passing it through).
-    - a decision the agent recorded with its alternatives and reasoning does not qualify just because the author has not seen it, and neither does a recommendation the spec or plan already made
-    - Process:
-        - Report back to caller using the **Writing Clearly** guidelines below
-        - the reporting should include rich context, give examples where possible
-        - use Mermaid code blocks for any diagrams you feel would help
-        - Set the following properties on the review file's Frontmatter:
-            - set `human_in_the_loop` to a list with one entry per decision (a YAML `|-` block each): what the decision is, why it is critical, the options with pros and cons, and your recommendation; Markdown, including Mermaid code blocks, is allowed
-            - set `human_resolved` to `false`
-            - set `ready` to `false`, and `findings` to the deferred-scope findings (an empty list when there are none)
-            - set `reviewed_by` property to "{{ctx.agent}}/{{ctx.model}}" 
-            - set `created` property to "{{ctx.now}}"
-            - set `spec` property to "{{ parent_dir(spec) }}/{{ basename(spec) }}"
-            - set `implemented` property to `false`
-            - set `description` property to "A **{{feature_or_fix}}** review of `{{ parent_dir(spec) }}/{{ basename(spec) }}`"
-
-    - You are done when:
-        - you have summarized -- in prose -- what needs to be reviewed back to the caller
-        - and documented those same decisions in the `human_in_the_loop` frontmatter property of the {{review}} file
-        - all other required Frontmatter metadata is set on the review file
-
-    > **Note:** the exercise of comparing the implementation to the specification is **not** done during this review when you choose this course of action; the focus is exclusively to document what we need from the author. The next review does the full comparison after the author's decisions are applied.
-2. **Summarize decisions and gather findings:** no decision meets the bar
-    - report the agent's decisions to the caller for informational purposes
-    - set `human_in_the_loop` property on the review file to `null` 
-    - the review process continues in the normal fashion
+Judge each item with "Stopping for a human" below. Record every item that does
+not need a human under `## Implementation decisions (informational)` in the
+review body, and put a one-line summary of each in `human_review_items` (see
+the readiness rules); they never stop the cycle.
 ::end-block
+
+### Stopping for a human
+
+Every stop halts the pipeline until the author is at a terminal, so the
+default is **not to stop**. An item needs a human only when at least one of
+these is true **and** you cannot recommend an option that stays within the
+spec, its decisions, and the author's rulings:
+
+1. **Hard to reverse:** it fixes a public API, an error or wire format, a
+   persisted format, or a name that dependents or later specs build on.
+2. **Contradicts a decision:** every way forward departs from something the
+   spec decided or the author ruled, and the spec does not pre-authorize the
+   departure.
+3. **Changes scope:** it adds or removes scope, or moves work to or from
+   another spec (for example, a finding that cannot be repaired until another,
+   unimplemented spec lands).
+4. **Safety or trust:** it sets a default affecting credentials, network
+   reach, data loss, or security beyond what the spec states.
+5. **No safe default:** the options trade off things the author would weigh,
+   the wrong choice is costly, and the spec supplies no default.
+6. **Human-only verification:** the spec requires evidence only a human can
+   produce.
+
+These never need a human:
+
+- a decision the implementer made that you would recommend anyway, or one the
+  spec pre-authorizes and whose conditions it met
+- a choice that is cheap to change later (names inside one crate, test
+  layout, internal structure, a test's measurement method when the stated
+  purpose of the acceptance criterion is kept)
+- a decision the author already made; ask again only when new evidence breaks
+  its premise, and then quote the decision and say what changed
+- anything whose answer would be "go with your recommendation"
+
+A finding whose repair needs a decision that does **not** meet the test is an
+ordinary, unblocked finding: state the option you recommend in the finding,
+and the repair step implements it. Never mark such a finding blocked and never
+write that a decision is "reserved for the author".
+
+When at least one item meets the test:
+
+- still do the full spec review below, so the repair after the rulings can fix
+  every finding in the same cycle
+- write at most **5** items to `human_in_the_loop`, ranked by the rework a
+  wrong choice would cause; each item says, in plain language that assumes no
+  knowledge of this repository, what it is, which test it meets, 2–4 options
+  with pros and cons, your recommendation and why, and which findings wait on
+  it. Use YAML's `|-` for long items; Markdown and Mermaid are allowed
+- set `human_resolved` to `false`, and set `blocked` and `has_blocked_findings`
+  as the readiness rules describe; a finding is blocked only when it waits on
+  one of these items
+- end the review body with a `## Human rulings` heading and one
+  `### Item N` subheading per item containing `Ruling: (pending)`
+- the `just fix` loop collects the rulings interactively and then continues;
+  do not try to stop it yourself
+
+When no item meets the test, set `human_in_the_loop` to `null`.
 
 ## Spec Review
 
@@ -202,9 +279,11 @@ Every finding cites its **authority**, in its first paragraph:
   design) it violates, quoted or numbered; or
 - **regression**: behavior that worked on the base branch and no longer does,
   reached by a **realistic input**: one an existing call site, template, or
-  fixture produces, or one a user would plausibly type.
+  fixture produces, or one a user would plausibly type; or
+- **defect**: code you read during the review, whether or not this spec added
+  or changed it, that gives a wrong result for a realistic input.
 
-A finding with neither is an **observation**. A behavior the spec does not
+An issue with none of these is not reported. A behavior the spec does not
 require is not made a requirement by a `docs/` page, a CommonMark or other
 external standard, or a reviewer's own expectation of how the code ought to
 behave.
@@ -218,14 +297,10 @@ behave.
 Priority orders the repair work (high first); it never decides whether the
 cycle can end.
 
-List observations under `## Observations`, one short paragraph each, after the
-findings. Defects in code this spec did not add or change are always
-observations, unless this spec's change made them reachable. Observations do
-not block `ready`, but the implementation repairs every observation that
-describes a defect in the same cycle. So write each one as a defect report:
-where it is, the input that reaches it, and the wrong result. An observation
-that describes no defect (a note about future work, a naming remark) says so
-in its first sentence.
+A defect in code this spec did not add or change is a finding like any other:
+it gets a priority, blocks `ready`, and is repaired in the next cycle. Write it
+as a defect report: where it is, the input that reaches it, and the wrong
+result.
 
 When a fix for a finding would be large next to the harm it prevents (a new
 escaping or protection layer, new syntax in generated output, a matrix of
@@ -242,8 +317,8 @@ default. One review that swept every parser for that class would have
 replaced all five.
 
 The sweep is bounded by the spec: siblings are sites this spec added or
-changed, and the call sites that reach them. A sibling outside that boundary
-is an observation.
+changed, and the call sites that reach them. A sibling you notice outside that
+boundary is reported as a finding of its own.
 
 For every high or medium finding:
 
@@ -271,7 +346,7 @@ For every high or medium finding:
 Low findings get an ID too, without a sweep.
 
 Do not stop at the first high finding. Finish the sweep, then write. Every
-blocking finding goes in the titled findings and the frontmatter `findings`
+finding goes in the titled findings and the frontmatter `findings`
 list, including one discovered in a robustness or verification section, so the
 repair inventory is complete.
 
@@ -340,6 +415,7 @@ test is at the wrong level under "Findings" with severity at least "high".
     - set `$schema` to "feature-review.yaml"
     ::file "../_ready.md"
     - set `reviewed_by` property to "{{ctx.agent}}/{{ctx.model}}" 
+    - set `human_in_the_loop` (and `human_resolved: false`) only as "Stopping for a human" describes; otherwise set `human_in_the_loop` to `null`
     - set `recurrence` to `true` when any finding repeats the class of a finding in an earlier review (see "Recurrence" above), otherwise `false`
     - set `created` property to "{{ctx.now}}"
     - set `spec` property to "{{ parent_dir(spec) }}/{{ basename(spec) }}"
@@ -366,13 +442,35 @@ The spec file which underpins the requirements for this feature review needs to 
 - if you set the review's `ready` property to `true` then set the spec file's `completed` property to `true`
 
 
-::block when="iteration == 1"
+::block when="iteration == 1 && !is_empty(next_spec)"
 
-### Human in the Loop?
+### Spec and Plan Refresh
 
-This is the first review after the implementation completed. Make sure
-`human_in_the_loop` on the review file ({{review}}) matches the course of action
-you chose above: the list of decisions for the author, or `null`.
+We are in a multi-plan based implementation:
+
+- the next spec is '{{next_spec}}', it has a plan located at '{{next_plan}}'
+- both the **spec** and the **plan** were written _before_ the current spec was implemented
+- we must now refresh the next spec and plan based on:
+    - what was learned and built while implementing this spec (its implementation log, the landed code, and this review's findings)
+    - every decision recorded in this review, adopted or ruled
+- skip this section when "Stopping for a human" requires a ruling; the next spec then stays `refresh_required: true` until the blocking decisions are ruled
+
+Refresh the next spec ({{next_spec}}):
+
+- check its "Refresh notes" (or similar) section and every assumption it makes about this spec: symbol names, file paths, contracts, serialized formats, counts, version constants, and builder or runtime surfaces; verify each against the landed code, not against this spec's text
+- correct stale facts in place and add a dated reader note summarizing what changed and why; keep decided requirements unless the landed code forces a change, and say so when it does
+- resolve choices using "Stopping for a human": adopt a recommendation that stays within the spec and author rulings and record it; request a ruling only when that test requires one
+- set its `refresh_required` frontmatter property to `false`
+
+Refresh the next plan ({{next_plan}}):
+
+- update rules and tasks that cite stale names, files, counts, or prerequisites; a prerequisite gate that the landed code now satisfies must say so, listing the actual symbols and locations, and must not wait on rulings already recorded
+- if its implementation log already exists from a run that stopped at a prerequisite gate, set that log's `human_review` to `false`, remove its `human_review_items` and `message_to_agent`, append a dated note explaining the refresh, and set the plan's `phase` back to the first phase that did no real work
+
+Record the outcome on this review file ({{review}}):
+
+- `next_spec_refresh`: `refreshed`, `not-needed`, or `blocked` (only when a blocking decision stops the refresh)
+- `next_spec_refresh_summary`: a short Markdown list of what changed, or of the blocking decision
 
 ::end-block
 

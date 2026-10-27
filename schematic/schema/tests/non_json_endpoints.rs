@@ -4,11 +4,12 @@
 //!
 //! Each test uses a real generated endpoint whose definition declares the
 //! codec under test: GitHub `GetRepositoryContentRaw` (text), Bitbucket
-//! `GetSource` (binary), and Samsung Smart TV `LaunchApplicationById` (empty).
+//! `GetSource`'s `File` binary fallback, and Samsung Smart TV
+//! `LaunchApplicationById` (empty).
 //! Calls are anonymous so a host credential never reaches the mock.
 
 use bytes::Bytes;
-use schematic_schema::bitbucket::GetSourceRequest;
+use schematic_schema::bitbucket::{GetSourceRequest, GetSourceResponse};
 use schematic_schema::prelude::*;
 use schematic_schema::schematic_runtime::{Method, RawCompletion};
 use wiremock::matchers::{header, method, path, query_param};
@@ -44,7 +45,8 @@ async fn text_endpoint_decodes_into_string() {
     assert_eq!(text, "# Widgets\n");
 }
 
-/// The binary endpoint returns the body bytes unchanged as `Bytes`.
+/// A binary shape returns the body bytes unchanged as `Bytes`: `GetSource`
+/// selects its `File` fallback for a media type no other shape declares.
 #[tokio::test]
 async fn binary_endpoint_decodes_into_bytes() {
     let mock_server = MockServer::start().await;
@@ -60,13 +62,15 @@ async fn binary_endpoint_decodes_into_bytes() {
         .base_url(mock_server.uri())
         .build()
         .expect("client builds");
-    let body: Bytes = client
+    let reply = client
         .get_source("team", "app", "abc123", "logo.png")
         .pagelen(10)
         .anonymous()
         .await
         .expect("success");
 
+    let GetSourceResponse::File(body) = reply else { panic!("an image/png body is the file, not a listing: {reply:?}") };
+    let body: Bytes = body;
     assert_eq!(body.as_ref(), PNG_PREFIX);
 }
 

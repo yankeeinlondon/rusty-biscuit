@@ -285,7 +285,6 @@ pub(super) fn generate_variant_builder(struct_name: &Ident, builder_name: &Ident
                             schematic_define::RestApi::legacy_env_mapping_for(
                                 &auth_strategy,
                                 &env_auth,
-                                self.base.env_username.as_deref(),
                             ),
                         )
                     }
@@ -298,7 +297,6 @@ pub(super) fn generate_variant_builder(struct_name: &Ident, builder_name: &Ident
                     env_auth,
                     auth_strategy,
                     auth_policy,
-                    env_username: self.base.env_username.clone(),
                     headers,
                     api_key_param: self.base.api_key_param.clone(),
                     variant_hooks: crate::shared::VariantHooks {

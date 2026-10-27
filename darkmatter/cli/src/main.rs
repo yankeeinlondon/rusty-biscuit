@@ -241,7 +241,16 @@ fn run() -> Result<()> {
         &[],
         None,
     )?;
-    run_render(cli.input.as_ref(), cli.output, cli.show, None, policy.denies("style"), &cli, &request)?;
+    run_render(
+        cli.input.as_ref(),
+        cli.output,
+        cli.show,
+        None,
+        policy.denies("style"),
+        &cli.features,
+        &cli,
+        &request,
+    )?;
 
     Ok(())
 }

@@ -797,146 +797,174 @@ fn a_proxy_out_of_a_failed_verdict_captures_the_targets_own_baseline() {
     );
 }
 
-const PROXY_OVERLAY_TARGET: &str = concat!(
-    "---\n",
-    "$schema:\n",
-    "  prompt: 'string(required;eager)'\n",
-    "  researched_by: 'string(required)'\n",
-    "prompt: Write the research\n",
-    "agent: goose\n",
-    "---\n",
-    "target body\n",
-);
-
 /// AC14: a `proxy.with` overlay is a transient effective-frontmatter input, so
 /// it satisfies the *target's* completion schema without ever being written to
 /// the target file — the same rule `--set` and sequence state follow.
-#[test]
-fn a_proxy_with_overlay_satisfies_the_targets_completion_schema() {
-    let source = concat!(
-        "---\n",
-        "prompt: Route to the researcher\n",
-        "agent: goose\n",
-        "initialize:\n",
-        "  - {proxy: {target: './target.md', with: {researched_by: from-the-router}}}\n",
-        "---\n",
-        "router body\n",
-    );
-    let fixture = Fixture::new(source);
-    let target = fixture.document.parent().unwrap().join("target.md");
-    let target_source = PROXY_OVERLAY_TARGET;
-    fs::write(&target, target_source).unwrap();
+mod a_proxy_with_overlay_satisfies_the_targets_completion_schema {
+    use super::*;
 
-    // The agent writes only the body — `researched_by` arrives from the
-    // overlay alone.
-    write_executable(
-        &fixture.bin.join("goose"),
-        &format!(
-            "#!/bin/sh\n{doc_from_prompt}\
-             CLAUDINE_ADD=''\n\
-             CLAUDINE_BODY='Agent wrote this.\n'\n\
-             {rewrite}\
-             printf 'wrote %s\\n' \"$CLAUDINE_DOC\"\n\
-             exit 0\n",
-            doc_from_prompt = common::INLINE_DOC_FROM_PROMPT,
-            rewrite = common::INLINE_BODY_REWRITE,
-        ),
-    );
+    /// The router, its proxy `target.md`, and the body-writing agent stub.
+    fn staged() -> (Fixture, std::path::PathBuf) {
+        let source = concat!(
+            "---\n",
+            "prompt: Route to the researcher\n",
+            "agent: goose\n",
+            "initialize:\n",
+            "  - {proxy: {target: './target.md', with: {researched_by: from-the-router}}}\n",
+            "---\n",
+            "router body\n",
+        );
+        let fixture = Fixture::new(source);
+        let target = fixture.document.parent().unwrap().join("target.md");
+        let target_source = concat!(
+            "---\n",
+            "$schema:\n",
+            "  prompt: 'string(required;eager)'\n",
+            "  researched_by: 'string(required)'\n",
+            "prompt: Write the research\n",
+            "agent: goose\n",
+            "---\n",
+            "target body\n",
+        );
+        fs::write(&target, target_source).unwrap();
 
-    fixture.inline_compose().success();
+        // The agent writes only the body — `researched_by` arrives from the
+        // overlay alone.
+        write_executable(
+            &fixture.bin.join("goose"),
+            &format!(
+                "#!/bin/sh\n{doc_from_prompt}\
+                 CLAUDINE_ADD=''\n\
+                 CLAUDINE_BODY='Agent wrote this.\n'\n\
+                 {rewrite}\
+                 printf 'wrote %s\\n' \"$CLAUDINE_DOC\"\n\
+                 exit 0\n",
+                doc_from_prompt = common::INLINE_DOC_FROM_PROMPT,
+                rewrite = common::INLINE_BODY_REWRITE,
+            ),
+        );
+        (fixture, target)
+    }
 
-    let target_after = fs::read_to_string(&target).unwrap();
-    assert!(
-        target_after.contains("Agent wrote this."),
-        "the target's body is the deliverable:\n{target_after}"
-    );
-    assert!(
-        !target_after.contains("from-the-router"),
-        "a transient overlay must never be persisted to the target:\n{target_after}"
-    );
+    #[test]
+    fn the_overlay_satisfies_the_schema_and_is_never_persisted() {
+        let (fixture, target) = staged();
+        fixture.inline_compose().success();
+
+        let target_after = fs::read_to_string(&target).unwrap();
+        assert!(
+            target_after.contains("Agent wrote this."),
+            "the target's body is the deliverable:\n{target_after}"
+        );
+        assert!(
+            !target_after.contains("from-the-router"),
+            "a transient overlay must never be persisted to the target:\n{target_after}"
+        );
+    }
+
+    /// Without the overlay the same target fails completion — proving the
+    /// overlay, not a missing check, is what made the run above succeed.
+    #[test]
+    fn the_target_without_the_overlay_fails_completion() {
+        let (fixture, target) = staged();
+        let without = fixture
+            .command()
+            .args(["inline-compose", target.to_str().unwrap()])
+            .assert()
+            .failure();
+        assert!(
+            stderr_of(&without).contains("researched_by"),
+            "stderr:\n{}",
+            stderr_of(&without)
+        );
+    }
 }
-
-#[test]
-fn a_proxy_overlay_target_without_the_overlay_fails_completion() {
-    let fixture = Fixture::new(PROXY_OVERLAY_TARGET);
-    InlineAgentStub::new(&fixture.document)
-        .body("Agent wrote this.\n")
-        .install(&fixture.bin, "goose");
-    let verdict = fixture.inline_compose().failure();
-    assert!(stderr_of(&verdict).contains("researched_by"), "stderr:\n{}", stderr_of(&verdict));
-}
-
-const SEQUENCE_OVERLAY_MEMBER: &str = concat!(
-    "---\n",
-    "$schema:\n",
-    "  prompt: 'string(required;eager)'\n",
-    "  researched_by: 'string(required)'\n",
-    "prompt: Write the research\n",
-    "agent: goose\n",
-    "---\n",
-    "research body\n",
-);
 
 /// AC14: sequence state is the third transient channel. A task's `with`
 /// satisfies the referenced document's completion schema for that step only, and
 /// the referenced file never records the value.
-#[test]
-fn sequence_task_with_satisfies_the_referenced_documents_completion_schema() {
-    let plan = concat!(
-        "---\n",
-        "agent: goose\n",
-        "sequence:\n",
-        "  - name: research\n",
-        "    prompt: research.md\n",
-        "    with:\n",
-        "      researched_by: \"{{ seq.name }}\"\n",
-        "---\n",
-        "plan body\n",
-    );
-    let fixture = Fixture::new(plan);
-    let member = fixture.document.parent().unwrap().join("research.md");
-    let member_source = SEQUENCE_OVERLAY_MEMBER;
-    fs::write(&member, member_source).unwrap();
+mod sequence_task_with_satisfies_the_referenced_documents_completion_schema {
+    use super::*;
 
-    write_executable(
-        &fixture.bin.join("goose"),
-        &format!(
-            "#!/bin/sh\n{doc_from_prompt}\
-             CLAUDINE_ADD=''\n\
-             CLAUDINE_BODY='Agent wrote this.\n'\n\
-             {rewrite}\
-             printf 'wrote %s\\n' \"$CLAUDINE_DOC\"\n\
-             exit 0\n",
-            doc_from_prompt = common::INLINE_DOC_FROM_PROMPT,
-            rewrite = common::INLINE_BODY_REWRITE,
-        ),
-    );
+    /// The plan, its referenced `research.md` member, and the rewriting agent stub.
+    fn staged() -> (Fixture, std::path::PathBuf) {
+        let plan = concat!(
+            "---\n",
+            "agent: goose\n",
+            "sequence:\n",
+            "  - name: research\n",
+            "    prompt: research.md\n",
+            "    with:\n",
+            "      researched_by: \"{{ seq.name }}\"\n",
+            "---\n",
+            "plan body\n",
+        );
+        let fixture = Fixture::new(plan);
+        let member = fixture.document.parent().unwrap().join("research.md");
+        let member_source = concat!(
+            "---\n",
+            "$schema:\n",
+            "  prompt: 'string(required;eager)'\n",
+            "  researched_by: 'string(required)'\n",
+            "prompt: Write the research\n",
+            "agent: goose\n",
+            "---\n",
+            "research body\n",
+        );
+        fs::write(&member, member_source).unwrap();
 
-    fixture
-        .command()
-        .args(["sequence", fixture.document.to_str().unwrap()])
-        .assert()
-        .success();
+        write_executable(
+            &fixture.bin.join("goose"),
+            &format!(
+                "#!/bin/sh\n{doc_from_prompt}\
+                 CLAUDINE_ADD=''\n\
+                 CLAUDINE_BODY='Agent wrote this.\n'\n\
+                 {rewrite}\
+                 printf 'wrote %s\\n' \"$CLAUDINE_DOC\"\n\
+                 exit 0\n",
+                doc_from_prompt = common::INLINE_DOC_FROM_PROMPT,
+                rewrite = common::INLINE_BODY_REWRITE,
+            ),
+        );
+        (fixture, member)
+    }
 
-    let member_after = fs::read_to_string(&member).unwrap();
-    assert!(
-        member_after.contains("Agent wrote this."),
-        "the step's document is the deliverable:\n{member_after}"
-    );
-    assert!(
-        !member_after.contains("researched_by: research"),
-        "sequence state must never be persisted to the referenced document:\n{member_after}"
-    );
-}
+    #[test]
+    fn the_tasks_with_satisfies_the_schema_and_is_never_persisted() {
+        let (fixture, member) = staged();
+        fixture
+            .command()
+            .args(["sequence", fixture.document.to_str().unwrap()])
+            .assert()
+            .success();
 
-#[test]
-fn a_sequence_overlay_member_without_the_overlay_fails_completion() {
-    let fixture = Fixture::new(SEQUENCE_OVERLAY_MEMBER);
-    InlineAgentStub::new(&fixture.document)
-        .body("Agent wrote this.\n")
-        .install(&fixture.bin, "goose");
-    let verdict = fixture.inline_compose().failure();
-    assert!(stderr_of(&verdict).contains("researched_by"), "stderr:\n{}", stderr_of(&verdict));
+        let member_after = fs::read_to_string(&member).unwrap();
+        assert!(
+            member_after.contains("Agent wrote this."),
+            "the step's document is the deliverable:\n{member_after}"
+        );
+        assert!(
+            !member_after.contains("researched_by: research"),
+            "sequence state must never be persisted to the referenced document:\n{member_after}"
+        );
+    }
+
+    /// The same document run on its own fails completion, so the task's `with`
+    /// — not a missing check — are what satisfied the schema in the test above.
+    #[test]
+    fn the_same_document_run_alone_fails_completion() {
+        let (fixture, member) = staged();
+        let alone = fixture
+            .command()
+            .args(["inline-compose", member.to_str().unwrap()])
+            .assert()
+            .failure();
+        assert!(
+            stderr_of(&alone).contains("researched_by"),
+            "stderr:\n{}",
+            stderr_of(&alone)
+        );
+    }
 }
 
 /// AC9a / AC13, inline half: a required-but-not-eager property whose authored

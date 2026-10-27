@@ -1,4 +1,4 @@
-use crate::args::LayoutArgs;
+use crate::args::{LayoutArgs, MermaidFeatureArgs};
 use crate::commands::mermaid::{build_mermaid_diagram, display_mermaid};
 use crate::commands::shared::{print_example_command_with_terminal, terminal_for_render};
 use crate::commands::{CliContext, Run};
@@ -38,6 +38,9 @@ pub struct BarChartArgs {
     #[command(flatten)]
     pub layout: LayoutArgs,
 
+    #[command(flatten)]
+    pub features: MermaidFeatureArgs,
+
     #[arg(long)]
     pub horizontal: bool,
 
@@ -72,6 +75,7 @@ impl Run for BarChartArgs {
             self.y_axis.as_deref(),
             self.width.as_ref().map(|w| w.to_string()).as_deref(),
             &self.layout,
+            &self.features,
             self.horizontal,
             self.show_data_label,
             self.aspect_ratio.map(|a| a.value()),
@@ -104,6 +108,9 @@ pub struct LineChartArgs {
 
     #[command(flatten)]
     pub layout: LayoutArgs,
+
+    #[command(flatten)]
+    pub features: MermaidFeatureArgs,
 
     #[arg(long)]
     pub horizontal: bool,
@@ -139,6 +146,7 @@ impl Run for LineChartArgs {
             self.y_axis.as_deref(),
             self.width.as_ref().map(|w| w.to_string()).as_deref(),
             &self.layout,
+            &self.features,
             self.horizontal,
             self.show_data_label,
             self.aspect_ratio.map(|a| a.value()),
@@ -162,6 +170,7 @@ pub fn render_xy_chart(
     y_axis: Option<&str>,
     width: Option<&str>,
     layout: &LayoutArgs,
+    features: &MermaidFeatureArgs,
     horizontal: bool,
     show_data_label: bool,
     aspect_ratio: Option<f32>,
@@ -300,7 +309,7 @@ pub fn render_xy_chart(
         return Ok(());
     }
 
-    let diagram = build_mermaid_diagram(&instructions, inverse, width, layout)?;
+    let diagram = build_mermaid_diagram(&instructions, eff_title, inverse, width, layout, features)?;
     let chart_name = match chart_type {
         XyChartType::Bar => "bar chart",
         XyChartType::Line => "line chart",

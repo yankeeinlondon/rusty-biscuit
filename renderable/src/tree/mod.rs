@@ -105,6 +105,14 @@ pub enum TerminalMermaidMode {
     /// Promote Mermaid fences to rasterized images where the tier and
     /// terminal capability allow (rasterized only at [`GraphicsMode::Rich`]).
     Image,
+    /// Promote Mermaid fences to the best presentation the ceiling allows: an
+    /// image when graphics allow one, an eligible text drawing otherwise, and
+    /// the ordinary code block when the diagram is not eligible for text.
+    ///
+    /// The diagram hook is offered the fence at [`GraphicsMode::Rich`] and
+    /// [`GraphicsMode::Vector`] (text only); at [`GraphicsMode::Off`] the fence
+    /// stays a code block, as in [`TerminalMermaidMode::Code`].
+    Automatic,
 }
 
 // Re-export terminal capability types for tree-render consumers.

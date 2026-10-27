@@ -12,9 +12,9 @@
 //!   infallible `new()`, and `basic_auth()` when the API accepts HTTP Basic
 //! - a `{Name}Api` tag type that the API's request types name, so the client
 //!   sends only that API's requests
-//! - one request struct per endpoint, implementing
-//!   `schematic_runtime::EndpointSpec` (its API, success type, codec, and
-//!   endpoint id)
+//! - one request struct per endpoint and per GraphQL operation, implementing
+//!   `schematic_runtime::EndpointSpec` (its API, success, failure, and codec
+//!   types, error table, and endpoint id)
 //!
 //! ## Modules
 //!
@@ -80,7 +80,6 @@ pub mod diagnostics;
 pub mod errors;
 pub mod export;
 pub mod import_pipeline;
-pub mod inference;
 pub mod model_gen;
 pub mod openapi_output;
 pub mod output;
@@ -90,15 +89,13 @@ pub mod postman_output;
 pub mod validation;
 pub mod ws_codegen;
 
-pub use inference::infer_module_path;
-
 /// The `schematic_runtime::ABI` this generator emits code for.
 ///
 /// Generated `lib.rs` declares it as `SCHEMATIC_RUNTIME_ABI` and asserts at
 /// compile time that the runtime it builds against has the same value;
 /// partial generation refuses to keep modules generated for another value.
 /// It changes together with the runtime's constant, which a test checks.
-pub const RUNTIME_ABI: u32 = 4;
+pub const RUNTIME_ABI: u32 = 8;
 
 
 pub use export::openapi::{
@@ -107,7 +104,7 @@ pub use export::openapi::{
 pub use export::postman::{write_postman, write_postman_grouped};
 
 pub use validation::{
-    validate_openapi, validate_openapi_registry, validate_postman, validate_rust_client,
+    validate_openapi, validate_postman, validate_rust_client,
 };
 
 #[cfg(test)]

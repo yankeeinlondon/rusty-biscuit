@@ -10,117 +10,58 @@ use colored::Colorize;
 use indexmap::IndexMap;
 use schematic_define::RestApi;
 use schematic_define::openapi::{ExportFormat, ExportOptions};
-use schematic_definitions::registry::{SchemaRegistry, get_registries_for_module};
+use schematic_definitions::naming::resolve_module_name;
+use schematic_definitions::registry::{ApiRegistration, registrations};
 
 use crate::diagnostics::{Output, ValidationDiagnostic, has_errors};
 use crate::errors::GeneratorError;
 use crate::export::openapi::{build_openapi_grouped, render_openapi_document};
-use crate::export::postman::render_postman_module;
+use crate::export::postman::{render_postman_environment, render_postman_module};
 use crate::output::{
     MutationPlan, PublicationReport, RustOutputRequest, Selection, expand_selection,
     prepare_export_output, prepare_rust_output,
 };
-use crate::validation::{
-    validate_openapi, validate_openapi_registry, validate_postman, validate_rust_client,
-};
+use crate::validation::{validate_openapi, validate_postman, validate_rust_client};
 
-/// List of available API names for error messages.
-const AVAILABLE_APIS: &str = "anthropic, artificial-analysis-data, artificial-analysis-critpt, bitbucket, openai, elevenlabs, eversolo, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, samsung-smart-tv, unfolded-circle-core-rest, all";
+/// The selection names `--api` accepts, then `all`, comma-separated.
+pub fn available_apis() -> String {
+    available_apis_in(registrations())
+}
 
-/// Returns the available API names string.
-pub fn available_apis() -> &'static str {
-    AVAILABLE_APIS
+/// [`available_apis`] over `registrations`: every REST key in registration
+/// order, then `all`.
+pub fn available_apis_in(registrations: &[ApiRegistration]) -> String {
+    let keys: Vec<&str> = registrations.iter().filter_map(|entry| entry.rest()).map(|rest| rest.key).collect();
+    format!("{}, all", keys.join(", "))
 }
 
 /// Resolves an API name to its definition.
 pub fn resolve_api(name: &str) -> Result<RestApi, GeneratorError> {
-    use schematic_definitions::anthropic::define_anthropic_api;
-    use schematic_definitions::artificial_analysis::{
-        define_artificial_analysis_critpt_api, define_artificial_analysis_data_api,
-    };
-    use schematic_definitions::bitbucket::define_bitbucket_api;
-    use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
-    use schematic_definitions::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
-    use schematic_definitions::eversolo::define_eversolo_api;
-    use schematic_definitions::gitea::define_gitea_api;
-    use schematic_definitions::github::define_github_api;
-    use schematic_definitions::gitlab::define_gitlab_api;
-    use schematic_definitions::huggingface::define_huggingface_hub_api;
-    use schematic_definitions::lmstudio::define_lmstudio_api;
-    use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
-    use schematic_definitions::openai::define_openai_api;
-    use schematic_definitions::samsung_smart_tv::define_samsung_smart_tv_api;
-    use schematic_definitions::unfolded_circle::define_unfolded_circle_core_rest_api;
+    resolve_api_in(registrations(), name)
+}
 
-    match name {
-        "anthropic" => Ok(define_anthropic_api()),
-        "artificial-analysis-data" => Ok(define_artificial_analysis_data_api()),
-        "artificial-analysis-critpt" => Ok(define_artificial_analysis_critpt_api()),
-        "bitbucket" => Ok(define_bitbucket_api()),
-        "openai" => Ok(define_openai_api()),
-        "elevenlabs" => Ok(define_elevenlabs_rest_api()),
-        "gitea" => Ok(define_gitea_api()),
-        "github" => Ok(define_github_api()),
-        "gitlab" => Ok(define_gitlab_api()),
-        "huggingface" => Ok(define_huggingface_hub_api()),
-        "lmstudio" => Ok(define_lmstudio_api()),
-        "ollama-native" => Ok(define_ollama_native_api()),
-        "ollama-openai" => Ok(define_ollama_openai_api()),
-        "emqx-basic" => Ok(define_emqx_basic_api()),
-        "emqx-bearer" => Ok(define_emqx_bearer_api()),
-        "eversolo" => Ok(define_eversolo_api()),
-        "samsung-smart-tv" => Ok(define_samsung_smart_tv_api()),
-        "unfolded-circle-core-rest" => Ok(define_unfolded_circle_core_rest_api()),
-        "all" => Err(GeneratorError::ConfigError(
-            "Use resolve_all_apis() for 'all'".to_string(),
-        )),
-        other => Err(GeneratorError::ConfigError(format!(
-            "Unknown API: '{}'. Available APIs: {}",
-            other, AVAILABLE_APIS
-        ))),
+/// [`resolve_api`] over `registrations`: selects a REST API by its key.
+pub fn resolve_api_in(registrations: &[ApiRegistration], name: &str) -> Result<RestApi, GeneratorError> {
+    if name == "all" {
+        return Err(GeneratorError::ConfigError("Use resolve_all_apis() for 'all'".to_string()));
     }
+    let entry = schematic_definitions::registry::find_rest(registrations, name).ok_or_else(|| {
+        GeneratorError::ConfigError(format!(
+            "Unknown API: '{}'. Available APIs: {}",
+            name,
+            available_apis_in(registrations)
+        ))
+    })?;
+    let group: Vec<ApiRegistration> = registrations.iter().filter(|other| other.module == entry.module).copied().collect();
+    Ok(schematic_definitions::registry::rest_apis(&group)
+        .into_iter()
+        .find(|api| api.name == entry.name)
+        .expect("a registered API builds"))
 }
 
 /// Returns all available API definitions for batch generation.
 pub fn resolve_all_apis() -> Vec<RestApi> {
-    use schematic_definitions::anthropic::define_anthropic_api;
-    use schematic_definitions::artificial_analysis::{
-        define_artificial_analysis_critpt_api, define_artificial_analysis_data_api,
-    };
-    use schematic_definitions::bitbucket::define_bitbucket_api;
-    use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
-    use schematic_definitions::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
-    use schematic_definitions::eversolo::define_eversolo_api;
-    use schematic_definitions::gitea::define_gitea_api;
-    use schematic_definitions::github::define_github_api;
-    use schematic_definitions::gitlab::define_gitlab_api;
-    use schematic_definitions::huggingface::define_huggingface_hub_api;
-    use schematic_definitions::lmstudio::define_lmstudio_api;
-    use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
-    use schematic_definitions::openai::define_openai_api;
-    use schematic_definitions::samsung_smart_tv::define_samsung_smart_tv_api;
-    use schematic_definitions::unfolded_circle::define_unfolded_circle_core_rest_api;
-
-    vec![
-        define_anthropic_api(),
-        define_artificial_analysis_data_api(),
-        define_artificial_analysis_critpt_api(),
-        define_bitbucket_api(),
-        define_openai_api(),
-        define_elevenlabs_rest_api(),
-        define_gitea_api(),
-        define_github_api(),
-        define_gitlab_api(),
-        define_huggingface_hub_api(),
-        define_lmstudio_api(),
-        define_ollama_native_api(),
-        define_ollama_openai_api(),
-        define_emqx_basic_api(),
-        define_emqx_bearer_api(),
-        define_eversolo_api(),
-        define_samsung_smart_tv_api(),
-        define_unfolded_circle_core_rest_api(),
-    ]
+    schematic_definitions::all_apis()
 }
 
 /// Resolves default export directories for OpenAPI and Postman.
@@ -178,6 +119,9 @@ pub struct GenerateOpts<'a> {
     pub postman_out: Option<&'a str>,
     pub no_openapi: bool,
     pub no_postman: bool,
+    /// Also write each Postman collection's environment,
+    /// `<module>.postman_environment.json`, beside it.
+    pub postman_environment: bool,
 }
 
 
@@ -262,7 +206,7 @@ pub fn run_generate(api_name: &str, opts: &GenerateOpts<'_>) -> Result<(), Gener
     } else {
         BatchScope::Selection(vec![resolve_api(api_name)?.name])
     };
-    generate_batch(&resolve_all_apis(), &scope, opts, &get_registries_for_module).into_result()
+    generate_batch(&resolve_all_apis(), &scope, opts).into_result()
 }
 
 /// Generates every requested output for `scope` of the registry `apis`.
@@ -275,12 +219,12 @@ pub fn run_generate(api_name: &str, opts: &GenerateOpts<'_>) -> Result<(), Gener
 /// when its own validation and ownership checks pass, so one output's
 /// failure never stops another. Diagnostics print to stderr as they are
 /// found, and the report names which outputs succeeded and which failed.
-/// `registry_for` supplies the OpenAPI schema registry of a module.
+/// Every API carries its own schema components ([`RestApi::schemas`]), which
+/// the Rust types and OpenAPI `components.schemas` are derived from.
 pub fn generate_batch(
     apis: &[RestApi],
     scope: &BatchScope,
     opts: &GenerateOpts<'_>,
-    registry_for: &dyn Fn(&str) -> Option<SchemaRegistry>,
 ) -> GenerationReport {
     let (openapi_out, postman_out) =
         resolve_export_defaults(opts.output, opts.openapi_out, opts.postman_out);
@@ -356,7 +300,7 @@ pub fn generate_batch(
             if let Some(dir) = openapi_out.as_deref().filter(|_| !opts.no_openapi) {
                 report
                     .outputs
-                    .push(publish_openapi(&exports, complete, dir, opts, registry_for));
+                    .push(publish_openapi(&exports, complete, dir, opts));
             }
             if let Some(dir) = postman_out.as_deref().filter(|_| !opts.no_postman) {
                 report
@@ -386,6 +330,22 @@ fn print_diagnostics(diagnostics: &[ValidationDiagnostic]) {
         };
         eprintln!("{label} {diagnostic}");
     }
+}
+
+/// Every Rust-output diagnostic of a run over `batch`: the REST batch's own,
+/// plus the shipped WebSocket definitions' (every Rust run writes their
+/// modules). WebSocket info notes have no shared severity; they print only
+/// when `verbose` is set.
+fn rust_diagnostics(batch: &[&RestApi], verbose: u8) -> Vec<ValidationDiagnostic> {
+    let mut diagnostics = validate_rust_client(batch);
+    let ws = crate::output::ws_modules::validate_ws_definition_modules(registrations());
+    if verbose > 0 {
+        for note in &ws.notes {
+            eprintln!("{} {note}", "[INFO]".dimmed());
+        }
+    }
+    diagnostics.extend(ws.diagnostics);
+    diagnostics
 }
 
 /// Validates one output's batch, then prepares and publishes it with
@@ -425,12 +385,13 @@ fn publish_rust(
         Ok(batch) => batch,
         Err(err) => return publish(Output::Rust, Vec::new(), || Err(err)),
     };
-    publish(Output::Rust, validate_rust_client(&batch), || {
+    publish(Output::Rust, rust_diagnostics(&batch, opts.verbose), || {
         println!("{}", "Generating code...".dimmed());
         let output_dir = Path::new(opts.output);
         let manifest_dir = output_dir.parent().unwrap_or(Path::new("schematic/schema"));
         let prepared = prepare_rust_output(&RustOutputRequest {
             registry,
+            registrations: registrations(),
             selection,
             output_dir,
             manifest_dir: Some(manifest_dir),
@@ -483,12 +444,12 @@ fn export_batch<'a>(
     }
     let modules: HashSet<String> = selected
         .iter()
-        .map(|api| crate::export::resolve_module_name(api))
+        .map(|api| resolve_module_name(api))
         .collect();
     registry
         .iter()
         .copied()
-        .filter(|api| modules.contains(&crate::export::resolve_module_name(api)))
+        .filter(|api| modules.contains(&resolve_module_name(api)))
         .collect()
 }
 
@@ -497,7 +458,7 @@ fn export_groups<'a>(apis: &[&'a RestApi]) -> IndexMap<String, Vec<&'a RestApi>>
     let mut groups: IndexMap<String, Vec<&RestApi>> = IndexMap::new();
     for api in apis {
         groups
-            .entry(crate::export::resolve_module_name(api))
+            .entry(resolve_module_name(api))
             .or_default()
             .push(api);
     }
@@ -510,22 +471,9 @@ fn publish_openapi(
     complete: bool,
     openapi_dir: &str,
     opts: &GenerateOpts<'_>,
-    registry_for: &dyn Fn(&str) -> Option<SchemaRegistry>,
 ) -> OutputReport {
     let groups = export_groups(apis);
-    let mut diagnostics = validate_openapi(apis);
-    let mut registries = Vec::with_capacity(groups.len());
-    for (module_name, members) in &groups {
-        let registry = registry_for(module_name);
-        diagnostics.extend(validate_openapi_registry(
-            module_name,
-            members,
-            registry.as_ref(),
-        ));
-        registries.push(registry);
-    }
-
-    publish(Output::OpenApi, diagnostics, || {
+    publish(Output::OpenApi, validate_openapi(apis), || {
         let extension = match opts.openapi_format {
             OpenApiFormat::Json => "json",
             OpenApiFormat::Yaml => "yaml",
@@ -533,13 +481,9 @@ fn publish_openapi(
         // Build every module's document before writing any, so a merge or
         // operationId failure in one module leaves the whole root untouched.
         let mut files = Vec::with_capacity(groups.len());
-        for ((module_name, members), registry) in groups.iter().zip(registries) {
-            // Validation proved every module has a registry.
-            let Some(registry) = registry else {
-                continue;
-            };
+        for (module_name, members) in &groups {
             let options = openapi_export_options(members, opts.openapi_format, opts.openapi_version);
-            let document = build_openapi_grouped(members, module_name, &registry, &options)?;
+            let document = build_openapi_grouped(members, module_name, &options)?;
             files.push((
                 format!("{module_name}.{extension}"),
                 render_openapi_document(&document, opts.openapi_format.into())?,
@@ -566,9 +510,18 @@ fn publish_postman(
                 format!("{module_name}.postman_collection.json"),
                 render_postman_module(&members, &module_name)?,
             ));
+            if opts.postman_environment {
+                files.push((
+                    format!("{module_name}.postman_environment.json"),
+                    render_postman_environment(&members, &module_name)?,
+                ));
+            }
         }
+        // Environment files are generator-owned only when requested, so a
+        // run without them never deletes environments another run wrote.
         let plan = prepare_export_output(Path::new(postman_dir), files, complete, |name| {
             name.ends_with(".postman_collection.json")
+                || (opts.postman_environment && name.ends_with(".postman_environment.json"))
         })?;
         publish_export(&plan, opts)
     })
@@ -609,6 +562,53 @@ fn openapi_export_options(
         .with_format(format.into())
 }
 
+/// Runs the bundle command: writes the [`DefinitionBundle`] of one API to
+/// `out`, or to standard output.
+///
+/// [`DefinitionBundle`]: schematic_define::DefinitionBundle
+pub fn run_bundle(api_name: &str, out: Option<&str>) -> Result<(), GeneratorError> {
+    let api = resolve_api(api_name)?;
+    let bundle = schematic_define::DefinitionBundle::new(api)
+        .map_err(|source| GeneratorError::Bundle { path: api_name.to_owned(), source })?;
+    let json = bundle.to_json();
+    match out {
+        Some(path) => std::fs::write(path, json).map_err(|source| GeneratorError::WriteError { path: path.to_owned(), source }),
+        None => {
+            print!("{json}");
+            Ok(())
+        }
+    }
+}
+
+/// Runs the export-bundle command: loads the bundle at `input` without the
+/// registry and publishes its OpenAPI document and Postman collection to the
+/// requested roots, keeping every other file there. A bundle that does not
+/// load writes nothing.
+pub fn run_export_bundle(input: &str, opts: &GenerateOpts<'_>) -> Result<(), GeneratorError> {
+    if opts.openapi_out.is_none() && opts.postman_out.is_none() {
+        return Err(GeneratorError::ConfigError("export-bundle needs --openapi-out or --postman-out".into()));
+    }
+    let text = std::fs::read_to_string(input)
+        .map_err(|error| GeneratorError::ConfigError(format!("cannot read {input}: {error}")))?;
+    let bundle = schematic_define::DefinitionBundle::from_json(&text)
+        .map_err(|source| GeneratorError::Bundle { path: input.to_owned(), source })?;
+    let apis = [bundle.api()];
+    let mut report = GenerationReport::default();
+    if let Some(dir) = opts.openapi_out {
+        report.outputs.push(publish_openapi(&apis, false, dir, opts));
+    }
+    if let Some(dir) = opts.postman_out {
+        report.outputs.push(publish_postman(&apis, false, dir, opts));
+    }
+    for output in &report.outputs {
+        match &output.result {
+            Ok(()) => println!("{} {} output", "[OK]".green().bold(), output.output),
+            Err(_) => println!("{} {} output", "[FAILED]".red().bold(), output.output),
+        }
+    }
+    report.into_result()
+}
+
 /// Runs the validate command: every output's validator over one API.
 ///
 /// Prints each diagnostic to stderr and one pass/fail line per output.
@@ -624,18 +624,10 @@ pub fn run_validate(api_name: &str, verbose: u8) -> Result<(), GeneratorError> {
         );
     }
 
-    let module_name = crate::export::resolve_module_name(&api);
-    let mut openapi = validate_openapi(&apis);
-    openapi.extend(validate_openapi_registry(
-        &module_name,
-        &apis,
-        get_registries_for_module(&module_name).as_ref(),
-    ));
-
     let mut report = GenerationReport::default();
     for (output, diagnostics) in [
-        (Output::Rust, validate_rust_client(&apis)),
-        (Output::OpenApi, openapi),
+        (Output::Rust, rust_diagnostics(&apis, verbose)),
+        (Output::OpenApi, validate_openapi(&apis)),
         (Output::Postman, validate_postman(&apis)),
     ] {
         report.outputs.push(publish(output, diagnostics, || Ok(())));

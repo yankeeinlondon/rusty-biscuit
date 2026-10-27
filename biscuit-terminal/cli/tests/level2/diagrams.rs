@@ -1,8 +1,8 @@
 //! Level-2 tests for Mermaid diagram rendering.
 //!
 //! These tests run the `bt` diagram subcommands inside a real terminal
-//! emulator to validate that image-protocol bytes (or fallback fenced
-//! blocks) are emitted correctly.
+//! emulator to validate that image-protocol bytes (or, without images, a
+//! text or source fallback) are emitted correctly.
 //!
 //! ## Skip-clean contract
 //!
@@ -27,8 +27,9 @@
 //!   which proves the renderer ran the image pipeline (not the fenced-
 //!   block fallback).
 //! - **tmux fallback**: tmux has no image protocol, so a single
-//!   negative-control test asserts the fenced ` ```mermaid ` fallback
-//!   fires and that no APC/OSC image bytes leak into the capture.
+//!   negative-control test asserts the flowchart is drawn as text (with
+//!   its partial note) instead of the source, and that no APC/OSC image
+//!   bytes leak into the capture.
 //!
 //! The 10 subcommands covered: `flowchart`, `quadrant`, `pie-chart`,
 //! `git-graph`, `bar-chart`, `line-chart`, `timeline`, `state-diagram`,
@@ -543,10 +544,10 @@ fn level2_inverse_flag_changes_background_in_capture() {
 // tmux fallback
 // ------------------------------------------------------------------
 
-/// True-negative coverage for the fenced-block fallback: under tmux
-/// (where image protocols are typically disabled) the renderer must
-/// emit a ` ```mermaid ` block AND the capture must contain zero
-/// Kitty APC or iTerm2 OSC image bytes.
+/// True-negative coverage for the fallback: under tmux (where image
+/// protocols are typically disabled) the flowchart must be drawn as text,
+/// followed by its partial note, never shown as its source, AND the
+/// capture must contain zero Kitty APC or iTerm2 OSC image bytes.
 #[test]
 #[serial(level2_terminal)]
 fn level2_diagram_fallback_when_no_image_protocol() {
@@ -557,12 +558,17 @@ fn level2_diagram_fallback_when_no_image_protocol() {
     let harness = guard.as_mut().expect("shared tmux harness present");
     let (frame, _) = run_bt_rows(harness, "flowchart \"A --> B\"", &[]);
     assert!(
-        frame.plain.contains("```mermaid"),
-        "expected fallback fenced code block in tmux (no image protocol). plain:\n{}",
+        frame.plain.contains('┌') && frame.plain.contains("mermaid-partial-warning"),
+        "expected the text drawing and its note in tmux (no image protocol). plain:\n{}",
+        frame.plain
+    );
+    assert!(
+        !frame.plain.contains("flowchart LR"),
+        "the source was shown instead of the text drawing. plain:\n{}",
         frame.plain
     );
     // Negative-control: image-protocol bytes must NOT appear in the
-    // tmux capture. If they did, the fenced fallback was bypassed.
+    // tmux capture. If they did, the fallback was bypassed.
     assert!(
         !frame.raw.contains("\x1b_G"),
         "Kitty APC bytes leaked into tmux capture; fallback path failed. raw:\n{:?}",

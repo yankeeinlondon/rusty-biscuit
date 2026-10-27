@@ -26,6 +26,13 @@ pub struct Collection {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position: Option<u64>,
 }
+impl schematic_define::Registration for Collection {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("Collection");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CollectionItem {

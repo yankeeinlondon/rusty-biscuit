@@ -414,7 +414,7 @@ impl<'a> StackExecutor<'a> {
             .build()
             .unwrap_or_else(|_| {
                 EffectiveState::new(
-                    &fm.to_hash_map(),
+                    &fm.to_map(),
                     None,
                     self.early_binding_context(""),
                 )

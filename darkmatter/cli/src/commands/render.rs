@@ -1,6 +1,6 @@
 //! `md render` (implicit and explicit) subcommand implementation.
 
-use crate::args::{Cli, OutputFormat};
+use crate::args::{Cli, Feature, OutputFormat};
 use crate::artifact::{
     emit_or_show_artifact, html_artifact, json_artifact, markdown_artifact, markdown_plus_artifact,
     open_output_artifact,
@@ -16,6 +16,8 @@ use std::path::PathBuf;
 use tracing::{debug, instrument};
 
 /// Shared render logic for both implicit (no subcommand) and explicit `render` subcommand.
+///
+/// `features` is every `--feature` given, top-level and on `render`.
 #[instrument(skip_all, fields(command = "render"))]
 pub fn run_render(
     input: Option<&PathBuf>,
@@ -23,6 +25,7 @@ pub fn run_render(
     show: bool,
     indent: Option<usize>,
     strict_style: bool,
+    features: &[Feature],
     cli: &Cli,
     request: &MdRequest,
 ) -> Result<()> {
@@ -49,7 +52,7 @@ pub fn run_render(
         OutputFormat::Auto => {
             if stdout_is_tty {
                 let term = Terminal::new();
-                render_terminal_output(&md, input, cli, term, strict_style)?;
+                render_terminal_output(&md, input, cli, term, strict_style, features)?;
                 if show {
                     open_output_artifact(&markdown_artifact(&md))?;
                 }
@@ -65,7 +68,7 @@ pub fn run_render(
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Html => {
-            let artifact = html_artifact(&md, cli, input, strict_style)?;
+            let artifact = html_artifact(&md, cli, input, strict_style, features)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {

@@ -3,8 +3,9 @@
 //! Applies CLI layout claims and `style:` frontmatter to a [`DarkmatterPage`]
 //! and drives terminal rendering.
 
-use crate::args::Cli;
+use crate::args::{Cli, Feature};
 use biscuit_terminal::terminal::Terminal;
+use biscuit_visualized::components::MermaidFallbackPolicy;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::layout::DarkmatterPage;
 use darkmatter::markdown::Markdown;
@@ -49,27 +50,52 @@ impl ResolvedTheme {
     }
 }
 
-/// Render Markdown to the terminal using CLI flags and `style:` frontmatter.
+/// Render Markdown to the terminal using CLI flags, `style:` frontmatter, and
+/// `features`.
 pub fn render_terminal_output(
     md: &Markdown,
     input_path: Option<&PathBuf>,
     cli: &Cli,
     term: Terminal,
     strict_style: bool,
+    features: &[Feature],
 ) -> Result<()> {
+    let output = terminal_page(md, input_path, cli, &term, strict_style, features)?
+        .render(md)
+        .context("Failed to render markdown for terminal")?;
+
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    handle
+        .write_all(output.as_bytes())
+        .context("Failed to write terminal output")?;
+
+    Ok(())
+}
+
+/// Build the page that renders terminal output: CLI flags (`--mermaid` selects
+/// automatic Mermaid mode), `style:` frontmatter, then `features`.
+pub fn terminal_page(
+    md: &Markdown,
+    input_path: Option<&PathBuf>,
+    cli: &Cli,
+    term: &Terminal,
+    strict_style: bool,
+    features: &[Feature],
+) -> Result<DarkmatterPage> {
     // Resolve the theme from the same `Terminal` that will render the page.
     // This keeps the page surface and the nested code-block panel aligned on
     // a single `color_mode` source of truth.
-    let theme = ResolvedTheme::from_cli(cli, &term);
+    let theme = ResolvedTheme::from_cli(cli, term);
 
-    let mut page = DarkmatterPage::new(&term)
+    let mut page = DarkmatterPage::new(term)
         .with_prose_theme(theme.prose.kebab_name())
         .with_code_theme(theme.code.kebab_name())
         .with_color_mode(theme.color_mode)
         .with_code_block_mode(cli.code_block.into())
         .with_image_mode(terminal_image_mode_from_env())
         .with_mermaid_mode(if cli.mermaid {
-            MermaidMode::Image
+            MermaidMode::Automatic
         } else {
             MermaidMode::Off
         });
@@ -92,17 +118,7 @@ pub fn render_terminal_output(
         page = page.with_line_numbers(on);
     }
 
-    let output = page
-        .render(md)
-        .context("Failed to render markdown for terminal")?;
-
-    let stdout = io::stdout();
-    let mut handle = stdout.lock();
-    handle
-        .write_all(output.as_bytes())
-        .context("Failed to write terminal output")?;
-
-    Ok(())
+    Ok(apply_features(page, features))
 }
 
 /// Apply CLI layout flags to a [`DarkmatterPage`].
@@ -114,6 +130,29 @@ pub fn render_terminal_output(
 pub fn apply_cli_layout_flags(page: DarkmatterPage, cli: &Cli) -> DarkmatterPage {
     let claims = crate::style_claims::cli_style_claims(cli);
     apply_cli_claims(page, &claims)
+}
+
+/// Apply each `--feature` to `page`.
+///
+/// Order and repetition among features do not matter. Call this after the
+/// page's Mermaid mode is set: `no-mermaid-rendering` replaces it with code.
+/// The fallback features fold into the page's Mermaid fallback policy, which
+/// only automatic mode (`--mermaid`) consults; with none of them the policy
+/// stays unset, so `MERMAID_FALLBACK` applies.
+pub fn apply_features(page: DarkmatterPage, features: &[Feature]) -> DarkmatterPage {
+    let policy = MermaidFallbackPolicy::from_features(
+        features.iter().filter_map(|feature| feature.mermaid_fallback()),
+    );
+    features
+        .iter()
+        .fold(page, |page, feature| match feature {
+            Feature::EmbedMermaidFont => page.with_embed_mermaid_font(true),
+            Feature::NoMermaidRendering => page.with_mermaid_mode(MermaidMode::Text),
+            Feature::NoMermaidFallbacks
+            | Feature::NoMermaidPartialFallbacks
+            | Feature::NoMermaidPartialWarning => page,
+        })
+        .with_mermaid_fallback_policy(policy)
 }
 
 /// Parse the `style:` frontmatter (if any), promote schema warnings to errors

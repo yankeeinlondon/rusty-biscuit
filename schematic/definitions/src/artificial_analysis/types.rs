@@ -12,6 +12,13 @@ pub struct ModelCreator {
     pub slug: String,
 }
 
+impl schematic_define::Registration for ModelCreator {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("ModelCreator");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// A per-category breakdown of Elo ratings for a media model.
 ///
 /// Returned only when `include_categories=true` is passed to a media endpoint
@@ -31,6 +38,13 @@ pub struct CategoryBreakdown {
     pub ci95: String,
     /// Number of appearances in this category.
     pub appearances: i32,
+}
+
+impl schematic_define::Registration for CategoryBreakdown {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CategoryBreakdown");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Benchmark scores for a single LLM model.
@@ -58,6 +72,13 @@ pub struct LlmEvaluations {
     pub aime: f64,
 }
 
+impl schematic_define::Registration for LlmEvaluations {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("LlmEvaluations");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Pricing for an LLM model in USD per 1M tokens.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LlmPricing {
@@ -67,6 +88,13 @@ pub struct LlmPricing {
     pub price_1m_input_tokens: f64,
     /// Output token price per 1M tokens.
     pub price_1m_output_tokens: f64,
+}
+
+impl schematic_define::Registration for LlmPricing {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("LlmPricing");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// A single LLM model entry returned by `ListLlmModels`.
@@ -90,6 +118,13 @@ pub struct LlmModel {
     pub median_time_to_first_token_seconds: f64,
 }
 
+impl schematic_define::Registration for LlmModel {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("LlmModel");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Configuration metadata describing how the LLM benchmarks were collected.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct PromptOptions {
@@ -97,6 +132,13 @@ pub struct PromptOptions {
     pub parallel_queries: i32,
     /// Length of prompts used (`"short"`, `"medium"`, etc.).
     pub prompt_length: String,
+}
+
+impl schematic_define::Registration for PromptOptions {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("PromptOptions");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Response body for the `ListLlmModels` endpoint.
@@ -108,6 +150,13 @@ pub struct LlmModelsResponse {
     pub prompt_options: PromptOptions,
     /// List of LLM models with their benchmarks.
     pub data: Vec<LlmModel>,
+}
+
+impl schematic_define::Registration for LlmModelsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("LlmModelsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// A single media-generation model entry. Used by all `/data/media/*` endpoints.
@@ -137,6 +186,13 @@ pub struct MediaModel {
     pub categories: Option<Vec<CategoryBreakdown>>,
 }
 
+impl schematic_define::Registration for MediaModel {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("MediaModel");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Shared response shape for all `/data/media/*` endpoints.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct MediaModelsResponse {
@@ -149,6 +205,13 @@ pub struct MediaModelsResponse {
     pub data: Vec<MediaModel>,
 }
 
+impl schematic_define::Registration for MediaModelsResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("MediaModelsResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// A single message in the prompt history sent to the model under test.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CritPtMessage {
@@ -156,6 +219,13 @@ pub struct CritPtMessage {
     pub role: String,
     /// Message content.
     pub content: String,
+}
+
+impl schematic_define::Registration for CritPtMessage {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CritPtMessage");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// One submission in a CritPt evaluation batch.
@@ -178,6 +248,13 @@ pub struct CritPtSubmission {
     pub messages: Option<Vec<CritPtMessage>>,
 }
 
+impl schematic_define::Registration for CritPtSubmission {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CritPtSubmission");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// Request body for the `EvaluateCritPt` endpoint.
 ///
 /// `batch_metadata` is an arbitrary JSON object that callers may populate with
@@ -190,6 +267,13 @@ pub struct CritPtEvaluateBody {
     /// Optional metadata about the evaluation batch.
     #[serde(skip_serializing_if = "serde_json::Value::is_null", default)]
     pub batch_metadata: serde_json::Value,
+}
+
+impl schematic_define::Registration for CritPtEvaluateBody {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CritPtEvaluateBody");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
 }
 
 /// Response body for the `EvaluateCritPt` endpoint.
@@ -205,11 +289,18 @@ pub struct CritPtEvaluateResponse {
     pub judge_error_count: i32,
 }
 
+impl schematic_define::Registration for CritPtEvaluateResponse {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("CritPtEvaluateResponse");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 /// 429 rate-limit error body.
 ///
 /// **Documentation only.** This struct is intentionally **not** registered in
-/// `openapi_registry()` because no endpoint currently declares it as its
-/// `ApiResponse`. It exists to document the wire shape callers should expect
+/// the module group's schemas because no endpoint declares it as a success or
+/// error shape. It exists to document the wire shape callers should expect
 /// when a 429 is returned (alongside the `Retry-After` header).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RateLimitError {

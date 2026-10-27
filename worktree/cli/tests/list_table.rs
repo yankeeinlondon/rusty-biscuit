@@ -76,6 +76,7 @@ fn status(dir: &str, branch: Option<&str>, is_main: bool, is_current: bool, dirt
         },
         dirty,
         availability: Availability::Healthy,
+        removal: None,
     }
 }
 
@@ -1851,4 +1852,23 @@ fn a_behind_caption_names_the_steps_on_the_tracking_refs_own_line() {
     assert!(caption(&with(3, 1)).contains("45 commits (3 on main's line) behind"));
     assert!(caption(&with(45, 0)).contains("45 commits behind"), "the counts agree");
     assert!(caption(&comparison(0, 45)).contains("45 commits behind"), "nothing measured");
+}
+
+/// A checkout a `wt remove` has not finished gets its own marker, legend
+/// entry, and note naming the command that finishes it, never `✕` or `?`.
+#[test]
+fn a_checkout_under_removal_is_marked_and_names_the_command_that_finishes_it() {
+    let mut removing = status(".wt-remove-feat-x-a91c", Some("feat/x"), false, false, DirtyStatus::Unknown);
+    removing.removal = Some("feat/x".into());
+    let example = Unavailable::with(vec![status("repo", Some("main"), true, true, DirtyStatus::Clean), removing]);
+
+    let table = example.table();
+    assert_eq!(worktree_cell(&table, ".wt-remove-feat-x-a91c"), "⊘ .wt-remove-feat-x-a91c", "{table}");
+    let legend = table.lines().find(|line| line.starts_with(" Worktree ")).expect("legend");
+    assert!(legend.contains("⊘ being removed"), "{legend}");
+    assert!(!legend.contains("✕") && !legend.contains("couldn't check"), "{legend}");
+    assert_eq!(
+        example.notes().trim(),
+        "- .wt-remove-feat-x-a91c: a wt remove of it has not finished;  wt remove feat/x  finishes it."
+    );
 }

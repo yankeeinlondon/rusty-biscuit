@@ -1,0 +1,303 @@
+[
+  {
+    "name": "upstream_cypress_flowchart_v2_spec_should_render_subgraphs_with_title_margins_and_edge_labels_063",
+    "family": "flowchart",
+    "group": "shared",
+    "source": "merman/fixtures/flowchart/upstream_cypress_flowchart_v2_spec_should_render_subgraphs_with_title_margins_and_edge_labels_063.mmd",
+    "reference": "merman/fixtures/upstream-svgs/flowchart/upstream_cypress_flowchart_v2_spec_should_render_subgraphs_with_title_margins_and_edge_labels_063.svg"
+  },
+  {
+    "name": "upstream_flowchart_v2_outgoing_links_2b_spec",
+    "family": "flowchart",
+    "group": "shared",
+    "source": "merman/fixtures/flowchart/upstream_flowchart_v2_outgoing_links_2b_spec.mmd",
+    "reference": "merman/fixtures/upstream-svgs/flowchart/upstream_flowchart_v2_outgoing_links_2b_spec.svg"
+  },
+  {
+    "name": "upstream_cypress_sequencediagram_spec_example_001",
+    "family": "sequence",
+    "group": "shared",
+    "source": "merman/fixtures/sequence/upstream_cypress_sequencediagram_spec_example_001.mmd",
+    "reference": "merman/fixtures/upstream-svgs/sequence/upstream_cypress_sequencediagram_spec_example_001.svg"
+  },
+  {
+    "name": "upstream_cypress_sequencediagram_v2_spec_should_render_different_participant_types_with_notes_and_loops_015",
+    "family": "sequence",
+    "group": "shared",
+    "source": "merman/fixtures/sequence/upstream_cypress_sequencediagram_v2_spec_should_render_different_participant_types_with_notes_and_loops_015.mmd",
+    "reference": "merman/fixtures/upstream-svgs/sequence/upstream_cypress_sequencediagram_v2_spec_should_render_different_participant_types_with_notes_and_loops_015.svg"
+  },
+  {
+    "name": "upstream_examples_class_basic_class_inheritance_001",
+    "family": "class",
+    "group": "shared",
+    "source": "merman/fixtures/class/upstream_examples_class_basic_class_inheritance_001.mmd",
+    "reference": "merman/fixtures/upstream-svgs/class/upstream_examples_class_basic_class_inheritance_001.svg"
+  },
+  {
+    "name": "upstream_separators_labels_notes",
+    "family": "class",
+    "group": "shared",
+    "source": "merman/fixtures/class/upstream_separators_labels_notes.mmd",
+    "reference": "merman/fixtures/upstream-svgs/class/upstream_separators_labels_notes.svg"
+  },
+  {
+    "name": "upstream_cypress_statediagram_v2_spec_v2_should_render_multiple_composite_states_017",
+    "family": "state",
+    "group": "shared",
+    "source": "merman/fixtures/state/upstream_cypress_statediagram_v2_spec_v2_should_render_multiple_composite_states_017.mmd",
+    "reference": "merman/fixtures/upstream-svgs/state/upstream_cypress_statediagram_v2_spec_v2_should_render_multiple_composite_states_017.svg"
+  },
+  {
+    "name": "upstream_examples_er_basic_er_schema_001",
+    "family": "er",
+    "group": "shared",
+    "source": "merman/fixtures/er/upstream_examples_er_basic_er_schema_001.mmd",
+    "reference": "merman/fixtures/upstream-svgs/er/upstream_examples_er_basic_er_schema_001.svg"
+  },
+  {
+    "name": "upstream_docs_pie_example_003",
+    "family": "pie",
+    "group": "shared",
+    "source": "merman/fixtures/pie/upstream_docs_pie_example_003.mmd",
+    "reference": "merman/fixtures/upstream-svgs/pie/upstream_docs_pie_example_003.svg"
+  },
+  {
+    "name": "upstream_cypress_xychart_spec_render_with_show_axis_label_false_015",
+    "family": "xychart",
+    "group": "shared",
+    "source": "merman/fixtures/xychart/upstream_cypress_xychart_spec_render_with_show_axis_label_false_015.mmd",
+    "reference": "merman/fixtures/upstream-svgs/xychart/upstream_cypress_xychart_spec_render_with_show_axis_label_false_015.svg"
+  },
+  {
+    "name": "upstream_quadrant_docs_example_reach_engagement",
+    "family": "quadrantchart",
+    "group": "shared",
+    "source": "merman/fixtures/quadrantchart/upstream_quadrant_docs_example_reach_engagement.mmd",
+    "reference": "merman/fixtures/upstream-svgs/quadrantchart/upstream_quadrant_docs_example_reach_engagement.svg"
+  },
+  {
+    "name": "upstream_html_demos_sankey_fy20_21_performance_001",
+    "family": "sankey",
+    "group": "shared",
+    "source": "merman/fixtures/sankey/upstream_html_demos_sankey_fy20_21_performance_001.mmd",
+    "reference": "merman/fixtures/upstream-svgs/sankey/upstream_html_demos_sankey_fy20_21_performance_001.svg"
+  },
+  {
+    "name": "zed_pr_57644_gantt",
+    "family": "gantt",
+    "group": "shared",
+    "source": "merman/fixtures/gantt/zed_pr_57644_gantt.mmd",
+    "reference": "merman/fixtures/upstream-svgs/gantt/zed_pr_57644_gantt.svg"
+  },
+  {
+    "name": "upstream_html_demos_gantt_gantt_chart_diagram_demos_010",
+    "family": "gantt",
+    "group": "shared",
+    "source": "merman/fixtures/gantt/upstream_html_demos_gantt_gantt_chart_diagram_demos_010.mmd",
+    "reference": "merman/fixtures/upstream-svgs/gantt/upstream_html_demos_gantt_gantt_chart_diagram_demos_010.svg"
+  },
+  {
+    "name": "zed_pr_57644_timeline",
+    "family": "timeline",
+    "group": "shared",
+    "source": "merman/fixtures/timeline/zed_pr_57644_timeline.mmd",
+    "reference": "merman/fixtures/upstream-svgs/timeline/zed_pr_57644_timeline.svg"
+  },
+  {
+    "name": "upstream_html_demos_journey_journey_diagram_demo_001",
+    "family": "journey",
+    "group": "shared",
+    "source": "merman/fixtures/journey/upstream_html_demos_journey_journey_diagram_demo_001.mmd",
+    "reference": "merman/fixtures/upstream-svgs/journey/upstream_html_demos_journey_journey_diagram_demo_001.svg"
+  },
+  {
+    "name": "upstream_docs_kanban_full_example_012",
+    "family": "kanban",
+    "group": "shared",
+    "source": "merman/fixtures/kanban/upstream_docs_kanban_full_example_012.mmd",
+    "reference": "merman/fixtures/upstream-svgs/kanban/upstream_docs_kanban_full_example_012.svg"
+  },
+  {
+    "name": "upstream_cypress_c4_spec_c4_1_should_render_a_simple_c4context_diagram_001",
+    "family": "c4",
+    "group": "shared",
+    "source": "merman/fixtures/c4/upstream_cypress_c4_spec_c4_1_should_render_a_simple_c4context_diagram_001.mmd",
+    "reference": "merman/fixtures/upstream-svgs/c4/upstream_cypress_c4_spec_c4_1_should_render_a_simple_c4context_diagram_001.svg"
+  },
+  {
+    "name": "upstream_docs_block_introduction_to_block_diagrams_001",
+    "family": "block",
+    "group": "shared",
+    "source": "merman/fixtures/block/upstream_docs_block_introduction_to_block_diagrams_001.mmd",
+    "reference": "merman/fixtures/upstream-svgs/block/upstream_docs_block_introduction_to_block_diagrams_001.svg"
+  },
+  {
+    "name": "upstream_architecture_demo_junction_groups_arrows",
+    "family": "architecture",
+    "group": "shared",
+    "source": "merman/fixtures/architecture/upstream_architecture_demo_junction_groups_arrows.mmd",
+    "reference": "merman/fixtures/upstream-svgs/architecture/upstream_architecture_demo_junction_groups_arrows.svg"
+  },
+  {
+    "name": "upstream_docs_requirementdiagram_combined_example_022",
+    "family": "requirement",
+    "group": "shared",
+    "source": "merman/fixtures/requirement/upstream_docs_requirementdiagram_combined_example_022.mmd",
+    "reference": "merman/fixtures/upstream-svgs/requirement/upstream_docs_requirementdiagram_combined_example_022.svg"
+  },
+  {
+    "name": "upstream_examples_mindmap_basic_mindmap_001",
+    "family": "mindmap",
+    "group": "shared",
+    "source": "merman/fixtures/mindmap/upstream_examples_mindmap_basic_mindmap_001.mmd",
+    "reference": "merman/fixtures/upstream-svgs/mindmap/upstream_examples_mindmap_basic_mindmap_001.svg"
+  },
+  {
+    "name": "upstream_docs_gitgraph_merging_two_branches_009",
+    "family": "gitgraph",
+    "group": "shared",
+    "source": "merman/fixtures/gitgraph/upstream_docs_gitgraph_merging_two_branches_009.mmd",
+    "reference": "merman/fixtures/upstream-svgs/gitgraph/upstream_docs_gitgraph_merging_two_branches_009.svg"
+  },
+  {
+    "name": "upstream_cypress_gitgraph_spec_7_should_render_a_simple_gitgraph_with_three_branches_and_tagged_007",
+    "family": "gitgraph",
+    "group": "shared",
+    "source": "merman/fixtures/gitgraph/upstream_cypress_gitgraph_spec_7_should_render_a_simple_gitgraph_with_three_branches_and_tagged_007.mmd",
+    "reference": "merman/fixtures/upstream-svgs/gitgraph/upstream_cypress_gitgraph_spec_7_should_render_a_simple_gitgraph_with_three_branches_and_tagged_007.svg"
+  },
+  {
+    "name": "upstream_cypress_gitgraph_spec_75_should_render_a_gitgraph_with_multiple_tags_on_a_merge_commit_079",
+    "family": "gitgraph",
+    "group": "shared",
+    "source": "merman/fixtures/gitgraph/upstream_cypress_gitgraph_spec_75_should_render_a_gitgraph_with_multiple_tags_on_a_merge_commit_079.mmd",
+    "reference": "merman/fixtures/upstream-svgs/gitgraph/upstream_cypress_gitgraph_spec_75_should_render_a_gitgraph_with_multiple_tags_on_a_merge_commit_079.svg"
+  },
+  {
+    "name": "upstream_docs_zenuml_demo",
+    "family": "zenuml",
+    "group": "shared",
+    "source": "merman/fixtures/zenuml/upstream_docs_zenuml_demo.mmd",
+    "reference": null
+  },
+  {
+    "name": "upstream_packet_docs_tcp_packet_example",
+    "family": "packet",
+    "group": "shared",
+    "source": "merman/fixtures/packet/upstream_packet_docs_tcp_packet_example.mmd",
+    "reference": "merman/fixtures/upstream-svgs/packet/upstream_packet_docs_tcp_packet_example.svg"
+  },
+  {
+    "name": "upstream_html_demos_radar_radar_diagram_demo_001",
+    "family": "radar",
+    "group": "shared",
+    "source": "merman/fixtures/radar/upstream_html_demos_radar_radar_diagram_demo_001.mmd",
+    "reference": "merman/fixtures/upstream-svgs/radar/upstream_html_demos_radar_radar_diagram_demo_001.svg"
+  },
+  {
+    "name": "upstream_cypress_treemap_spec_2_should_render_a_hierarchical_treemap_002",
+    "family": "treemap",
+    "group": "shared",
+    "source": "merman/fixtures/treemap/upstream_cypress_treemap_spec_2_should_render_a_hierarchical_treemap_002.mmd",
+    "reference": "merman/fixtures/upstream-svgs/treemap/upstream_cypress_treemap_spec_2_should_render_a_hierarchical_treemap_002.svg"
+  },
+  {
+    "name": "upstream_info_show_info_spec",
+    "family": "info",
+    "group": "merman-only",
+    "source": "merman/fixtures/info/upstream_info_show_info_spec.mmd",
+    "reference": "merman/fixtures/upstream-svgs/info/upstream_info_show_info_spec.svg"
+  },
+  {
+    "name": "upstream_docs_venn_text_nodes_and_style_003",
+    "family": "venn",
+    "group": "merman-only",
+    "source": "merman/fixtures/venn/upstream_docs_venn_text_nodes_and_style_003.mmd",
+    "reference": "merman/fixtures/upstream-svgs/venn/upstream_docs_venn_text_nodes_and_style_003.svg"
+  },
+  {
+    "name": "upstream_docs_ishikawa_basic",
+    "family": "ishikawa",
+    "group": "merman-only",
+    "source": "merman/fixtures/ishikawa/upstream_docs_ishikawa_basic.mmd",
+    "reference": "merman/fixtures/upstream-svgs/ishikawa/upstream_docs_ishikawa_basic.svg"
+  },
+  {
+    "name": "upstream_cypress_wardley_spec_3_should_render_pipelines_003",
+    "family": "wardley",
+    "group": "merman-only",
+    "source": "merman/fixtures/wardley/upstream_cypress_wardley_spec_3_should_render_pipelines_003.mmd",
+    "reference": "merman/fixtures/upstream-svgs/wardley/upstream_cypress_wardley_spec_3_should_render_pipelines_003.svg"
+  },
+  {
+    "name": "upstream_cypress_treeview_spec_should_render_descriptions_007",
+    "family": "treeView",
+    "group": "merman-only",
+    "source": "merman/fixtures/treeView/upstream_cypress_treeview_spec_should_render_descriptions_007.mmd",
+    "reference": "merman/fixtures/upstream-svgs/treeView/upstream_cypress_treeview_spec_should_render_descriptions_007.svg"
+  },
+  {
+    "name": "upstream_docs_eventmodeling_minimum",
+    "family": "eventmodeling",
+    "group": "merman-only",
+    "source": "merman/fixtures/eventmodeling/upstream_docs_eventmodeling_minimum.mmd",
+    "reference": "merman/fixtures/upstream-svgs/eventmodeling/upstream_docs_eventmodeling_minimum.svg"
+  },
+  {
+    "name": "upstream_cypress_cynefin_spec_should_render_cynefin_without_domain_descriptions_006",
+    "family": "cynefin",
+    "group": "merman-only",
+    "source": "merman/fixtures/cynefin/upstream_cypress_cynefin_spec_should_render_cynefin_without_domain_descriptions_006.mmd",
+    "reference": "merman/fixtures/upstream-svgs/cynefin/upstream_cypress_cynefin_spec_should_render_cynefin_without_domain_descriptions_006.svg"
+  },
+  {
+    "name": "upstream_cypress_railroad_spec_renders_sequences_and_choices_002",
+    "family": "railroad",
+    "group": "merman-only",
+    "source": "merman/fixtures/railroad/upstream_cypress_railroad_spec_renders_sequences_and_choices_002.mmd",
+    "reference": "merman/fixtures/upstream-svgs/railroad/upstream_cypress_railroad_spec_renders_sequences_and_choices_002.svg"
+  },
+  {
+    "name": "upstream_cypress_railroad_spec_renders_alternation_and_repetition_008",
+    "family": "railroadAbnf",
+    "group": "merman-only",
+    "source": "merman/fixtures/railroadAbnf/upstream_cypress_railroad_spec_renders_alternation_and_repetition_008.mmd",
+    "reference": "merman/fixtures/upstream-svgs/railroadAbnf/upstream_cypress_railroad_spec_renders_alternation_and_repetition_008.svg"
+  },
+  {
+    "name": "upstream_cypress_railroad_spec_renders_iso_14977_notation_007",
+    "family": "railroadEbnf",
+    "group": "merman-only",
+    "source": "merman/fixtures/railroadEbnf/upstream_cypress_railroad_spec_renders_iso_14977_notation_007.mmd",
+    "reference": "merman/fixtures/upstream-svgs/railroadEbnf/upstream_cypress_railroad_spec_renders_iso_14977_notation_007.svg"
+  },
+  {
+    "name": "upstream_cypress_railroad_spec_renders_ordered_choice_and_suffixes_009",
+    "family": "railroadPeg",
+    "group": "merman-only",
+    "source": "merman/fixtures/railroadPeg/upstream_cypress_railroad_spec_renders_ordered_choice_and_suffixes_009.mmd",
+    "reference": "merman/fixtures/upstream-svgs/railroadPeg/upstream_cypress_railroad_spec_renders_ordered_choice_and_suffixes_009.svg"
+  },
+  {
+    "name": "upstream_docs_basic",
+    "family": "swimlane",
+    "group": "merman-only",
+    "source": "merman/fixtures/swimlane/upstream_docs_basic.mmd",
+    "reference": "merman/fixtures/upstream-svgs/swimlane/upstream_docs_basic.svg"
+  },
+  {
+    "name": "shapes-and-notes",
+    "family": "usecase",
+    "group": "merman-only",
+    "source": "merman/fixtures/usecase/shapes-and-notes.mmd",
+    "reference": "merman/fixtures/upstream-svgs/usecase/shapes-and-notes.svg"
+  },
+  {
+    "name": "container-and-shapes",
+    "family": "agentflow",
+    "group": "merman-only",
+    "source": "merman/fixtures/agentflow/container-and-shapes.mmd",
+    "reference": "merman/fixtures/upstream-svgs/agentflow/container-and-shapes.svg"
+  }
+]

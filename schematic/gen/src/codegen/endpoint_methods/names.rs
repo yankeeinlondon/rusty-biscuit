@@ -36,7 +36,6 @@ use schematic_define::{Endpoint, RestApi};
 use crate::codegen::pagination::{PagerForwards, pager_forwards, pager_view};
 use crate::codegen::request_structs::shared::{
     QueryParamInfo, extract_cookie_params, extract_header_params, extract_query_params,
-    param_field_name,
 };
 use crate::output::get_request_suffix;
 
@@ -69,6 +68,8 @@ pub const API_CLIENT_METHODS: &[&str] = &[
     "api_key",
     "env_order",
     "cross_origin",
+    "max_frame_bytes",
+    "graphql_url",
     "pre_response_json",
     "mutate_response",
     "build",
@@ -340,15 +341,22 @@ fn endpoint_names(
     let pager = pager_forwards(api, endpoint);
     let endpoint = pager_view(api, endpoint);
     let is_pager_control = |name: &str| pager.as_ref().is_some_and(|pager| pager.has_control(name));
+    let request_type = format!("{}{suffix}", endpoint.id);
+    // A required query value is an argument of the endpoint method, not a
+    // setter.
+    let optional_query = extract_query_params(&endpoint.params, &request_type)
+        .into_iter()
+        .filter(|param| !param.required)
+        .collect();
     let located = [
-        (ParamLocation::Query, extract_query_params(&endpoint.params)),
+        (ParamLocation::Query, optional_query),
         (ParamLocation::Header, extract_header_params(&endpoint.params)),
         (ParamLocation::Cookie, extract_cookie_params(&endpoint.params)),
     ];
     let mut setters = Vec::new();
     for (location, params) in located {
         for param in params {
-            let field = param_field_name(&param.name);
+            let field = param.field_name();
             let setter = if is_call_type_method(&field) {
                 let renamed = format!("{field}_param");
                 rename(RenameTarget::Setter, &field, &renamed, RenameReason::SharedCallMethod);
@@ -369,7 +377,6 @@ fn endpoint_names(
         }
     }
 
-    let request_type = format!("{}{suffix}", endpoint.id);
     EndpointNames {
         endpoint_id: endpoint.id.clone(),
         call_type: call_type_name(&request_type),

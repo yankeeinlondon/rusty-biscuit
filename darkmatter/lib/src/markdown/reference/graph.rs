@@ -350,7 +350,7 @@ fn build_node(
     // Uses the document's frontmatter merged with any external state from
     // options, plus runtime context (including environment variables).
     let effective_state = {
-        let fm: std::collections::HashMap<String, serde_json::Value> = md
+        let fm: serde_json::Map<String, serde_json::Value> = md
             .frontmatter()
             .as_map()
             .iter()

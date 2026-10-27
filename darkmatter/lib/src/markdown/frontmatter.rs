@@ -88,9 +88,9 @@ impl Frontmatter {
 
     /// Returns authored key order for the mapping at a JSON Pointer path.
     ///
-    /// This metadata is available only for frontmatter parsed from YAML. It
-    /// lets consumers preserve order at a narrow authoring boundary without
-    /// changing the representation of every `serde_json::Map` in their graph.
+    /// This metadata is available only for frontmatter parsed from YAML. For
+    /// parsed frontmatter it agrees with the iteration order of the mapping's
+    /// value in [`Self::as_map`].
     pub fn mapping_key_order(&self, pointer: &str) -> Option<&[String]> {
         self.mapping_orders.get(pointer)
     }
@@ -142,6 +142,13 @@ impl Frontmatter {
 
     /// Merges another value into this frontmatter using the specified strategy.
     ///
+    /// Key order is part of the contract: existing keys keep their positions
+    /// (an overwritten key is never moved), and keys only `other` holds are
+    /// appended in `other`'s order. The merge is shallow, so an incoming
+    /// object value replaces the existing one whole, keeping its own key order.
+    /// On an `ErrorOnConflict` error, keys merged before the conflict stay
+    /// merged; there is no rollback.
+    ///
     /// ## Examples
     ///
     /// ```
@@ -191,6 +198,9 @@ impl Frontmatter {
     }
 
     /// Sets default values for missing keys.
+    ///
+    /// Existing keys keep their values and positions; missing keys are
+    /// appended in `defaults`' order.
     ///
     /// ## Examples
     ///
@@ -945,6 +955,79 @@ mod tests {
         assert_eq!(title, Some("Original".to_string()));
     }
 
+    fn keys(fm: &Frontmatter) -> Vec<&str> {
+        fm.as_map().keys().map(String::as_str).collect()
+    }
+
+    fn za_frontmatter() -> Frontmatter {
+        let mut fm = Frontmatter::new();
+        fm.insert("z", json!("doc-z")).unwrap();
+        fm.insert("a", json!("doc-a")).unwrap();
+        fm
+    }
+
+    #[test]
+    fn merge_with_never_moves_an_overwritten_key_and_appends_incoming_keys() {
+        for strategy in [MergeStrategy::PreferExternal, MergeStrategy::PreferDocument] {
+            let mut fm = za_frontmatter();
+            fm.merge_with(json!({"a": "in-a", "b": "in-b"}), strategy).unwrap();
+
+            assert_eq!(keys(&fm), ["z", "a", "b"], "{strategy:?}");
+            let expected_a = match strategy {
+                MergeStrategy::PreferExternal => "in-a",
+                _ => "doc-a",
+            };
+            assert_eq!(fm.as_map()["a"], json!(expected_a), "{strategy:?}");
+            assert_eq!(fm.as_map()["z"], json!("doc-z"), "{strategy:?}");
+            assert_eq!(fm.as_map()["b"], json!("in-b"), "{strategy:?}");
+        }
+    }
+
+    #[test]
+    fn merge_with_appends_incoming_only_keys_in_incoming_order() {
+        for strategy in [
+            MergeStrategy::ErrorOnConflict,
+            MergeStrategy::PreferExternal,
+            MergeStrategy::PreferDocument,
+        ] {
+            let mut fm = za_frontmatter();
+            fm.merge_with(json!({"y": 1, "c": 2, "m": 3}), strategy).unwrap();
+            assert_eq!(keys(&fm), ["z", "a", "y", "c", "m"], "{strategy:?}");
+        }
+    }
+
+    #[test]
+    fn merge_with_error_on_conflict_still_errors_on_an_ordered_map() {
+        let mut fm = za_frontmatter();
+        let error = fm
+            .merge_with(json!({"b": 1, "a": 2}), MergeStrategy::ErrorOnConflict)
+            .unwrap_err();
+        assert!(
+            matches!(&error, MarkdownError::FrontmatterMerge(message) if message.contains("a")),
+            "{error:?}"
+        );
+        assert_eq!(fm.as_map()["a"], json!("doc-a"));
+    }
+
+    #[test]
+    fn merge_with_replaces_a_nested_object_whole_in_incoming_order() {
+        let (mut fm, _) = parse_frontmatter("---\ncfg:\n  x: 1\n  y: 2\nafter: true\n---\n").unwrap();
+        fm.merge_with(json!({"cfg": {"q": 1, "a": 2}}), MergeStrategy::PreferExternal).unwrap();
+
+        assert_eq!(keys(&fm), ["cfg", "after"]);
+        let cfg: Vec<&str> = fm.as_map()["cfg"].as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(cfg, ["q", "a"], "shallow merge: the incoming object replaces the base whole");
+    }
+
+    #[test]
+    fn set_defaults_keeps_existing_positions_and_appends_missing_keys_in_order() {
+        let mut fm = za_frontmatter();
+        fm.set_defaults(json!({"k": 1, "a": "default-a", "b": 2})).unwrap();
+
+        assert_eq!(keys(&fm), ["z", "a", "k", "b"]);
+        assert_eq!(fm.as_map()["a"], json!("doc-a"));
+    }
+
     #[test]
     fn test_frontmatter_set_defaults() {
         let mut fm = Frontmatter::new();
@@ -1266,13 +1349,18 @@ This is content."#;
     }
 
     #[test]
-    fn parsed_frontmatter_retains_nested_mapping_order_as_metadata() {
+    fn parsed_frontmatter_mapping_order_metadata_agrees_with_value_order() {
         let content = concat!(
             "---\n",
+            "zeta: 1\n",
             "start:\n",
             "  - set:\n",
             "      z_last_lexically: true\n",
             "      a_first_lexically: false\n",
+            "      m_middle:\n",
+            "        y: 1\n",
+            "        b: 2\n",
+            "alpha: 2\n",
             "---\n",
         );
 
@@ -1280,14 +1368,28 @@ This is content."#;
 
         assert_eq!(
             frontmatter.mapping_key_order("/start/0/set"),
-            Some(["z_last_lexically".to_string(), "a_first_lexically".to_string()].as_slice()),
+            Some(
+                [
+                    "z_last_lexically".to_string(),
+                    "a_first_lexically".to_string(),
+                    "m_middle".to_string(),
+                ]
+                .as_slice()
+            ),
         );
-        let set = &frontmatter.as_map()["start"][0]["set"];
-        assert_eq!(
-            set.as_object().unwrap().keys().collect::<Vec<_>>(),
-            vec!["z_last_lexically", "a_first_lexically"],
-            "serde_json maps keep written order (`preserve_order`), agreeing with the metadata",
-        );
+        let map = frontmatter.as_map();
+        let top: Vec<String> = map.keys().cloned().collect();
+        assert_eq!(frontmatter.mapping_key_order(""), Some(top.as_slice()));
+        for pointer in ["/start/0/set", "/start/0/set/m_middle"] {
+            let value = serde_json::Value::Object(map.clone().into_iter().collect());
+            let keys: Vec<String> =
+                value.pointer(pointer).unwrap().as_object().unwrap().keys().cloned().collect();
+            assert_eq!(
+                frontmatter.mapping_key_order(pointer),
+                Some(keys.as_slice()),
+                "metadata and value iteration order agree at {pointer}",
+            );
+        }
     }
 
     #[test]

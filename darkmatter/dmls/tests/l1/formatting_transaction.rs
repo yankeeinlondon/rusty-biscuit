@@ -564,3 +564,81 @@ fn every_parity_case_matches_through_formatting() {
     }
     session.shutdown();
 }
+
+/// The frontmatter of `document`, parsed.
+fn frontmatter_value(document: &str) -> serde_yaml_ng::Value {
+    let extraction = darkmatter::markdown::extract_frontmatter_block(document)
+        .expect("frontmatter fences are well formed")
+        .expect("the document has frontmatter");
+    serde_yaml_ng::from_str(extraction.yaml).expect("frontmatter parses")
+}
+
+/// Formats `source` (whose root mapping is indented), applies the offered
+/// edit to the buffer, and formats again. Returns the formatted text after
+/// asserting the second request offers nothing, so the root repair is stable.
+fn format_indented_root_twice(source: &str) -> String {
+    let root = tempfile::tempdir().expect("tempdir");
+    let uri = file_uri(&root.path().join("doc.md"));
+    let mut session = Session::start(root.path(), &[]);
+    session.open(&uri, source);
+
+    let edits = session.format(&uri);
+    let formatted = whole_document_edit(&edits, source);
+    assert!(session.take_messages().is_empty());
+    assert_eq!(library_clean(source, root.path()), (CleanOutcome::Changed, formatted.clone()));
+
+    session.change(&uri, 2, &formatted);
+    let again = session.format(&uri);
+    assert_eq!(again, Vec::<Value>::new(), "a formatted root needs no further edit");
+    assert!(session.take_messages().is_empty());
+    session.shutdown();
+    formatted
+}
+
+#[test]
+fn an_indented_root_is_dedented_once_and_keeps_its_value() {
+    let source = concat!(
+        "---\n",
+        "    # Inline prompt\n",
+        "    prompt: |-\n",
+        "        Your task is to summarize.\n",
+        "    options:\n",
+        "        retries: 2 # bounded\n",
+        "---\n",
+        "\n",
+        "# Body\n",
+    );
+
+    let formatted = format_indented_root_twice(source);
+
+    assert_eq!(
+        formatted,
+        concat!(
+            "---\n",
+            "# Inline prompt\n",
+            "prompt: |-\n",
+            "    Your task is to summarize.\n",
+            "options:\n",
+            "    retries: 2 # bounded\n",
+            "---\n",
+            "\n",
+            "# Body\n",
+        )
+    );
+    assert_eq!(frontmatter_value(&formatted), frontmatter_value(source));
+}
+
+/// Strict YAML rejects a tab-indented root; tab recovery and the cleanup
+/// rescan's root repair arrive in the same formatting transaction.
+#[test]
+fn a_tab_indented_root_is_recovered_and_dedented_in_one_transaction() {
+    let source = "---\n\tprompt: |-\n\t\tbody line\n\tnext: 1\n---\n\n# Body\n";
+
+    let formatted = format_indented_root_twice(source);
+
+    assert_eq!(formatted, "---\nprompt: |-\n  body line\nnext: 1\n---\n\n# Body\n");
+    assert_eq!(
+        frontmatter_value(&formatted),
+        serde_yaml_ng::from_str::<serde_yaml_ng::Value>("prompt: body line\nnext: 1\n").unwrap()
+    );
+}

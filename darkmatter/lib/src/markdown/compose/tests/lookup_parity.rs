@@ -106,7 +106,7 @@ fn context() -> ComposeContext {
 
 fn state() -> EffectiveState {
     EffectiveStateBuilder::new()
-        .with_frontmatter([("env".to_string(), json!(DOCUMENT_ENV))].into())
+        .with_frontmatter([("env".to_string(), json!(DOCUMENT_ENV))].into_iter().collect())
         .with_context(context())
         .build()
         .unwrap()
@@ -176,7 +176,7 @@ fn every_production_lookup_keeps_bare_names_out_of_ctx() {
             }
             "FrontmatterSeedState" => {
                 let seed = FrontmatterSeedState::new(
-                    std::collections::HashMap::from([("env".to_string(), json!(DOCUMENT_ENV))]),
+                    serde_json::Map::from_iter([("env".to_string(), json!(DOCUMENT_ENV))]),
                     context(),
                 );
                 assert_bare_name_is_a_document_property(name, &seed);

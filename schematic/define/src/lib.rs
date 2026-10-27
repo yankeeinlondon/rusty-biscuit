@@ -15,11 +15,13 @@
 //! - [`AuthPolicy`] - Explicit auth methods plus environment fallback policy
 //! - [`CrossOrigin`] - Policy for following redirects and next-page links to other origins
 //! - [`UpdateStrategy`] - Strategy for updating auth in API variants (NoChange, ChangeTo); no generated code reads it
-//! - [`ApiResponse`] - Response type definitions (JSON, Text, Binary, Empty)
+//! - [`SuccessShape`] - Success shapes an endpoint may reply with (JSON, text, binary, empty, streams)
 //! - [`ApiRequest`] - Request body type definitions (JSON, FormData, UrlEncoded, Text, Binary)
 //! - [`FormField`] - Form field definitions for multipart and URL-encoded requests
 //! - [`FormFieldKind`] - Form field type classification (Text, File, Files, Json)
-//! - [`Schema`] - Type information for request/response bodies
+//! - [`SchemaComponent`] - A named schema carried by [`RestApi::schemas`]; JSON bodies reference it through [`TypeRef`]
+//! - [`DefinitionBundle`] - An API with its complete schema closure, as canonical JSON that loads without the Rust registry
+//! - [`Schema`] - Type information for WebSocket message bodies
 //!
 //! ### Header and Authentication Types
 //!
@@ -34,10 +36,10 @@
 //!
 //! - [`WebSocketApi`] - Complete WebSocket API definition with base URL, auth, and endpoints
 //! - [`WebSocketEndpoint`] - Single WebSocket endpoint with path, parameters, and message schemas
-//! - [`ConnectionParam`] - Query/path parameter definition for WebSocket connections
-//! - [`ParamType`] - Parameter types (String, Integer, Boolean, Float)
+//! - [`EndpointRole`] - Generated side of an endpoint (client, host, or both)
 //! - [`ConnectionLifecycle`] - Open, close, and keepalive message schemas
-//! - [`MessageSchema`] - Single message type with direction and schema
+//! - [`MessageSchema`] - Single message type with direction, schema, selectors, and response link
+//! - [`MessageSelector`] - Equality check on an inbound wire field that selects a message
 //! - [`MessageDirection`] - Message flow direction (Client, Server, Bidirectional)
 //!
 //! ### Model Definition Types (for API schema import)
@@ -58,9 +60,6 @@
 //! - [`ParamDef`] - Single parameter definition
 //! - [`QueryParamType`] - Parameter value type
 //! - [`ParamStyle`] - Parameter serialization style
-//! - [`PaginationStyle`] - Legacy pagination query parameters, superseded by
-//!   [`pagination::Strategy`]
-//! - [`PaginationResponse`] - Legacy response pagination signal; nothing reads it
 //!
 //! List pagination is authored per API through the [`pagination`] module.
 //!
@@ -69,41 +68,19 @@
 //! Define a simple API with bearer token authentication:
 //!
 //! ```
-//! use schematic_define::{RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, CrossOrigin};
+//! use schematic_define::{DefinitionContext, RestApi, Endpoint};
 //!
-//! let api = RestApi {
-//!     name: "OpenAI".to_string(),
-//!     description: "OpenAI API".to_string(),
-//!     base_url: "https://api.openai.com/v1".to_string(),
-//!     docs_url: Some("https://platform.openai.com/docs/api-reference".to_string()),
-//!     auth: AuthStrategy::BearerToken { header: None },
-//!     auth_policy: None,
-//!     env_auth: vec!["OPENAI_API_KEY".to_string()],
-//!     env_username: None,
-//!     headers: vec![],
-//!     endpoints: vec![
-//!         Endpoint {
-//!             id: "ListModels".to_string(),
-//!             method: RestMethod::Get,
-//!             path: "/models".to_string(),
-//!             description: "List available models".to_string(),
-//!             request: None,
-//!             response: ApiResponse::json_type("ListModelsResponse"),
-//!             headers: vec![],
-//!             params: None,
-//!             oauth_scopes: None,
-//!         },
-//!     ],
-//!     module_path: None,
-//!     request_suffix: None,
-//!     version: None,
-//!     env_mapping: None,
-//!     cross_origin: CrossOrigin::default(),
-//!     request_id_header: None,
-//!     secret_names: vec![],
-//!     default_pagination: None,
-//!     pagination_exceptions: vec![],
-//! };
+//! let mut ctx = DefinitionContext::types_in("crate::types");
+//! let endpoint = Endpoint::get("ListModels", "/models")
+//!     .describes("List available models")
+//!     .returns_json::<serde_json::Value>(&mut ctx)
+//!     .build().unwrap();
+//! let api = RestApi::builder(&ctx, "OpenAI", "https://api.openai.com/v1")
+//!     .describes("OpenAI API")
+//!     .bearer_env(["OPENAI_API_KEY"])
+//!     .docs_url("https://platform.openai.com/docs/api-reference")
+//!     .endpoints([endpoint])
+//!     .build().unwrap();
 //!
 //! assert_eq!(api.name, "OpenAI");
 //! assert_eq!(api.endpoints.len(), 1);
@@ -141,7 +118,17 @@
 //!
 //! See `schematic_definitions::anthropic` for a comprehensive example.
 
+#![doc = include_str!("../../docs/authoring-examples.md")]
+
+/// Compiles the examples of `schematic/define/README.md`.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+pub struct ReadmeDoc;
+
 pub mod auth;
+pub mod bundle;
+pub mod components;
+pub mod constraints;
 pub mod cross_origin;
 pub mod headers;
 pub mod models;
@@ -151,8 +138,14 @@ pub mod params;
 pub mod prelude;
 pub mod request;
 pub mod response;
+pub mod error_table;
+pub mod graphql;
 pub mod schema;
+mod serde_presence;
 pub mod types;
+pub mod registration;
+pub mod builders;
+pub mod metadata;
 pub mod websocket;
 
 #[cfg(feature = "openapi")]
@@ -160,23 +153,34 @@ pub mod openapi;
 
 // Re-export main types at crate root
 pub use auth::{
-    ApiKeyLocation, AuthMethod, AuthPolicy, AuthStrategy, EnvAuthStrategy, UpdateStrategy,
+    ApiKeyLocation, AuthMethod, AuthPolicy, AuthStrategy, EndpointAuth, EnvAuthStrategy,
+    UpdateStrategy,
 };
+pub use bundle::{BUNDLE_FORMAT_VERSION, BundleError, DefinitionBundle};
+pub use metadata::{Backoff, MetadataError, RateLimit, ResetUnit, RetryGuidance, StatusSelector};
+pub use components::SchemaComponent;
 pub use cross_origin::CrossOrigin;
 pub use headers::{ApiKeyEnv, EnvList, EnvMapping, HeaderError, Headers, SensitiveString};
 pub use models::{
     EnumDef, EnumVariant, FieldDef, ModelCatalog, ModelDef, PrimitiveType, StructDef, TypeAlias,
-    TypeRef,
+    TypeRef, UnionDiscriminator,
 };
-pub use oauth::{OAuth2ClientAuthMethod, OAuth2Config, OAuth2GrantType, PkceRequirement};
-pub use pagination::{PaginationResponse, PaginationStyle};
+pub use oauth::{
+    AuthorizationCodeGrant, ClientCredentialsGrant, DeviceCodeGrant, OAuth2ClientAuthMethod,
+    OAuth2Config, OAuth2ConfigError, OAuth2GrantType, PkceRequirement,
+};
 pub use params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
 pub use request::{ApiRequest, FormField, FormFieldKind};
-pub use response::ApiResponse;
+pub use response::{JsonTag, ResponseShape, StreamEnd, StreamFraming, SuccessShape};
+pub use error_table::{ErrorEntry, ErrorTable, StatusMatch};
+pub use graphql::{AddressRule, GraphQlOperation, GraphQlOperationBuilder, GraphQlSurface, GraphQlVariables, OperationKind};
 pub use schema::{Schema, SchemaObject};
-pub use types::{Endpoint, RestApi, RestMethod};
+pub use types::{Endpoint, ResolvedEndpointAuth, RestApi, RestMethod};
+pub use registration::{DefinitionContext, DefinitionError, MapKey, Registration, RustPath, SchemaReference, TypeDesc, TypeRegistration};
 pub use websocket::{
-    AuthFlowHints, ConnectionLifecycle, ConnectionParam, CorrelationHints, FrameFormat,
-    HeartbeatHints, MessageDirection, MessageSchema, ParamType, RequestIdType, WebSocketApi,
-    WebSocketEndpoint, WebSocketEndpointHints, WebSocketRuntimeHints,
+    AuthFlowHints, ConnectionLifecycle, CorrelationHints, EndpointRole, FrameFormat,
+    HeartbeatHints, MessageDirection, MessageSchema, MessageSelector, RequestIdType,
+    WebSocketApi, WebSocketEndpoint, WebSocketEndpointHints, WebSocketRuntimeHints,
 };
+
+pub use builders::{EndpointBuilder, ErrorSet, ErrorShape, RestApiBuilder, Success};

@@ -656,7 +656,7 @@ impl DocumentOutput<'_> {
             // MarkdownPlus fold so disclosure blocks emit `<details>` /
             // `<summary>` inline HTML rather than the DSL verbatim.
             OutputFormat::MarkdownPlus => markdown_plus_artifact(composed, self.cli, self.input, self.strict_style),
-            OutputFormat::Html => html_artifact(composed, self.cli, self.input, self.strict_style),
+            OutputFormat::Html => html_artifact(composed, self.cli, self.input, self.strict_style, &self.cli.features),
             OutputFormat::Json => json_artifact(composed),
         }
     }

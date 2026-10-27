@@ -1,0 +1,476 @@
+//! Disposable spike: reusable setup-callback factory, exclusive per-attempt
+//! session ownership, stream transfer, and cancellation during setup/backoff.
+
+use std::fmt;
+use std::future::Future;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
+
+use futures_util::{SinkExt, StreamExt};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use tokio::net::TcpStream;
+use tokio::sync::{mpsc, watch};
+use tokio::time::Instant;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+
+pub type Transport = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+// ---------------------------------------------------------------- credential
+
+/// Resolved credential handed to setup. `Debug` never prints the value.
+#[derive(Clone)]
+pub struct RedactedCredential(Arc<str>);
+
+impl RedactedCredential {
+    pub fn new(value: impl Into<Arc<str>>) -> Self {
+        Self(value.into())
+    }
+    /// Explicit, greppable access to the secret.
+    pub fn expose_secret(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for RedactedCredential {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("RedactedCredential(<redacted>)")
+    }
+}
+
+// ---------------------------------------------------------------- errors
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetupError {
+    /// Protocol-level rejection: terminal, no redial.
+    Rejected { reason: String },
+    /// Retryable failure reported by the callback.
+    Transient { reason: String },
+    /// Peer closed (close frame or EOF) during setup.
+    Closed,
+    /// Transport I/O failure during setup.
+    Io(String),
+    /// Encode/decode failure for a setup message.
+    Codec(String),
+    /// The session was revoked (attempt finished, timed out, or client closed).
+    SessionInvalid,
+}
+
+impl SetupError {
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Rejected { .. })
+    }
+}
+
+impl fmt::Display for SetupError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Rejected { reason } => write!(f, "setup rejected: {reason}"),
+            Self::Transient { reason } => write!(f, "transient setup failure: {reason}"),
+            Self::Closed => f.write_str("connection closed during setup"),
+            Self::Io(e) => write!(f, "I/O during setup: {e}"),
+            Self::Codec(e) => write!(f, "setup codec: {e}"),
+            Self::SessionInvalid => f.write_str("setup session is no longer valid"),
+        }
+    }
+}
+impl std::error::Error for SetupError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClientError {
+    Setup(SetupError),
+    Dial(String),
+    OpeningWrite(String),
+    AttemptTimeout,
+    /// Setup returned `Ok` while a detached session operation held the stream.
+    SessionLeaked,
+}
+
+// ---------------------------------------------------------------- session
+
+enum Slot {
+    Idle(Transport),
+    Busy,
+    Revoked,
+}
+
+type SharedSlot = Arc<Mutex<Slot>>;
+
+fn lock(slot: &SharedSlot) -> std::sync::MutexGuard<'_, Slot> {
+    slot.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Exclusive setup access to one connection attempt.
+///
+/// The stream lives in a slot shared only with the attempt's [`SlotGuard`].
+/// Each operation checks the stream out (so no lock is held across `.await`)
+/// and races the I/O against revocation, so a session moved into a detached
+/// task cannot keep the stream alive after its attempt ends.
+pub struct SetupSession {
+    slot: SharedSlot,
+    revoked: watch::Receiver<bool>,
+    credential: Option<RedactedCredential>,
+}
+
+impl fmt::Debug for SetupSession {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SetupSession")
+            .field("credential", &self.credential)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SetupSession {
+    pub fn credential(&self) -> Option<&RedactedCredential> {
+        self.credential.as_ref()
+    }
+
+    pub async fn send_json<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<(), SetupError> {
+        let text = serde_json::to_string(value).map_err(|e| SetupError::Codec(e.to_string()))?;
+        self.send_text(text).await
+    }
+
+    pub async fn send_text(&mut self, text: String) -> Result<(), SetupError> {
+        let mut stream = self.checkout()?;
+        let outcome = tokio::select! {
+            biased;
+            _ = self.revoked.wait_for(|r| *r) => None,
+            r = stream.send(Message::text(text)) => Some(r),
+        };
+        match outcome {
+            None => Err(SetupError::SessionInvalid),
+            Some(Err(e)) => Err(SetupError::Io(e.to_string())),
+            Some(Ok(())) => self.checkin(stream),
+        }
+    }
+
+    pub async fn recv_json<T: DeserializeOwned>(&mut self) -> Result<T, SetupError> {
+        let text = self.recv_text().await?;
+        serde_json::from_str(&text).map_err(|e| SetupError::Codec(e.to_string()))
+    }
+
+    /// Next text frame; control frames are skipped (tungstenite queues pongs).
+    pub async fn recv_text(&mut self) -> Result<String, SetupError> {
+        let mut stream = self.checkout()?;
+        let outcome = tokio::select! {
+            biased;
+            _ = self.revoked.wait_for(|r| *r) => None,
+            r = next_text(&mut stream) => Some(r),
+        };
+        match outcome {
+            None => Err(SetupError::SessionInvalid),
+            Some(Err(e)) => Err(e),
+            Some(Ok(text)) => {
+                self.checkin(stream)?;
+                Ok(text)
+            }
+        }
+    }
+
+    fn checkout(&self) -> Result<Transport, SetupError> {
+        let mut slot = lock(&self.slot);
+        match std::mem::replace(&mut *slot, Slot::Busy) {
+            Slot::Idle(stream) => Ok(stream),
+            other => {
+                *slot = other;
+                Err(SetupError::SessionInvalid)
+            }
+        }
+    }
+
+    fn checkin(&self, stream: Transport) -> Result<(), SetupError> {
+        let mut slot = lock(&self.slot);
+        if matches!(*slot, Slot::Busy) {
+            *slot = Slot::Idle(stream);
+            Ok(())
+        } else {
+            // Revoked while we held it: the stream is dropped here.
+            Err(SetupError::SessionInvalid)
+        }
+    }
+}
+
+async fn next_text(stream: &mut Transport) -> Result<String, SetupError> {
+    loop {
+        match stream.next().await {
+            None | Some(Ok(Message::Close(_))) => return Err(SetupError::Closed),
+            Some(Err(e)) => return Err(SetupError::Io(e.to_string())),
+            Some(Ok(Message::Text(t))) => return Ok(t.to_string()),
+            Some(Ok(Message::Binary(_))) => return Err(SetupError::Codec("unexpected binary frame".into())),
+            Some(Ok(_)) => continue,
+        }
+    }
+}
+
+/// Supervisor-side owner of an attempt's slot. Dropping it (timeout, close,
+/// error) revokes the session and drops an idle stream immediately.
+struct SlotGuard {
+    slot: SharedSlot,
+    revoke: watch::Sender<bool>,
+}
+
+impl SlotGuard {
+    fn new(stream: Transport, credential: Option<RedactedCredential>) -> (SetupSession, Self) {
+        let slot = Arc::new(Mutex::new(Slot::Idle(stream)));
+        let (revoke, revoked) = watch::channel(false);
+        let session = SetupSession { slot: Arc::clone(&slot), revoked, credential };
+        (session, Self { slot, revoke })
+    }
+
+    fn reclaim(self) -> Result<Transport, ClientError> {
+        let taken = std::mem::replace(&mut *lock(&self.slot), Slot::Revoked);
+        match taken {
+            Slot::Idle(stream) => Ok(stream),
+            // Drop of `self` signals revoke; the detached op drops the stream.
+            _ => Err(ClientError::SessionLeaked),
+        }
+    }
+}
+
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        let taken = std::mem::replace(&mut *lock(&self.slot), Slot::Revoked);
+        drop(taken);
+        let _ = self.revoke.send(true);
+    }
+}
+
+// ---------------------------------------------------------------- client
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnState {
+    Connecting,
+    Ready,
+    Closed,
+}
+
+/// Test-observable lifecycle log (stands in for tracing in the spike).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Lifecycle {
+    SetupStarted(usize),
+    SetupOk(usize),
+    Ready(usize),
+    Failed(usize, ClientError),
+    Backoff,
+    Closed,
+}
+
+#[derive(Clone)]
+pub struct ConnectOptions {
+    pub per_attempt_timeout: Duration,
+    pub connect_deadline: Option<Instant>,
+    pub max_attempts: Option<u32>,
+    pub backoff: Duration,
+    pub credential: Option<RedactedCredential>,
+    pub lifecycle: Option<mpsc::UnboundedSender<Lifecycle>>,
+}
+
+impl Default for ConnectOptions {
+    fn default() -> Self {
+        Self {
+            per_attempt_timeout: Duration::from_secs(10),
+            connect_deadline: None,
+            max_attempts: Some(5),
+            backoff: Duration::from_millis(10),
+            credential: None,
+            lifecycle: None,
+        }
+    }
+}
+
+pub struct WsClient {
+    state: watch::Receiver<ConnState>,
+    shutdown: watch::Sender<bool>,
+    pub errors: mpsc::Receiver<ClientError>,
+}
+
+impl WsClient {
+    pub fn state(&self) -> ConnState {
+        *self.state.borrow()
+    }
+
+    pub async fn close(&self) {
+        let _ = self.shutdown.send(true);
+        let mut state = self.state.clone();
+        let _ = state.wait_for(|s| *s == ConnState::Closed).await;
+    }
+
+    pub async fn wait_closed(&self) {
+        let mut state = self.state.clone();
+        let _ = state.wait_for(|s| *s == ConnState::Closed).await;
+    }
+}
+
+impl Drop for WsClient {
+    fn drop(&mut self) {
+        let _ = self.shutdown.send(true);
+    }
+}
+
+fn log(opts: &ConnectOptions, event: Lifecycle) {
+    if let Some(tx) = &opts.lifecycle {
+        let _ = tx.send(event);
+    }
+}
+
+async fn shutdown_requested(rx: &mut watch::Receiver<bool>) {
+    // Sender dropped (client dropped) also counts as shutdown.
+    let _ = rx.wait_for(|v| *v).await;
+}
+
+/// Dial, write the retained opening, run setup, reclaim the stream.
+/// Cancel-safe: dropping this future drops the guard, revoking the session.
+async fn attempt<F, Fut>(
+    url: &str,
+    opening: Option<&str>,
+    setup: &F,
+    opts: &ConnectOptions,
+    ordinal: usize,
+) -> Result<Transport, ClientError>
+where
+    F: Fn(SetupSession) -> Fut,
+    Fut: Future<Output = Result<(), SetupError>>,
+{
+    let (mut stream, _) = tokio_tungstenite::connect_async(url)
+        .await
+        .map_err(|e| ClientError::Dial(e.to_string()))?;
+    if let Some(opening) = opening {
+        stream
+            .send(Message::text(opening))
+            .await
+            .map_err(|e| ClientError::OpeningWrite(e.to_string()))?;
+    }
+    let (session, guard) = SlotGuard::new(stream, opts.credential.clone());
+    log(opts, Lifecycle::SetupStarted(ordinal));
+    setup(session).await.map_err(ClientError::Setup)?;
+    let stream = guard.reclaim()?;
+    log(opts, Lifecycle::SetupOk(ordinal));
+    Ok(stream)
+}
+
+fn budget(opts: &ConnectOptions, before_first_ready: bool) -> Duration {
+    match (before_first_ready, opts.connect_deadline) {
+        (true, Some(deadline)) => opts
+            .per_attempt_timeout
+            .min(deadline.saturating_duration_since(Instant::now())),
+        _ => opts.per_attempt_timeout,
+    }
+}
+
+/// Connect, running `setup` on this dial and every redial before `Ready`.
+///
+/// The initial attempt runs inline (dropping this future cancels it with no
+/// spawned task); the supervisor is spawned only after the first `Ready`.
+pub async fn connect_with_setup<O, F, Fut>(
+    url: String,
+    opening: Option<&O>,
+    opts: ConnectOptions,
+    setup: F,
+) -> Result<WsClient, ClientError>
+where
+    O: Serialize + ?Sized,
+    F: Fn(SetupSession) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<(), SetupError>> + Send + 'static,
+{
+    let opening: Option<Arc<str>> = opening
+        .map(|o| serde_json::to_string(o).map(Arc::from))
+        .transpose()
+        .map_err(|e| ClientError::OpeningWrite(e.to_string()))?;
+
+    let stream = tokio::time::timeout(
+        budget(&opts, true),
+        attempt(&url, opening.as_deref(), &setup, &opts, 0),
+    )
+    .await
+    .map_err(|_| ClientError::AttemptTimeout)??;
+
+    let (state_tx, state_rx) = watch::channel(ConnState::Ready);
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let (err_tx, err_rx) = mpsc::channel(16);
+    log(&opts, Lifecycle::Ready(0));
+    tokio::spawn(supervise(url, opening, opts, setup, stream, state_tx, shutdown_rx, err_tx));
+    Ok(WsClient { state: state_rx, shutdown: shutdown_tx, errors: err_rx })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn supervise<F, Fut>(
+    url: String,
+    opening: Option<Arc<str>>,
+    opts: ConnectOptions,
+    setup: F,
+    mut stream: Transport,
+    state: watch::Sender<ConnState>,
+    mut shutdown: watch::Receiver<bool>,
+    errors: mpsc::Sender<ClientError>,
+) where
+    F: Fn(SetupSession) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<(), SetupError>> + Send + 'static,
+{
+    let mut ordinal = 0usize;
+    let finish = |state: &watch::Sender<ConnState>| {
+        let _ = state.send(ConnState::Closed);
+        log(&opts, Lifecycle::Closed);
+    };
+    'connected: loop {
+        // Connected: only inbound loss or shutdown matter for the spike.
+        let lost = loop {
+            tokio::select! {
+                biased;
+                _ = shutdown_requested(&mut shutdown) => break false,
+                msg = stream.next() => match msg {
+                    None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break true,
+                    Some(Ok(_)) => continue,
+                },
+            }
+        };
+        if !lost {
+            let _ = tokio::time::timeout(Duration::from_millis(250), stream.close(None)).await;
+            finish(&state);
+            return;
+        }
+        drop(stream);
+        let _ = state.send(ConnState::Connecting);
+
+        let mut failures: u32 = 0;
+        loop {
+            if opts.max_attempts.is_some_and(|max| failures >= max) {
+                finish(&state);
+                return;
+            }
+            log(&opts, Lifecycle::Backoff);
+            tokio::select! {
+                biased;
+                _ = shutdown_requested(&mut shutdown) => { finish(&state); return; }
+                _ = tokio::time::sleep(opts.backoff) => {}
+            }
+            ordinal += 1;
+            let result = tokio::select! {
+                biased;
+                _ = shutdown_requested(&mut shutdown) => { finish(&state); return; }
+                r = tokio::time::timeout(
+                    budget(&opts, false),
+                    attempt(&url, opening.as_deref(), &setup, &opts, ordinal),
+                ) => r.unwrap_or(Err(ClientError::AttemptTimeout)),
+            };
+            match result {
+                Ok(next) => {
+                    stream = next;
+                    let _ = state.send(ConnState::Ready);
+                    log(&opts, Lifecycle::Ready(ordinal));
+                    continue 'connected;
+                }
+                Err(err) => {
+                    log(&opts, Lifecycle::Failed(ordinal, err.clone()));
+                    let terminal = matches!(&err, ClientError::Setup(e) if e.is_terminal());
+                    let _ = errors.try_send(err);
+                    if terminal {
+                        finish(&state);
+                        return;
+                    }
+                    failures += 1;
+                }
+            }
+        }
+    }
+}

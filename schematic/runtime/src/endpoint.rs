@@ -5,7 +5,8 @@
 //! that decodes its body. A send therefore never takes a caller-chosen
 //! response type.
 
-use std::ops::RangeInclusive;
+use std::any::Any;
+use std::fmt;
 
 use bytes::Bytes;
 use http::Method;
@@ -33,7 +34,7 @@ pub trait EndpointSpec: Send + 'static {
     type Success: Send + 'static;
     /// The declared error body; [`NoDeclaredError`](crate::NoDeclaredError)
     /// when the endpoint declares none.
-    type Failure: ErrorBody;
+    type Failure: ErrorBody<Self::Api>;
     /// The codec that reads a 2xx body into [`Self::Success`].
     type Decoder: Decode<Output = Self::Success>;
 
@@ -44,9 +45,18 @@ pub trait EndpointSpec: Send + 'static {
     /// assembled reports it; a sent request uses [`RequestParts::method`].
     const METHOD: Method;
 
-    /// Statuses whose body is decoded as [`Self::Failure`] when the endpoint
-    /// declares one. Any other non-2xx status is reported as undeclared.
-    const DECLARED_ERROR_STATUSES: RangeInclusive<u16> = 400..=599;
+    /// The endpoint's effective error table: which statuses decode as
+    /// [`Self::Failure`], and as which of its shapes.
+    ///
+    /// [`ErrorRoute::lookup`] chooses the entry: an exact status, then the
+    /// narrowest range. A status no entry matches is reported as undeclared.
+    /// The default sends every 4xx and 5xx status to alternative 0, the one
+    /// shape of a single-shape failure type.
+    const ERRORS: &'static [ErrorRoute] = &[ErrorRoute::new(StatusMatch::Range { lo: 400, hi: 599 }, 0)];
+
+    /// Where the request is sent; [`Address::Base`] unless the endpoint is
+    /// a GraphQL operation.
+    const ADDRESS: Address = Address::Base;
 
     /// Assembles the application-level request.
     ///
@@ -55,21 +65,152 @@ pub trait EndpointSpec: Send + 'static {
     ///
     /// ## Errors
     ///
-    /// Returns [`InvalidArgument`] when a parameter cannot be encoded; the
-    /// runtime reports it before any network work.
+    /// Returns [`InvalidArgument`] when a parameter cannot be encoded or the
+    /// request breaks one of its declared value rules (see
+    /// [`validate`](crate::validate)); the runtime reports it before any
+    /// credential or network work.
     fn into_parts(self) -> Result<RequestParts, InvalidArgument>;
+}
+
+/// Where an endpoint's request is sent.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Address {
+    /// [`RequestParts::path`] joined onto the client's base URL, or taken
+    /// whole when it is an absolute URL.
+    Base,
+    /// The client's GraphQL address (see [`crate::graphql`]).
+    /// [`RequestParts::path`] is ignored; declared query pairs are still
+    /// appended. A client with neither GraphQL address rules nor a
+    /// [`Client::graphql_url`](crate::Client::graphql_url) refuses the send
+    /// with [`TransportErrorKind::InvalidUrl`](crate::TransportErrorKind::InvalidUrl)
+    /// before any request.
+    GraphQl,
 }
 
 /// A failure body that the runtime decodes when a declared error status
 /// arrives, so the caller never performs a decode step.
-pub trait ErrorBody: Sized + Send + 'static {
+///
+/// `A` is the [`Api`] marker of the endpoint whose failure this is. The
+/// runtime implements it for every `A` for the plain shapes of a
+/// single-shape table: `String` (text, invalid UTF-8 replaced), [`Bytes`]
+/// (binary), `()` (empty), and [`serde_json::Value`] (any JSON). Generated
+/// code implements `ErrorBody<ApiMarker>` once per API module for each
+/// registered JSON type the module's error tables name, and for the enum of a
+/// table with several distinct shapes. The marker parameter is what makes
+/// that legal: registered types live in another crate, and the orphan rule
+/// allows a foreign trait on a foreign type only when a local type, here the
+/// generated marker, appears among the trait's parameters.
+pub trait ErrorBody<A>: Sized + Send + 'static {
     /// `false` only for [`NoDeclaredError`](crate::NoDeclaredError): every
     /// error reply of such an endpoint is reported as undeclared.
     const DECLARED: bool = true;
 
-    /// Decodes a declared error body, or returns `None` when the bytes do not
-    /// form this type; the runtime then reports a malformed error body.
-    fn decode_body(body: &[u8]) -> Option<Self>;
+    /// Decodes a declared error body as the shape the matched
+    /// [`ErrorRoute::alternative`] names, or returns `None` when the bytes do
+    /// not form it; the runtime then reports a malformed error body.
+    fn decode_body(alternative: usize, body: &[u8]) -> Option<Self>;
+
+    /// Accepts a failure that a 2xx body carried, which a success codec
+    /// reported through [`DecodeFailure::declared`](crate::DecodeFailure::declared);
+    /// `None`, the default, makes the reply a malformed success.
+    fn from_declared(failure: Box<dyn Any + Send>) -> Option<Self> {
+        let _ = failure;
+        None
+    }
+}
+
+impl<A> ErrorBody<A> for String {
+    fn decode_body(_: usize, body: &[u8]) -> Option<Self> {
+        Some(String::from_utf8_lossy(body).into_owned())
+    }
+}
+
+impl<A> ErrorBody<A> for Bytes {
+    fn decode_body(_: usize, body: &[u8]) -> Option<Self> {
+        Some(Bytes::copy_from_slice(body))
+    }
+}
+
+impl<A> ErrorBody<A> for () {
+    fn decode_body(_: usize, _: &[u8]) -> Option<Self> {
+        Some(())
+    }
+}
+
+impl<A> ErrorBody<A> for serde_json::Value {
+    fn decode_body(_: usize, body: &[u8]) -> Option<Self> {
+        serde_json::from_slice(body).ok()
+    }
+}
+
+/// The statuses one error entry matches; mirrors the definition's status
+/// match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StatusMatch {
+    /// One status.
+    Exact(u16),
+    /// Every status from `lo` to `hi`, both inclusive.
+    Range {
+        /// First matched status.
+        lo: u16,
+        /// Last matched status.
+        hi: u16,
+    },
+}
+
+impl StatusMatch {
+    /// Whether `status` is matched.
+    pub const fn contains(self, status: u16) -> bool {
+        match self {
+            Self::Exact(exact) => exact == status,
+            Self::Range { lo, hi } => lo <= status && status <= hi,
+        }
+    }
+
+    /// How many statuses are matched; an exact match is the narrowest.
+    pub const fn width(self) -> u16 {
+        match self {
+            Self::Exact(_) => 1,
+            Self::Range { lo, hi } => hi.saturating_sub(lo).saturating_add(1),
+        }
+    }
+}
+
+impl fmt::Display for StatusMatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Exact(status) => write!(f, "{status}"),
+            Self::Range { lo, hi } => write!(f, "{lo}-{hi}"),
+        }
+    }
+}
+
+/// One entry of an endpoint's effective error table: a status match and
+/// which shape of the failure type its body decodes as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ErrorRoute {
+    /// The statuses this entry matches.
+    pub status: StatusMatch,
+    /// The shape index handed to [`ErrorBody::decode_body`].
+    pub alternative: usize,
+}
+
+impl ErrorRoute {
+    /// An entry sending `status` to `alternative`.
+    pub const fn new(status: StatusMatch, alternative: usize) -> Self {
+        Self { status, alternative }
+    }
+
+    /// The most specific entry of `table` matching `status`: an exact match,
+    /// then the narrowest range. A validated table has no tie; on one, the
+    /// first entry wins.
+    pub fn lookup(table: &[Self], status: u16) -> Option<&Self> {
+        table
+            .iter()
+            .filter(|route| route.status.contains(status))
+            .min_by_key(|route| route.status.width())
+    }
 }
 
 /// The application-level request an endpoint sends, before credentials.
@@ -85,7 +226,7 @@ pub struct RequestParts {
     pub path: String,
     /// Declared query parameters in declaration order, **not**
     /// percent-encoded. Duplicate names are kept in order.
-    pub query: Vec<(String, String)>,
+    pub query: Vec<(String, QueryValue)>,
     /// Request headers as (name, value) pairs, including cookie parameters
     /// already folded into a `Cookie` header.
     pub headers: Vec<(String, String)>,
@@ -102,6 +243,112 @@ impl RequestParts {
             query: Vec::new(),
             headers: Vec::new(),
             body: RequestBody::Empty,
+        }
+    }
+}
+
+/// The value of one declared query pair, before percent-encoding.
+///
+/// The client encodes every value once, when it builds the URL: every byte
+/// outside the RFC 3986 unreserved set becomes `%XX`, so a space is `%20`,
+/// never `+`. A [`Delimited`](Self::Delimited) value encodes each element
+/// that way and then joins them with its delimiter, so a delimiter inside an
+/// element stays escaped:
+///
+/// ```
+/// use schematic_runtime::{QueryDelimiter, QueryValue};
+///
+/// let tags = QueryValue::delimited(["a,b", "c"], QueryDelimiter::Comma);
+/// assert_eq!(tags.encoded(), "a%2Cb,c");
+/// assert_eq!(QueryValue::from("a,b c").encoded(), "a%2Cb%20c");
+/// assert_eq!(QueryValue::delimited(Vec::<String>::new(), QueryDelimiter::Pipe).encoded(), "");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueryValue {
+    /// One value, encoded whole.
+    Text(String),
+    /// A non-exploded array (OpenAPI `form` with `explode: false`,
+    /// `spaceDelimited`, or `pipeDelimited`): the elements in order and the
+    /// delimiter that joins them. No elements is the empty value.
+    Delimited {
+        /// The unencoded elements.
+        elements: Vec<String>,
+        /// What joins the encoded elements.
+        delimiter: QueryDelimiter,
+    },
+}
+
+/// The separator of a [`QueryValue::Delimited`] value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryDelimiter {
+    /// A literal `,` (`form`, `explode: false`).
+    Comma,
+    /// A space, sent as `%20` (`spaceDelimited`).
+    Space,
+    /// A `|`, sent as `%7C` (`pipeDelimited`).
+    Pipe,
+}
+
+impl QueryDelimiter {
+    /// The delimiter as it appears in the encoded query.
+    pub fn encoded(self) -> &'static str {
+        match self {
+            Self::Comma => ",",
+            Self::Space => "%20",
+            Self::Pipe => "%7C",
+        }
+    }
+}
+
+impl QueryValue {
+    /// A [`Delimited`](Self::Delimited) value of `elements` joined by
+    /// `delimiter`.
+    pub fn delimited<I>(elements: I, delimiter: QueryDelimiter) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<String>,
+    {
+        Self::Delimited { elements: elements.into_iter().map(Into::into).collect(), delimiter }
+    }
+
+    /// The value as it is written into the URL's query.
+    pub fn encoded(&self) -> String {
+        let mut out = String::new();
+        match self {
+            Self::Text(text) => encode_query_component(text, &mut out),
+            Self::Delimited { elements, delimiter } => {
+                for (index, element) in elements.iter().enumerate() {
+                    if index > 0 {
+                        out.push_str(delimiter.encoded());
+                    }
+                    encode_query_component(element, &mut out);
+                }
+            }
+        }
+        out
+    }
+}
+
+impl From<String> for QueryValue {
+    fn from(text: String) -> Self {
+        Self::Text(text)
+    }
+}
+
+impl From<&str> for QueryValue {
+    fn from(text: &str) -> Self {
+        Self::Text(text.to_owned())
+    }
+}
+
+/// Percent-encodes `text` into `out`, keeping only RFC 3986 unreserved
+/// characters; the one query encoding the runtime writes.
+pub(crate) fn encode_query_component(text: &str, out: &mut String) {
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
         }
     }
 }

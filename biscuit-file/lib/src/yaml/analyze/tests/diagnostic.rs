@@ -102,6 +102,7 @@ fn test_code_spellings_pinned() {
             "yaml.whitespace",
             "yaml.reserved-indicator",
             "yaml.tab-indentation",
+            "yaml.root-indentation",
             "yaml.duplicate-key",
             "yaml.anchor-undeclared",
             "yaml.anchor-forward",

@@ -989,7 +989,7 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
         let related = cycle
             .iter()
             .filter_map(|&doc| ctx.graph.document(doc))
-            .filter_map(|record| file_path_to_uri(&record.path))
+            .filter_map(|record| file_path_to_uri(record.path))
             .map(|uri| DiagnosticRelatedInformation {
                 location: Location::new(uri, line_range(1)),
                 message: "on the transclusion cycle".to_string(),

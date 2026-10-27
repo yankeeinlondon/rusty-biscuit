@@ -451,89 +451,86 @@ fn initialize_shells_are_forbidden_even_with_yolo_across_entry_paths() {
     }
 }
 
-const EARLY_CATCH_TRIGGERS: &[&str] = &["missing", "error", "proxy", "evaluation", "schema", "audit", "adopted"];
+mod early_catch_shells_cannot_run_or_enable_another_catch_shell {
+    use super::*;
 
-macro_rules! early_catch_cases {
-    ($($name:ident: $trigger:literal),+ $(,)?) => {
-        const SCHEDULED_EARLY_CATCH_TRIGGERS: &[&str] = &[$($trigger),+];
+    const TRIGGERS: [&str; 7] = ["missing", "error", "proxy", "evaluation", "schema", "audit", "adopted"];
 
-        $(
+    macro_rules! trigger_tests {
+        ($($test:ident => $trigger:literal),* $(,)?) => {
+            $(#[test] fn $test() { assert_catch_shells_refused($trigger); })*
+
             #[test]
-            fn $name() {
-                early_catch_shells($trigger);
+            fn every_row_has_a_listed_test() {
+                assert_eq!(TRIGGERS, [$($trigger),*]);
             }
-        )+
-    };
-}
-
-early_catch_cases! {
-    early_catch_shells_cannot_run_or_enable_another_catch_shell: "missing",
-    early_catch_shells_after_initialize_error_are_refused: "error",
-    early_catch_shells_after_missing_proxy_are_refused: "proxy",
-    early_catch_shells_after_evaluation_error_are_refused: "evaluation",
-    early_catch_shells_after_schema_failure_are_refused: "schema",
-    early_catch_shells_after_audit_failure_are_refused: "audit",
-    early_catch_shells_in_an_adopted_target_are_refused: "adopted",
-}
-
-#[test]
-fn every_early_catch_trigger_is_scheduled_once() {
-    assert_eq!(SCHEDULED_EARLY_CATCH_TRIGGERS, EARLY_CATCH_TRIGGERS);
-}
-
-fn early_catch_shells(trigger: &str) {
-    for yolo in [false, true] {
-        let staged = Staged::new("early-catch-shell-prohibited");
-        staged.install_compose_provider();
-        let action = match trigger {
-            "error" => "{error: 'INITIALIZE-ERROR'}",
-            "proxy" => "{proxy: './missing-target.md'}",
-            _ => "{ensure_file: 'initialized.md'}",
         };
-        let body = match trigger {
-            "schema" => "Body",
-            "audit" => "::shell rm forbidden.txt",
-            _ => "::file ./missing.md",
-        };
-        let schema = if trigger == "schema" { "$schema:\n  required_value: string(required)\n" } else { "" };
-        let mut catches = String::new();
-        for event in ["blocked", "failure", "finalize"] {
-            let marker = staged.fixture.workspace_path().join(format!("{event}-shell"));
-            catches.push_str(&format!(
-                "{event}:\n    - {{append_line: ['events.log', '{event}']}}\n",
-            ));
-            if trigger == "evaluation" && event == "blocked" {
-                catches.push_str("    - {info: '{{ definitely_missing_value }}'}\n");
+    }
+
+    trigger_tests! {
+        a_missing_include => "missing",
+        an_initialize_error => "error",
+        a_failed_proxy => "proxy",
+        an_evaluation_error => "evaluation",
+        a_schema_failure => "schema",
+        a_refused_audit => "audit",
+        an_adopted_proxy_target => "adopted",
+    }
+
+    fn assert_catch_shells_refused(trigger: &str) {
+        for yolo in [false, true] {
+            let staged = Staged::new("early-catch-shell-prohibited");
+            staged.install_compose_provider();
+            let action = match trigger {
+                "error" => "{error: 'INITIALIZE-ERROR'}",
+                "proxy" => "{proxy: './missing-target.md'}",
+                _ => "{ensure_file: 'initialized.md'}",
+            };
+            let body = match trigger {
+                "schema" => "Body",
+                "audit" => "::shell rm forbidden.txt",
+                _ => "::file ./missing.md",
+            };
+            let schema = if trigger == "schema" { "$schema:\n  required_value: string(required)\n" } else { "" };
+            let mut catches = String::new();
+            for event in ["blocked", "failure", "finalize"] {
+                let marker = staged.fixture.workspace_path().join(format!("{event}-shell"));
+                catches.push_str(&format!(
+                    "{event}:\n    - {{append_line: ['events.log', '{event}']}}\n",
+                ));
+                if trigger == "evaluation" && event == "blocked" {
+                    catches.push_str("    - {info: '{{ definitely_missing_value }}'}\n");
+                }
+                catches.push_str(&format!(
+                    "    - shell:\n        command: \"touch {}\"\n        no_error: true\n", marker.display(),
+                ));
             }
-            catches.push_str(&format!(
-                "    - shell:\n        command: \"touch {}\"\n        no_error: true\n", marker.display(),
+            staged.write_doc("doc.md", &format!(
+                "---\n{schema}initialize:\n    - {action}\n{catches}---\n{body}\n",
             ));
+            staged.write_doc("router.md", "---\ninitialize:\n    - {proxy: './doc.md'}\n---\nRouter\n");
+            staged.write_doc("seq.md", "---\nsequence:\n  - name: one\n    prompt: router.md\n---\nSequence\n");
+            let mut args = if trigger == "adopted" {
+                vec!["sequence", "seq.md", "--claude"]
+            } else {
+                vec!["compose", "doc.md", "--claude"]
+            };
+            if yolo { args.push("-y"); }
+            let (success, output) = staged.run(&args);
+            assert!(!success, "{trigger}, yolo={yolo}: {output}");
+            assert!(output.contains("shell commands are forbidden"), "{trigger}: {output}");
+            for event in ["blocked", "failure", "finalize"] {
+                assert!(!staged.fixture.workspace_path().join(format!("{event}-shell")).exists(), "{trigger}: {output}");
+                assert!(staged.events().iter().filter(|value| *value == event).count() <= 1, "catch repeated: {output}");
+            }
+            let expected = if trigger == "error" {
+                vec!["failure", "finalize"]
+            } else {
+                vec!["blocked", "failure", "finalize"]
+            };
+            assert_eq!(staged.events(), expected, "{trigger}: {output}");
+            assert!(!staged.prompt.exists(), "provider launched: {output}");
         }
-        staged.write_doc("doc.md", &format!(
-            "---\n{schema}initialize:\n    - {action}\n{catches}---\n{body}\n",
-        ));
-        staged.write_doc("router.md", "---\ninitialize:\n    - {proxy: './doc.md'}\n---\nRouter\n");
-        staged.write_doc("seq.md", "---\nsequence:\n  - name: one\n    prompt: router.md\n---\nSequence\n");
-        let mut args = if trigger == "adopted" {
-            vec!["sequence", "seq.md", "--claude"]
-        } else {
-            vec!["compose", "doc.md", "--claude"]
-        };
-        if yolo { args.push("-y"); }
-        let (success, output) = staged.run(&args);
-        assert!(!success, "{trigger}, yolo={yolo}: {output}");
-        assert!(output.contains("shell commands are forbidden"), "{trigger}: {output}");
-        for event in ["blocked", "failure", "finalize"] {
-            assert!(!staged.fixture.workspace_path().join(format!("{event}-shell")).exists(), "{trigger}: {output}");
-            assert!(staged.events().iter().filter(|value| *value == event).count() <= 1, "catch repeated: {output}");
-        }
-        let expected = if trigger == "error" {
-            vec!["failure", "finalize"]
-        } else {
-            vec!["blocked", "failure", "finalize"]
-        };
-        assert_eq!(staged.events(), expected, "{trigger}: {output}");
-        assert!(!staged.prompt.exists(), "provider launched: {output}");
     }
 }
 

@@ -1,18 +1,19 @@
 # biscuit-terminal
 
-Terminal capability detection, rendering utilities, and image/diagram display for Rust applications.
+Terminal capability detection, rendering utilities, and inline image display for Rust applications.
 
 ## Cargo Features
 
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `clap` | No | Derive `clap::ValueEnum` on enums for CLI integration with shell completions |
+| `image` | No | SVG images and graphical horizontal rules, rasterized with `resvg` |
 
-> **Note:** Image rendering via [viuer](https://crates.io/crates/viuer) is always available (unconditional dependency).
+> **Note:** Raster image rendering (Kitty and iTerm2 formats) is always available; the `image` feature adds SVG input and graphical rules.
 
 ### When to use the `clap` feature
 
-Enable the `clap` feature if you're building a CLI application that uses types like `QuadrantTheme` as command-line arguments:
+Enable the `clap` feature if you're building a CLI application that uses this crate's enums (for example the `renderable` layout enums it re-exposes) as command-line arguments:
 
 ```toml
 [dependencies]
@@ -21,7 +22,7 @@ biscuit-terminal = { version = "0.1", features = ["clap"] }
 
 This derives `clap::ValueEnum` on supported enums, enabling:
 
-- Shell tab-completion for enum values (e.g., `--theme <TAB>` shows `default`, `magic-quadrangle`)
+- Shell tab-completion for enum values
 - Automatic `--help` text listing valid values
 - Direct use in clap argument definitions with `#[arg(value_enum)]`
 
@@ -30,9 +31,8 @@ This derives `clap::ValueEnum` on supported enums, enabling:
 ## Capabilities
 
 - **Terminal App Detection**: Recognize 13+ terminal emulators with capability profiles
-- **Image Rendering**: Inline images via Kitty/iTerm2 protocols with security guards
-- **Mermaid Diagrams**: Adapter for `biscuit-visualized` Mermaid rendering (pure Rust, no external dependencies)
-- **Graph Visualization**: Adapter for `biscuit-visualized` graph rendering with multiple syntaxes
+- **Image Rendering**: Inline images via Kitty/iTerm2/Sixel, chosen by a detected [graphics route](../docs/discovery/graphics-routes.md), with security guards
+- **Diagram Hook**: Render-tree hook through which a caller (for example `biscuit-visualized`) draws Mermaid fences
 - **OS Detection**: Identify operating system and Linux distribution
 - **Repo Detection**: Detect git repo root and monorepo status via `sniff`
 - **Font Detection**: Extract font name and size from terminal config files
@@ -72,8 +72,6 @@ fn main() {
 - `discovery::locale` - Locale detection
 - `discovery::eval` - Escape code analysis utilities
 - `components::terminal_image` - Terminal image rendering (Kitty/iTerm2 with fallbacks)
-- `components::mermaid` - Mermaid diagram adapter (delegates to biscuit-visualized)
-- `components::graph_expression` - Graph visualization adapter (delegates to biscuit-visualized)
 - `components::prose` - Styled prose rendering
 - `components::table` - Table rendering
 - `components::list` - List rendering
@@ -97,13 +95,16 @@ fn main() {
 - `utils::text` - Content length calculation (escape-aware)
 - `utils::multiplex` - Multiplexing detection
 
-Live terminal queries (colors, window pixels, cursor position) cost a terminal
-that never answers one short wait per process; see
+Live terminal queries (colors, the graphics probe, window pixels, cursor
+position) cost a terminal that never answers one short wait per process. A
+program with its own input loop builds its `Terminal` with
+`Terminal::builder().probe(ProbeMode::Off)` (or runs under
+`BISCUIT_TERMINAL_PROBE=off`) so construction queries nothing; see
 [`docs/discovery/terminal-queries.md`](../docs/discovery/terminal-queries.md).
 
 ## Terminal Images (TerminalImage)
 
-`TerminalImage` renders inline images using the Kitty graphics protocol with automatic iTerm2 handling and a graceful text fallback.
+`TerminalImage` renders inline images in the format chosen by the terminal's graphics route, with a text fallback.
 
 ### Width syntax
 
@@ -114,9 +115,20 @@ that never answers one short wait per process; see
 
 ### Protocol selection
 
-- Kitty-capable terminals (Kitty, WezTerm, Ghostty, etc.): use Kitty protocol
-- iTerm2: uses iTerm’s native inline images even if iTerm advertises Kitty, to avoid Kitty-path failures
-- Others / unsupported: falls back to alt text
+`Terminal::new()` resolves a `graphics_route` once from the environment, and
+asks the terminal (the graphics probe) only when the environment cannot
+decide: the format (Kitty, iTerm2, Sixel, or none), how sure it is, and why. Every image
+rendered with that `Terminal` follows it.
+
+- Kitty-family terminals (Kitty, Ghostty, WezTerm, Warp, Konsole): Kitty protocol
+- iTerm2, mintty, cterm: iTerm2's native inline images (iTerm2 accepts Kitty but mishandles it)
+- Sixel terminals (Windows Terminal 1.22+, Zellij, a tmux 3.4+ that draws Sixel itself, or a DA1 reply reporting Sixel): Sixel, composited onto the terminal's background
+- No usable format: half-blocks on a truecolor, Unicode terminal (`render_with_half_blocks`, used by `render`/`display`), else the alt text
+- `BISCUIT_GRAPHICS` (`auto`, `kitty`, `iterm2`, `sixel`, `none`) forces or disables a format; `BISCUIT_GRAPHICS_TRANSPORT` (`auto`, `direct`, `tmux`) declares a tmux layer
+
+See [Graphics Routes](../docs/discovery/graphics-routes.md) for the full
+resolution order, SSH, tmux, Zellij, and Windows rules, and
+[`TerminalImage`](../docs/components/terminal_image.md) for `render_with_route`.
 
 ### Aspect ratio handling
 
@@ -127,14 +139,14 @@ that never answers one short wait per process; see
 
 - Default behavior uses `c=` (columns only) so Kitty preserves aspect ratio.
 - WezTerm requires `c=` + `r=` (both columns and rows) for correct aspect ratio; Kitty/Ghostty use `c=` only.
-- `render_to_terminal()` handles cursor positioning per terminal: Kitty/Ghostty auto-advance and overshoot by 1 row (corrected with CUU), Wezterm doesn't auto-advance (explicit CUD + CR applied).
+- `render_with_route()` handles cursor positioning per terminal: Kitty/Ghostty auto-advance and overshoot by 1 row (corrected with CUU), Wezterm doesn't auto-advance (explicit CUD + CR applied).
 - Usually does not append a trailing newline; it may append one line feed when bottom-of-screen scroll compensation is needed.
 
 ### iTerm2 specifics
 
-- Forces iTerm path when `TERM_PROGRAM=iTerm.app`, even if Kitty is advertised.
+- iTerm2 gets this format even if Kitty is advertised; only `BISCUIT_GRAPHICS=kitty` sends Kitty to iTerm2.
 - Uses `inline=1;preserveAspectRatio=1;width=<user spec>;size=auto`.
-- `render_to_terminal()` sends the original image without pre-resizing, letting iTerm2 handle scaling natively for better accuracy. Corrects auto-advance overshoot with CUU(1).
+- `render_with_route()` sends the original image without pre-resizing, letting iTerm2 handle scaling natively for better accuracy. Corrects auto-advance overshoot with CUU(1).
 
 ### Inline layout notes (TwoColumn)
 
@@ -164,7 +176,7 @@ assert!(options.is_size_allowed(1_024));
 
 ### Image rendering architecture
 
-All image rendering is string-based: `render()`, `render_optimistic()`, and `render_to_terminal()` return escape sequences as strings. `render_to_terminal()` applies terminal-aware cursor management by saving/restoring cursor position, explicitly advancing rows by computed image height, and normalizing to column 0 with a trailing `\r`. It usually avoids trailing newlines, but may append one line feed when bottom-of-screen scroll compensation is needed. The Kitty graphics protocol is bidirectional — terminals respond with `\x1b_Gi=<id>;OK\x1b\\` after receiving image data. To prevent this response from appearing as garbage text, all Kitty sequences include `q=2` (quiet mode) which suppresses terminal responses entirely.
+All image rendering is string-based: `render()`, `render_optimistic()`, and `render_with_route()` return escape sequences as strings (or, from `render_with_route()`, the alt-text fallback). The pixel path applies terminal-aware cursor management by saving/restoring cursor position, explicitly advancing rows by computed image height, and normalizing to column 0 with a trailing `\r`. It usually avoids trailing newlines, but may append one line feed when bottom-of-screen scroll compensation is needed. The Kitty graphics protocol is bidirectional — terminals respond with `\x1b_Gi=<id>;OK\x1b\\` after receiving image data. To prevent this response from appearing as garbage text, all Kitty sequences include `q=2` (quiet mode) which suppresses terminal responses entirely.
 
 ### Gotchas and notes
 
@@ -172,156 +184,9 @@ All image rendering is string-based: `render()`, `render_optimistic()`, and `ren
 - Large images: we don't upscale the default 50% case; explicit widths can upscale.
 - Unsupported terminals: you'll see the generated alt text instead of an image.
 
-## Mermaid Diagrams (MermaidDiagram)
-
-`MermaidDiagram` is the public terminal-facing adapter for Mermaid rendering in `biscuit-terminal`. It delegates raster generation and caching to `biscuit-visualized`, then displays the cached PNG inline via `TerminalImage`.
-
-The rendering stack is pure Rust: `biscuit-visualized` uses `mermaid-rs-renderer`, and no Node.js, npm, Chromium, or `mmdc` dependency is required.
-
-### Basic Usage
-
-```rust
-use biscuit_terminal::components::mermaid::MermaidDiagram;
-use biscuit_terminal::terminal::Terminal;
-
-let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
-let term = Terminal::new();
-
-match diagram.try_render(&term) {
-    Ok(result) => print!("{}", result.output),
-    Err(_) => println!("{}", diagram.fallback_code_block()),
-}
-```
-
-### Terminal-Aware Rendering
-
-`MermaidDiagram::new(...)` is already terminal-aware. It auto-selects a light or dark theme based on `Terminal::color_mode()` and defaults to a transparent background with 50% width.
-
-```rust
-use biscuit_terminal::components::mermaid::MermaidDiagram;
-use biscuit_terminal::components::terminal_image::ImageWidth;
-
-let diagram = MermaidDiagram::new("flowchart LR\n    A --> B")
-    .with_width(ImageWidth::Percent(0.6));
-```
-
-### Theme and Rendering Options
-
-```rust
-use biscuit_terminal::components::mermaid::{MermaidDiagram, MermaidTheme};
-
-let diagram = MermaidDiagram::new("flowchart LR\n    A --> B")
-    .with_theme(MermaidTheme::Dark)         // dark, default, forest, neutral
-    .with_scale(3)                          // Higher resolution (default: 2)
-    .with_transparent_background(true);     // Blend with terminal background
-```
-
-### Quadrant Chart Configuration
-
-Use `MermaidConfig` to customize quadrant chart styling:
-
-```rust
-use biscuit_terminal::components::mermaid::{MermaidConfig, MermaidDiagram};
-
-let config = MermaidConfig::new()
-    .with_point_label_font_size(18)    // Font size for point labels (default: 12)
-    .with_point_radius(10)             // Default point radius (default: 5)
-    .with_quadrant_fill(1, "#1e2a1e")  // Top-right (quadrant-1) fill color
-    .with_quadrant_fill(3, "#2a1e1e"); // Bottom-left (quadrant-3) fill color
-
-let diagram = MermaidDiagram::new("quadrantChart\n    Item: [0.5, 0.5]")
-    .with_config(config);
-```
-
-**Quadrant numbering** (matches Mermaid convention):
-
-```
-        +-------------+-------------+
-        |  quadrant-2 |  quadrant-1 |
-        |  (top-left) | (top-right) |
-        +-------------+-------------+
-        |  quadrant-3 |  quadrant-4 |
-        |(bottom-left)|(bottom-right)|
-        +-------------+-------------+
-```
-
-### Quadrant Themes
-
-Use preset themes for common quadrant chart styles:
-
-```rust
-use biscuit_terminal::components::mermaid::{MermaidConfig, QuadrantTheme};
-use biscuit_terminal::terminal::Terminal;
-
-// Magic Quadrangle style: subtle green top-right, red bottom-left
-// Colors automatically adapt to terminal light/dark mode
-let color_mode = Terminal::color_mode();
-let config = QuadrantTheme::MagicQuadrangle.apply(MermaidConfig::new(), color_mode);
-
-// Parse theme from string
-let theme = QuadrantTheme::parse("magic-quadrangle").unwrap();
-```
-
-**Available themes:**
-
-| Theme | Description |
-|-------|-------------|
-| `QuadrantTheme::Default` | Standard Mermaid colors (no customization) |
-| `QuadrantTheme::MagicQuadrangle` | Gartner-style: subtle green top-right (leaders), subtle red bottom-left (niche). Top-left and bottom-right use a neutral color. Colors adapt to terminal color mode. |
-
-**Magic Quadrangle colors by terminal mode:**
-
-| Mode | Top-right (q1) | Top-left (q2) | Bottom-left (q3) | Bottom-right (q4) |
-|------|----------------|---------------|------------------|-------------------|
-| Dark | `#1e2a1e` (green tint) | `#1a1a1a` (neutral) | `#2a1e1e` (red tint) | `#1a1a1a` (neutral) |
-| Light | `#f6faf6` (green tint) | `#f8f8f8` (neutral) | `#faf6f6` (red tint) | `#f8f8f8` (neutral) |
-
-The neutral quadrants (q2, q4) use the same color - a dark grey in dark mode, light grey in light mode - creating visual balance while highlighting the key diagonal (top-right leaders vs bottom-left niche).
-
-### Inline Point Styling
-
-Individual points can override defaults using comma-separated properties:
-
-```
-Item A: [0.3, 0.6] color: #ff3300, radius: 12
-Item B: [0.7, 0.4] color: #00ff00
-```
-
-**Important:** Multiple properties must be comma-separated. Space-only separation causes parsing errors (e.g., `color: #ff3300 radius: 10` fails).
-
-Available properties: `color`, `radius`, `stroke-color`, `stroke-width`
-
-### Themes
-
-- **`MermaidTheme::Dark`**: Light text on dark background (default for dark terminals)
-- **`MermaidTheme::Default`**: Dark text on light background (default for light terminals)
-- **`MermaidTheme::Forest`**: Green tones
-- **`MermaidTheme::Neutral`**: Grayscale, works well with transparent backgrounds
-
-Use `MermaidTheme::for_color_mode()` to automatically select based on terminal:
-
-```rust
-use biscuit_terminal::components::mermaid::MermaidTheme;
-use biscuit_terminal::terminal::Terminal;
-
-let theme = MermaidTheme::for_color_mode(Terminal::color_mode());
-let inverse_theme = theme.inverse();  // For solid background rendering
-```
-
-### Security Features
-
-- **Size limit**: Diagrams over 10KB are rejected
-- **Terminal check**: Only renders when image protocols are supported
-
-### Public API Notes
-
-- Use `MermaidDiagram::try_render(&Terminal)` when you need the rendered output plus metadata (`png_path`, `cache_hit`).
-- Use the `Renderable` implementation when you want graceful fallback to a fenced Mermaid code block on terminals without image support.
-- `MermaidRenderer` exists as an internal helper inside the module; application code should prefer `MermaidDiagram`.
-
 ### Display Notes
 
-**Aspect Ratio Preservation**: `render_to_terminal()` preserves aspect ratio using terminal-aware rendering:
+**Aspect Ratio Preservation**: `render_with_route()` preserves aspect ratio using terminal-aware rendering:
 
 - **Kitty/Ghostty**: Specifies only `c=` (columns), letting the terminal calculate rows from the image's native aspect ratio.
 - **Wezterm**: Specifies both `c=` and `r=` (columns and rows) since Wezterm requires explicit row count for correct proportions. Height is calculated from `cell_size()` (falls back to 8×16 px).
@@ -346,9 +211,9 @@ let term_image = TerminalImage::new(&png_path)?
 let term_image = TerminalImage::new(&png_path)?
     .with_width(ImageWidth::Fill);  // Full terminal width
 
-// Render to terminal
+// Render for the terminal's graphics route (pixels, or the alt text)
 let terminal = Terminal::new();
-term_image.render_to_terminal(&terminal)?;
+print!("{}", term_image.render_with_route(&terminal)?.into_text());
 ```
 
 ### Width Specification Parsing
@@ -367,47 +232,15 @@ parse_width_spec("fill");  // ImageWidth::Fill
 
 The `ch` suffix provides explicit character-based sizing, useful for CLI tools accepting width from users.
 
-## Graph Diagrams (GraphExpression)
+## Diagrams
 
-`GraphExpression` is the terminal-facing adapter for graph rendering. It delegates parsing, layout, theming, SVG/PNG generation, and caching to `biscuit-visualized`, then displays the cached PNG via `TerminalImage`.
-
-Supported input modes:
-
-- expression syntax with directed edges: `a -> b -> c`
-- expression syntax with undirected edges: `a -- b -- c`
-- DOT input: `digraph { A -> B; }`
-
-Mixed directed and undirected expression syntax is rejected in a single graph expression.
-
-### Basic Usage
-
-```rust
-use biscuit_terminal::components::graph_expression::{
-    GraphExpression, GraphInputSyntax, GraphOrientation,
-};
-use biscuit_terminal::terminal::Terminal;
-
-let graph = GraphExpression::for_terminal("a -> b -> c", GraphInputSyntax::Auto)?
-    .with_orientation(GraphOrientation::LeftToRight)
-    .with_title("Example graph");
-
-let term = Terminal::new();
-match graph.try_render(&term) {
-    Ok(result) => print!("{}", result.output),
-    Err(_) => println!("{}", graph.fallback_code_block()),
-}
-# Ok::<(), biscuit_terminal::components::graph_expression::GraphRenderError>(())
-```
-
-### Graph Features
-
-- terminal-aware light/dark themes by default
-- explicit inverse rendering via `GraphExpression::inverted_for_terminal(...)`
-- width control through `ImageWidth`
-- optional font-family override with `.with_font_family(...)`
-- render metadata via `GraphRenderResult` (`png_path`, `cache_hit`)
-
-Like Mermaid rendering, graph rendering is pure Rust. `biscuit-visualized` uses `layout-rs` for layout and `resvg` for rasterization; no Graphviz binary is required.
+Diagram components (`MermaidDiagram`, `GraphExpression`, `GitGraph`) live in
+[`biscuit-visualized`](../../biscuit-visualized/README.md) behind its
+`terminal` feature; they decide what a diagram shows and hand its pixels to
+`TerminalImage`. This crate never depends on them: its render-tree renderer
+draws a Mermaid fence only through a caller-installed diagram hook
+(`TerminalRenderOptions::with_diagram_renderer`) and otherwise shows it as code;
+see [the render-tree hooks page](../docs/render-tree.md).
 
 ## Terminal Detection
 
@@ -425,11 +258,11 @@ The library detects these terminal emulators:
 | Konsole | Kitty | Yes | Yes |
 | Foot | None | Yes | Yes |
 | Contour | None | Yes | Yes |
-| VS Code | Kitty* | Yes | Yes |
+| VS Code | None* | Yes | Yes |
 | Warp | Kitty | Yes | Yes |
 | Wast | Kitty | No | No |
 
-\* Requires `terminal.integrated.enableImages` and GPU acceleration enabled in VS Code settings.
+\* The graphics route does not identify VS Code (`TERM_PROGRAM=vscode`); with `terminal.integrated.enableImages` on, `BISCUIT_GRAPHICS=iterm2` can force a format it renders.
 
 ## OS Detection
 

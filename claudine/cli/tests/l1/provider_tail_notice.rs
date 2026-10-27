@@ -322,92 +322,90 @@ fn recording_opencode(fixture: &CliProcessFixture, body: &std::path::Path) -> st
 /// entrypoint, never a known OpenCode switch. The inline notice is emitted
 /// before its body-change check, and the child receives the tokens unchanged.
 #[cfg(unix)]
-fn assert_unknown_switch(switch: &str, command: &str) {
-    let case = format!("{command} {switch}");
-    let fixture = CliProcessFixture::named("tail-notice-unknown-type");
-    let body = fixture.cwd().join("inline.md");
-    let log = recording_opencode(&fixture, &body);
-    let target = match command {
-        "compose" => prompt_file(&fixture),
-        "sequence" => {
-            prompt_file(&fixture);
-            let seq = fixture.cwd().join("seq.md");
-            fs::write(&seq, "---\nsequence:\n  - name: plan\n    prompt: plan.md\n---\nBody\n").unwrap();
-            seq.to_str().unwrap().to_owned()
-        }
-        "inline-compose" => {
-            fs::write(&body, "---\ntitle: plan\nprompt: Write the plan.\n---\nOld body\n").unwrap();
-            body.to_str().unwrap().to_owned()
-        }
-        _ => "do the thing".to_owned(),
-    };
-    // A direct wrapper has no type-aware ownership: a bare word after
-    // the switch would be part of its prompt, so the switch goes alone.
-    let forwarded: &[&str] = if command == "opencode" { &[switch] } else { &[switch, "foo"] };
-    let mut args: Vec<&str> = vec![command];
-    if command == "opencode" {
-        args.extend(forwarded);
-        args.push(&target);
-    } else {
-        args.extend(["--opencode", &target]);
-        args.extend(forwarded);
-    }
-    let unrecognized = format!(
-        "{switch}: Claudine's compiled OpenCode switch catalog has no established type \
-         for it at its `run` command; Claudine forwards it anyway."
-    );
+mod a_switch_whose_record_is_typed_unknown_is_not_called_known {
+    use super::*;
 
-    let output = fixture
-        .command()
-        .env("OPENCODE_MODEL", "test/model")
-        .args(&args)
-        .output()
-        .unwrap();
-    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-    assert_eq!(output.status.code(), Some(0), "{case}\nstderr:\n{stderr}");
-    let flat = flattened(&stderr);
-    assert!(flat.contains(&unrecognized), "{case}: {flat}");
-    for claim in ["is one of OpenCode's switches", "OpenCode switch (", " a OpenCode ", "reject"] {
-        assert!(!flat.contains(claim), "{case} claims {claim}: {flat}");
-    }
-    let launches = launches(&log);
-    assert_eq!(launches.len(), 1, "{case}: {launches:?}");
-    assert_eq!(occurrences(&launches[0], forwarded), 1, "{case}: {launches:?}");
-}
+    const SWITCHES: [&str; 2] = ["--get-yargs-completions", "--new-unresearched-switch"];
+    const COMMANDS: [&str; 4] = ["compose", "sequence", "inline-compose", "opencode"];
 
-#[cfg(unix)]
-macro_rules! unknown_switch_tests {
-    ($($test:ident => ($switch:literal, $command:literal)),+ $(,)?) => {
-        const UNKNOWN_SWITCH_CASES: &[(&str, &str)] = &[$(($switch, $command)),+];
-        $(
+    macro_rules! case_tests {
+        ($($test:ident => ($switch:literal, $command:literal)),* $(,)?) => {
+            $(#[test] fn $test() { assert_switch_is_unrecognized($switch, $command); })*
+
             #[test]
-            fn $test() {
-                assert_unknown_switch($switch, $command);
+            fn every_row_has_a_listed_test() {
+                let listed = [$(($switch, $command)),*];
+                let rows: Vec<(&str, &str)> = SWITCHES
+                    .iter()
+                    .flat_map(|switch| COMMANDS.iter().map(move |command| (*switch, *command)))
+                    .collect();
+                assert_eq!(listed.to_vec(), rows);
             }
-        )+
-    };
-}
+        };
+    }
 
-#[cfg(unix)]
-unknown_switch_tests! {
-    compose_does_not_claim_the_unknown_typed_switch_is_known => ("--get-yargs-completions", "compose"),
-    sequence_does_not_claim_the_unknown_typed_switch_is_known => ("--get-yargs-completions", "sequence"),
-    inline_compose_does_not_claim_the_unknown_typed_switch_is_known => ("--get-yargs-completions", "inline-compose"),
-    opencode_does_not_claim_the_unknown_typed_switch_is_known => ("--get-yargs-completions", "opencode"),
-    compose_does_not_claim_an_unresearched_switch_is_known => ("--new-unresearched-switch", "compose"),
-    sequence_does_not_claim_an_unresearched_switch_is_known => ("--new-unresearched-switch", "sequence"),
-    inline_compose_does_not_claim_an_unresearched_switch_is_known => ("--new-unresearched-switch", "inline-compose"),
-    opencode_does_not_claim_an_unresearched_switch_is_known => ("--new-unresearched-switch", "opencode"),
-}
+    case_tests! {
+        typed_unknown_through_compose => ("--get-yargs-completions", "compose"),
+        typed_unknown_through_sequence => ("--get-yargs-completions", "sequence"),
+        typed_unknown_through_inline_compose => ("--get-yargs-completions", "inline-compose"),
+        typed_unknown_through_the_direct_wrapper => ("--get-yargs-completions", "opencode"),
+        unrecorded_through_compose => ("--new-unresearched-switch", "compose"),
+        unrecorded_through_sequence => ("--new-unresearched-switch", "sequence"),
+        unrecorded_through_inline_compose => ("--new-unresearched-switch", "inline-compose"),
+        unrecorded_through_the_direct_wrapper => ("--new-unresearched-switch", "opencode"),
+    }
 
-#[cfg(unix)]
-#[test]
-fn unknown_switch_tests_cover_both_catalog_states_on_every_launch_surface_once() {
-    assert_eq!(UNKNOWN_SWITCH_CASES.len(), 8);
-    for switch in ["--get-yargs-completions", "--new-unresearched-switch"] {
-        for command in ["compose", "sequence", "inline-compose", "opencode"] {
-            assert_eq!(UNKNOWN_SWITCH_CASES.iter().filter(|case| **case == (switch, command)).count(), 1);
+    fn assert_switch_is_unrecognized(switch: &str, command: &str) {
+        let case = format!("{command} {switch}");
+        let fixture = CliProcessFixture::named("tail-notice-unknown-type");
+        let body = fixture.cwd().join("inline.md");
+        let log = recording_opencode(&fixture, &body);
+        let target = match command {
+            "compose" => prompt_file(&fixture),
+            "sequence" => {
+                prompt_file(&fixture);
+                let seq = fixture.cwd().join("seq.md");
+                fs::write(&seq, "---\nsequence:\n  - name: plan\n    prompt: plan.md\n---\nBody\n").unwrap();
+                seq.to_str().unwrap().to_owned()
+            }
+            "inline-compose" => {
+                fs::write(&body, "---\ntitle: plan\nprompt: Write the plan.\n---\nOld body\n").unwrap();
+                body.to_str().unwrap().to_owned()
+            }
+            _ => "do the thing".to_owned(),
+        };
+        // A direct wrapper has no type-aware ownership: a bare word after
+        // the switch would be part of its prompt, so the switch goes alone.
+        let forwarded: &[&str] = if command == "opencode" { &[switch] } else { &[switch, "foo"] };
+        let mut args: Vec<&str> = vec![command];
+        if command == "opencode" {
+            args.extend(forwarded);
+            args.push(&target);
+        } else {
+            args.extend(["--opencode", &target]);
+            args.extend(forwarded);
         }
+        let unrecognized = format!(
+            "{switch}: Claudine's compiled OpenCode switch catalog has no established type \
+             for it at its `run` command; Claudine forwards it anyway."
+        );
+
+        let output = fixture
+            .command()
+            .env("OPENCODE_MODEL", "test/model")
+            .args(&args)
+            .output()
+            .unwrap();
+        let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.status.code(), Some(0), "{case}\nstderr:\n{stderr}");
+        let flat = flattened(&stderr);
+        assert!(flat.contains(&unrecognized), "{case}: {flat}");
+        for claim in ["is one of OpenCode's switches", "OpenCode switch (", " a OpenCode ", "reject"] {
+            assert!(!flat.contains(claim), "{case} claims {claim}: {flat}");
+        }
+        let launches = launches(&log);
+        assert_eq!(launches.len(), 1, "{case}: {launches:?}");
+        assert_eq!(occurrences(&launches[0], forwarded), 1, "{case}: {launches:?}");
     }
 }
 

@@ -46,7 +46,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"messages\": [],\n  \"model\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -54,7 +54,33 @@
               }
             },
             "description": "Chat completion with SSE streaming support"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"model_instance_id\": \"string\",\n  \"output\": [],\n  \"stats\": {\n    \"input_tokens\": 0,\n    \"reasoning_output_tokens\": 0,\n    \"time_to_first_token_seconds\": 0,\n    \"tokens_per_second\": 0,\n    \"total_output_tokens\": 0\n  }\n}"
+            },
+            {
+              "name": "200 OK (text/event-stream)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/event-stream"
+                }
+              ],
+              "body": "data: {\"model_instance_id\":\"string\",\"type\":\"chat.start\"}\n\nevent: chat.end\ndata: {\"model_instance_id\":\"string\",\"type\":\"chat.start\"}\n\n"
+            }
+          ]
         },
         {
           "name": "ListModels",
@@ -72,7 +98,21 @@
               ]
             },
             "description": "List available models"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": [],\n  \"object\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "LoadModel",
@@ -92,7 +132,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"model\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -100,7 +140,21 @@
               }
             },
             "description": "Load a model into memory"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"model\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "UnloadModel",
@@ -120,7 +174,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"model\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -128,7 +182,21 @@
               }
             },
             "description": "Unload a model from memory"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "DownloadModel",
@@ -148,15 +216,29 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"model\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Download a model from HuggingFace with SSE progress"
-          }
+            "description": "Download a model from HuggingFace"
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "GetDownloadStatus",
@@ -177,7 +259,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"job_id\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -185,7 +267,21 @@
               }
             },
             "description": "Check the status of a download job"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"status\": \"string\"\n}"
+            }
+          ]
         }
       ]
     }

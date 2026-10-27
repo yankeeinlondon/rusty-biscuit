@@ -359,7 +359,7 @@ fn run_one_step(
         .get(step_index)
         .is_some_and(|step| step.task.is_some());
     if !has_executable {
-        super::container::mask_body_events(&mut set_overrides);
+        super::container::mask_body_events(&mut set_overrides, &live);
     }
     // Each step is a document of its own: it captures its environment here,
     // once, before anything of it is prepared, and every stage of it — its

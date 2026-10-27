@@ -151,8 +151,9 @@ Shell completion notes:
 `md clean` auto-applies only deterministic repairs whose safety proof passes.
 These include source normalization, parse-equivalent whitespace cleanup,
 tab-indentation repair (each indentation tab becomes two spaces, matching how
-Darkmatter reads tab-indented frontmatter), reserved-indicator quoting, and
-schema-proven string quoting. Bytes outside
+Darkmatter reads tab-indented frontmatter), root-indentation repair (see
+[Indented Root Mappings](#indented-root-mappings-yamlroot-indentation)),
+reserved-indicator quoting, and schema-proven string quoting. Bytes outside
 accepted edits are preserved. Non-deterministic findings, including duplicate
 keys and suspicious values, are report-only and never mutate the document.
 
@@ -187,6 +188,53 @@ documents with no frontmatter or an empty frontmatter block.
 
 There is no `md clean --strict` in v1. Report-only findings remain suggestions
 and exit successfully.
+
+### Indented Root Mappings (`yaml.root-indentation`)
+
+Frontmatter whose top-level keys are all indented is valid YAML, and
+Darkmatter reads it normally. The text-preserving editors, such as
+[`md hash --save`](./hash.md#indented-frontmatter), need top-level keys at
+column 0, so they refuse it. `md clean` repairs it by removing the leading
+spaces every content line shares:
+
+```markdown
+---
+    title: Weekly report
+  # indented less than the keys
+    prompt: |
+      Summarize the week.
+    tags: [ops]
+---
+```
+
+After `md clean --save`:
+
+```markdown
+---
+title: Weekly report
+  # indented less than the keys
+prompt: |
+  Summarize the week.
+tags: [ops]
+---
+```
+
+Comments indented at least as far as the keys move with them; comments
+indented less keep their position. The repair never touches line terminators
+or the delimiter lines. DMLS formatting applies the same repair, and a second pass
+finds nothing to do.
+
+The repair is offered only for a nonempty block mapping whose first key is an
+ordinary `key: value` entry. It is not offered for flow (`{...}`), sequence,
+or scalar roots, for empty or comment-only frontmatter, for YAML with
+directives or explicit `---` / `...` document markers, or when the first key
+is complex (`?`), tagged, anchored, or an alias. Like every automatic repair,
+it must also pass the parse-equality proof: the dedented YAML has to read as
+the same value. When it does not, for example because blank lines inside a
+block scalar would change the scalar's text, nothing is applied and the
+editors keep refusing the file; move the keys to column 0 by hand. Tab-indented
+frontmatter is first repaired by `yaml.tab-indentation`, and the same run then
+removes the remaining indentation.
 
 ### When Cleanup Declines
 

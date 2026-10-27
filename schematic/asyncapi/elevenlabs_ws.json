@@ -1,0 +1,354 @@
+{
+  "asyncapi": "3.0.0",
+  "channels": {
+    "MultiContextTextToSpeech": {
+      "address": "/v1/text-to-speech/{voice_id}/multi-stream-input",
+      "bindings": {
+        "ws": {
+          "bindingVersion": "0.1.0",
+          "query": {
+            "properties": {
+              "model_id": {
+                "description": "TTS model to use",
+                "type": "string"
+              },
+              "output_format": {
+                "description": "Audio output format",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        }
+      },
+      "description": "Manage multiple audio streams over a single connection",
+      "messages": {
+        "AudioChunk": {
+          "$ref": "#/components/messages/MultiContextTextToSpeech.AudioChunk"
+        },
+        "CloseContext": {
+          "$ref": "#/components/messages/MultiContextTextToSpeech.CloseContext"
+        },
+        "CloseSocket": {
+          "$ref": "#/components/messages/MultiContextTextToSpeech.CloseSocket"
+        },
+        "InitContext": {
+          "$ref": "#/components/messages/MultiContextTextToSpeech.InitContext"
+        },
+        "TextChunk": {
+          "$ref": "#/components/messages/MultiContextTextToSpeech.TextChunk"
+        }
+      },
+      "parameters": {
+        "voice_id": {
+          "description": "Voice identifier used in the websocket path",
+          "x-schematic-param": {
+            "type": "string"
+          }
+        }
+      },
+      "x-schematic-role": "client"
+    },
+    "TextToSpeech": {
+      "address": "/v1/text-to-speech/{voice_id}/stream-input",
+      "bindings": {
+        "ws": {
+          "bindingVersion": "0.1.0",
+          "query": {
+            "properties": {
+              "apply_text_normalization": {
+                "description": "Text normalization: auto, on, off",
+                "type": "string"
+              },
+              "auto_mode": {
+                "description": "Auto mode for generation",
+                "type": "boolean"
+              },
+              "enable_logging": {
+                "description": "Enable logging (default: true)",
+                "type": "boolean"
+              },
+              "enable_ssml_parsing": {
+                "description": "Parse SSML tags",
+                "type": "boolean"
+              },
+              "inactivity_timeout": {
+                "description": "Timeout in seconds (default: 20)",
+                "type": "integer"
+              },
+              "language_code": {
+                "description": "Target language code",
+                "type": "string"
+              },
+              "model_id": {
+                "description": "TTS model to use",
+                "type": "string"
+              },
+              "output_format": {
+                "description": "Audio output format",
+                "type": "string"
+              },
+              "seed": {
+                "description": "Reproducibility seed",
+                "type": "integer"
+              },
+              "sync_alignment": {
+                "description": "Synchronize alignment data",
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
+        }
+      },
+      "description": "Stream text and receive audio chunks in real-time",
+      "messages": {
+        "AudioChunk": {
+          "$ref": "#/components/messages/TextToSpeech.AudioChunk"
+        },
+        "BOS": {
+          "$ref": "#/components/messages/TextToSpeech.BOS"
+        },
+        "EOS": {
+          "$ref": "#/components/messages/TextToSpeech.EOS"
+        },
+        "TextChunk": {
+          "$ref": "#/components/messages/TextToSpeech.TextChunk"
+        }
+      },
+      "parameters": {
+        "voice_id": {
+          "description": "Voice identifier used in the websocket path",
+          "x-schematic-param": {
+            "type": "string"
+          }
+        }
+      },
+      "x-schematic-role": "client"
+    }
+  },
+  "components": {
+    "messages": {
+      "MultiContextTextToSpeech.AudioChunk": {
+        "description": "Audio data for a context",
+        "name": "AudioChunk",
+        "payload": {
+          "$ref": "#/components/schemas/MultiContextAudioResponse"
+        }
+      },
+      "MultiContextTextToSpeech.CloseContext": {
+        "description": "Close a specific context",
+        "name": "CloseContext",
+        "payload": {
+          "$ref": "#/components/schemas/MultiContextCloseMessage"
+        }
+      },
+      "MultiContextTextToSpeech.CloseSocket": {
+        "description": "Close the entire socket",
+        "name": "CloseSocket",
+        "payload": {
+          "$ref": "#/components/schemas/MultiContextCloseSocketMessage"
+        }
+      },
+      "MultiContextTextToSpeech.InitContext": {
+        "description": "Initialize a context with settings",
+        "name": "InitContext",
+        "payload": {
+          "$ref": "#/components/schemas/MultiContextInitMessage"
+        }
+      },
+      "MultiContextTextToSpeech.TextChunk": {
+        "description": "Text to synthesize for a context",
+        "name": "TextChunk",
+        "payload": {
+          "$ref": "#/components/schemas/MultiContextTextMessage"
+        }
+      },
+      "TextToSpeech.AudioChunk": {
+        "description": "Audio data with alignment",
+        "name": "AudioChunk",
+        "payload": {
+          "$ref": "#/components/schemas/TtsAudioResponse"
+        }
+      },
+      "TextToSpeech.BOS": {
+        "description": "Begin-of-stream with voice settings",
+        "name": "BOS",
+        "payload": {
+          "$ref": "#/components/schemas/TtsInitMessage"
+        }
+      },
+      "TextToSpeech.EOS": {
+        "description": "End-of-stream signal",
+        "name": "EOS",
+        "payload": {
+          "$ref": "#/components/schemas/TtsCloseMessage"
+        }
+      },
+      "TextToSpeech.TextChunk": {
+        "description": "Text to synthesize",
+        "name": "TextChunk",
+        "payload": {
+          "$ref": "#/components/schemas/TtsTextMessage"
+        }
+      }
+    },
+    "schemas": {
+      "MultiContextAudioResponse": {
+        "description": "Payload type `MultiContextAudioResponse`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "MultiContextCloseMessage": {
+        "description": "Payload type `MultiContextCloseMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "MultiContextCloseSocketMessage": {
+        "description": "Payload type `MultiContextCloseSocketMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "MultiContextInitMessage": {
+        "description": "Payload type `MultiContextInitMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "MultiContextTextMessage": {
+        "description": "Payload type `MultiContextTextMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "TtsAudioResponse": {
+        "description": "Payload type `TtsAudioResponse`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "TtsCloseMessage": {
+        "description": "Payload type `TtsCloseMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "TtsInitMessage": {
+        "description": "Payload type `TtsInitMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "TtsTextMessage": {
+        "description": "Payload type `TtsTextMessage`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      }
+    },
+    "securitySchemes": {
+      "apiKey": {
+        "in": "header",
+        "name": "xi-api-key",
+        "type": "httpApiKey"
+      }
+    }
+  },
+  "defaultContentType": "application/json",
+  "info": {
+    "description": "ElevenLabs Text-to-Speech WebSocket API for real-time streaming",
+    "externalDocs": {
+      "url": "https://elevenlabs.io/docs/api-reference/websockets"
+    },
+    "title": "ElevenLabsTTS",
+    "version": "1.0.0"
+  },
+  "operations": {
+    "MultiContextTextToSpeech.receive.AudioChunk": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/MultiContextTextToSpeech"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/MultiContextTextToSpeech/messages/AudioChunk"
+        }
+      ]
+    },
+    "MultiContextTextToSpeech.send.CloseContext": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/MultiContextTextToSpeech"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/MultiContextTextToSpeech/messages/CloseContext"
+        }
+      ]
+    },
+    "MultiContextTextToSpeech.send.CloseSocket": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/MultiContextTextToSpeech"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/MultiContextTextToSpeech/messages/CloseSocket"
+        }
+      ]
+    },
+    "MultiContextTextToSpeech.send.InitContext": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/MultiContextTextToSpeech"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/MultiContextTextToSpeech/messages/InitContext"
+        }
+      ]
+    },
+    "MultiContextTextToSpeech.send.TextChunk": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/MultiContextTextToSpeech"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/MultiContextTextToSpeech/messages/TextChunk"
+        }
+      ]
+    },
+    "TextToSpeech.receive.AudioChunk": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/TextToSpeech"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/TextToSpeech/messages/AudioChunk"
+        }
+      ]
+    },
+    "TextToSpeech.send.BOS": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/TextToSpeech"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/TextToSpeech/messages/BOS"
+        }
+      ]
+    },
+    "TextToSpeech.send.EOS": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/TextToSpeech"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/TextToSpeech/messages/EOS"
+        }
+      ]
+    },
+    "TextToSpeech.send.TextChunk": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/TextToSpeech"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/TextToSpeech/messages/TextChunk"
+        }
+      ]
+    }
+  },
+  "servers": {
+    "default": {
+      "host": "api.elevenlabs.io",
+      "protocol": "wss",
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/apiKey"
+        }
+      ]
+    }
+  }
+}

@@ -27,24 +27,27 @@
 //!
 //! ## Examples
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
+//! use schematic_schema::samsung_smart_tv::GetDeviceInfoRequest;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = SamsungSmartTv::new();
-//!     let data = client.get_device_info().await?;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = SamsungSmartTv::new();
+//! let data = client.get_device_info().await?;
 //!
-//!     // the whole response: status, headers, and request id as well
-//!     let response = client.get_device_info().full().await?;
-//!     println!("{}", response.meta);
-//!     Ok(())
-//! }
+//! // the same request, built as a typed request and sent
+//! let data = client.send(GetDeviceInfoRequest::default()).await?;
+//!
+//! // the whole response: status, headers, and request id as well
+//! let response = client.get_device_info().full().await?;
+//! println!("{}", response.meta);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ### Override Base URL
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
 //!
 //! let client = SamsungSmartTv::new().base_url("https://staging.example.com/v1");
@@ -94,26 +97,27 @@ impl Default for SamsungSmartTv {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::samsung_smart_tv::GetDeviceInfoRequest;
 ///
-/// let request = GetDeviceInfoRequest::default()
-///;
+/// let request = GetDeviceInfoRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDeviceInfoRequest {}
 impl schematic_runtime::EndpointSpec for GetDeviceInfoRequest {
     type Api = SamsungSmartTvApi;
-    type Success = SamsungDeviceInfoResponse;
+    type Success = ::schematic_definitions::samsung_smart_tv::SamsungDeviceInfoResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SamsungDeviceInfoResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::samsung_smart_tv::SamsungDeviceInfoResponse,
+    >;
     const ENDPOINT_ID: &'static str = "GetDeviceInfo";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/api/v2/".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -128,11 +132,10 @@ impl schematic_runtime::EndpointSpec for GetDeviceInfoRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::samsung_smart_tv::GetServerLogsRequest;
 ///
-/// let request = GetServerLogsRequest::default()
-///;
+/// let request = GetServerLogsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetServerLogsRequest {}
@@ -147,7 +150,7 @@ impl schematic_runtime::EndpointSpec for GetServerLogsRequest {
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/logs/".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -162,11 +165,10 @@ impl schematic_runtime::EndpointSpec for GetServerLogsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::samsung_smart_tv::LaunchApplicationByIdRequest;
 ///
-/// let request = LaunchApplicationByIdRequest::new("app_id_value")
-///;
+/// let request = LaunchApplicationByIdRequest::new("app_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LaunchApplicationByIdRequest {
@@ -202,7 +204,7 @@ impl schematic_runtime::EndpointSpec for LaunchApplicationByIdRequest {
         let path = format!(
             "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -217,11 +219,10 @@ impl schematic_runtime::EndpointSpec for LaunchApplicationByIdRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::samsung_smart_tv::LaunchApplicationByNameRequest;
 ///
-/// let request = LaunchApplicationByNameRequest::new("app_name_value")
-///;
+/// let request = LaunchApplicationByNameRequest::new("app_name_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LaunchApplicationByNameRequest {
@@ -259,7 +260,7 @@ impl schematic_runtime::EndpointSpec for LaunchApplicationByNameRequest {
         let path = format!(
             "/ws/apps/{}", urlencoding::encode(& self.app_name.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -274,11 +275,10 @@ impl schematic_runtime::EndpointSpec for LaunchApplicationByNameRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::samsung_smart_tv::GetAppStatusRequest;
 ///
-/// let request = GetAppStatusRequest::new("app_id_value")
-///;
+/// let request = GetAppStatusRequest::new("app_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetAppStatusRequest {
@@ -303,9 +303,11 @@ impl From<String> for GetAppStatusRequest {
 }
 impl schematic_runtime::EndpointSpec for GetAppStatusRequest {
     type Api = SamsungSmartTvApi;
-    type Success = SamsungAppStatusResponse;
+    type Success = ::schematic_definitions::samsung_smart_tv::SamsungAppStatusResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<SamsungAppStatusResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::samsung_smart_tv::SamsungAppStatusResponse,
+    >;
     const ENDPOINT_ID: &'static str = "GetAppStatus";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -314,7 +316,7 @@ impl schematic_runtime::EndpointSpec for GetAppStatusRequest {
         let path = format!(
             "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -329,11 +331,10 @@ impl schematic_runtime::EndpointSpec for GetAppStatusRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::samsung_smart_tv::CloseAppRequest;
 ///
-/// let request = CloseAppRequest::new("app_id_value")
-///;
+/// let request = CloseAppRequest::new("app_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CloseAppRequest {
@@ -369,7 +370,7 @@ impl schematic_runtime::EndpointSpec for CloseAppRequest {
         let path = format!(
             "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -384,11 +385,10 @@ impl schematic_runtime::EndpointSpec for CloseAppRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::samsung_smart_tv::InstallAppRequest;
 ///
-/// let request = InstallAppRequest::new("app_id_value")
-///;
+/// let request = InstallAppRequest::new("app_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InstallAppRequest {
@@ -424,7 +424,7 @@ impl schematic_runtime::EndpointSpec for InstallAppRequest {
         let path = format!(
             "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,

@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use schematic_schema::bitbucket::*;
-use schematic_schema::schematic_runtime::CallError;
+use schematic_schema::schematic_runtime::{CallError, CallOptions};
 
 use super::{
     count_api_request,
@@ -185,8 +185,15 @@ async fn collect_directory_entries(
             count_api_request("tree");
         }
 
-        let body = REPLIES.value(call.await)?;
-        let response = decode_directory_listing(&body)?;
+        let response = match REPLIES.value(call.await)? {
+            GetSourceResponse::Directory(listing) => listing,
+            // Any media type but JSON is a file: the path is not a directory.
+            GetSourceResponse::File(_) => return Err(SniffError::RemoteApi {
+                provider: "Bitbucket".to_string(),
+                status: 0,
+                message: format!("expected a directory listing at `{path}`, received file content"),
+            }),
+        };
         entries.extend(response.values);
 
         if response.next.is_none() {
@@ -195,21 +202,6 @@ async fn collect_directory_entries(
     }
 
     Ok((entries, true))
-}
-
-/// Decodes a `GetSource` body for a directory path as a paginated JSON listing.
-///
-/// ## Errors
-///
-/// A body that is not a listing is a `RemoteApi` error, never an empty
-/// directory: reading it as empty would report "no docs, no CI" with full
-/// confidence.
-fn decode_directory_listing(body: &[u8]) -> Result<PaginatedResponse<SourceEntry>, SniffError> {
-    serde_json::from_slice(body).map_err(|error| SniffError::RemoteApi {
-        provider: "Bitbucket".to_string(),
-        status: 0,
-        message: format!("JSON parse error: {error}"),
-    })
 }
 
 /// Decodes a `GetSource` body for a file path as text.
@@ -355,12 +347,11 @@ impl RemoteRepoProvider for BitbucketRemote {
         let commit = info.default_branch().unwrap_or("main").to_string();
 
         count_api_request("contents");
-        let body = REPLIES.value(
-            self.client
-                .get_source(workspace, repo_slug, &commit, path)
-                .await,
-        )?;
-        Ok(decode_file_text(&body))
+        // Read raw: Bitbucket serves a file in the media type its name implies,
+        // so a committed `.json` file would select the typed `Directory` shape.
+        let request = GetSourceRequest::new(workspace, repo_slug, &commit, path);
+        let reply = REPLIES.raw(self.client.send_raw(request, &CallOptions::default()).await)?;
+        Ok(decode_file_text(&reply.body))
     }
 
     async fn list_pull_requests(
@@ -688,36 +679,6 @@ impl RemoteRepoProvider for BitbucketRemote {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_directory_listing_body_decodes_to_its_entries() {
-        let body =
-            br#"{"values": [{"path": "README.md", "type": "commit_file", "size": 3}], "page": 1}"#;
-
-        let listing = decode_directory_listing(body).unwrap();
-
-        assert_eq!(listing.values.len(), 1);
-        assert_eq!(listing.values[0].path.as_deref(), Some("README.md"));
-        assert!(listing.next.is_none());
-    }
-
-    #[test]
-    fn a_malformed_directory_listing_body_is_a_json_error() {
-        let result = decode_directory_listing(b"# README\n");
-
-        match result {
-            Err(SniffError::RemoteApi {
-                provider,
-                status,
-                message,
-            }) => {
-                assert_eq!(provider, "Bitbucket");
-                assert_eq!(status, 0);
-                assert!(message.starts_with("JSON parse error"), "{message}");
-            }
-            other => panic!("expected a RemoteApi JSON error, got {other:?}"),
-        }
-    }
 
     #[test]
     fn file_text_replaces_invalid_utf8() {

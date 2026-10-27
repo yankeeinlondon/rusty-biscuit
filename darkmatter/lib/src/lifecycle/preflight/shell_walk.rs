@@ -1,7 +1,6 @@
 //! Fixing each lifecycle shell site at preflight: its resolved bytes, its
 //! typed template, or both.
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use serde_json::{Map, Value};
@@ -106,11 +105,7 @@ impl LifecycleShellSites<'_> {
         lifecycle: &mut LifecycleConfig,
         resolution: impl FnOnce() -> Result<ResolutionContext, ContextBuildError>,
     ) -> Result<(), PreflightError> {
-        let frontmatter: HashMap<String, Value> = self
-            .effective_frontmatter
-            .as_object()
-            .map(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-            .unwrap_or_default();
+        let frontmatter = self.effective_frontmatter.as_object().cloned().unwrap_or_default();
 
         let state = EffectiveStateBuilder::new()
             .with_frontmatter(frontmatter.clone())
@@ -204,7 +199,7 @@ struct Walk<'a> {
     sites: &'a LifecycleShellSites<'a>,
     state: &'a EffectiveState,
     resolution_ctx: &'a ResolutionContext,
-    frontmatter: &'a HashMap<String, Value>,
+    frontmatter: &'a Map<String, Value>,
 }
 
 /// The text one lifecycle shell field resolved to at pre-flight.

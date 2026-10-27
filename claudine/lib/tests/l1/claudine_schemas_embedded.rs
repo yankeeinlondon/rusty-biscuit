@@ -1167,8 +1167,8 @@ fn longhand_kind_default(root: &serde_json::Value, fragment: &serde_json::Value)
 
 /// `hash`'s longhand `kind` declares `default(simple)`. The default survives
 /// as an annotation through each trigger alone and through their merge, and
-/// the launch never inserts it: a longhand without `kind` reaches the
-/// prepared frontmatter as written, and so does a shorthand string.
+/// the launch never inserts it: a longhand without `kind` reaches a direct
+/// launch's prepared frontmatter as written, and so does a shorthand string.
 #[test]
 fn longhand_hash_kind_default_is_declared_and_never_inserted() {
     let both = Locations::new();
@@ -1198,11 +1198,19 @@ fn longhand_hash_kind_default_is_declared_and_never_inserted() {
         };
         prepared.unwrap_or_else(|error| panic!("`{frontmatter}` prepares: {error:?}")).effective_frontmatter["hash"].clone()
     };
+    // Inline launch rehearses the closure's hash stamp first, so a stored
+    // longhand without `kind` is refused there rather than after the agent runs.
+    let inline_longhand = both.document("prepared", "prompt: hi\nhash: { value: 42 }");
+    let source = resolve_composition_source_in_context(inline_longhand.to_str().expect("UTF-8 path"), &context).expect("resolves");
+    let refused = claudine::composition::prepare_inline_with_schema(&source, claudine::composition::PrepareOptions::new(context.clone()));
+    assert!(
+        matches!(refused, Err(claudine::composition::CompositionError::InlineBaselineUnstampable { .. })),
+        "inline longhand without `kind` is refused at launch: {refused:?}"
+    );
     for (frontmatter, inline, expected) in [
-        ("prompt: hi\nhash: { value: 42 }", true, serde_json::json!({ "value": 42 })),
         ("start: [stop]\nhash: { value: 42 }", false, serde_json::json!({ "value": 42 })),
-        ("prompt: hi\nhash: { kind: fm, value: x }", true, serde_json::json!({ "kind": "fm", "value": "x" })),
-        ("prompt: hi\nhash: 0123456789abcdef", true, serde_json::json!("0123456789abcdef")),
+        ("prompt: hi\nhash: { kind: fm, value: 0123456789abcdef }", true, serde_json::json!({ "kind": "fm", "value": "0123456789abcdef" })),
+        ("prompt: hi\nhash: 0123456789abcdef-fedcba9876543210", true, serde_json::json!("0123456789abcdef-fedcba9876543210")),
     ] {
         assert_eq!(prepared_hash("prepared", frontmatter, inline), expected, "`{frontmatter}`");
     }

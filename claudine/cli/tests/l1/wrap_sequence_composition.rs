@@ -18,79 +18,73 @@ use common::{CliProcessFixture, strip_ansi, write_executable};
 /// chain silently bails when the prompt arrives via the composition
 /// body, this test fails.
 #[cfg(unix)]
-fn assert_sequence_composition_dry_run(provider: Provider) {
-    let provider_slug = provider.as_slug();
-    let fixture = CliProcessFixture::named("wrap-sequence-composition");
-    fixture.seed_user_config();
+mod sequence_composition_dry_run_for_every_provider {
+    use super::*;
 
-    write_executable(
-        &fixture.bin_dir().join(provider_info(provider).binary),
-        "#!/bin/sh\nexit 0\n",
-    );
+    macro_rules! provider_tests {
+        ($($test:ident => $provider:ident),* $(,)?) => {
+            $(#[test] fn $test() { assert_sequence_dry_run_composes(Provider::$provider); })*
 
-    let compose_file = fixture.cwd().join("compose.md");
-    fs::write(
-        &compose_file,
-        "---\nsequence:\n  - step_one\n---\ncomposed body text\n",
-    )
-    .unwrap();
+            /// A provider added to the compiled set must get its own test.
+            #[test]
+            fn every_row_has_a_listed_test() {
+                assert_eq!([$(Provider::$provider),*].as_slice(), PROVIDERS_DISPLAY_ORDER.as_slice());
+            }
+        };
+    }
 
-    let output = fixture
-        .command_builder()
-        // Only the staged stub may resolve: the subject is that every
-        // provider composes, not that the host has one installed.
-        .fake_only_path()
-        .build()
-        .env("OPENCODE_MODEL", "test-model")
-        .args([
-            "sequence",
-            "compose.md",
-            &format!("--{provider_slug}"),
-            "--dry-run",
-        ])
-        .output()
+    provider_tests! {
+        claude => Claude,
+        codex => Codex,
+        gemini => Gemini,
+        goose => Goose,
+        kimi => KimiCode,
+        opencode => OpenCode,
+        qwen => QwenCode,
+        kilo => Kilo,
+        pi => Pi,
+        antigravity => Antigravity,
+    }
+
+    fn assert_sequence_dry_run_composes(provider: Provider) {
+        let provider_slug = provider.as_slug();
+        let fixture = CliProcessFixture::named("wrap-sequence-composition");
+        fixture.seed_user_config();
+
+        write_executable(
+            &fixture.bin_dir().join(provider_info(provider).binary),
+            "#!/bin/sh\nexit 0\n",
+        );
+
+        let compose_file = fixture.cwd().join("compose.md");
+        fs::write(
+            &compose_file,
+            "---\nsequence:\n  - step_one\n---\ncomposed body text\n",
+        )
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "`claudine sequence compose.md --{provider_slug} --dry-run` failed: stderr={}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
+        let output = fixture
+            .command_builder()
+            // Only the staged stub may resolve: the subject is that every
+            // provider composes, not that the host has one installed.
+            .fake_only_path()
+            .build()
+            .env("OPENCODE_MODEL", "test-model")
+            .args([
+                "sequence",
+                "compose.md",
+                &format!("--{provider_slug}"),
+                "--dry-run",
+            ])
+            .output()
+            .unwrap();
 
-/// One test per provider, so nextest runs the spawns in parallel.
-macro_rules! sequence_composition_dry_run_tests {
-    ($($test:ident => $provider:ident),* $(,)?) => {
-        /// The providers the generated tests cover, in declaration order.
-        #[cfg(unix)]
-        const SEQUENCE_COMPOSITION_PROVIDERS: &[Provider] = &[$(Provider::$provider),*];
-
-        $(#[cfg(unix)]
-        #[test]
-        fn $test() {
-            assert_sequence_composition_dry_run(Provider::$provider);
-        })*
-    };
-}
-
-sequence_composition_dry_run_tests! {
-    sequence_composition_dry_run_for_claude => Claude,
-    sequence_composition_dry_run_for_codex => Codex,
-    sequence_composition_dry_run_for_gemini => Gemini,
-    sequence_composition_dry_run_for_goose => Goose,
-    sequence_composition_dry_run_for_kimi => KimiCode,
-    sequence_composition_dry_run_for_opencode => OpenCode,
-    sequence_composition_dry_run_for_qwen => QwenCode,
-    sequence_composition_dry_run_for_kilo => Kilo,
-    sequence_composition_dry_run_for_pi => Pi,
-    sequence_composition_dry_run_for_antigravity => Antigravity,
-}
-
-/// A provider added to the compiled set must get its own dry-run test above.
-#[cfg(unix)]
-#[test]
-fn every_provider_has_a_sequence_composition_dry_run_test() {
-    assert_eq!(SEQUENCE_COMPOSITION_PROVIDERS, PROVIDERS_DISPLAY_ORDER.as_slice());
+        assert!(
+            output.status.success(),
+            "`claudine sequence compose.md --{provider_slug} --dry-run` failed: stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 /// Sequence preflight must audit lifecycle shell commands for every step

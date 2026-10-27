@@ -31,6 +31,14 @@ pub enum GeneratorError {
     #[error("Invalid configuration: {0}")]
     ConfigError(String),
 
+    /// A definition bundle could not be built or loaded from `path`.
+    #[error("definition bundle {path}: {source}")]
+    Bundle {
+        path: String,
+        #[source]
+        source: schematic_define::BundleError,
+    },
+
     /// One output's validator reported blocking diagnostics.
     ///
     /// Nothing of that output was written. The rendered message lists every

@@ -1,0 +1,1644 @@
+{
+  "definition": {
+    "auth": "Basic",
+    "auth_policy": null,
+    "base_url": "https://api.bitbucket.org/2.0",
+    "cross_origin": "SameOrigin",
+    "default_pagination": {
+      "constants": [],
+      "follow_up": null,
+      "kind": {
+        "kind": "next_link",
+        "next": {
+          "from": "field",
+          "source": {
+            "at": [
+              "next"
+            ],
+            "from": "body"
+          }
+        },
+        "prev": {
+          "from": "field",
+          "source": {
+            "at": [
+              "previous"
+            ],
+            "from": "body"
+          }
+        },
+        "size": {
+          "adjustable": false,
+          "max": 100,
+          "min": 1,
+          "param": {
+            "in": "query",
+            "name": "pagelen"
+          },
+          "sent_default": null,
+          "server_default": 10
+        }
+      },
+      "partition": null,
+      "session": null,
+      "terminal_values": [],
+      "total": {
+        "at": [
+          "size"
+        ],
+        "from": "body"
+      }
+    },
+    "description": "Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows",
+    "docs_url": "https://developer.atlassian.com/cloud/bitbucket/rest/",
+    "endpoints": [
+      {
+        "description": "Get repository metadata including default branch and workspace info",
+        "headers": [],
+        "id": "GetRepository",
+        "method": "GET",
+        "params": null,
+        "path": "/repositories/{workspace}/{repo_slug}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "Repository"
+          }
+        }
+      },
+      {
+        "description": "Get a directory listing (paginated JSON of SourceEntry) or the raw content of a file at a specific commit",
+        "headers": [],
+        "id": "GetSource",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "pagelen",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repositories/{workspace}/{repo_slug}/src/{commit}/{path}",
+        "request": null,
+        "response": "Binary"
+      },
+      {
+        "description": "List pull requests (all states)",
+        "headers": [],
+        "id": "ListPullRequests",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": "PullRequest",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "values"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "inherit"
+          }
+        },
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "pagelen",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Filter by state (OPEN, MERGED, DECLINED, SUPERSEDED)",
+              "explode": false,
+              "name": "state",
+              "param_type": "String",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repositories/{workspace}/{repo_slug}/pullrequests",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "PaginatedResponse<PullRequest>"
+          }
+        }
+      },
+      {
+        "description": "Get a single pull request by ID",
+        "headers": [],
+        "id": "GetPullRequest",
+        "method": "GET",
+        "params": null,
+        "path": "/repositories/{workspace}/{repo_slug}/pullrequests/{id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "PullRequest"
+          }
+        }
+      },
+      {
+        "description": "List comments on a pull request",
+        "headers": [],
+        "id": "ListPullRequestComments",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": "PullRequestComment",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "values"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "inherit"
+          }
+        },
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "pagelen",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repositories/{workspace}/{repo_slug}/pullrequests/{id}/comments",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "PaginatedResponse<PullRequestComment>"
+          }
+        }
+      },
+      {
+        "description": "List repository issues",
+        "headers": [],
+        "id": "ListIssues",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": "Issue",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "values"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "inherit"
+          }
+        },
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "pagelen",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repositories/{workspace}/{repo_slug}/issues",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "PaginatedResponse<Issue>"
+          }
+        }
+      },
+      {
+        "description": "Get a single issue by ID",
+        "headers": [],
+        "id": "GetIssue",
+        "method": "GET",
+        "params": null,
+        "path": "/repositories/{workspace}/{repo_slug}/issues/{id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "Issue"
+          }
+        }
+      },
+      {
+        "description": "List comments on an issue",
+        "headers": [],
+        "id": "ListIssueComments",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": "IssueComment",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "values"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "inherit"
+          }
+        },
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "pagelen",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repositories/{workspace}/{repo_slug}/issues/{id}/comments",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "PaginatedResponse<IssueComment>"
+          }
+        }
+      },
+      {
+        "description": "List change history for an issue",
+        "headers": [],
+        "id": "ListIssueChanges",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": "IssueChange",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "values"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "inherit"
+          }
+        },
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "pagelen",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repositories/{workspace}/{repo_slug}/issues/{id}/changes",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "PaginatedResponse<IssueChange>"
+          }
+        }
+      },
+      {
+        "description": "Get a single branch by name (target.hash is the branch head commit)",
+        "headers": [],
+        "id": "GetBranch",
+        "method": "GET",
+        "params": null,
+        "path": "/repositories/{workspace}/{repo_slug}/refs/branches/{name}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "Branch"
+          }
+        }
+      },
+      {
+        "description": "List repository tags",
+        "headers": [],
+        "id": "ListTags",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": "Tag",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "values"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "inherit"
+          }
+        },
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "pagelen",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repositories/{workspace}/{repo_slug}/refs/tags",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "PaginatedResponse<Tag>"
+          }
+        }
+      },
+      {
+        "description": "Get a single tag by name",
+        "headers": [],
+        "id": "GetTag",
+        "method": "GET",
+        "params": null,
+        "path": "/repositories/{workspace}/{repo_slug}/refs/tags/{name}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "Tag"
+          }
+        }
+      },
+      {
+        "description": "List repository downloads (release artifacts)",
+        "headers": [],
+        "id": "ListDownloads",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": "Download",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "values"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "inherit"
+          }
+        },
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "pagelen",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repositories/{workspace}/{repo_slug}/downloads",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "PaginatedResponse<Download>"
+          }
+        }
+      },
+      {
+        "description": "Download a file from repository downloads",
+        "headers": [],
+        "id": "GetDownload",
+        "method": "GET",
+        "params": null,
+        "path": "/repositories/{workspace}/{repo_slug}/downloads/{filename}",
+        "request": null,
+        "response": "Binary"
+      },
+      {
+        "description": "List repositories in a workspace",
+        "headers": [],
+        "id": "ListWorkspaceRepos",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": "Repository",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "values"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "inherit"
+          }
+        },
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "description": "Page number (1-indexed, default: 1)",
+              "explode": false,
+              "name": "page",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            },
+            {
+              "description": "Items per page (default: 50, max: 100)",
+              "explode": false,
+              "name": "pagelen",
+              "param_type": "Integer",
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/repositories/{workspace}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "PaginatedResponse<Repository>"
+          }
+        }
+      }
+    ],
+    "env_auth": [
+      "BITBUCKET_APP_PASSWORD"
+    ],
+    "env_mapping": {
+      "api_key": null,
+      "basic_pass": {
+        "names": [
+          "BITBUCKET_APP_PASSWORD"
+        ]
+      },
+      "basic_user": {
+        "names": [
+          "BITBUCKET_USERNAME"
+        ]
+      },
+      "bearer_token": null
+    },
+    "env_username": "BITBUCKET_USERNAME",
+    "headers": [],
+    "module_path": "bitbucket",
+    "name": "Bitbucket",
+    "request_id_header": null,
+    "request_suffix": null,
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "905a6ff2ff46383672eaa2b80cf5af96e0678baa6890a3c18f7bac5ca0a27614",
+    "endpoints": [
+      {
+        "blake3": "95b54b18bceb986fecd3e82e113efb5b61b50680ab328ad6ba931fce20324d8a",
+        "id": "GetRepository"
+      },
+      {
+        "blake3": "1ae643a90bd097fed115865e4e92602c65a0c48667760d8f7b865f50d25d5b45",
+        "id": "GetSource"
+      },
+      {
+        "blake3": "4ff040439f3f5a47504f6ea622f90a4ff11509ba69ef0ea8609758286cfe890b",
+        "id": "ListPullRequests"
+      },
+      {
+        "blake3": "6ca7f9cdba655638fd751388561d59bf00db8a24a4473e1f8d2701543ce809cc",
+        "id": "GetPullRequest"
+      },
+      {
+        "blake3": "bfc6a9fe8c61a19697092fc1bb1d20f6911b087f24e8f2fecce3a15e03c99ffb",
+        "id": "ListPullRequestComments"
+      },
+      {
+        "blake3": "859e62428af431a6bc06bfb9b8b1a332d02a9ff03ff50ca0a85560ee71413d6a",
+        "id": "ListIssues"
+      },
+      {
+        "blake3": "02b747ffbd7a2a946dca06c7eef637770dc15fd30fcb485f58f767181d0428cb",
+        "id": "GetIssue"
+      },
+      {
+        "blake3": "83718b6bed901c3ea385dc1b6ad179db94289c333022e08de1ef8efb5d6cdea9",
+        "id": "ListIssueComments"
+      },
+      {
+        "blake3": "b3dfaee6c5e63d1016532c941ce9aa6bc467d9954f8643ad06fdca76c5dc33b8",
+        "id": "ListIssueChanges"
+      },
+      {
+        "blake3": "78dedb6c189d56a97f9a14dd9a1016139f2412d26671c4134107585b2ba8e247",
+        "id": "GetBranch"
+      },
+      {
+        "blake3": "819f03987e52408907181b289a41c112d9a49d75a68e72c1023b8cd34f8aaf9e",
+        "id": "ListTags"
+      },
+      {
+        "blake3": "2bef4333da6a3ddb46eb383ec43b95466e6e75647f15ec57b2928c7c1d997095",
+        "id": "GetTag"
+      },
+      {
+        "blake3": "3b68068971847c45cecfabfab8ee554f6a652eb65c0d4d4ab0d72b83c876beed",
+        "id": "ListDownloads"
+      },
+      {
+        "blake3": "3de6f98f7d9274a87f108e779a2f2022b4007d276265cfbe0e03e19e62aad712",
+        "id": "GetDownload"
+      },
+      {
+        "blake3": "a1e0eca13731b6012f9579b520b0bdebf0c26f4894313fa15ce3ef046c988d61",
+        "id": "ListWorkspaceRepos"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "GetRepository",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetSource",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "pagelen",
+            "server_default": 10
+          }
+        },
+        "Next",
+        "Prev",
+        "Total"
+      ],
+      "endpoint": "ListPullRequests",
+      "param_adoptions": [
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "pagelen"
+          },
+          "location": "Query",
+          "name": "pagelen",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "PullRequest",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "values"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "kind": "next_link",
+              "next": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "next"
+                  ],
+                  "from": "body"
+                }
+              },
+              "prev": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "previous"
+                  ],
+                  "from": "body"
+                }
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "pagelen"
+                },
+                "sent_default": null,
+                "server_default": 10
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": [
+                "size"
+              ],
+              "from": "body"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetPullRequest",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "pagelen",
+            "server_default": 10
+          }
+        },
+        "Next",
+        "Prev",
+        "Total"
+      ],
+      "endpoint": "ListPullRequestComments",
+      "param_adoptions": [
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "pagelen"
+          },
+          "location": "Query",
+          "name": "pagelen",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "PullRequestComment",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "values"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "kind": "next_link",
+              "next": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "next"
+                  ],
+                  "from": "body"
+                }
+              },
+              "prev": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "previous"
+                  ],
+                  "from": "body"
+                }
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "pagelen"
+                },
+                "sent_default": null,
+                "server_default": 10
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": [
+                "size"
+              ],
+              "from": "body"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "pagelen",
+            "server_default": 10
+          }
+        },
+        "Next",
+        "Prev",
+        "Total"
+      ],
+      "endpoint": "ListIssues",
+      "param_adoptions": [
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "pagelen"
+          },
+          "location": "Query",
+          "name": "pagelen",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "Issue",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "values"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "kind": "next_link",
+              "next": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "next"
+                  ],
+                  "from": "body"
+                }
+              },
+              "prev": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "previous"
+                  ],
+                  "from": "body"
+                }
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "pagelen"
+                },
+                "sent_default": null,
+                "server_default": 10
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": [
+                "size"
+              ],
+              "from": "body"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetIssue",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "pagelen",
+            "server_default": 10
+          }
+        },
+        "Next",
+        "Prev",
+        "Total"
+      ],
+      "endpoint": "ListIssueComments",
+      "param_adoptions": [
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "pagelen"
+          },
+          "location": "Query",
+          "name": "pagelen",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "IssueComment",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "values"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "kind": "next_link",
+              "next": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "next"
+                  ],
+                  "from": "body"
+                }
+              },
+              "prev": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "previous"
+                  ],
+                  "from": "body"
+                }
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "pagelen"
+                },
+                "sent_default": null,
+                "server_default": 10
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": [
+                "size"
+              ],
+              "from": "body"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "pagelen",
+            "server_default": 10
+          }
+        },
+        "Next",
+        "Prev",
+        "Total"
+      ],
+      "endpoint": "ListIssueChanges",
+      "param_adoptions": [
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "pagelen"
+          },
+          "location": "Query",
+          "name": "pagelen",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "IssueChange",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "values"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "kind": "next_link",
+              "next": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "next"
+                  ],
+                  "from": "body"
+                }
+              },
+              "prev": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "previous"
+                  ],
+                  "from": "body"
+                }
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "pagelen"
+                },
+                "sent_default": null,
+                "server_default": 10
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": [
+                "size"
+              ],
+              "from": "body"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetBranch",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "pagelen",
+            "server_default": 10
+          }
+        },
+        "Next",
+        "Prev",
+        "Total"
+      ],
+      "endpoint": "ListTags",
+      "param_adoptions": [
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "pagelen"
+          },
+          "location": "Query",
+          "name": "pagelen",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "Tag",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "values"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "kind": "next_link",
+              "next": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "next"
+                  ],
+                  "from": "body"
+                }
+              },
+              "prev": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "previous"
+                  ],
+                  "from": "body"
+                }
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "pagelen"
+                },
+                "sent_default": null,
+                "server_default": 10
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": [
+                "size"
+              ],
+              "from": "body"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetTag",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "pagelen",
+            "server_default": 10
+          }
+        },
+        "Next",
+        "Prev",
+        "Total"
+      ],
+      "endpoint": "ListDownloads",
+      "param_adoptions": [
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "pagelen"
+          },
+          "location": "Query",
+          "name": "pagelen",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "Download",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "values"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "kind": "next_link",
+              "next": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "next"
+                  ],
+                  "from": "body"
+                }
+              },
+              "prev": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "previous"
+                  ],
+                  "from": "body"
+                }
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "pagelen"
+                },
+                "sent_default": null,
+                "server_default": 10
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": [
+                "size"
+              ],
+              "from": "body"
+            }
+          }
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetDownload",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [
+        {
+          "PageSize": {
+            "max": 100,
+            "min": 1,
+            "param": "pagelen",
+            "server_default": 10
+          }
+        },
+        "Next",
+        "Prev",
+        "Total"
+      ],
+      "endpoint": "ListWorkspaceRepos",
+      "param_adoptions": [
+        {
+          "has_sent_default": false,
+          "input": {
+            "in": "query",
+            "name": "pagelen"
+          },
+          "location": "Query",
+          "name": "pagelen",
+          "outcome": "Adopted",
+          "required": false,
+          "role": "PageSize"
+        }
+      ],
+      "resolution": {
+        "Paginated": {
+          "alternates": [],
+          "list": {
+            "item_type": "Repository",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "values"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "ApiDefault",
+          "strategy": {
+            "constants": [],
+            "follow_up": null,
+            "kind": {
+              "kind": "next_link",
+              "next": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "next"
+                  ],
+                  "from": "body"
+                }
+              },
+              "prev": {
+                "from": "field",
+                "source": {
+                  "at": [
+                    "previous"
+                  ],
+                  "from": "body"
+                }
+              },
+              "size": {
+                "adjustable": false,
+                "max": 100,
+                "min": 1,
+                "param": {
+                  "in": "query",
+                  "name": "pagelen"
+                },
+                "sent_default": null,
+                "server_default": 10
+              }
+            },
+            "partition": null,
+            "session": null,
+            "terminal_values": [],
+            "total": {
+              "at": [
+                "size"
+              ],
+              "from": "body"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "aff51c000c2a170bba55f8ff870b8fcaa22549c1ead9900a0194c9c772af8ac5",
+      "name": "Repository",
+      "rust_path": "::schematic_definitions::bitbucket::Repository"
+    },
+    {
+      "blake3": "4d0d287e29c5c800f24ceac923fda2fa015b4d08466a3f28a356d051438ea4e8",
+      "name": "BranchInfo",
+      "rust_path": null
+    },
+    {
+      "blake3": "47300c291dd321e3c1d9015652b3bab156c5cec11c70d1b03dc2269f4a7b3e37",
+      "name": "Link",
+      "rust_path": null
+    },
+    {
+      "blake3": "94bbe041733ac5d89ca773081d9ccbb8b23a877abdc26db6a883ff09269ad3cd",
+      "name": "Project",
+      "rust_path": null
+    },
+    {
+      "blake3": "1be8341491e1e4aebe6dc67be3087fa7816c8b5fc221137d736b4a36307c4bcd",
+      "name": "User",
+      "rust_path": null
+    },
+    {
+      "blake3": "e1e234070cbe08061994a1f749e1484efbd42d70a9cd664be9264e9391708145",
+      "name": "Workspace",
+      "rust_path": null
+    },
+    {
+      "blake3": "28ab87a21cdc35aa79d26d32dd756365e277966d3d7bdcd63b18fa25d027f27b",
+      "name": "PaginatedResponse<SourceEntry>",
+      "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: SourceEntry >"
+    },
+    {
+      "blake3": "7f512c73ac26c43d72bf1a0bb0d1282a743b6d29b6ec927d46e6fb1d0a32752a",
+      "name": "CommitInfo",
+      "rust_path": null
+    },
+    {
+      "blake3": "a234afecae20dcf15c009347de2fece13a3128fa76c384fb6fcab5d91b311fc7",
+      "name": "SourceEntry",
+      "rust_path": null
+    },
+    {
+      "blake3": "7f28158e9b7e7d7e419368e6c323209b8af1f7f294e4e6fdc628edbfe6dbec0b",
+      "name": "PaginatedResponse<PullRequest>",
+      "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: PullRequest >"
+    },
+    {
+      "blake3": "2c7ad6b5306932ebd4e9079147f3f7157075632a84d8e4c04b839046d63ca6dc",
+      "name": "BranchRef",
+      "rust_path": null
+    },
+    {
+      "blake3": "62c04ee9dfadf870d0ef3769f53a0b489556cd5e80e99f0df6b3044e23953598",
+      "name": "Content",
+      "rust_path": null
+    },
+    {
+      "blake3": "b665ba534d6ed3d0928e68028b5dbfac91ecbb73ec4501ef2eb87df5e0cf65ea",
+      "name": "Participant",
+      "rust_path": null
+    },
+    {
+      "blake3": "6adc77e9561095fc553ad2a3f45b2dfb26d859fcdc4e62d6c113ca8bb7575dee",
+      "name": "PullRequest",
+      "rust_path": "::schematic_definitions::bitbucket::PullRequest"
+    },
+    {
+      "blake3": "964b460d1565791acbbb1355c26802ff6b3002a1083a9af22597b5abedf39771",
+      "name": "RepositoryRef",
+      "rust_path": null
+    },
+    {
+      "blake3": "19635a113a805665d68a6fde0a89ccd6b6a1e6d01b96ed4de5e9e0056f47a990",
+      "name": "PaginatedResponse<PullRequestComment>",
+      "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: PullRequestComment >"
+    },
+    {
+      "blake3": "d76f71fdff41788415471b7c75863296e5231a7eed5daaa7ef94fb9a62600be4",
+      "name": "CommentParent",
+      "rust_path": null
+    },
+    {
+      "blake3": "18f1848c9fc97a950f53e08f434bf1ab1de23582013bfb5f1050ca2eaa2eddd2",
+      "name": "InlineContext",
+      "rust_path": null
+    },
+    {
+      "blake3": "8ba69367b430b294f1746187f57dd19687f274a93e2e0832f990f14f83eb406f",
+      "name": "PullRequestComment",
+      "rust_path": null
+    },
+    {
+      "blake3": "09647075b4b8dfe4b782f6d9637d63b3c537beabce4f962311ba590cd9e6478c",
+      "name": "PaginatedResponse<Issue>",
+      "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: Issue >"
+    },
+    {
+      "blake3": "1b664bb4f3d134dd5371baff71af2865e839c1fde5990104c99fe79b2d4a4d01",
+      "name": "Issue",
+      "rust_path": "::schematic_definitions::bitbucket::Issue"
+    },
+    {
+      "blake3": "9a45d951ad21d90e2674ae12560180877263b1f2904a08c7288a7a80affe8b58",
+      "name": "Milestone",
+      "rust_path": null
+    },
+    {
+      "blake3": "0e6adf2e4c288b3d3745eb8db680186d11af53aaa55838347f11b2b6c7871329",
+      "name": "PaginatedResponse<IssueComment>",
+      "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: IssueComment >"
+    },
+    {
+      "blake3": "f41cbb246cc23f5f7f02c965ea2fb011cba74bdce122f3df422aba888de1aca9",
+      "name": "IssueComment",
+      "rust_path": null
+    },
+    {
+      "blake3": "1c08c71fd81877d7fc57c9dc0a59323800a3891034f4b1dc98b3446c61cf2128",
+      "name": "PaginatedResponse<IssueChange>",
+      "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: IssueChange >"
+    },
+    {
+      "blake3": "f8421b4b781b206285884270fdf4c38f91f743d1b352ca41ea73b37ef2ddcfe9",
+      "name": "ChangeDetail",
+      "rust_path": null
+    },
+    {
+      "blake3": "349e6b893c0a62de8e81d4407e27f233f5cbf72045af4530c51241f7f698161b",
+      "name": "IssueChange",
+      "rust_path": null
+    },
+    {
+      "blake3": "daddc87f01f1e945163390ab700332f0a756743f03d61fb1d2e4a02deb7920bd",
+      "name": "PaginatedResponse<Tag>",
+      "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: Tag >"
+    },
+    {
+      "blake3": "69cd4330932d850e2300470ecfd5b644b7a5a502804f38c28d04d5b416e70a56",
+      "name": "CommitAuthor",
+      "rust_path": null
+    },
+    {
+      "blake3": "5fdabc8da95fb3310db7d05e02d103ac0651abb8e9ae2fe33ab2a217741a3ed0",
+      "name": "Tag",
+      "rust_path": "::schematic_definitions::bitbucket::Tag"
+    },
+    {
+      "blake3": "e9c30bafcba8aafba82da36b61e1cca08310bc173f04de15d4c105ffbe23ec0a",
+      "name": "TagTarget",
+      "rust_path": null
+    },
+    {
+      "blake3": "01df02aaea2e0def722c8ac0e00e8a0361808a10b5acb80cb1e325d47cd2e7e1",
+      "name": "Tagger",
+      "rust_path": null
+    },
+    {
+      "blake3": "af9ca44da7e41b72088b8766ddb1f25f323d6a16cd5521f2bafdd51fc61c310a",
+      "name": "Branch",
+      "rust_path": "::schematic_definitions::bitbucket::Branch"
+    },
+    {
+      "blake3": "ea97454fa5b4a4b1d002e13621775145da56cb570bb6430edff61235989c9110",
+      "name": "PaginatedResponse<Download>",
+      "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: Download >"
+    },
+    {
+      "blake3": "9b770dcd8b5e5f67104f28027f15224cc5b0fad4cddd6af844771e6b36f8b198",
+      "name": "Download",
+      "rust_path": null
+    },
+    {
+      "blake3": "01d0a734d4cccecc9f45b3f5169708a2c73f00f6ac95a81de14d995081a968c4",
+      "name": "PaginatedResponse<Repository>",
+      "rust_path": "schematic_definitions :: bitbucket :: PaginatedResponse <\nschematic_definitions :: bitbucket :: Repository >"
+    }
+  ]
+}

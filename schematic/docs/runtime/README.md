@@ -16,7 +16,8 @@ These pages describe that runtime from the caller's side. You can:
 - tell "the server answered with an error" apart from "the server never
   answered" with one `match`
 - supply credentials per call, per client, or from environment variables,
-  and see in the metadata which one was sent
+  and see in the metadata which one was sent; an endpoint the definition
+  declares public never sends one
 - page through a list endpoint, or collect all of it, and know whether the
   list is complete
 - bound a whole multi-request operation by one shared deadline
@@ -60,12 +61,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | [Calling an API](./calling-an-api.md) | creating a client, endpoint methods, optional values, per-call overrides, `.full()`, `.build()?`, `CallError`, and when to use request objects |
 | [Sending and responses](./sending-and-responses.md) | awaiting a call, `.full()` and `send_raw`, the `Response` envelope, `CallError`, every `ErrorKind`, `TransportError`, codecs, and what is safe to log |
 | [Building clients](./building-clients.md) | `{Api}::new()` and its chained settings, when settings are validated, timeouts, proxies and TLS, `SharedTransport`, and every `BuildError` |
-| [Credentials](./credentials.md) | precedence (per call, client, environment, anonymous), `.anonymous()` on a call, and why the runtime never retries |
+| [Credentials](./credentials.md) | precedence (per call, client, environment, anonymous), public endpoints and endpoint replacement policies, `.anonymous()` on a call, and why the runtime never retries |
 | [Origins and redirects](./origins-and-redirects.md) | the cross-origin policies, how a redirect is followed hop by hop, and `check_link` |
 | [Deadlines and timeouts](./deadlines-and-timeouts.md) | the per-request timeout, a `Deadline` shared across sends, and stream bounds |
 | [Response hooks](./hooks.md) | `pre_response_json` and `mutate_response` |
-| [Codecs and decoding](./codecs.md) | how an endpoint fixes its result type, the `Decode` and `ErrorBody` traits, `LiveBody`, and what a codec that runs hooks must do |
+| [Codecs and decoding](./codecs.md) | how an endpoint fixes its result type, the `Decode` and `ErrorBody` traits, `LiveBody`, the stream and multi-shape codecs, and what a codec that runs hooks must do |
+| [GraphQL operations](../graphql.md) | the GraphQL address, how a reply's `errors` and `data` are classified, and paging an operation |
 | [Metadata and redaction](./metadata-and-redaction.md) | `RequestMeta`, `ResponseMeta`, request ids, and which values are redacted |
+| [Request validation](./validation.md) | the request-side constraint checks: what each rule means, exact numbers, patterns, the violation report and why it is safe to log |
 | [Pagination](../pagination.md) | `collect_all`, `pages()`, `fetch_page()`, the pager's controls, `Incomplete` and `PagerError`, sessions, and partitions |
 
 How a request struct's fields become a URL, headers, and body is covered by
@@ -88,12 +91,13 @@ How a request struct's fields become a URL, headers, and body is covered by
    resolution, the origin policy, timeouts, and redaction apply to every
    request.
 
-## Planned
+## Shipped definitions
 
-- **More codecs.** Server-sent events, NDJSON, and GraphQL codecs, built on
-  the same [`Decode` trait](./codecs.md) as the four built-in codecs, are **planned**. Until
-  then a streaming endpoint is modeled as binary and framed by the caller.
-- **Declared error bodies in definitions.** The runtime can decode an
-  endpoint's declared error body on arrival, but API definitions cannot
-  declare one yet. Every generated endpoint uses `NoDeclaredError`, so its
-  error replies arrive as `ErrorKind::Undeclared` with the raw body.
+Streaming endpoints of the Ollama, LM Studio, Anthropic, and ElevenLabs
+definitions, Bitbucket's source endpoint, and OpenAI's `GetResponse` declare
+streams or several shapes, so their generated clients decode with the stream
+and multi-shape codecs (see
+[Codecs and decoding](./codecs.md#what-generated-code-emits)). The imported
+OpenAI definition declares per-endpoint error bodies, which arrive as
+`ErrorKind::Declared`; every other shipped definition declares none, so its
+error replies arrive as `ErrorKind::Undeclared`.

@@ -1,0 +1,392 @@
+{
+  "asyncapi": "3.0.0",
+  "channels": {
+    "ArtMode": {
+      "address": "/api/v2/channels/com.samsung.art-app",
+      "bindings": {
+        "ws": {
+          "bindingVersion": "0.1.0",
+          "query": {
+            "properties": {
+              "name": {
+                "description": "Base64-encoded client name for the Art Mode channel",
+                "type": "string"
+              },
+              "token": {
+                "description": "Previously approved token to bypass on-TV approval prompt",
+                "type": "string",
+                "x-schematic-param": {
+                  "secret": true
+                }
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "Samsung Art Mode (Frame TV) channel for artwork management, brightness control, and Art Mode on/off. Uses double-encoded JSON in the `data` field of `ms.channel.emit` messages.",
+      "messages": {
+        "ArtModeCommand": {
+          "$ref": "#/components/messages/ArtMode.ArtModeCommand"
+        },
+        "ArtModeEvent": {
+          "$ref": "#/components/messages/ArtMode.ArtModeEvent"
+        },
+        "ChannelConnectEvent": {
+          "$ref": "#/components/messages/ArtMode.ChannelConnectEvent"
+        },
+        "ChannelEnvelope": {
+          "$ref": "#/components/messages/ArtMode.ChannelEnvelope"
+        }
+      },
+      "x-schematic-role": "client"
+    },
+    "RemoteControl": {
+      "address": "/api/v2/channels/samsung.remote.control",
+      "bindings": {
+        "ws": {
+          "bindingVersion": "0.1.0",
+          "query": {
+            "properties": {
+              "name": {
+                "description": "Base64-encoded client name used by Samsung remote channel",
+                "type": "string"
+              },
+              "token": {
+                "description": "Previously approved remote token to bypass repeated on-TV prompts",
+                "type": "string",
+                "x-schematic-param": {
+                  "secret": true
+                }
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          }
+        }
+      },
+      "description": "Samsung remote control channel for key transport and lifecycle events. First connection may trigger an on-TV approval prompt; approved sessions provide a token for subsequent reconnects.",
+      "messages": {
+        "AppLaunchCommand": {
+          "$ref": "#/components/messages/RemoteControl.AppLaunchCommand"
+        },
+        "ChannelConnectEvent": {
+          "$ref": "#/components/messages/RemoteControl.ChannelConnectEvent"
+        },
+        "ChannelEnvelope": {
+          "$ref": "#/components/messages/RemoteControl.ChannelEnvelope"
+        },
+        "ChannelErrorEvent": {
+          "$ref": "#/components/messages/RemoteControl.ChannelErrorEvent"
+        },
+        "ChannelUnauthorizedEvent": {
+          "$ref": "#/components/messages/RemoteControl.ChannelUnauthorizedEvent"
+        },
+        "InstalledAppsCommand": {
+          "$ref": "#/components/messages/RemoteControl.InstalledAppsCommand"
+        },
+        "RemoteControlCommand": {
+          "$ref": "#/components/messages/RemoteControl.RemoteControlCommand"
+        }
+      },
+      "x-schematic-role": "client"
+    }
+  },
+  "components": {
+    "messages": {
+      "ArtMode.ArtModeCommand": {
+        "description": "Art Mode command sent via `ms.channel.emit` with double-encoded data payload. Supports brightness, artwork selection, and mode control.",
+        "name": "ArtModeCommand",
+        "payload": {
+          "$ref": "#/components/schemas/SamsungArtModeCommand"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "method",
+            "value": "ms.channel.emit"
+          }
+        ]
+      },
+      "ArtMode.ArtModeEvent": {
+        "description": "Art Mode response event. The `data` field contains a double-encoded JSON string that must be parsed separately.",
+        "name": "ArtModeEvent",
+        "payload": {
+          "$ref": "#/components/schemas/SamsungArtModeEvent"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "event",
+            "value": "d2d_service_message"
+          }
+        ]
+      },
+      "ArtMode.ChannelConnectEvent": {
+        "description": "Emitted when the Art Mode channel is successfully connected.",
+        "name": "ChannelConnectEvent",
+        "payload": {
+          "$ref": "#/components/schemas/SamsungRemoteConnectEvent"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "event",
+            "value": "ms.channel.connect"
+          }
+        ]
+      },
+      "ArtMode.ChannelEnvelope": {
+        "description": "Generic envelope with deferred payload for any other Art Mode event.",
+        "name": "ChannelEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/SamsungRemoteEnvelope"
+        },
+        "x-schematic-fallback": true
+      },
+      "RemoteControl.AppLaunchCommand": {
+        "description": "Launch an application via `ms.channel.emit` with optional deep-link metadata. Supports both `DEEP_LINK` and `NATIVE_LAUNCH` action types.",
+        "name": "AppLaunchCommand",
+        "payload": {
+          "$ref": "#/components/schemas/SamsungAppLaunchCommand"
+        }
+      },
+      "RemoteControl.ChannelConnectEvent": {
+        "description": "Emitted when the channel is successfully connected and authorized. May include a `token` for future reconnects.",
+        "name": "ChannelConnectEvent",
+        "payload": {
+          "$ref": "#/components/schemas/SamsungRemoteConnectEvent"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "event",
+            "value": "ms.channel.connect"
+          }
+        ]
+      },
+      "RemoteControl.ChannelEnvelope": {
+        "description": "Generic envelope with deferred `RawValue` payload for any other event. Route by inspecting `event` or `method`, then deserialize `data` on demand.",
+        "name": "ChannelEnvelope",
+        "payload": {
+          "$ref": "#/components/schemas/SamsungRemoteEnvelope"
+        },
+        "x-schematic-fallback": true
+      },
+      "RemoteControl.ChannelErrorEvent": {
+        "description": "Emitted on channel-level errors.",
+        "name": "ChannelErrorEvent",
+        "payload": {
+          "$ref": "#/components/schemas/SamsungRemoteErrorEvent"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "event",
+            "value": "ms.error"
+          }
+        ]
+      },
+      "RemoteControl.ChannelUnauthorizedEvent": {
+        "description": "Emitted when channel connection is unauthorized (approval needed or denied).",
+        "name": "ChannelUnauthorizedEvent",
+        "payload": {
+          "$ref": "#/components/schemas/SamsungRemoteUnauthorizedEvent"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "event",
+            "value": "ms.channel.unauthorized"
+          }
+        ]
+      },
+      "RemoteControl.InstalledAppsCommand": {
+        "description": "Request the list of installed applications via `ms.channel.emit`. The TV responds with an `ed.installedApp.get` event containing the app list.",
+        "name": "InstalledAppsCommand",
+        "payload": {
+          "$ref": "#/components/schemas/SamsungInstalledAppsCommand"
+        }
+      },
+      "RemoteControl.RemoteControlCommand": {
+        "description": "Remote key command (method, key, action). Use `Cmd=Click` for single presses, `Press`/`Release` for hold gestures.",
+        "name": "RemoteControlCommand",
+        "payload": {
+          "$ref": "#/components/schemas/SamsungRemoteControlCommand"
+        },
+        "x-schematic-selectors": [
+          {
+            "field": "method",
+            "value": "ms.remote.control"
+          }
+        ]
+      }
+    },
+    "schemas": {
+      "SamsungAppLaunchCommand": {
+        "description": "Payload type `SamsungAppLaunchCommand`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "SamsungArtModeCommand": {
+        "description": "Payload type `SamsungArtModeCommand`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "SamsungArtModeEvent": {
+        "description": "Payload type `SamsungArtModeEvent`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "SamsungInstalledAppsCommand": {
+        "description": "Payload type `SamsungInstalledAppsCommand`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "SamsungRemoteConnectEvent": {
+        "description": "Payload type `SamsungRemoteConnectEvent`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "SamsungRemoteControlCommand": {
+        "description": "Payload type `SamsungRemoteControlCommand`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "SamsungRemoteEnvelope": {
+        "description": "Payload type `SamsungRemoteEnvelope`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "SamsungRemoteErrorEvent": {
+        "description": "Payload type `SamsungRemoteErrorEvent`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      },
+      "SamsungRemoteUnauthorizedEvent": {
+        "description": "Payload type `SamsungRemoteUnauthorizedEvent`. Schematic WebSocket definitions declare no JSON Schema for payloads, so any JSON value is accepted."
+      }
+    }
+  },
+  "defaultContentType": "application/json",
+  "info": {
+    "description": "Samsung Smart TV remote-control websocket API (S95C-focused)",
+    "externalDocs": {
+      "url": "https://developer.samsung.com/smarttv/develop/extension-libraries/smart-view-sdk/receiver-apps/debugging.html"
+    },
+    "title": "SamsungSmartTvRemote",
+    "version": "1.0.0"
+  },
+  "operations": {
+    "ArtMode.receive.ArtModeEvent": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/ArtMode"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/ArtMode/messages/ArtModeEvent"
+        }
+      ]
+    },
+    "ArtMode.receive.ChannelConnectEvent": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/ArtMode"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/ArtMode/messages/ChannelConnectEvent"
+        }
+      ]
+    },
+    "ArtMode.receive.ChannelEnvelope": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/ArtMode"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/ArtMode/messages/ChannelEnvelope"
+        }
+      ]
+    },
+    "ArtMode.send.ArtModeCommand": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/ArtMode"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/ArtMode/messages/ArtModeCommand"
+        }
+      ]
+    },
+    "RemoteControl.receive.ChannelConnectEvent": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/RemoteControl"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/RemoteControl/messages/ChannelConnectEvent"
+        }
+      ]
+    },
+    "RemoteControl.receive.ChannelEnvelope": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/RemoteControl"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/RemoteControl/messages/ChannelEnvelope"
+        }
+      ]
+    },
+    "RemoteControl.receive.ChannelErrorEvent": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/RemoteControl"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/RemoteControl/messages/ChannelErrorEvent"
+        }
+      ]
+    },
+    "RemoteControl.receive.ChannelUnauthorizedEvent": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/RemoteControl"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/RemoteControl/messages/ChannelUnauthorizedEvent"
+        }
+      ]
+    },
+    "RemoteControl.send.AppLaunchCommand": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/RemoteControl"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/RemoteControl/messages/AppLaunchCommand"
+        }
+      ]
+    },
+    "RemoteControl.send.InstalledAppsCommand": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/RemoteControl"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/RemoteControl/messages/InstalledAppsCommand"
+        }
+      ]
+    },
+    "RemoteControl.send.RemoteControlCommand": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/RemoteControl"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/RemoteControl/messages/RemoteControlCommand"
+        }
+      ]
+    }
+  },
+  "servers": {
+    "default": {
+      "host": "192.168.1.1:8002",
+      "protocol": "wss"
+    }
+  }
+}

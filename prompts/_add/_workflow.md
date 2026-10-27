@@ -52,9 +52,9 @@ Stop clarifying when every item on the Definition Checklist is answered for ever
 or when the caller says the remaining questions are yours to decide. Record decisions as
 numbered rulings (`R1`, `R2`, …) with the date; they go into the spec verbatim.
 
-When the caller declines to rule on a question, adopt your recommendation, record it as a
-ruling marked "recommended, adopted by default", and implement it. Never leave requested scope
-unimplemented because a question was not answered.
+Do not convert an open question into a decision on the caller's behalf. If a question is
+genuinely a design choice with no obvious default and the caller declines to rule, write it
+into the spec's "Open Questions" section with your recommendation and do **not** implement it.
 
 ## Phase 3 — Specification
 
@@ -74,6 +74,7 @@ has these sections:
    the normal invocation path.
 6. **Documentation** — the exact files that must agree with the spec at completion.
 7. **Blast radius** — the GitNexus impact results for every existing symbol you will edit.
+8. **Open Questions** — anything left unruled, with your recommendation.
 
 Set the spec's frontmatter: `created: {{ctx.today}}`, `status: draft`,
 `clarified_by: "{{ctx.agent}}/{{ctx.model}}"`, and `requirements` holding the caller's
@@ -134,11 +135,11 @@ red test to get green; report it.
 ## Closure
 
 Update `{{spec_dir}}/spec.md` frontmatter: `implemented: true`,
-`implemented_by: "{{ctx.agent}}/{{ctx.model}}"`, `status: "implemented, ready for review"`.
-Every design decision taken without the caller's ruling is already recorded in **Rulings**
-with its alternatives and reason; it is not a review item.
+`implemented_by: "{{ctx.agent}}/{{ctx.model}}"`, `status: "implemented, ready for review"`,
+and `human_review_items` when a design decision was taken without a ruling (write each item
+as a `|-` block so it reads well; explain it without repo jargon).
 
 Report to the caller, in this order: what was added (names and shapes), what was ruled, what
-was adopted by default, which docs were corrected for drift, the exact test and lint results, and
+was left open, which docs were corrected for drift, the exact test and lint results, and
 anything a reviewer should look at first. Do not move the spec to `_completed`; that is the
 author's call after review.

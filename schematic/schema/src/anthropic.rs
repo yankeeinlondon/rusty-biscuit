@@ -20,24 +20,27 @@
 //!
 //! ## Examples
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
+//! use schematic_schema::anthropic::ListModelsRequest;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let client = Anthropic::new();
-//!     let data = client.list_models().await?;
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let client = Anthropic::new();
+//! let data = client.list_models().await?;
 //!
-//!     // the whole response: status, headers, and request id as well
-//!     let response = client.list_models().full().await?;
-//!     println!("{}", response.meta);
-//!     Ok(())
-//! }
+//! // the same request, built as a typed request and sent
+//! let data = client.send(ListModelsRequest::default()).await?;
+//!
+//! // the whole response: status, headers, and request id as well
+//! let response = client.list_models().full().await?;
+//! println!("{}", response.meta);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ### Override Base URL
 //!
-//! ```text
+//! ```no_run
 //! use schematic_schema::prelude::*;
 //!
 //! let client = Anthropic::new().base_url("https://staging.example.com/v1");
@@ -106,44 +109,96 @@ impl Default for Anthropic {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::anthropic::{CreateMessageRequest, CreateMessageBody};
+/// ```no_run
+/// use schematic_schema::anthropic::CreateMessageRequest;
 ///
-/// let body = CreateMessageBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = CreateMessageRequest::new(body)
-///;
+/// let body: ::schematic_definitions::anthropic::CreateMessageBody = Default::default();
+/// let request = CreateMessageRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateMessageRequest {
     /// Request body
-    pub body: CreateMessageBody,
+    pub body: ::schematic_definitions::anthropic::CreateMessageBody,
 }
 impl CreateMessageRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CreateMessageBody) -> Self {
+    pub fn new(body: ::schematic_definitions::anthropic::CreateMessageBody) -> Self {
         Self { body }
     }
 }
-impl From<CreateMessageBody> for CreateMessageRequest {
-    fn from(body: CreateMessageBody) -> Self {
+impl From<::schematic_definitions::anthropic::CreateMessageBody>
+for CreateMessageRequest {
+    fn from(body: ::schematic_definitions::anthropic::CreateMessageBody) -> Self {
         Self { body }
+    }
+}
+/// The end condition of the `CreateMessage` stream.
+#[derive(Debug, Clone, Copy)]
+pub struct CreateMessageStreamEnd;
+impl schematic_runtime::StreamEnd for CreateMessageStreamEnd {
+    const CONDITION: schematic_runtime::EndCondition = schematic_runtime::EndCondition::EventNamed(
+        "message_stop",
+    );
+}
+/// The success reply of `CreateMessage`: one variant per declared shape, chosen from the reply's status, media type, and JSON tag.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub enum CreateMessageResponse {
+    /// returned when `stream` is false or omitted
+    ///
+    /// Chosen by media type `application/json`.
+    Json(::schematic_definitions::anthropic::MessageResponse),
+    /// returned when `stream` is true
+    ///
+    /// Chosen by media type `text/event-stream`.
+    Stream(
+        schematic_runtime::ItemStream<
+            ::schematic_definitions::anthropic::MessageStreamEvent,
+        >,
+    ),
+}
+impl schematic_runtime::Alternatives for CreateMessageResponse {
+    const ROUTES: &'static [schematic_runtime::Route] = &[
+        schematic_runtime::Route::new(schematic_runtime::ShapeKind::Json)
+            .media("application/json"),
+        schematic_runtime::Route::new(schematic_runtime::ShapeKind::Stream)
+            .media("text/event-stream"),
+    ];
+    async fn decode_alternative(
+        index: usize,
+        body: schematic_runtime::LiveBody,
+    ) -> Result<Self, schematic_runtime::DecodeFailure> {
+        match index {
+            0 => {
+                <schematic_runtime::Json<
+                    ::schematic_definitions::anthropic::MessageResponse,
+                > as schematic_runtime::Decode>::decode(body)
+                    .await
+                    .map(Self::Json)
+            }
+            _ => {
+                <schematic_runtime::Sse<
+                    ::schematic_definitions::anthropic::MessageStreamEvent,
+                    CreateMessageStreamEnd,
+                > as schematic_runtime::Decode>::decode(body)
+                    .await
+                    .map(Self::Stream)
+            }
+        }
     }
 }
 impl schematic_runtime::EndpointSpec for CreateMessageRequest {
     type Api = AnthropicApi;
-    type Success = MessageResponse;
+    type Success = CreateMessageResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<MessageResponse>;
+    type Decoder = schematic_runtime::Shapes<CreateMessageResponse>;
     const ENDPOINT_ID: &'static str = "CreateMessage";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/messages".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -165,44 +220,42 @@ impl schematic_runtime::EndpointSpec for CreateMessageRequest {
 ///
 /// ## Example
 ///
-/// ```text
-/// use schematic_schema::anthropic::{CountTokensRequest, CountTokensBody};
+/// ```no_run
+/// use schematic_schema::anthropic::CountTokensRequest;
 ///
-/// let body = CountTokensBody {
-///     // ... set required fields ...
-///     ..Default::default()
-/// };
-/// let request = CountTokensRequest::new(body)
-///;
+/// let body: ::schematic_definitions::anthropic::CountTokensBody = Default::default();
+/// let request = CountTokensRequest::new(body);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CountTokensRequest {
     /// Request body
-    pub body: CountTokensBody,
+    pub body: ::schematic_definitions::anthropic::CountTokensBody,
 }
 impl CountTokensRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(body: CountTokensBody) -> Self {
+    pub fn new(body: ::schematic_definitions::anthropic::CountTokensBody) -> Self {
         Self { body }
     }
 }
-impl From<CountTokensBody> for CountTokensRequest {
-    fn from(body: CountTokensBody) -> Self {
+impl From<::schematic_definitions::anthropic::CountTokensBody> for CountTokensRequest {
+    fn from(body: ::schematic_definitions::anthropic::CountTokensBody) -> Self {
         Self { body }
     }
 }
 impl schematic_runtime::EndpointSpec for CountTokensRequest {
     type Api = AnthropicApi;
-    type Success = CountTokensResponse;
+    type Success = ::schematic_definitions::anthropic::CountTokensResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<CountTokensResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::anthropic::CountTokensResponse,
+    >;
     const ENDPOINT_ID: &'static str = "CountTokens";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::POST;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/messages/count_tokens".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -224,26 +277,27 @@ impl schematic_runtime::EndpointSpec for CountTokensRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::anthropic::ListModelsRequest;
 ///
-/// let request = ListModelsRequest::default()
-///;
+/// let request = ListModelsRequest::default();
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
 impl schematic_runtime::EndpointSpec for ListModelsRequest {
     type Api = AnthropicApi;
-    type Success = ListModelsResponse;
+    type Success = ::schematic_definitions::anthropic::ListModelsResponse;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ListModelsResponse>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::anthropic::ListModelsResponse,
+    >;
     const ENDPOINT_ID: &'static str = "ListModels";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
         self,
     ) -> Result<schematic_runtime::RequestParts, schematic_runtime::InvalidArgument> {
         let path = "/models".to_string();
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -258,11 +312,10 @@ impl schematic_runtime::EndpointSpec for ListModelsRequest {
 ///
 /// ## Example
 ///
-/// ```text
+/// ```no_run
 /// use schematic_schema::anthropic::RetrieveModelRequest;
 ///
-/// let request = RetrieveModelRequest::new("model_id_value")
-///;
+/// let request = RetrieveModelRequest::new("model_id_value");
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveModelRequest {
@@ -289,9 +342,11 @@ impl From<String> for RetrieveModelRequest {
 }
 impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
     type Api = AnthropicApi;
-    type Success = ModelInfo;
+    type Success = ::schematic_definitions::anthropic::ModelInfo;
     type Failure = schematic_runtime::NoDeclaredError;
-    type Decoder = schematic_runtime::Json<ModelInfo>;
+    type Decoder = schematic_runtime::Json<
+        ::schematic_definitions::anthropic::ModelInfo,
+    >;
     const ENDPOINT_ID: &'static str = "RetrieveModel";
     const METHOD: schematic_runtime::Method = schematic_runtime::Method::GET;
     fn into_parts(
@@ -300,7 +355,7 @@ impl schematic_runtime::EndpointSpec for RetrieveModelRequest {
         let path = format!(
             "/models/{}", urlencoding::encode(& self.model_id.to_string())
         );
-        let query: Vec<(String, String)> = Vec::new();
+        let query: Vec<(String, schematic_runtime::QueryValue)> = Vec::new();
         let headers: Vec<(String, String)> = vec![];
         Ok(schematic_runtime::RequestParts {
             method: <Self as schematic_runtime::EndpointSpec>::METHOD,
@@ -524,8 +579,11 @@ impl Anthropic {
     ///
     /// ## Arguments
     ///
-    /// - `body: CreateMessageBody`: the request body
-    pub fn create_message(&self, body: CreateMessageBody) -> CreateMessageCall<'_> {
+    /// - `body: ::schematic_definitions::anthropic::CreateMessageBody`: the request body
+    pub fn create_message(
+        &self,
+        body: ::schematic_definitions::anthropic::CreateMessageBody,
+    ) -> CreateMessageCall<'_> {
         CreateMessageCall(self.0.send(CreateMessageRequest::new(body)))
     }
     /// Count tokens in a message before sending
@@ -536,8 +594,11 @@ impl Anthropic {
     ///
     /// ## Arguments
     ///
-    /// - `body: CountTokensBody`: the request body
-    pub fn count_tokens(&self, body: CountTokensBody) -> CountTokensCall<'_> {
+    /// - `body: ::schematic_definitions::anthropic::CountTokensBody`: the request body
+    pub fn count_tokens(
+        &self,
+        body: ::schematic_definitions::anthropic::CountTokensBody,
+    ) -> CountTokensCall<'_> {
         CountTokensCall(self.0.send(CountTokensRequest::new(body)))
     }
     /// List available Claude models

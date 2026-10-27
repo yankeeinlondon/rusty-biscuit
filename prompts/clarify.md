@@ -193,8 +193,7 @@ Your job is to follow these steps exactly:
             - note: often there will not be any but there is always the possibility that our improved understanding has brought in some new questions that need to be addressed
     - ask the user if they'd like to address any open ambiguities or design decisions from the list now:
         - if yes: iterate one by one through remaining items employing the same basic technique used in the **Clarification** stage
-        - if no: offer to adopt your recommendation for every remaining item; when the caller agrees, record each one in the document's `## Design Decisions` as decided
-        - only an item the caller explicitly wants left open stays open: document it in the spec/design document with enough detail that any future reader can understand the ruling that is needed. Planning and implementation refuse to start until it is settled
+        - if no: make sure the unanswered questions are documented in the spec/design document with enough detail that any future reader can understand the remaining rulings that are needed
     - update the document's frontmatter ({{doc}}):
         ::file ./_set_spec_schema.md
         - set `status` to "finalized-spec"

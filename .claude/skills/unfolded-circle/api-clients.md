@@ -15,7 +15,7 @@ Because we want to be able to develop high quality Integrations as well as Core 
 - Dock API
     - [Websocket API for Dock in `unfolded_circle_dock_ws`](@schematic/schema/src/unfolded_circle_dock_ws.rs)
 - Integration API
-    - [Websocket API for Integrations in `unfolded_circle_dock_ws`](@schematic/schema/src/unfolded_circle_doc_ws.rs)
+    - [Websocket API for Integrations in `unfolded_circle_integration_ws`](@schematic/schema/src/unfolded_circle_integration_ws.rs)
 
 ### Definitions
 

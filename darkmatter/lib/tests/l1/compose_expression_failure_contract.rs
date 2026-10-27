@@ -449,7 +449,7 @@ fn shell_ternary_condition_and_branch_failures_stay_fatal() {
 fn subtree_compose_fails_on_real_expression_failures_only() {
     let dir = TempDir::new().unwrap();
     let state = EffectiveStateBuilder::new()
-        .with_frontmatter([("name".to_string(), json!("x"))].into())
+        .with_frontmatter([("name".to_string(), json!("x"))].into_iter().collect())
         .with_context(ComposeContext::capture_for_content(dir.path(), ""))
         .build()
         .unwrap();

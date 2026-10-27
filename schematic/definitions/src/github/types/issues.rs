@@ -71,6 +71,13 @@ pub struct IssueSummary {
     #[serde(default)]
     pub milestone: Option<Milestone>,
 }
+impl schematic_define::Registration for IssueSummary {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(IssueSummary));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 impl IssueSummary {
     /// Returns `true` if this issue is actually a pull request.
@@ -137,6 +144,13 @@ pub struct IssueComment {
     #[serde(default)]
     pub url: Option<String>,
 }
+impl schematic_define::Registration for IssueComment {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(IssueComment));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 /// A timeline event on an issue.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -161,6 +175,13 @@ pub struct TimelineEvent {
     #[serde(flatten)]
     pub extra: serde_json::Value,
 }
+impl schematic_define::Registration for TimelineEvent {
+    const RUST_IDENTIFIER: Option<&'static str> = Some(stringify!(TimelineEvent));
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

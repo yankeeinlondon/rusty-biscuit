@@ -56,6 +56,14 @@ md rm doc.md draft --json
 - If any requested property does not exist in frontmatter, the command fails with a non-zero exit code and reports the missing properties.
 - The file is only written if all requested properties are found and removed.
 
+## Formatting Is Preserved
+
+Only the removed properties' lines change. Every other byte of the document
+stays exactly as authored: indentation, comments, quoting, block scalars,
+line endings, and the body. When the frontmatter cannot be edited in place
+(for example, its root mapping is indented), `rm` falls back to rewriting the
+whole frontmatter block in Darkmatter's standard YAML style.
+
 ## Lessons Learned
 
 - Silent-by-default keeps `rm` well-behaved in scripts.

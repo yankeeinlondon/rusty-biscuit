@@ -87,6 +87,7 @@ pub fn merge_ctx(
             let merged = crate::markdown::compose::context::effective_state::deep_merge(
                 &Value::Object(user_obj.clone()),
                 &Value::Object(runtime_obj),
+                crate::markdown::compose::context::effective_state::ConflictWinner::Overlay,
             );
 
             diagnostics.push(ContextMergeDiagnostic::UserCtxMerged { colliding_keys });

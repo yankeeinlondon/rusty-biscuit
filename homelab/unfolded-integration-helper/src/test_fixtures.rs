@@ -1,4 +1,18 @@
+use schematic_schema::unfolded_circle_integration_ws::IntegrationClientMessage;
+use schematic_schema::ws_shared::{WsInboundFrame, WsRawFrame};
 use serde_json::{Value, json};
+
+/// Decodes a JSON fixture as the host decodes an inbound text frame.
+///
+/// ## Panics
+///
+/// Panics if the fixture is not a message the Integration endpoint declares.
+#[must_use]
+pub fn client_message(value: Value) -> IntegrationClientMessage {
+    WsInboundFrame::parse(WsRawFrame::Text(value.to_string()))
+        .and_then(IntegrationClientMessage::decode)
+        .expect("fixture decodes as an Integration client message")
+}
 
 #[must_use]
 pub fn request(id: u64, msg: &str, msg_data: Value) -> Value {

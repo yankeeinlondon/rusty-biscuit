@@ -1,0 +1,1081 @@
+{
+  "definition": {
+    "auth": {
+      "BearerToken": {
+        "header": null
+      }
+    },
+    "auth_policy": null,
+    "base_url": "https://huggingface.co/api",
+    "cross_origin": "SameOrigin",
+    "default_pagination": null,
+    "description": "Hugging Face Hub API for model discovery, dataset management, spaces, and repository operations",
+    "docs_url": "https://huggingface.co/docs/hub/api",
+    "endpoints": [
+      {
+        "description": "Lists models with optional filtering. Query params: search, author, filter, sort, direction, limit, full, config",
+        "headers": [],
+        "id": "ListModels",
+        "method": "GET",
+        "params": null,
+        "path": "/models",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "ModelInfo"
+            }
+          }
+        }
+      },
+      {
+        "description": "Gets detailed information about a specific model",
+        "headers": [],
+        "id": "GetModel",
+        "method": "GET",
+        "params": null,
+        "path": "/models/{+repo_id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "ModelInfo"
+          }
+        }
+      },
+      {
+        "description": "Lists files in a model repository at a specific revision",
+        "headers": [],
+        "id": "ListModelFiles",
+        "method": "GET",
+        "params": null,
+        "path": "/models/{+repo_id}/tree/{revision}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "RepoFile"
+            }
+          }
+        }
+      },
+      {
+        "description": "Gets file metadata for a specific file in a model repository",
+        "headers": [],
+        "id": "GetModelFile",
+        "method": "GET",
+        "params": null,
+        "path": "/models/{+repo_id}/blob/{revision}/{+path}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "FileMetadata"
+          }
+        }
+      },
+      {
+        "description": "Lists commits for a model repository",
+        "headers": [],
+        "id": "ListModelCommits",
+        "method": "GET",
+        "params": null,
+        "path": "/models/{+repo_id}/commits/{revision}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "Commit"
+            }
+          }
+        }
+      },
+      {
+        "description": "Gets the README file content for a model",
+        "headers": [],
+        "id": "GetModelReadme",
+        "method": "GET",
+        "params": null,
+        "path": "/models/{+repo_id}/resolve/{revision}/README.md",
+        "request": null,
+        "response": "Text"
+      },
+      {
+        "description": "Lists discussions for a model repository",
+        "headers": [],
+        "id": "ListModelDiscussions",
+        "method": "GET",
+        "pagination": {
+          "alternates": [],
+          "item_type": "Discussion",
+          "items": {
+            "projection": [],
+            "record": [
+              {
+                "key": "discussions"
+              },
+              "each"
+            ]
+          },
+          "pagination": {
+            "policy": "unpaginated"
+          }
+        },
+        "params": null,
+        "path": "/models/{+repo_id}/discussions",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "DiscussionList"
+          }
+        }
+      },
+      {
+        "description": "Gets the model card file content",
+        "headers": [],
+        "id": "GetModelCard",
+        "method": "GET",
+        "params": null,
+        "path": "/models/{+repo_id}/resolve/{revision}/model_card.md",
+        "request": null,
+        "response": "Text"
+      },
+      {
+        "description": "Lists datasets with optional filtering. Query params: search, author, filter, sort, direction, limit, full",
+        "headers": [],
+        "id": "ListDatasets",
+        "method": "GET",
+        "params": null,
+        "path": "/datasets",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "DatasetInfo"
+            }
+          }
+        }
+      },
+      {
+        "description": "Gets detailed information about a specific dataset",
+        "headers": [],
+        "id": "GetDataset",
+        "method": "GET",
+        "params": null,
+        "path": "/datasets/{+repo_id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "DatasetInfo"
+          }
+        }
+      },
+      {
+        "description": "Lists files in a dataset repository at a specific revision",
+        "headers": [],
+        "id": "ListDatasetFiles",
+        "method": "GET",
+        "params": null,
+        "path": "/datasets/{+repo_id}/tree/{revision}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "RepoFile"
+            }
+          }
+        }
+      },
+      {
+        "description": "Gets file metadata for a specific file in a dataset repository",
+        "headers": [],
+        "id": "GetDatasetFile",
+        "method": "GET",
+        "params": null,
+        "path": "/datasets/{+repo_id}/blob/{revision}/{+path}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "FileMetadata"
+          }
+        }
+      },
+      {
+        "description": "Lists commits for a dataset repository",
+        "headers": [],
+        "id": "ListDatasetCommits",
+        "method": "GET",
+        "params": null,
+        "path": "/datasets/{+repo_id}/commits/{revision}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "Commit"
+            }
+          }
+        }
+      },
+      {
+        "description": "Gets the README file content for a dataset",
+        "headers": [],
+        "id": "GetDatasetReadme",
+        "method": "GET",
+        "params": null,
+        "path": "/datasets/{+repo_id}/resolve/{revision}/README.md",
+        "request": null,
+        "response": "Text"
+      },
+      {
+        "description": "Lists spaces with optional filtering. Query params: search, author, filter, sort, direction, limit",
+        "headers": [],
+        "id": "ListSpaces",
+        "method": "GET",
+        "params": null,
+        "path": "/spaces",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "SpaceInfo"
+            }
+          }
+        }
+      },
+      {
+        "description": "Gets detailed information about a specific space",
+        "headers": [],
+        "id": "GetSpace",
+        "method": "GET",
+        "params": null,
+        "path": "/spaces/{+repo_id}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "SpaceInfo"
+          }
+        }
+      },
+      {
+        "description": "Lists files in a space repository at a specific revision",
+        "headers": [],
+        "id": "ListSpaceFiles",
+        "method": "GET",
+        "params": null,
+        "path": "/spaces/{+repo_id}/tree/{revision}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "RepoFile"
+            }
+          }
+        }
+      },
+      {
+        "description": "Gets file metadata for a specific file in a space repository",
+        "headers": [],
+        "id": "GetSpaceFile",
+        "method": "GET",
+        "params": null,
+        "path": "/spaces/{+repo_id}/blob/{revision}/{+path}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "FileMetadata"
+          }
+        }
+      },
+      {
+        "description": "Creates a new repository (model, dataset, or space)",
+        "headers": [],
+        "id": "CreateRepo",
+        "method": "POST",
+        "params": null,
+        "path": "/repos/create",
+        "request": {
+          "Json": {
+            "Named": "CreateRepoBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "RepoUrl"
+          }
+        }
+      },
+      {
+        "description": "Deletes a repository",
+        "headers": [],
+        "id": "DeleteRepo",
+        "method": "DELETE",
+        "params": null,
+        "path": "/repos/delete",
+        "request": {
+          "Json": {
+            "Named": "DeleteRepoBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Updates repository settings (visibility, gated access, etc.)",
+        "headers": [],
+        "id": "UpdateRepoSettings",
+        "method": "PUT",
+        "params": null,
+        "path": "/repos/{repo_type}/{+repo_id}/settings",
+        "request": {
+          "Json": {
+            "Named": "UpdateRepoSettingsBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Moves/renames a repository",
+        "headers": [],
+        "id": "MoveRepo",
+        "method": "POST",
+        "params": null,
+        "path": "/repos/move",
+        "request": {
+          "Json": {
+            "Named": "MoveRepoBody"
+          }
+        },
+        "response": {
+          "Json": {
+            "Named": "StatusResponse"
+          }
+        }
+      },
+      {
+        "description": "Gets information about the authenticated user",
+        "headers": [],
+        "id": "WhoAmI",
+        "method": "GET",
+        "params": null,
+        "path": "/whoami-v2",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "UserInfo"
+          }
+        }
+      },
+      {
+        "description": "Gets public information about a user",
+        "headers": [],
+        "id": "GetUser",
+        "method": "GET",
+        "params": null,
+        "path": "/users/{username}",
+        "request": null,
+        "response": {
+          "Json": {
+            "Named": "UserInfo"
+          }
+        }
+      },
+      {
+        "description": "Lists repositories owned by a user",
+        "headers": [],
+        "id": "ListUserRepos",
+        "method": "GET",
+        "params": null,
+        "path": "/users/{username}/repos",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "RepoInfo"
+            }
+          }
+        }
+      },
+      {
+        "description": "Gets collections created by a user",
+        "headers": [],
+        "id": "GetUserCollections",
+        "method": "GET",
+        "params": null,
+        "path": "/users/{username}/collections",
+        "request": null,
+        "response": {
+          "Json": {
+            "Array": {
+              "Named": "Collection"
+            }
+          }
+        }
+      }
+    ],
+    "env_auth": [
+      "HF_TOKEN",
+      "HUGGING_FACE_API_KEY",
+      "HF_API_KEY"
+    ],
+    "env_mapping": {
+      "api_key": null,
+      "basic_pass": null,
+      "basic_user": null,
+      "bearer_token": {
+        "names": [
+          "HF_TOKEN",
+          "HUGGING_FACE_API_KEY",
+          "HF_API_KEY"
+        ]
+      }
+    },
+    "env_username": null,
+    "headers": [],
+    "module_path": "huggingface",
+    "name": "HuggingFaceHub",
+    "request_id_header": null,
+    "request_suffix": null,
+    "secret_names": [],
+    "version": null
+  },
+  "fingerprints": {
+    "api_metadata": "4e2f155527392dd6d1680f5ef8e3cc6220afdcc4b153da75f850c08124726406",
+    "endpoints": [
+      {
+        "blake3": "9edc77953111386e2a14bfc57395df4d5531261161e540a28a76cd41d59ce06b",
+        "id": "ListModels"
+      },
+      {
+        "blake3": "a38001703e0c96ed92bd52c6c88de7d042006286f050807da0aa44270b2deb2b",
+        "id": "GetModel"
+      },
+      {
+        "blake3": "363c1b2236d9f86aa93d2d2dbcb7fce6166b2ed345105db965fcfef2f8a75cba",
+        "id": "ListModelFiles"
+      },
+      {
+        "blake3": "83d57afdae7f21f74767bb836cea6d959214a5097b044148b321aa9a2fac78ba",
+        "id": "GetModelFile"
+      },
+      {
+        "blake3": "5f0d8410cac7816a67f442fb45f025a748e1685f97b8a8b08be0af1c84479794",
+        "id": "ListModelCommits"
+      },
+      {
+        "blake3": "06a6d78e79459b5b1665aa33c9194f8baf546c814f4ee7961f3b3abff3ef89e3",
+        "id": "GetModelReadme"
+      },
+      {
+        "blake3": "046143c4bfd81584c3e3275f6919162ec6fdc1ddd35741a6770faad2aac8de21",
+        "id": "ListModelDiscussions"
+      },
+      {
+        "blake3": "177fc6c9b1c5a6edb368f279745b10fede142c1ed56c4e443ba37817935b4ad9",
+        "id": "GetModelCard"
+      },
+      {
+        "blake3": "c4911fecd040ab3358230802208cbb5326b665878bf9a0707ff8b96f71aa16e0",
+        "id": "ListDatasets"
+      },
+      {
+        "blake3": "19642d3d969f92765b517ccf936e15dcea6421b61af8a3546a6b379a689cc4f4",
+        "id": "GetDataset"
+      },
+      {
+        "blake3": "e23e0235dad5cc61a0f7491cae97e32401feff9a3168c1c620463d6210e433ff",
+        "id": "ListDatasetFiles"
+      },
+      {
+        "blake3": "e7ca48908d95179250f3ca1454b7076fdf3c13ee1683e18df6647a16ad3bf674",
+        "id": "GetDatasetFile"
+      },
+      {
+        "blake3": "09a69d0ac348b9bc628957a3c801e8af6f32d35e26e0c2889669977b30774ce7",
+        "id": "ListDatasetCommits"
+      },
+      {
+        "blake3": "ffed7f945273e51c94a8db176fd570e8db93e90706d8c826500c9bb8d2999213",
+        "id": "GetDatasetReadme"
+      },
+      {
+        "blake3": "8460a3174b93d20be64988f424a502eef669f56ad35bcc37ca23ebb2edeedb71",
+        "id": "ListSpaces"
+      },
+      {
+        "blake3": "26133226baedea1c0cfab0f5c9c86d151a8566173f359a94469b7e4276e8665e",
+        "id": "GetSpace"
+      },
+      {
+        "blake3": "32bac85420c1fddc8bbc2a0bf739e8839a156c2f80f499c4e6872d991e37cab2",
+        "id": "ListSpaceFiles"
+      },
+      {
+        "blake3": "2f66f1b90aa9100592f883d0c4eaafa9ec3fa30bcb7d75fee7b331032ce45706",
+        "id": "GetSpaceFile"
+      },
+      {
+        "blake3": "832c1808a7bd15312c56dd8c82afeb8e1d49bfea8b1784f1fa9700362094df7a",
+        "id": "CreateRepo"
+      },
+      {
+        "blake3": "06e3abadb70def85df285792c3e5713d2c7e78f27cc93dddd932d4e182583368",
+        "id": "DeleteRepo"
+      },
+      {
+        "blake3": "1ed9cd3a5417d574e14b8c78e8342847791638558011c68753c0c76642953e14",
+        "id": "UpdateRepoSettings"
+      },
+      {
+        "blake3": "21e4503103386c65719efae486e5b103c9bc79a56c21aadec39711eea233181c",
+        "id": "MoveRepo"
+      },
+      {
+        "blake3": "5e094e852f46236229c5e5687d078e5f33fe3e4903907c0de7caedebaaadbdaa",
+        "id": "WhoAmI"
+      },
+      {
+        "blake3": "cfb5c8aa0a5751d1b1084ee7747a35c687b3313a9f1f1470257b7887a375556b",
+        "id": "GetUser"
+      },
+      {
+        "blake3": "9a6dac85ec7df7cc0423f90b60d6a665e68f7adaf7f2872e5314bdd7c7b8dad3",
+        "id": "ListUserRepos"
+      },
+      {
+        "blake3": "20757a05b501aeb4f2b977b9689b822ceb5596001670fc417ed99e88dbcbe148",
+        "id": "GetUserCollections"
+      }
+    ]
+  },
+  "pagination": [
+    {
+      "caller_knobs": [],
+      "endpoint": "ListModels",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "::schematic_definitions::huggingface::ModelInfo",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "Unauthored"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetModel",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListModelFiles",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "::schematic_definitions::huggingface::RepoFile",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "Unauthored"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetModelFile",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListModelCommits",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "schematic_definitions::huggingface::Commit",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "Unauthored"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetModelReadme",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListModelDiscussions",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "Discussion",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "discussions"
+                },
+                "each"
+              ]
+            }
+          },
+          "origin": "Exception"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetModelCard",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListDatasets",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "::schematic_definitions::huggingface::DatasetInfo",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "Unauthored"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetDataset",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListDatasetFiles",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "::schematic_definitions::huggingface::RepoFile",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "Unauthored"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetDatasetFile",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListDatasetCommits",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "schematic_definitions::huggingface::Commit",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "Unauthored"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetDatasetReadme",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListSpaces",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "::schematic_definitions::huggingface::SpaceInfo",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "Unauthored"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetSpace",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListSpaceFiles",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "::schematic_definitions::huggingface::RepoFile",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "Unauthored"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetSpaceFile",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "CreateRepo",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "DeleteRepo",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "UpdateRepoSettings",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "MoveRepo",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "WhoAmI",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetUser",
+      "param_adoptions": [],
+      "resolution": "NotAList"
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "ListUserRepos",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "::schematic_definitions::huggingface::RepoInfo",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "Unauthored"
+        }
+      }
+    },
+    {
+      "caller_knobs": [],
+      "endpoint": "GetUserCollections",
+      "param_adoptions": [],
+      "resolution": {
+        "Unpaginated": {
+          "list": {
+            "item_type": "::schematic_definitions::huggingface::Collection",
+            "items": {
+              "projection": [],
+              "record": [
+                "each"
+              ]
+            }
+          },
+          "origin": "Unauthored"
+        }
+      }
+    }
+  ],
+  "registry": [
+    {
+      "blake3": "232b6981fac0a53db5769603b92afb9be7b7a64211d10737aed74e10619578be",
+      "name": "CreateRepoBody",
+      "rust_path": "::schematic_definitions::huggingface::CreateRepoBody"
+    },
+    {
+      "blake3": "f355ddc1bac05c715fdc84db982b9db78069e9bec959886ce22f96b2907d934c",
+      "name": "RepoType",
+      "rust_path": null
+    },
+    {
+      "blake3": "a4faf2ce47c1acd63192438e924d16953b73ed3459e89cb513770816283df05f",
+      "name": "SpaceHardware",
+      "rust_path": null
+    },
+    {
+      "blake3": "f911042ec67ddf74d8d459469c50a5cd350922df5c7f4376e7f4313f33b94f85",
+      "name": "SpaceSdk",
+      "rust_path": null
+    },
+    {
+      "blake3": "b38d7176f750ce273a8e3f6cae7a9ed99fe9c4aa45ab40f774b3652ff8327f1f",
+      "name": "SpaceSecret",
+      "rust_path": null
+    },
+    {
+      "blake3": "456c63cf074f66a2bb5401df563fd4bc1f7782a7f6c38de9bdf25b2da51e3720",
+      "name": "SpaceVariable",
+      "rust_path": null
+    },
+    {
+      "blake3": "ffabf169ed8d775930c463224a39561f4f310116efd604c0d53110a0da91b77f",
+      "name": "DeleteRepoBody",
+      "rust_path": "::schematic_definitions::huggingface::DeleteRepoBody"
+    },
+    {
+      "blake3": "c221ea8e2a847b3d7ba248c84268cae59d57ad2ce33cf3fbe999f88b8ba05b79",
+      "name": "MoveRepoBody",
+      "rust_path": "::schematic_definitions::huggingface::MoveRepoBody"
+    },
+    {
+      "blake3": "bc7e81cd7ebb052bcb6ae3da78176d597c3c0d61b17060ec6268beb640345f31",
+      "name": "UpdateRepoSettingsBody",
+      "rust_path": "::schematic_definitions::huggingface::UpdateRepoSettingsBody"
+    },
+    {
+      "blake3": "29822069f3c3dcddac1426e6709a31217ab6be8febee40a9b76c0cf51f571c79",
+      "name": "GatedStatus",
+      "rust_path": null
+    },
+    {
+      "blake3": "18090245d6b129c7287297440041a22274dd2d5b05a32ed79273d748de4414b3",
+      "name": "ModelInfo",
+      "rust_path": "::schematic_definitions::huggingface::ModelInfo"
+    },
+    {
+      "blake3": "76a9266cab83b13cf1f3d4f802743ebb69b29c7acf620538b2d6df95c41ca193",
+      "name": "CardData",
+      "rust_path": null
+    },
+    {
+      "blake3": "d726e735b30d9da24e6db6dfd5bf4c5a5b589250a3fd8bb642a4d54b6ead3546",
+      "name": "Co2Emissions",
+      "rust_path": null
+    },
+    {
+      "blake3": "1dde48c91c8e5f480af06eb15cbb9b228d5de8806700710ab5c0dba2ebc6e842",
+      "name": "DatasetRef",
+      "rust_path": null
+    },
+    {
+      "blake3": "fb6fbd40ecd48f3f63014aabfc0da640dd4a5aa0d3d7133380effd87672d25f3",
+      "name": "EvaluationResult",
+      "rust_path": null
+    },
+    {
+      "blake3": "2213aa98340361ef92d2fcb6d06224435e3ca851bccef85c540d1021604ea172",
+      "name": "InferenceStatus",
+      "rust_path": null
+    },
+    {
+      "blake3": "ecf16a6f723fe55268f7e145949ad9759ae93d4f153998b35c6393343a17c43b",
+      "name": "LfsInfo",
+      "rust_path": null
+    },
+    {
+      "blake3": "b9da5b6ce3587af40436cb302fe16ebde2788eada4b2625fb064520f399a0fdc",
+      "name": "MetricResult",
+      "rust_path": null
+    },
+    {
+      "blake3": "55df54b53b7ab23ceb37752e1a8b8b1f8c2f2adf799aaa717a05a0ddb3e4e448",
+      "name": "ModelIndexEntry",
+      "rust_path": null
+    },
+    {
+      "blake3": "5a98d9b671823912f88f88314d9014294e4b985298a1b212ee485a2536d17baa",
+      "name": "RepoFile",
+      "rust_path": "::schematic_definitions::huggingface::RepoFile"
+    },
+    {
+      "blake3": "18a79474b59a49bd92bb6f07493ef6129ebc54e8a6b9d274de93786b59b76f97",
+      "name": "SafetensorsInfo",
+      "rust_path": null
+    },
+    {
+      "blake3": "44efb80aa7c099444b8ad52c5feae58689947408bd207a547e32ace2d69d7c40",
+      "name": "TaskInfo",
+      "rust_path": null
+    },
+    {
+      "blake3": "b7f299f6f0a0945d06e702c398a6d65e7f82c4abec888bc665364b1852863f6a",
+      "name": "TransformersInfo",
+      "rust_path": null
+    },
+    {
+      "blake3": "b31d8fcc5e38904434f9e4614ce65af4973ad0075ce367310dc31c78ca555a5a",
+      "name": "WidgetConfig",
+      "rust_path": null
+    },
+    {
+      "blake3": "15425756caa0a9079c8a9344a34292edc15e0cd85d69b4c2fc5538e671c8bade",
+      "name": "FileMetadata",
+      "rust_path": "::schematic_definitions::huggingface::FileMetadata"
+    },
+    {
+      "blake3": "0cc5e232ffafb874c63460dad9b3f2e031a534e446f2cf2ddd490cc5f20f8786",
+      "name": "Commit",
+      "rust_path": "schematic_definitions::huggingface::Commit"
+    },
+    {
+      "blake3": "c9ab1217d974bbd7698687b2da5e40f7c836af5f8f421027111137cf54270fda",
+      "name": "DiscussionList",
+      "rust_path": "::schematic_definitions::huggingface::DiscussionList"
+    },
+    {
+      "blake3": "de1294197fbd7844bb4bb1919c54ea246fe5844e2249fc30f00c0a4024caac3a",
+      "name": "Author",
+      "rust_path": null
+    },
+    {
+      "blake3": "167478936f3413997dba243ba041504ed75cb69d9e85fb0beff2cbda9c2ab6c0",
+      "name": "Discussion",
+      "rust_path": null
+    },
+    {
+      "blake3": "2062fced456e7ace542274a213d1b3329cbe2e3f3960b56e2ecc03a03ad978b6",
+      "name": "DiscussionStatus",
+      "rust_path": null
+    },
+    {
+      "blake3": "3932e0ee5587e7cc2764374d084fed3eb8682c2531edf2ad3a1989e945d90980",
+      "name": "DatasetInfo",
+      "rust_path": "::schematic_definitions::huggingface::DatasetInfo"
+    },
+    {
+      "blake3": "7130621ae0c346415f545120d2f0a84965e9da773017c3233c09463aee72b96b",
+      "name": "DatasetCardData",
+      "rust_path": null
+    },
+    {
+      "blake3": "65a8b593c8cb6281affce74ba365bb5fcaba7bae40f816facf042dc686465b49",
+      "name": "DatasetConfig",
+      "rust_path": null
+    },
+    {
+      "blake3": "032fa689ec992bca07ed7d46182d94473f8053551e3776a6596b642d8c783ccd",
+      "name": "DatasetSplit",
+      "rust_path": null
+    },
+    {
+      "blake3": "0d449551112bcecfdb057d0b2e5bfc00a2dc72241f65fe35bbfd9181ae81a173",
+      "name": "SpaceInfo",
+      "rust_path": "::schematic_definitions::huggingface::SpaceInfo"
+    },
+    {
+      "blake3": "964091fb0e32e457259d9f7a44b25b4c60ec9728556b2280c2a020abe9f35d47",
+      "name": "SpaceCardData",
+      "rust_path": null
+    },
+    {
+      "blake3": "1c5af0f818941d5af28506a5b44e7dfda226ce1f8964ae3962787e00f73261db",
+      "name": "SpaceRuntime",
+      "rust_path": null
+    },
+    {
+      "blake3": "bf8031eb0a931820bc28860d06c681afa5a6f5ec21ae62558960af0b91c90861",
+      "name": "SpaceStage",
+      "rust_path": null
+    },
+    {
+      "blake3": "7f06d8000d4dedfb02031ed1cf0ba9a64e47eb0e636946504e4138ba45754eb4",
+      "name": "RepoUrl",
+      "rust_path": "::schematic_definitions::huggingface::RepoUrl"
+    },
+    {
+      "blake3": "4ed56c8b4d65e44bd2269452e6f83279a9cf0fbd0fd8400b635ef4ed6fbf82cf",
+      "name": "StatusResponse",
+      "rust_path": "::schematic_definitions::huggingface::StatusResponse"
+    },
+    {
+      "blake3": "943de48c9624ea212df3fef98ef95fd394311d1851193b58166be3fcf8af53ef",
+      "name": "UserInfo",
+      "rust_path": "::schematic_definitions::huggingface::UserInfo"
+    },
+    {
+      "blake3": "8dc1b9dc253858c2a30536e1642096c12937bbdae38aa25acbc209fad8413bb5",
+      "name": "RepoInfo",
+      "rust_path": "::schematic_definitions::huggingface::RepoInfo"
+    },
+    {
+      "blake3": "a649bb58a730db11014fcfc62822cbc006516964c9de425146de5b07a553c6a0",
+      "name": "Collection",
+      "rust_path": "::schematic_definitions::huggingface::Collection"
+    },
+    {
+      "blake3": "40ce99b4a2902f22fde4d0f6fe6dd5b74cf6e6363f3407bba346cd842f12bb1a",
+      "name": "CollectionItem",
+      "rust_path": null
+    }
+  ]
+}

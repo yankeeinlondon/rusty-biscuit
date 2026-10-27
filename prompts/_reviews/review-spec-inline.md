@@ -9,23 +9,14 @@ dir: "{{ dirname(spec) }}"
 start:
     message: "👀 reviewing the specification file: `{{spec}}`"
 success:
-    - say: |-
+    say: |-
         {{
         ctx.area
             ? "The review of the draft specification file in " + ctx.area + " has completed"
             : "The review of the draft specification file in the " + ctx.repo + " repo has completed"
         }}
-    - message: "✅  review of the draft specification {{ code_link(spec) }} has completed"
-    - info: the {{link(spec)}} _specification_ has been reviewed and updated inline
-    - when: "frontmatter(spec, 'human_review') == true"
-      then:
-          - warn: |-
-                the {{link(spec)}} _specification_ has decisions that need the author before it can be planned:
-
-                {{ as_ordered_list(frontmatter(spec, 'human_review_items') || []) }}
-
-                Settle them (for example with the **clarify** prompt), then set the spec's `human_review` to `false`.
-          - message: "🤷  `{{parent_dir(spec)}}` has **{{ length(frontmatter(spec, 'human_review_items') || []) }}** decision(s) that need the author before it can be planned; see `human_review_items` in its spec"
+    message: "✅  review of the draft specification {{ code_link(spec) }} has completed"
+    info: the {{link(spec)}} _specification_ has been reviewed and updated inline
 failure:
     say: |-
         {{
@@ -72,20 +63,15 @@ It's important to note that Frontmatter references to other specs are likely not
 
 ## Task
 
-A reviewed spec is ready to plan: it has no open questions, pending rulings, or
-"to be decided" items. Your review closes them.
-
-::file ../_decisions.md
-
 Look for how this spec file could be improved:
 
 - what feels like a gap in the scope of this specification
-    - fill in the gaps: make a clear decision and record it in the spec's `## Design Decisions` section
-    - never shrink the scope to avoid a decision; the spec's requested scope is fixed
-- resolve every open item the spec already carries
-    - an "Open Questions", "Rulings needed", "TBD", or similar section with a recommendation: adopt the recommendation, move it into `## Design Decisions`, and delete the open item
-    - an open item without a recommendation: decide it yourself, following "Design Decisions" above
-    - when you finish, the spec has no "Open Questions" section and no item that waits on the author
+    - fill in the gaps as much as you can
+    - ideally make a clear decision and document the design decision 
+    - however, if you feel this gap represents a major design decision and should be reviewed before being implemented
+        - add the gap in the "Open Questions" sections
+        - add 2-3 suggested solutions under the gaps description, each suggested solution should list out that design's pros and cons
+        - choose the solution you think is MOST appropriate and recommend; include WHY you recommend this
 - fix mistakes the spec is making relative to other contracts or standards that are already established in the repo
     - make sure to distinguish "intended" changes to standards versus accidental
     - **intended** changes obviously should not be "fixed" but if they are incomplete in describing their impact then you must choose between:
@@ -98,19 +84,7 @@ Look for how this spec file could be improved:
 - keep performance measurement proportional to the risk
     - a performance spike is one host and a quick sample, unless the spec names a known cost that is specific to one OS
     - if the spec's own figures already answer a spike's question, remove the spike rather than tightening it
-    - never add hosts, workloads, repetitions, or statistical thresholds to a spike on your own initiative, and do not leave a wider measurement as a question for the author
-
-### Decisions That Need the Author
-
-Only a decision that meets the bar in "When a human is needed" above stays
-open. For each one:
-
-- describe it in the spec under `## Decisions Needing the Author`, with the options, their pros and cons, and your recommendation
-- add it to the spec's `human_review_items` frontmatter list (each item a YAML `|-` block, written without repo jargon)
-
-Planning and implementation refuse to start while such an item is open, so the
-author settles it before any code is written. Keep the list empty unless an
-item truly meets the bar.
+    - never add hosts, workloads, repetitions, or statistical thresholds to a spike on your own initiative; if you think more is needed, put it in "Open Questions" for the author to decide
 
 ### Update Spec Frontmatter
 
@@ -122,5 +96,3 @@ Update the spec file's ({{spec}}) Frontmatter (keep any other properties that we
 - set the spec file's `reviewed_by` Frontmatter property to "{{ctx.agent}}/{{ctx.model}}"
 - set the spec file's `reviewed_on` Frontmatter property to "{{ctx.today}}"
 - set the spec file's `review_iterations` to `0`
-- set the spec file's `human_review` to `true` when "Decisions That Need the Author" left any item open, otherwise to `false` and remove any `human_review_items`
-- set the spec file's `needs_rulings` to `false` (or remove it) when no item is open

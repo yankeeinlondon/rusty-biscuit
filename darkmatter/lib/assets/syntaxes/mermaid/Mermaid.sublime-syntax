@@ -1,0 +1,532 @@
+%YAML 1.2
+---
+# Flattened from SublimeText/Mermaid at commit
+# a5c6d45d1b0a99f8d4e0fdb2b5ccd7fd07809859 (MIT, see LICENSE beside this
+# file). SOURCE.md records what was merged, renamed, and dropped.
+name: Mermaid
+file_extensions:
+  - mermaid
+  - mmd
+scope: source.mermaid
+variables:
+  arrowhead: (?:[>xo])
+  multi_direction_arrowhead: (?:[<xo]?)
+  entity: \b[-\w]+\b
+  entity_from: \b{{entity}}\s?
+  entity_to: \s?{{entity}}\b
+  sequence_graph_link: (?:--?(?:>>|[>)x]))
+  diagram_keyword: |-
+    (?x:
+      gantt | pie | journey | timeline | mindmap | kanban | zenuml
+    | stateDiagram(?:-v2)? | classDiagram(?:-v2)? | erDiagram
+    | gitGraph | quadrantChart | requirementDiagram
+    | C4(?:Context|Container|Component|Dynamic|Deployment)
+    | (?:sankey|xychart|block|packet|architecture|radar|treemap)(?:-beta)?
+    )
+
+contexts:
+  prototype:
+    - include: line-comment
+
+  main:
+    # don't include the prototype so we can have preprocesor comments take precedence over normal ones
+    - meta_include_prototype: false
+    - include: preprocessor-comments
+    - include: line-comment
+
+    - match: <
+      push:
+        - meta_scope: punctuation.definition.comment.mermaid.html
+        - match: $
+          pop: true
+
+    - match: (?-i)^\s*(sequenceDiagram)\s+
+      captures:
+        1: keyword.declaration.trait.diagram.mermaid
+      push:
+        - meta_scope: meta.declaration.diagram.mermaid
+        - match: $
+          set: sequence-main
+    - match: ^\s*(graph|flowchart)\s+
+      captures:
+        1: keyword.declaration.graph.mermaid
+      push:
+        - meta_scope: meta.declaration.graph.mermaid
+        - include: graph-direction
+        - include: flowchart-terminator
+        - match: $
+          set: flowchart-main
+    # Added in the flattening: upstream highlights only the flowchart and
+    # sequence headers. Every other family gets its header keyword, and its
+    # body keeps comment and quoted-string highlighting.
+    - match: (?-i)^\s*({{diagram_keyword}})\b
+      captures:
+        1: keyword.declaration.diagram.mermaid
+      set: diagram-body
+
+  diagram-body:
+    - include: quoted-string
+
+  graph-direction:
+    - match: \b(?:T[BD]|BT|LR|RL)\b
+      scope: constant.language.graph-direction.mermaid
+
+  preprocessor-comments:
+    # Upstream pushes a context that combines `pop` with an embed of the
+    # JavaScript syntax, which syntect reads as a bare pop. One embed of a
+    # local context keeps the whole directive comment-scoped.
+    - match: '^\s*(%%)(?=\{)'
+      captures:
+        1: punctuation.definition.comment.mermaid
+      embed: preprocessor-directive
+      embed_scope: comment.line.percentage.mermaid
+      escape: (%%)?$
+      escape_captures:
+        1: punctuation.definition.comment.end.mermaid
+
+  preprocessor-directive:
+    - meta_include_prototype: false
+
+  line-comment:
+    - match: '^\s*(%%)'
+      captures:
+        1: punctuation.definition.comment.mermaid
+      push: inside-line-comment
+
+  inside-line-comment:
+    - meta_scope: comment.line.percentage.mermaid
+    - match: $\n?
+      pop: true
+
+  quoted-string:
+    - match: '"'
+      scope: punctuation.definition.string.begin.mermaid
+      push: inside-quoted-string
+
+  inside-quoted-string:
+    - meta_scope: string.quoted.double.mermaid
+    - match: '"'
+      scope: punctuation.definition.string.end.mermaid
+      pop: true
+    - match: (#)[0-9]{1,7}(;)
+      scope: constant.character.entity.decimal.mermaid
+      captures:
+        1: punctuation.definition.entity.mermaid
+        2: punctuation.terminator.entity.mermaid
+    - match: (#)[a-zA-Z0-9]+(;)
+      scope: constant.character.entity.named.mermaid
+      captures:
+        1: punctuation.definition.entity.mermaid
+        2: punctuation.terminator.entity.mermaid
+
+  ###[ FLOWCHART (upstream "Mermaid Flowchart.sublime-syntax") ]###
+
+  # Upstream prepends this to the flowchart syntax's prototype; flattened, the
+  # flowchart contexts that read statements include it explicitly.
+  flowchart-terminator:
+    - match: ';'
+      scope: punctuation.terminator.flowchart
+
+  flowchart-main:
+    - include: flowchart-terminator
+    - match: ^---$
+      scope: punctuation.section.block.begin.graph.mermaid
+      push: flowchart-config
+    - include: flowchart-style
+    - match: ^\s*(click)\s+
+      captures:
+        1: keyword.type.interaction.graph.mermaid
+      push:
+        - meta_scope: meta.declaration.interaction.graph.mermaid
+        - match: '{{entity}}'
+          scope: meta.node-name.mermaid variable.parameter.mermaid
+          push:
+            - match: '{{entity}}'
+              scope: entity.name.callback.interaction.graph.mermaid
+            - include: quoted-string
+            - match: $
+              pop: true
+        - match: $
+          pop: true
+
+    - match: ^\s*(subgraph)\s+(.*)$
+      captures:
+        1: keyword.type.begin.sub.graph.mermaid
+        2: string.unquoted.sub.graph.mermaid
+      push:
+        - meta_scope: meta.declaration.sub.graph.mermaid
+        - match: ^\s*(direction)\b
+          captures:
+            1: keyword.other.flowchart
+          push:
+            - include: graph-direction
+            - match: $
+              pop: true
+        - match: ^\s*(end)\b
+          captures:
+            1: keyword.type.end.sub.graph.mermaid
+          pop: true
+        - include: flowchart-main
+
+    - match: ^\s*(?={{entity}})
+      push:
+        - flowchart-node
+
+  flowchart-node:
+    - include: flowchart-terminator
+    - match: '{{entity}}'
+      scope: meta.node-name.mermaid variable.parameter.mermaid
+      push:
+        - flowchart-maybe-node-declaration
+    - match: $
+      pop: true
+
+  # Upstream ends each shape rule with `set: maybe-graph-link` beside its
+  # `embed`; syntect reads that pair as a bare `set`, so the node text would
+  # never close. Without the `set`, the escape returns here and the final
+  # `match: ''` moves on to the link.
+  flowchart-maybe-node-declaration:
+    - match: \(\[ # stadium shaped
+      scope: keyword.operator.begin.node.graph.mermaid
+      embed: flowchart-node-declaration-text
+      escape: \]\)
+      escape_captures:
+        0: meta.declaration.node.graph.mermaid keyword.operator.end.node.graph.mermaid
+    - match: \[\[ # subroutine
+      scope: keyword.operator.begin.node.graph.mermaid
+      embed: flowchart-node-declaration-text
+      escape: \]\]
+      escape_captures:
+        0: meta.declaration.node.graph.mermaid keyword.operator.end.node.graph.mermaid
+    - match: \[\( # cylindrical
+      scope: keyword.operator.begin.node.graph.mermaid
+      embed: flowchart-node-declaration-text
+      escape: \)\]
+      escape_captures:
+        0: meta.declaration.node.graph.mermaid keyword.operator.end.node.graph.mermaid
+    - match: '>' # asymmetric
+      scope: keyword.operator.begin.node.graph.mermaid
+      embed: flowchart-node-declaration-text
+      escape: \]
+      escape_captures:
+        0: meta.declaration.node.graph.mermaid keyword.operator.end.node.graph.mermaid
+    - match: \{\{ # hexagon
+      scope: keyword.operator.begin.node.graph.mermaid
+      embed: flowchart-node-declaration-text
+      escape: \}\}
+      escape_captures:
+        0: meta.declaration.node.graph.mermaid keyword.operator.end.node.graph.mermaid
+    - match: \[/ # Parallelogram or Trapezoid
+      scope: keyword.operator.begin.node.graph.mermaid
+      embed: flowchart-node-declaration-text
+      escape: '[/\\]\]'
+      escape_captures:
+        0: meta.declaration.node.graph.mermaid keyword.operator.end.node.graph.mermaid
+    - match: \[\\ # Parallelogram alt or Trapezoid alt
+      scope: keyword.operator.begin.node.graph.mermaid
+      embed: flowchart-node-declaration-text
+      escape: '[\\/]\]'
+      escape_captures:
+        0: meta.declaration.node.graph.mermaid keyword.operator.end.node.graph.mermaid
+    - match: \(\(\( # double circle
+      scope: keyword.operator.begin.node.graph.mermaid
+      embed: flowchart-node-declaration-text
+      escape: \)\)\)
+      escape_captures:
+        0: meta.declaration.node.graph.mermaid keyword.operator.end.node.graph.mermaid
+    - match: \(\( # circle
+      scope: keyword.operator.begin.node.graph.mermaid
+      embed: flowchart-node-declaration-text
+      escape: \)\)
+      escape_captures:
+        0: meta.declaration.node.graph.mermaid keyword.operator.end.node.graph.mermaid
+    - match: \( # round edges
+      scope: keyword.operator.begin.node.graph.mermaid
+      embed: flowchart-node-declaration-text
+      escape: \)
+      escape_captures:
+        0: meta.declaration.node.graph.mermaid keyword.operator.end.node.graph.mermaid
+    - match: \[ # rectangular
+      scope: keyword.operator.begin.node.graph.mermaid
+      embed: flowchart-node-declaration-text
+      escape: \]
+      escape_captures:
+        0: meta.declaration.node.graph.mermaid keyword.operator.end.node.graph.mermaid
+    - match: \{ # rhombus
+      scope: keyword.operator.begin.node.graph.mermaid
+      embed: flowchart-node-declaration-text
+      escape: \}
+      escape_captures:
+        0: meta.declaration.node.graph.mermaid keyword.operator.end.node.graph.mermaid
+
+    - match: ':::'
+      scope: punctuation.accessor.double-colon.flowchart
+      push: flowchart-class-expect-class-name
+    - match: ''
+      set: flowchart-expect-graph-link
+
+  flowchart-expect-graph-link:
+    - meta_scope: meta.declaration.link.graph.mermaid
+    - include: flowchart-maybe-graph-link
+
+  flowchart-maybe-graph-link:
+    # Length  1 2 3
+    # Normal  --- ----  -----
+    # Normal with arrow --> --->  ---->
+    # Thick === ====  =====
+    # Thick with arrow  ==> ===>  ====>
+    # Dotted  -.- -..-  -...-
+    # Dotted with arrow -.->  -..-> -...->
+    - include: flowchart-terminator
+    - match: |-
+        (?x:
+          (?:{{multi_direction_arrowhead}}-{2,}{{arrowhead}})
+        | (?:                             -{3,})
+        | (?:{{multi_direction_arrowhead}}={2,}{{arrowhead}})
+        | (?:={3,})
+        | (?:{{multi_direction_arrowhead}}-\.+-{{arrowhead}}?)
+        | (?:~{3,})
+        )
+      scope: keyword.operator.link.graph.mermaid
+      set:
+        - flowchart-node
+        - flowchart-maybe-explicit-pipe-link-text
+    - match: |-
+        (?x:
+          {{multi_direction_arrowhead}}--(?!-)
+        | {{multi_direction_arrowhead}}==(?!=)
+        | {{multi_direction_arrowhead}}-\.
+        )
+      scope: keyword.operator.link.begin.graph.mermaid
+      set:
+        - flowchart-node
+        - flowchart-expect-link-end
+    - match: $
+      pop: true
+    - match: '&'
+      scope: keyword.operator.flowchart
+      set: flowchart-node
+
+  flowchart-maybe-explicit-pipe-link-text:
+    - match: \|
+      scope: keyword.operator.begin.text.link.graph.mermaid
+      set: flowchart-explicit-pipe-link-text
+    - match: $|(?=\S)
+      pop: true
+
+  flowchart-explicit-pipe-link-text:
+    - meta_content_scope: string.unquoted.link.graph.mermaid
+    - match: \|
+      scope: keyword.operator.end.text.link.graph.mermaid
+      pop: true
+    - match: $
+      pop: true
+
+  flowchart-expect-link-end:
+    - meta_scope: meta.declaration.link.graph.mermaid
+    - meta_content_scope: string.unquoted.link.graph.mermaid
+    - match: |-
+        (?x:
+          (?:-{2,}{{arrowhead}})
+        | (?:-{3,})
+        | (?:={2,}{{arrowhead}})
+        | (?:={3,})
+        | (?:\.+-{{arrowhead}})
+        )
+      scope: keyword.operator.link.end.graph.mermaid
+      pop: true
+    - match: $
+      pop: true
+
+  flowchart-style:
+    - match: ^\s*(class)\s+
+      captures:
+        1: keyword.declaration.styling.graph.mermaid
+      push:
+        - meta_scope: meta.declaration.styling.graph.mermaid
+        - match: $
+          pop: true
+        - match: ''
+          push: flowchart-class-expect-node-name
+    # Upstream embeds its CSS extension here; that syntax is not vendored, so
+    # the declarations after the name stay unhighlighted.
+    - match: ^\s*(classDef)\s+({{entity}})\s+
+      captures:
+        1: keyword.declaration.styling.graph.mermaid
+        2: entity.name.constant.styling.graph.mermaid
+      embed: flowchart-style-declarations
+      escape: $
+
+    - match: ^\s*(style|linkStyle)\s+({{entity}})\s+
+      captures:
+        1: keyword.declaration.styling.graph.mermaid
+        2: variable.parameter.graph.mermaid
+      embed: flowchart-style-declarations
+      escape: $
+
+  flowchart-style-declarations:
+    - meta_include_prototype: false
+
+  flowchart-class-expect-node-name:
+    - match: '{{entity}}'
+      scope: variable.parameter.flowchart
+    - match: \s
+      set: flowchart-class-expect-class-name
+    - match: ','
+      scope: punctuation.separator.sequence.flowchart
+    - match: $
+      pop: true
+
+  flowchart-class-expect-class-name:
+    - match: '{{entity}}'
+      scope: support.name.styling.graph.mermaid
+      pop: true
+    - match: $
+      pop: true
+
+  flowchart-node-declaration-text:
+    - meta_scope: meta.declaration.node.graph.mermaid
+    - include: quoted-string
+    - match: ''
+      push: flowchart-unquoted-string
+
+  # Upstream embeds HTML in node text; this syntax references no other
+  # syntax, so the text keeps only its string scope.
+  flowchart-unquoted-string:
+    - meta_content_scope: string.unquoted.node.graph.mermaid
+
+  flowchart-config:
+    - match: ^---$
+      scope: punctuation.section.block.end.graph.mermaid
+      pop: true
+
+  ###[ SEQUENCE DIAGRAM (upstream "Mermaid SequenceDiagram.sublime-syntax") ]###
+
+  sequence-main:
+    - match: (?i)^\s*(participant|actor)\s+({{entity}})(?:\s+(as)\s+)?
+      captures:
+        1: storage.type.interface.mermaid
+        2: entity.name.actor.diagram.mermaid
+        3: keyword.context.resource.mermaid
+      push:
+        - meta_scope: meta.declaration.actor.diagram.mermaid
+        - meta_content_scope: string.unquoted.alias.actor.diagram.mermaid
+        - match: $
+          pop: true
+
+    - match: (?i)^\s*((?:de)?activate)\s+{{entity}}
+      captures:
+        1: keyword.type.activation.diagram.mermaid
+      push:
+        - meta_scope: meta.declaration.activation.diagram.mermaid
+        - match: $
+          pop: true
+
+    - match: (?i)^\s*(loop)\s+(.*)$
+      captures:
+        1: keyword.type.begin.loop.diagram.mermaid
+        2: string.unquoted.loop.diagram.mermaid
+      push:
+        - meta_scope: meta.declaration.loop.diagram.mermaid
+        - include: sequence-main
+        - match: ^\s*end\b
+          scope: keyword.type.end.loop.diagram.mermaid
+          pop: true
+
+    - match: (?i)^\s*(alt)\s+(.*)$
+      captures:
+        1: keyword.control.conditional.if.mermaid
+        2: meta.alternative-path.diagram.mermaid string.unquoted.mermaid
+      push:
+        - meta_scope: meta.declaration.alternative-path.diagram.mermaid
+        - include: sequence-main
+        - match: (?i)^\s*(else)(?:\s+(.*))$
+          captures:
+            1: keyword.control.conditional.else.mermaid
+            2: meta.alternative-path.diagram.mermaid string.unquoted.mermaid
+        - match: (?i)^\s*end\b
+          scope: keyword.control.conditional.end.mermaid
+          pop: true
+
+    - match: (?i)^\s*(rect)\b
+      captures:
+        1: keyword.context.block.mermaid
+      push:
+        - sequence-inside-rect
+        - sequence-expect-rgb
+
+    - match: (?i)^\s*(opt|break)\s+(.*)$
+      captures:
+        1: keyword.type.begin.optional-path.diagram.mermaid
+        2: string.unquoted.optional-path.diagram.mermaid
+      push:
+        - meta_scope: meta.declaration.optional-path.diagram.mermaid
+        - include: sequence-main
+        - match: ^\s*end\b
+          scope: keyword.type.end.optional-path.diagram.mermaid
+          pop: true
+
+    - match: (?i)^\s*(Note)\s+((?:left|right)\sof|over)\s+({{entity}}(?:,\s*{{entity}})*)(:)
+      captures:
+        0: meta.declaration.note.diagram.mermaid
+        1: keyword.type.note.diagram.mermaid
+        2: constant.language.note.diagram.mermaid
+        3: meta.node-name.mermaid variable.parameter.mermaid
+        4: punctuation.separator.key-value.mermaid
+      embed: sequence-note-text
+      embed_scope: meta.declaration.note.diagram.mermaid
+      escape: $
+
+    - match: ^\s*({{entity_from}})\s*({{sequence_graph_link}}[+-]?)\s*({{entity_to}})(:)
+      captures:
+        0: meta.declaration.message.diagram.mermaid
+        1: meta.node-name.mermaid variable.parameter.mermaid
+        2: keyword.operator.message.diagram.mermaid
+        3: meta.node-name.mermaid variable.parameter.mermaid
+        4: punctuation.separator.key-value.mermaid
+      embed: sequence-message-text
+      embed_scope: meta.declaration.message.diagram.mermaid
+      escape: $
+
+    - match: (?i)^\s*(autonumber)\b
+      scope: keyword.other.mermaid
+
+  sequence-expect-rgb:
+    - match: \b(rgba?)\s*(\()
+      captures:
+        1: meta.function-call.identifier.mermaid support.function.mermaid
+        2: meta.function-call.arguments.mermaid punctuation.section.parens.begin.mermaid
+      set: sequence-rgb-values
+    - match: $
+      pop: true
+
+  sequence-rgb-values:
+    - meta_content_scope: meta.function-call.arguments.mermaid
+    - match: (\d*(\.)\d+)
+      captures:
+        0: meta.number.float.decimal.mermaid
+        1: constant.numeric.value.mermaid
+        2: punctuation.separator.decimal.mermaid
+    - match: \d+
+      scope: meta.number.integer.decimal.mermaid constant.numeric.value.mermaid
+    - match: ','
+      scope: punctuation.separator.sequence.mermaid
+    - match: \)
+      scope: meta.function-call.arguments.mermaid punctuation.section.parens.end.mermaid
+      pop: true
+    - match: $
+      pop: true
+
+  sequence-inside-rect:
+    - meta_scope: meta.block.mermaid
+    - include: sequence-main
+    - match: ^\s*end\b
+      scope: keyword.context.block.mermaid
+      pop: true
+
+  # Upstream embeds HTML in note and message text (see the node-text note).
+  sequence-note-text:
+    - meta_include_prototype: false
+
+  sequence-message-text:
+    - meta_include_prototype: false

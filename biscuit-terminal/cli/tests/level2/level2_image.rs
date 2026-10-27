@@ -30,6 +30,7 @@ use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::kitty::KittyHarness;
 use biscuit_test_harness::manifest_dir;
 use biscuit_test_harness::shared::SharedHarness;
+use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use common::pane_geometry::{
     find_row_of, parse_debug_cursor_before, parse_debug_cursor_rows, parse_debug_image_height,
@@ -46,6 +47,9 @@ static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 
 /// Process-shared Kitty window reused across the Kitty image tests.
 static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
+
+/// Process-shared tmux pane for the half-block test.
+static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 
 /// Returns the absolute path to a fixture file.
 fn fixture_path(name: &str) -> String {
@@ -442,5 +446,65 @@ fn level2_image_kitty_row_advance() {
         cursor_rows >= 1,
         "renderer reported zero cursor rows for non-empty image; \
          cursor_before={cursor_before:?}",
+    );
+}
+
+// ------------------------------------------------------------------
+// Half-block fallback — tmux without passthrough
+// ------------------------------------------------------------------
+
+/// A harness tmux pane leaves `allow-passthrough` at its default (off), so
+/// the graphics route has no pixel format and `bt image` must draw the image
+/// as half-block text. The environment is pinned so truecolor and Unicode are
+/// detected and no override variable from the host reaches the route
+/// (`auto` is the same as unset).
+#[test]
+#[serial(level2_terminal)]
+fn level2_image_half_blocks_in_tmux_without_passthrough() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let mut guard = SHARED_TMUX
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("shared tmux harness present");
+
+    let path = fixture_path("13x13.png");
+    let output = common::run_bt_output(
+        harness,
+        &format!("image --width 8 '{path}'"),
+        &[
+            ("COLORTERM", "truecolor"),
+            ("LANG", "en_US.UTF-8"),
+            ("LC_ALL", "en_US.UTF-8"),
+            ("BISCUIT_GRAPHICS", "auto"),
+            ("BISCUIT_GRAPHICS_TRANSPORT", "auto"),
+        ],
+    );
+    let plain = &output.plain;
+
+    let block_rows: Vec<&str> = plain.lines().filter(|row| row.contains('\u{2580}')).collect();
+    assert!(
+        block_rows.len() >= 2,
+        "expected several rows of half-block glyphs.\nplain:\n{plain}"
+    );
+    for row in &block_rows {
+        assert!(
+            row.trim().chars().all(|c| c == '\u{2580}'),
+            "a half-block row shows something other than the glyph: {row:?}\nplain:\n{plain}"
+        );
+    }
+    assert!(
+        !plain.contains("[Image:"),
+        "the alt-text fallback was printed instead of half-blocks.\nplain:\n{plain}"
+    );
+    for residue in ["\x1b", "[38;2;", "_G", "1337", "\x1bP"] {
+        assert!(
+            !plain.contains(residue),
+            "visible escape residue {residue:?} in the pane.\nplain:\n{plain}"
+        );
+    }
+    assert!(
+        output.raw.contains("38;2;"),
+        "expected truecolor SGR on the half-block cells in the raw capture.\nraw:\n{:?}",
+        output.raw
     );
 }

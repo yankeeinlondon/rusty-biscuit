@@ -30,9 +30,11 @@
 use crate::markdown::highlighting::{CodeBlockMode, ColorMode, ThemePair};
 #[cfg(test)]
 use crate::markdown::output::code_block;
+use biscuit_visualized::components::MermaidFallbackPolicy;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
-use biscuit_terminal::components::renderable::TerminalRenderable;
-use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage, parse_width_spec};
+use biscuit_terminal::components::terminal_image::{
+    ImageOutput, ImageWidth, TerminalImage, parse_width_spec,
+};
 use biscuit_terminal::discovery::detection::ColorDepth as TerminalColorDepth;
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
@@ -294,8 +296,9 @@ pub enum HyperlinkMode {
 
 /// Controls how Mermaid diagrams are rendered to the terminal.
 ///
-/// Mermaid diagrams can be rendered as images (via mermaid.ink service)
-/// or displayed as code blocks.
+/// Mermaid diagrams can be rendered as images, drawn as text, or displayed as
+/// code blocks. Browser output treats [`Automatic`](Self::Automatic) like
+/// [`Image`](Self::Image).
 ///
 /// ## Examples
 ///
@@ -320,12 +323,21 @@ pub enum MermaidMode {
     #[default]
     Off,
 
-    /// Render mermaid diagrams as images via mermaid.ink service.
+    /// Render mermaid diagrams as images.
     ///
-    /// Uses mermaid.ink to convert diagrams to SVG, then resvg to convert
-    /// to PNG, and viuer to display in the terminal. Falls back to `Text`
-    /// mode if terminal doesn't support graphics or rendering fails.
+    /// Renders each diagram locally and displays it as a terminal image. With
+    /// terminal graphics off ([`TerminalImageMode::Never`]) it shows the code
+    /// block.
     Image,
+
+    /// Render mermaid diagrams as images where the terminal supports them, and
+    /// otherwise as a text drawing when the diagram can be drawn as text and
+    /// fits; any other diagram shows its code block.
+    ///
+    /// [`TerminalOptions::mermaid_fallback_policy`] decides whether a text
+    /// drawing may replace the code block and whether a partial drawing
+    /// carries a note.
+    Automatic,
 
     /// Display mermaid diagrams as fenced code blocks.
     ///
@@ -355,7 +367,8 @@ const MAX_IMAGE_FILE_SIZE: u64 = 10 * 1024 * 1024;
 /// Renderer for inline images in terminal output.
 ///
 /// Wraps `biscuit_terminal::components::TerminalImage` to provide image rendering
-/// with automatic protocol detection (Kitty/iTerm2) and graceful fallback.
+/// in the format the terminal's graphics route selects (Kitty, iTerm2, or
+/// Sixel) and graceful fallback.
 ///
 /// ## Security
 ///
@@ -437,7 +450,7 @@ impl ImageRenderer {
             .build();
 
         tracing::debug!(
-            graphics_supported = ?terminal.image_support,
+            graphics_supported = ?terminal.image_support(),
             is_tty = terminal.is_tty,
             terminal_width = terminal.width(),
             image_mode = ?image_mode,
@@ -456,7 +469,7 @@ impl ImageRenderer {
     /// Returns whether graphics protocols are supported.
     #[inline]
     pub fn graphics_supported(&self) -> bool {
-        self.terminal.is_tty && !matches!(self.terminal.image_support, ImageSupport::None)
+        self.terminal.is_tty && !matches!(self.terminal.image_support(), ImageSupport::None)
     }
 
     /// Returns whether stdout is a TTY.
@@ -493,9 +506,7 @@ impl ImageRenderer {
 
         let mut forced = self.terminal.clone();
         forced.is_tty = true;
-        if matches!(forced.image_support, ImageSupport::None) {
-            forced.image_support = ImageSupport::Kitty;
-        }
+        forced.graphics_route = forced.graphics_route.forced_by_caller();
         forced
     }
 
@@ -602,13 +613,10 @@ impl ImageRenderer {
             return format!("▉ IMAGE[{}]\n", alt_text);
         }
 
-        // Render via TerminalRenderable fallback (protocol-aware string output)
         let render_terminal = self.render_terminal();
-        let output = term_image.render(&render_terminal);
-        if output.is_empty() {
-            format!("▉ IMAGE[{}]\n", alt_text)
-        } else {
-            output
+        match term_image.render_with_route(&render_terminal) {
+            Ok(ImageOutput::Pixels(output)) if !output.is_empty() => output,
+            _ => format!("▉ IMAGE[{}]\n", alt_text),
         }
     }
 }
@@ -694,9 +702,15 @@ pub struct TerminalOptions {
     /// Controls how Mermaid diagrams are rendered.
     ///
     /// - `Off` (default): Show mermaid blocks as syntax-highlighted code
-    /// - `Image`: Render as images via mermaid.ink service
-    /// - `Text`: Show as fenced code blocks (fallback format)
+    /// - `Image`: Render as terminal images
+    /// - `Automatic`: Render as images where the terminal shows pixels, else
+    ///   as a text drawing, else as code
+    /// - `Text`: Show as syntax-highlighted code
     pub mermaid_mode: MermaidMode,
+    /// When a [`MermaidMode::Automatic`] diagram may be drawn as text, and
+    /// whether a partial drawing carries a note. A setting left unset is
+    /// resolved at render time (the text fallback reads `MERMAID_FALLBACK`).
+    pub mermaid_fallback_policy: MermaidFallbackPolicy,
     /// Controls how hyperlinks are rendered.
     ///
     /// - `Auto` (default): Detect terminal capability via `supports_hyperlinks` crate
@@ -741,6 +755,7 @@ impl Default for TerminalOptions {
             dim_mode: DimMode::default(),
             max_width: None,
             mermaid_mode: MermaidMode::default(),
+            mermaid_fallback_policy: MermaidFallbackPolicy::default(),
             hyperlink_mode: HyperlinkMode::default(),
             hr_defaults: None,
             code_block_mode: CodeBlockMode::default(),
@@ -921,6 +936,7 @@ mod tests {
             dim_mode: DimMode::Always,
             max_width: Some(80),
             mermaid_mode: MermaidMode::Off,
+            mermaid_fallback_policy: Default::default(),
             hyperlink_mode: HyperlinkMode::Always,
             hr_defaults: None,
             code_block_mode: CodeBlockMode::default(),
@@ -1726,12 +1742,39 @@ mod tests {
 
     #[test]
     fn test_image_renderer_force_mode_attempts_protocol_render() {
-        let renderer = ImageRenderer::new(None, TerminalImageMode::Force);
+        let mut renderer = ImageRenderer::new(None, TerminalImageMode::Force);
         assert!(renderer.should_attempt_protocol_render());
+        renderer.terminal = Terminal::builder()
+            .is_tty(false)
+            .image_support(ImageSupport::None)
+            .build();
 
         let forced_terminal = renderer.render_terminal();
         assert!(forced_terminal.is_tty);
-        assert!(!matches!(forced_terminal.image_support, ImageSupport::None));
+        assert!(!matches!(forced_terminal.image_support(), ImageSupport::None));
+    }
+
+    /// Force upgrades a terminal without image support, but never output that
+    /// is not a terminal: piped output gets no graphics controls.
+    #[test]
+    fn test_image_renderer_force_mode_keeps_piped_output_free_of_graphics() {
+        use biscuit_terminal::discovery::detection::{
+            RouteInputs, RouteReasonKind, resolve_graphics_route,
+        };
+
+        let mut renderer = ImageRenderer::new(None, TerminalImageMode::Force);
+        renderer.terminal = Terminal::builder()
+            .graphics_route(resolve_graphics_route(
+                &RouteInputs::new(false).with_var("TERM_PROGRAM", "WezTerm"),
+            ))
+            .build();
+
+        let forced_terminal = renderer.render_terminal();
+        assert_eq!(forced_terminal.image_support(), ImageSupport::None);
+        assert_eq!(
+            forced_terminal.graphics_route.reason.kind,
+            RouteReasonKind::NotATerminal
+        );
     }
 
     #[test]
@@ -1873,7 +1916,7 @@ mod tests {
 
         // Should get fallback text either because:
         // 1. graphics_supported is false, or
-        // 2. viuer fails to decode invalid PNG data
+        // 2. the image fails to decode
         assert!(
             result.contains("▉ IMAGE[Test]"),
             "Expected fallback placeholder for invalid image data"

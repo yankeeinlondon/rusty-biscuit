@@ -114,10 +114,14 @@ and repair is off, cleanup stops with an error rather than format a document
 it cannot read. The full list of repairs is in [`md clean`](../cli/clean.md#frontmatter-repair-and-schema-precedence).
 
 Frontmatter that strict YAML rejects but Darkmatter itself reads, such as a
-bare `{{ … }}` value (`review: {{ ctx.area }}/review.md`) or tab
-indentation, is a supported document. Cleanup keeps that block exactly as
-written, applies no repair to it, reports the YAML finding as a suggestion,
-and formats the body.
+bare `{{ … }}` value (`review: {{ ctx.area }}/review.md`), is a supported
+document. Cleanup keeps that block exactly as written, applies no repair to
+it, reports the YAML finding as a suggestion, and formats the body.
+
+With repair on, tab-indented frontmatter is recovered instead: each indentation tab becomes
+two spaces, which Darkmatter reads as the same value, and any other
+[repair](../cli/clean.md#frontmatter-repair-and-schema-precedence) the block
+needs then applies.
 
 ### `table-layout`
 

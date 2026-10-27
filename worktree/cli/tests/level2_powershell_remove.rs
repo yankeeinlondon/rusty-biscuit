@@ -13,12 +13,14 @@
 //! is used only to see the prompt appear, because ConPTY repaints the screen
 //! with cursor movement rather than writing text in order.
 //!
-//! The held-directory case (acceptance criterion 3, Windows) runs `wt remove`
-//! from the base repo while a separate windowless `ping` stands in the
-//! worktree. `--force-worktree` approves the dirty and ignored files and the
-//! branch is Safe, so only the usage check can stop the removal: the console
-//! must show the usage refusal with exit 3, and every file, the registration,
-//! and the branch must survive.
+//! The held-directory cases run `wt remove` from the base repo while a
+//! separate windowless `ping` stands in the worktree, which Windows treats as
+//! holding the directory. A program using the worktree is a warning, not a
+//! refusal (R1 of `2026-10-22-confirmed-remove-always-deletes`): with `CI`
+//! set, so nobody can be asked, the run names the program and refuses with
+//! exit 3, keeping every file, the registration, and the branch; with
+//! `--force` it deletes everything else, waits while the program holds the
+//! directory (R22), and finishes once the program exits.
 #![cfg(windows)]
 
 use std::fs;
@@ -356,13 +358,13 @@ impl Scene {
     }
 
     /// Launches PowerShell inside `cwd`, runs `wt remove <name>` through the
-    /// wrapper, waits for the files question, and answers `answer`.
+    /// wrapper, waits for the question, and answers `answer`.
     fn remove_from_inside(&self, cwd: &Path, name: &str, answer: &str) -> Outcome {
         let script = self.script(&format!("wt remove {name}"));
         let mut console = Console::launch(cwd);
         console.wait_for("PS ");
         console.type_text(&format!(". {}\r", ps_quote(&script)));
-        console.wait_for("Discard");
+        console.wait_for(QUESTION);
         console.type_text(answer);
         let outcome = self.wait_outcome(&console);
         console.exit();
@@ -370,17 +372,22 @@ impl Scene {
     }
 
     /// Launches PowerShell in the base repo and runs `command` through the
-    /// wrapper; no prompt is expected.
-    fn run_from_base(&self, command: &str) -> Outcome {
+    /// wrapper; no prompt is expected. `during` runs once the scene has
+    /// started, with the console, before the outcome is awaited.
+    fn run_from_base(&self, command: &str, during: impl FnOnce(&Console)) -> Outcome {
         let script = self.script(command);
         let mut console = Console::launch(&self.repo());
         console.wait_for("PS ");
         console.type_text(&format!(". {}\r", ps_quote(&script)));
+        during(&console);
         let outcome = self.wait_outcome(&console);
         console.exit();
         outcome
     }
 }
+
+/// The one question about the checkout.
+const QUESTION: &str = "Delete it?";
 
 /// The screen as one line: a full-width row continues on the next row
 /// without a break, and runs of whitespace become one space.
@@ -433,11 +440,10 @@ fn level2_powershell_launched_inside_the_worktree_moves_to_the_base_repo_and_rem
     let screen = &outcome.screen;
 
     assert_eq!(outcome.code, 0, "{screen}");
-    assert!(screen.contains("Uncommitted files (1):"), "{screen}");
-    assert!(screen.contains("notes.txt"), "{screen}");
-    assert_one_blank_line_before(screen, "Discard the files listed above");
+    assert!(unwrapped(screen).contains("1 uncommitted file will be lost: notes.txt"), "{screen}");
+    assert_one_blank_line_before(screen, QUESTION);
     assert!(screen.contains("Moving you to the base repo"), "{screen}");
-    assert!(screen.contains("Removed worktree"), "{screen}");
+    assert!(screen.contains("Removed feat-x ("), "{screen}");
     assert!(screen.contains("You are now in"), "{screen}");
     assert_eq!(canonical(&outcome.location), canonical(&scene.repo()), "{screen}");
     assert_eq!(canonical(&outcome.current_directory), canonical(&scene.repo()), "{screen}");
@@ -457,9 +463,9 @@ fn level2_powershell_launched_inside_a_subdirectory_lands_in_the_fork_parent() {
     let screen = &outcome.screen;
 
     assert_eq!(outcome.code, 0, "{screen}");
-    assert_one_blank_line_before(screen, "Discard the files listed above");
+    assert_one_blank_line_before(screen, QUESTION);
     assert!(screen.contains("Moving you to the feat/theme worktree"), "{screen}");
-    assert!(screen.contains("Removed worktree"), "{screen}");
+    assert!(screen.contains("Removed feat-x ("), "{screen}");
     assert!(screen.contains("You are now in"), "{screen}");
     let landing = canonical(&parent.join("docs"));
     assert_eq!(canonical(&outcome.location), landing, "{screen}");
@@ -468,9 +474,10 @@ fn level2_powershell_launched_inside_a_subdirectory_lands_in_the_fork_parent() {
     assert!(parent.exists(), "the fork parent is untouched");
 }
 
-#[test]
-fn level2_powershell_refuses_a_worktree_another_program_holds_with_exit_3_and_nothing_removed() {
-    require_level!(Level::L2, powershell_available(), "ConPTY (Windows PowerShell)");
+/// A worktree with a dirty and an ignored file, held by a windowless `ping`
+/// standing in it. The branch is Safe, so only the checkout's warnings
+/// decide.
+fn held_scene() -> (Scene, PathBuf) {
     let scene = Scene::new();
     let wt = scene.add_worktree("feat/x", "feat-x");
     fs::create_dir_all(scene.repo().join(".git/info")).unwrap();
@@ -480,17 +487,30 @@ fn level2_powershell_refuses_a_worktree_another_program_holds_with_exit_3_and_no
     let status = git(&wt, &["status", "--porcelain", "--ignored"]);
     assert!(status.contains("?? notes.txt"), "{status}");
     assert!(status.contains("!! .env"), "{status}");
+    (scene, wt)
+}
+
+#[test]
+fn level2_powershell_without_force_or_a_terminal_names_the_program_and_refuses_with_exit_3() {
+    require_level!(Level::L2, powershell_available(), "ConPTY (Windows PowerShell)");
+    let (scene, wt) = held_scene();
     // Dropped before `scene`, so the lock is gone before the tempdir cleanup.
     let _holder = Holder::start(&wt);
 
-    let outcome = scene.run_from_base("wt remove feat-x --force-worktree");
+    // `CI` makes the run non-interactive inside the console.
+    let outcome = scene.run_from_base("$env:CI = '1'; wt remove feat-x", |_| {});
     let screen = &outcome.screen;
     let text = unwrapped(screen);
 
     assert_eq!(outcome.code, 3, "{screen}");
-    assert!(text.contains("Removal paused: another process is using feat-x."), "{screen}");
-    assert!(text.contains("PING.EXE"), "{screen}");
-    assert!(!text.contains("Discard"), "--force-worktree skips the question:\n{screen}");
+    assert!(text.contains("1 program is using files in this worktree:"), "{screen}");
+    assert!(text.to_ascii_lowercase().contains("ping"), "{screen}");
+    assert!(
+        text.contains("Nothing was removed. There is no terminal to ask whether to delete worktree feat-x despite the warnings listed above."),
+        "{screen}"
+    );
+    assert!(text.contains("Add --force to delete it anyway."), "{screen}");
+    assert!(!text.contains(QUESTION), "nobody is asked:\n{screen}");
     assert!(!text.contains("Removed"), "{screen}");
     // The checkout follows the host's `core.autocrlf`.
     assert_eq!(
@@ -502,4 +522,26 @@ fn level2_powershell_refuses_a_worktree_another_program_holds_with_exit_3_and_no
     assert_eq!(fs::read_to_string(wt.join(".env")).unwrap(), "SECRET=1\n", "ignored file kept");
     assert!(scene.registered(&wt), "still in `git worktree list`:\n{screen}");
     assert!(scene.branch_exists("feat/x"), "the branch is kept:\n{screen}");
+}
+
+#[test]
+fn level2_powershell_with_force_deletes_a_worktree_another_program_holds_once_it_exits() {
+    require_level!(Level::L2, powershell_available(), "ConPTY (Windows PowerShell)");
+    let (scene, wt) = held_scene();
+    let holder = Holder::start(&wt);
+
+    // The removal waits while `ping` holds the directory; ending `ping` lets
+    // it finish in the same run.
+    let outcome = scene.run_from_base("wt remove feat-x --force", |console| {
+        console.wait_for("Waiting:");
+        drop(holder);
+    });
+    let screen = &outcome.screen;
+    let text = unwrapped(screen);
+
+    assert_eq!(outcome.code, 0, "{screen}");
+    assert!(text.contains("1 program is using files in this worktree:"), "{screen}");
+    assert!(!text.contains(QUESTION), "--force answers the question:\n{screen}");
+    assert!(text.contains("Removed feat-x (") && text.contains("and deleted branch feat/x."), "{screen}");
+    assert_removed(&scene, &wt, "feat/x", screen);
 }

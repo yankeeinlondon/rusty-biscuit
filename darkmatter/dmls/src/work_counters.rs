@@ -1,5 +1,6 @@
 //! Process-wide counts of the file reads, content hashes, Markdown document
-//! parses, schema-root enumerations, and trigger-registry scans DMLS performs.
+//! parses, schema-root enumerations, trigger-registry scans, and live-graph
+//! path work DMLS performs.
 //!
 //! A work counter, like [`crate::context::context_build_count`]: a test takes
 //! [`work_counts`] before and after the code under test and asserts the delta
@@ -10,7 +11,11 @@
 //! Every DMLS file read, content hash, document parse, schema-root directory
 //! enumeration, and trigger-registry scan goes through [`read`],
 //! [`read_to_string`], [`hash_bytes`], [`record_parse`], [`record_enumeration`],
-//! and [`record_registry_scan`]. Not counted: reads the darkmatter library
+//! and [`record_registry_scan`]. The path-derived work of a graph build is
+//! counted where it happens: each [`WikiUniverse`](crate::wiki::WikiUniverse)
+//! constructed, each document's wiki path facts
+//! ([`WikiDoc::for_path`](crate::wiki::WikiDoc::for_path)), each portability
+//! key computed, and each graph document table constructed. Not counted: reads the darkmatter library
 //! performs on DMLS's behalf (a registry scan's payload resolution among
 //! them, which is why scans are counted), and hashes that only build an
 //! in-memory cache key.
@@ -45,6 +50,10 @@ static HASHES: AtomicUsize = AtomicUsize::new(0);
 static PARSES: AtomicUsize = AtomicUsize::new(0);
 static ENUMERATIONS: AtomicUsize = AtomicUsize::new(0);
 static REGISTRY_SCANS: AtomicUsize = AtomicUsize::new(0);
+static WIKI_UNIVERSES: AtomicUsize = AtomicUsize::new(0);
+static WIKI_PATH_FACTS: AtomicUsize = AtomicUsize::new(0);
+static WIKI_PORTABILITY_KEYS: AtomicUsize = AtomicUsize::new(0);
+static DOCUMENT_TABLES: AtomicUsize = AtomicUsize::new(0);
 /// Distinct threads, so the set stays as small as the thread count.
 static REGISTRY_SCAN_THREADS: Mutex<Vec<ThreadId>> = Mutex::new(Vec::new());
 static REGISTRY_SCANS_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
@@ -83,6 +92,14 @@ pub struct WorkCounts {
     pub typing_walks: usize,
     /// Whole-document lifecycle stack-expression walks.
     pub stack_walks: usize,
+    /// Wiki universes constructed.
+    pub wiki_universes: usize,
+    /// Wiki path facts (canonical logical path and owning root) computed.
+    pub wiki_path_facts: usize,
+    /// Portability keys computed.
+    pub wiki_portability_keys: usize,
+    /// Graph document tables constructed.
+    pub document_tables: usize,
 }
 
 impl WorkCounts {
@@ -100,6 +117,10 @@ impl WorkCounts {
             scalar_classifications: self.scalar_classifications - earlier.scalar_classifications,
             typing_walks: self.typing_walks - earlier.typing_walks,
             stack_walks: self.stack_walks - earlier.stack_walks,
+            wiki_universes: self.wiki_universes - earlier.wiki_universes,
+            wiki_path_facts: self.wiki_path_facts - earlier.wiki_path_facts,
+            wiki_portability_keys: self.wiki_portability_keys - earlier.wiki_portability_keys,
+            document_tables: self.document_tables - earlier.document_tables,
         }
     }
 
@@ -117,6 +138,10 @@ impl WorkCounts {
             scalar_classifications: self.scalar_classifications + other.scalar_classifications,
             typing_walks: self.typing_walks + other.typing_walks,
             stack_walks: self.stack_walks + other.stack_walks,
+            wiki_universes: self.wiki_universes + other.wiki_universes,
+            wiki_path_facts: self.wiki_path_facts + other.wiki_path_facts,
+            wiki_portability_keys: self.wiki_portability_keys + other.wiki_portability_keys,
+            document_tables: self.document_tables + other.document_tables,
         }
     }
 }
@@ -135,6 +160,10 @@ pub fn work_counts() -> WorkCounts {
         scalar_classifications: SCALAR_CLASSIFICATIONS.load(Ordering::SeqCst),
         typing_walks: TYPING_WALKS.load(Ordering::SeqCst),
         stack_walks: STACK_WALKS.load(Ordering::SeqCst),
+        wiki_universes: WIKI_UNIVERSES.load(Ordering::SeqCst),
+        wiki_path_facts: WIKI_PATH_FACTS.load(Ordering::SeqCst),
+        wiki_portability_keys: WIKI_PORTABILITY_KEYS.load(Ordering::SeqCst),
+        document_tables: DOCUMENT_TABLES.load(Ordering::SeqCst),
     }
 }
 
@@ -194,6 +223,26 @@ pub(crate) fn record_typing_walk() {
 /// Counts one whole-document lifecycle stack-expression walk.
 pub(crate) fn record_stack_walk() {
     STACK_WALKS.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Counts one wiki universe constructed.
+pub(crate) fn record_wiki_universe() {
+    WIKI_UNIVERSES.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Counts one document's wiki path facts computed.
+pub(crate) fn record_wiki_path_facts() {
+    WIKI_PATH_FACTS.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Counts one portability key computed.
+pub(crate) fn record_wiki_portability_key() {
+    WIKI_PORTABILITY_KEYS.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Counts one graph document table constructed.
+pub(crate) fn record_document_table() {
+    DOCUMENT_TABLES.fetch_add(1, Ordering::SeqCst);
 }
 
 /// A trigger-registry scan in progress, counted as in flight until dropped.
@@ -277,6 +326,12 @@ mod tests {
         record_scalar_classification();
         record_typing_walk();
         record_stack_walk();
+        record_wiki_universe();
+        record_wiki_path_facts();
+        record_wiki_path_facts();
+        record_wiki_portability_key();
+        record_document_table();
+        let middle = work_counts();
         let one = WorkCounts {
             reads: 2,
             hashes: 1,
@@ -289,8 +344,19 @@ mod tests {
             scalar_classifications: 1,
             typing_walks: 1,
             stack_walks: 1,
+            wiki_universes: 1,
+            wiki_path_facts: 2,
+            wiki_portability_keys: 1,
+            document_tables: 1,
         };
-        assert_eq!(work_counts().since(before), one);
+        assert_eq!(middle.since(before), one);
         assert_eq!(one.plus(one).since(one), one);
+        // A later snapshot subtracts only what happened after `middle`.
+        record_wiki_portability_key();
+        record_document_table();
+        assert_eq!(
+            work_counts().since(middle),
+            WorkCounts { wiki_portability_keys: 1, document_tables: 1, ..WorkCounts::default() }
+        );
     }
 }

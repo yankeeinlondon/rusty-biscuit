@@ -1,0 +1,267 @@
+{
+  "call": 0,
+  "commit_step": 34.0,
+  "commits": [
+    {
+      "id": "09a6368",
+      "index": 0,
+      "lane": "main",
+      "parents": [],
+      "tags": [],
+      "x": 8.0
+    },
+    {
+      "id": "a51ef88",
+      "index": 1,
+      "lane": "main",
+      "parents": [
+        "09a6368"
+      ],
+      "tags": [],
+      "x": 50.0
+    },
+    {
+      "id": "+53",
+      "index": 2,
+      "lane": "feat/schema-enhancement",
+      "parents": [
+        "a51ef88"
+      ],
+      "tags": [],
+      "x": 92.0
+    },
+    {
+      "id": "9ea3929",
+      "index": 3,
+      "lane": "feat/schema-enhancement",
+      "parents": [
+        "+53"
+      ],
+      "tags": [],
+      "x": 134.0
+    },
+    {
+      "id": "1690344",
+      "index": 4,
+      "lane": "feat/schema-enhancement",
+      "parents": [
+        "9ea3929"
+      ],
+      "tags": [],
+      "x": 176.0
+    },
+    {
+      "id": "+2",
+      "index": 5,
+      "lane": "main",
+      "parents": [
+        "a51ef88"
+      ],
+      "tags": [],
+      "x": 218.0
+    },
+    {
+      "id": "b14297e",
+      "index": 6,
+      "lane": "main",
+      "parents": [
+        "+2"
+      ],
+      "tags": [],
+      "x": 260.0
+    },
+    {
+      "id": "+7",
+      "index": 7,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "b14297e"
+      ],
+      "tags": [],
+      "x": 302.0
+    },
+    {
+      "id": "0056338",
+      "index": 8,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "+7"
+      ],
+      "tags": [],
+      "x": 344.0
+    },
+    {
+      "id": "+92",
+      "index": 9,
+      "lane": "fix/sniff",
+      "parents": [
+        "0056338"
+      ],
+      "tags": [],
+      "x": 386.0
+    },
+    {
+      "id": "353bcc8",
+      "index": 10,
+      "lane": "fix/sniff",
+      "parents": [
+        "+92"
+      ],
+      "tags": [],
+      "x": 428.0
+    },
+    {
+      "id": "02ed3d5",
+      "index": 11,
+      "lane": "fix/sniff",
+      "parents": [
+        "353bcc8"
+      ],
+      "tags": [],
+      "x": 470.0
+    },
+    {
+      "id": "5ad325a",
+      "index": 12,
+      "lane": "main",
+      "parents": [
+        "b14297e"
+      ],
+      "tags": [],
+      "x": 512.0
+    },
+    {
+      "id": "bb0d93a",
+      "index": 13,
+      "lane": "main",
+      "parents": [
+        "5ad325a"
+      ],
+      "tags": [],
+      "x": 554.0
+    },
+    {
+      "id": "15d6ba6",
+      "index": 14,
+      "lane": "main",
+      "parents": [
+        "bb0d93a"
+      ],
+      "tags": [],
+      "x": 596.0
+    },
+    {
+      "id": "1377f4d",
+      "index": 15,
+      "lane": "main",
+      "parents": [
+        "15d6ba6"
+      ],
+      "tags": [],
+      "x": 638.0
+    },
+    {
+      "id": "984454a",
+      "index": 16,
+      "lane": "main",
+      "parents": [
+        "1377f4d"
+      ],
+      "tags": [],
+      "x": 680.0
+    },
+    {
+      "id": "1a8bcd5",
+      "index": 17,
+      "lane": "main",
+      "parents": [
+        "984454a"
+      ],
+      "tags": [],
+      "x": 722.0
+    },
+    {
+      "id": "9c3f926",
+      "index": 18,
+      "lane": "main",
+      "parents": [
+        "1a8bcd5"
+      ],
+      "tags": [],
+      "x": 764.0
+    },
+    {
+      "id": "4ad7b02",
+      "index": 19,
+      "lane": "main",
+      "parents": [
+        "9c3f926",
+        "0056338"
+      ],
+      "tags": [],
+      "x": 806.0
+    },
+    {
+      "id": "+67",
+      "index": 20,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "0056338"
+      ],
+      "tags": [],
+      "x": 848.0
+    },
+    {
+      "id": "8f99915",
+      "index": 21,
+      "lane": "fix/wt-ux",
+      "parents": [
+        "+67"
+      ],
+      "tags": [],
+      "x": 890.0
+    },
+    {
+      "id": "c3166ee",
+      "index": 22,
+      "lane": "main",
+      "parents": [
+        "4ad7b02"
+      ],
+      "tags": [],
+      "x": 932.0
+    },
+    {
+      "id": "38ec4a1",
+      "index": 23,
+      "lane": "main",
+      "parents": [
+        "c3166ee",
+        "02ed3d5"
+      ],
+      "tags": [
+        {
+          "text": "origin/main",
+          "x1": 938.22314453125,
+          "x2": 1003.27685546875,
+          "y1": -23.5,
+          "y2": -8.5
+        },
+        {
+          "text": "main",
+          "x1": 938.22314453125,
+          "x2": 1003.27685546875,
+          "y1": -39.5,
+          "y2": -24.5
+        }
+      ],
+      "x": 974.0
+    }
+  ],
+  "default_commit_step": 34.0,
+  "height": 322.4012145996094,
+  "mermaid": "gitGraph\n    commit id: \"09a6368\"\n    commit id: \"a51ef88\"\n    branch feat/schema-enhancement\n    checkout feat/schema-enhancement\n    commit id: \"+53\" type: HIGHLIGHT\n    commit id: \"9ea3929\"\n    commit id: \"1690344\"\n    checkout main\n    commit id: \"+2\" type: HIGHLIGHT\n    commit id: \"b14297e\"\n    branch fix/wt-ux\n    checkout fix/wt-ux\n    commit id: \"+7\" type: HIGHLIGHT\n    commit id: \"0056338\"\n    branch fix/sniff\n    checkout fix/sniff\n    commit id: \"+92\" type: HIGHLIGHT\n    commit id: \"353bcc8\"\n    commit id: \"02ed3d5\"\n    checkout fix/wt-ux\n    checkout main\n    commit id: \"5ad325a\"\n    commit id: \"bb0d93a\"\n    commit id: \"15d6ba6\"\n    commit id: \"1377f4d\"\n    commit id: \"984454a\"\n    commit id: \"1a8bcd5\"\n    commit id: \"9c3f926\"\n    merge fix/wt-ux id: \"4ad7b02\"\n    checkout fix/wt-ux\n    commit id: \"+67\" type: HIGHLIGHT\n    commit id: \"8f99915\"\n    checkout main\n    commit id: \"c3166ee\"\n    merge fix/sniff id: \"38ec4a1\" tag: \"main\" tag: \"origin/main\"",
+  "tag_gap": 16.0,
+  "test": "commands__git_graph__tests__the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60",
+  "width": 1257.3125
+}

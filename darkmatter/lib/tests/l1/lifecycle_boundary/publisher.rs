@@ -5,7 +5,6 @@
 //! real expression engine over the state and `err` binding each request
 //! carries; it changes the run only by replying.
 
-use std::collections::HashMap;
 
 use darkmatter::markdown::compose::EffectiveStateBuilder;
 use darkmatter::markdown::compose::expression::{
@@ -121,8 +120,7 @@ impl Publisher {
 }
 
 fn render(template: &Value, state: &Map<String, Value>, event: &EventRequest) -> Result<Value, LifecycleError> {
-    let frontmatter: HashMap<String, Value> = state.clone().into_iter().collect();
-    let document = EffectiveStateBuilder::new().with_frontmatter(frontmatter).build().expect("publisher state builds");
+    let document = EffectiveStateBuilder::new().with_frontmatter(state.clone()).build().expect("publisher state builds");
     let session = EvaluationSession::associate(event.globals.clone(), &document, event.runtime_bindings())
         .expect("a request's bindings match its view");
     let prepared = prepare_value(template, AuthoredMode::InterpolatedValue).expect("publisher templates parse");

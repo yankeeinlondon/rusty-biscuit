@@ -14,6 +14,11 @@
       "key": "apiKey",
       "value": "",
       "description": "API key value"
+    },
+    {
+      "key": "path_model_id",
+      "value": "",
+      "description": "Value of the `model_id` path parameter"
     }
   ],
   "auth": {
@@ -58,7 +63,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"max_tokens\": 0,\n  \"messages\": [],\n  \"model\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -66,7 +71,33 @@
               }
             },
             "description": "Create a message with optional tool use for agent interactions"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"content\": [],\n  \"id\": \"string\",\n  \"model\": \"string\",\n  \"role\": \"user\",\n  \"stop_reason\": \"end_turn\",\n  \"type\": \"string\",\n  \"usage\": {\n    \"input_tokens\": 0,\n    \"output_tokens\": 0\n  }\n}"
+            },
+            {
+              "name": "200 OK (text/event-stream)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "text/event-stream"
+                }
+              ],
+              "body": "data: {\"message\":{\"content\":[],\"id\":\"string\",\"model\":\"string\",\"role\":\"user\",\"type\":\"string\"},\"type\":\"message_start\"}\n\nevent: message_stop\ndata: {}\n\n"
+            }
+          ]
         },
         {
           "name": "CountTokens",
@@ -90,7 +121,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{}",
+              "raw": "{\n  \"messages\": [],\n  \"model\": \"string\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -98,7 +129,21 @@
               }
             },
             "description": "Count tokens in a message before sending"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"input_tokens\": 0\n}"
+            }
+          ]
         }
       ]
     },
@@ -125,7 +170,21 @@
               }
             ],
             "description": "List available Claude models"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"data\": [],\n  \"first_id\": \"string\",\n  \"has_more\": false,\n  \"last_id\": \"string\"\n}"
+            }
+          ]
         },
         {
           "name": "RetrieveModel",
@@ -143,7 +202,7 @@
               "variable": [
                 {
                   "key": "model_id",
-                  "value": "<model_id>"
+                  "value": "{{path_model_id}}"
                 }
               ]
             },
@@ -154,7 +213,21 @@
               }
             ],
             "description": "Get information about a specific model"
-          }
+          },
+          "response": [
+            {
+              "name": "200 OK (application/json)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"created_at\": \"string\",\n  \"display_name\": \"string\",\n  \"id\": \"string\",\n  \"type\": \"string\"\n}"
+            }
+          ]
         }
       ]
     }

@@ -1,0 +1,12 @@
+[package]
+name = "ac-e1-widths"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Throwaway evidence tool for AC-E1, not a workspace member.
+[workspace]
+
+[dependencies]
+darkmatter = { path = "../../../../../darkmatter/lib" }
+biscuit-terminal = { path = "../../../../../biscuit-terminal/lib" }

@@ -16,7 +16,7 @@ impl OAuth2Manager {
     /// - `OAuthError::TokenRefresh` if the revocation request fails.
     /// - `OAuthError::AuthenticationRequired` if no token is stored.
     pub async fn revoke_token(&self) -> Result<(), OAuthError> {
-        if self.config.provider.revocation_url.is_none() {
+        if self.config.provider.revocation_url().is_none() {
             return Err(OAuthError::Configuration(
                 "No revocation URL configured for this provider".into(),
             ));

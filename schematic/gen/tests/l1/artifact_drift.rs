@@ -1,9 +1,11 @@
 //! Artifact drift detection tests.
 //!
-//! These tests verify that committed OpenAPI and Postman artifacts match
-//! what the generator would produce. They iterate every module reported by
-//! [`apis_by_module`] and compare the in-memory regeneration against the
-//! files committed under `schematic/openapi/` and `schematic/postman/`, and
+//! These tests verify that committed Rust, OpenAPI, Postman (collections and
+//! environments), and AsyncAPI artifacts match what the generator would
+//! produce. They iterate every module reported by [`apis_by_module`] (and
+//! every registered WebSocket API for AsyncAPI) and compare the in-memory
+//! regeneration against the files committed under `schematic/schema/`,
+//! `schematic/openapi/`, `schematic/postman/`, and `schematic/asyncapi/`, and
 //! scan the committed OpenAPI corpus for `operationId` integrity.
 //!
 //! Run with:
@@ -17,15 +19,17 @@
 //! invoked — so the entire suite completes in a few seconds for ~16
 //! modules.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use schematic_define::openapi::ExportOptions;
 use schematic_definitions::apis_by_module;
-use schematic_definitions::registry::get_registries_for_module;
 use schematic_gen::export::openapi::{operation_id_diagnostics, write_openapi_grouped};
-use schematic_gen::export::postman::{write_postman, write_postman_grouped};
+use schematic_gen::export::postman::{write_postman, write_postman_environment, write_postman_grouped};
+use schematic_gen::pipeline::{
+    BatchScope, GenerateOpts, OpenApiFormat, generate_batch, resolve_all_apis,
+};
 
 /// Returns the absolute path to the `schematic/` package area, anchored on
 /// the gen crate's manifest directory so the tests work regardless of the
@@ -46,12 +50,6 @@ fn generated_openapi_artifacts_are_up_to_date() {
     let grouped = apis_by_module();
 
     for (module_name, apis) in grouped.iter() {
-        let Some(registry) = get_registries_for_module(module_name) else {
-            // Modules without a registry are not exported as OpenAPI; skip.
-            eprintln!("Skipping module '{module_name}' for OpenAPI drift: no registry available");
-            continue;
-        };
-
         // Use the version of the first API as the document version (matches
         // the CLI driver's behavior for the grouped writer).
         let version = apis
@@ -62,7 +60,7 @@ fn generated_openapi_artifacts_are_up_to_date() {
 
         let api_refs: Vec<&_> = apis.iter().collect();
         let generated_path =
-            write_openapi_grouped(&api_refs, module_name, &registry, &options, temp_dir.path())
+            write_openapi_grouped(&api_refs, module_name, &options, temp_dir.path())
                 .unwrap_or_else(|e| {
                     panic!("Failed to generate OpenAPI for module '{module_name}': {e}")
                 });
@@ -114,29 +112,77 @@ fn generated_postman_artifacts_are_up_to_date() {
             )
         };
 
-        let generated = fs::read_to_string(&generated_path).unwrap();
+        // `just generate` requests environments, so each committed collection
+        // has its environment beside it.
+        let api_refs: Vec<&_> = apis.iter().collect();
+        let environment_path = write_postman_environment(&api_refs, module_name, temp_dir.path(), false)
+            .unwrap_or_else(|e| panic!("Failed to generate the Postman environment of module {module_name}: {e}"));
 
-        let committed_path = postman_committed.join(generated_path.file_name().unwrap());
+        for generated_path in [generated_path, environment_path] {
+            let generated = fs::read_to_string(&generated_path).unwrap();
+
+            let committed_path = postman_committed.join(generated_path.file_name().unwrap());
+            assert!(
+                committed_path.exists(),
+                "Missing committed Postman artifact for module '{module_name}' at {}",
+                committed_path.display()
+            );
+
+            let committed = fs::read_to_string(&committed_path).unwrap_or_else(|e| {
+                panic!("Failed to read committed Postman for module {module_name}: {e}")
+            });
+
+            assert_eq!(
+                generated,
+                committed,
+                "\nPostman artifact drift detected for module '{}'.\n\
+                 Run `just -f schematic/justfile generate` to update the committed artifacts.\n\
+                 Diff: {} vs {}",
+                module_name,
+                generated_path.display(),
+                committed_path.display(),
+            );
+        }
+    }
+
+    let generated = source_files(temp_dir.path());
+    let committed = source_files(&postman_committed);
+    assert_eq!(
+        generated.keys().collect::<Vec<_>>(),
+        committed.keys().collect::<Vec<_>>(),
+        "Postman artifact file-set drift; run `just -f schematic/justfile generate`",
+    );
+}
+
+/// Every registered WebSocket API has its committed AsyncAPI document, byte
+/// for byte, and `schematic/asyncapi/` holds nothing else. Each committed
+/// document's local references all resolve.
+#[test]
+fn generated_asyncapi_artifacts_are_up_to_date() {
+    use schematic_gen::export::asyncapi::{asyncapi_documents, dangling_refs, render_asyncapi};
+
+    let committed_dir = schematic_root().join("asyncapi");
+    let documents = asyncapi_documents(schematic_definitions::registry::registrations());
+    let mut expected = BTreeMap::new();
+    for document in &documents {
+        let rendered = render_asyncapi(&document.api)
+            .unwrap_or_else(|e| panic!("AsyncAPI export of {} failed: {e}", document.api.name));
+        expected.insert(PathBuf::from(&document.file_name), rendered.into_bytes());
+    }
+    let committed = source_files(&committed_dir);
+    assert_eq!(
+        committed.keys().collect::<Vec<_>>(),
+        expected.keys().collect::<Vec<_>>(),
+        "AsyncAPI artifact file-set drift; run `just -f schematic/justfile generate-asyncapi`",
+    );
+    for (name, bytes) in &expected {
         assert!(
-            committed_path.exists(),
-            "Missing committed Postman artifact for module '{module_name}' at {}",
-            committed_path.display()
+            &committed[name] == bytes,
+            "AsyncAPI artifact drift in {}; run `just -f schematic/justfile generate-asyncapi`",
+            name.display(),
         );
-
-        let committed = fs::read_to_string(&committed_path).unwrap_or_else(|e| {
-            panic!("Failed to read committed Postman for module {module_name}: {e}")
-        });
-
-        assert_eq!(
-            generated,
-            committed,
-            "\nPostman artifact drift detected for module '{}'.\n\
-             Run `just -f schematic/justfile generate` to update the committed artifacts.\n\
-             Diff: {} vs {}",
-            module_name,
-            generated_path.display(),
-            committed_path.display(),
-        );
+        let document: serde_json::Value = serde_json::from_slice(&committed[name]).unwrap();
+        assert!(dangling_refs(&document).is_empty(), "{}: {:?}", name.display(), dangling_refs(&document));
     }
 }
 
@@ -301,12 +347,10 @@ fn committed_openapi_filenames_match_modules() {
     let openapi_dir = schematic_root().join("openapi");
     let grouped = apis_by_module();
 
+    // Every module carries its components, so every module is exported.
     let expected: HashSet<String> = grouped
-        .iter()
-        .filter_map(|(module_name, _)| {
-            // Only modules with a registry are exported as OpenAPI.
-            get_registries_for_module(module_name).map(|_| format!("{module_name}.json"))
-        })
+        .keys()
+        .map(|module_name| format!("{module_name}.json"))
         .collect();
 
     let actual: HashSet<String> = fs::read_dir(&openapi_dir)
@@ -326,4 +370,83 @@ fn committed_openapi_filenames_match_modules() {
          Unexpected (should be removed): {unexpected:?}\n\
          Run `just -f schematic/justfile generate` to reconcile.",
     );
+}
+
+fn source_files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    fn collect(root: &Path, dir: &Path, files: &mut BTreeMap<PathBuf, Vec<u8>>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if entry.file_type().unwrap().is_dir() {
+                collect(root, &path, files);
+            } else {
+                assert!(
+                    entry.file_type().unwrap().is_file(),
+                    "unexpected source entry: {}",
+                    path.display(),
+                );
+                files.insert(
+                    path.strip_prefix(root).unwrap().to_path_buf(),
+                    fs::read(&path).unwrap(),
+                );
+            }
+        }
+    }
+    let mut files = BTreeMap::new();
+    collect(root, root, &mut files);
+    files
+}
+
+#[test]
+fn generated_rust_artifacts_are_up_to_date() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let output = temp_dir.path().join("schema/src");
+    let output_text = output.to_str().unwrap();
+    let opts = GenerateOpts {
+        output: output_text,
+        dry_run: false,
+        verbose: 0,
+        openapi_out: None,
+        openapi_format: OpenApiFormat::Json,
+        openapi_version: None,
+        postman_out: None,
+        no_openapi: true,
+        no_postman: true,
+        postman_environment: false,
+    };
+    generate_batch(&resolve_all_apis(), &BatchScope::Complete, &opts)
+    .into_result()
+    .unwrap();
+
+    let committed = schematic_root().join("schema/src");
+    let expected = source_files(&committed);
+    let generated = source_files(&output);
+    assert!(!expected.is_empty(), "committed Rust source tree is empty");
+    assert_eq!(
+        generated.keys().collect::<Vec<_>>(),
+        expected.keys().collect::<Vec<_>>(),
+        "Rust artifact file-set drift; run `just -f schematic/justfile generate`",
+    );
+    for (path, bytes) in &generated {
+        assert!(
+            bytes == &expected[path],
+            "Rust artifact byte drift in {}; run `just -f schematic/justfile generate`",
+            path.display(),
+        );
+    }
+    assert!(
+        fs::read(output.parent().unwrap().join("Cargo.toml")).unwrap()
+            == fs::read(schematic_root().join("schema/Cargo.toml")).unwrap(),
+        "Rust manifest byte drift; run `just -f schematic/justfile generate`",
+    );
+}
+
+#[test]
+fn qualified_typed_split_modules_need_no_unused_response_imports() {
+    let api = schematic_gen::pipeline::resolve_api("emqx-basic").unwrap();
+    let out = tempfile::TempDir::new().unwrap();
+    schematic_gen::output::generate_and_write(&api, out.path(), false).unwrap();
+    let requests = std::fs::read_to_string(out.path().join("emqx/requests.rs")).unwrap();
+    assert!(!requests.contains("use super::responses::*;"), "typed paths already name their defining crate");
+    assert!(requests.contains("::schematic_definitions::emqx::NodeInfo"));
 }

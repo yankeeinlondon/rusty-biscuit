@@ -37,6 +37,13 @@ pub struct Tag {
     pub links: Option<HashMap<String, Link>>,
 }
 
+impl schematic_define::Registration for Tag {
+    const RUST_IDENTIFIER: Option<&'static str> = Some("Tag");
+    fn register(ctx: &mut schematic_define::DefinitionContext) -> Result<schematic_define::TypeDesc, schematic_define::DefinitionError> {
+        ctx.register_nominal::<Self>()
+    }
+}
+
 impl Tag {
     /// Returns `true` if this is an annotated tag (has a message).
     pub fn is_annotated(&self) -> bool {

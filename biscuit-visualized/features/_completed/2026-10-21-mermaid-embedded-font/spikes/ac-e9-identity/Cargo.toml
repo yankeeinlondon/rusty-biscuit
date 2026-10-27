@@ -1,0 +1,13 @@
+[package]
+name = "ac-e9-identity"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Throwaway evidence tool for AC-E9, not a workspace member. It uses only API
+# that predates the embedded font, so it builds against the pre-feature tree.
+[workspace]
+
+[dependencies]
+darkmatter = { path = "../../../../../darkmatter/lib" }
+biscuit-terminal = { path = "../../../../../biscuit-terminal/lib" }

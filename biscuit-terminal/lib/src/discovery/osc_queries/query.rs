@@ -5,12 +5,10 @@ use std::time::Duration;
 use crate::discovery::detection::{TerminalApp, get_terminal_app, is_tty};
 use crate::discovery::os_detection::is_ci;
 
-#[cfg(any(unix, test))]
 use super::parse::parse_osc_color_response;
 use super::parse::{ansi_index_to_rgb, parse_colorfgbg};
-#[cfg(unix)]
 use super::types::DEFAULT_TIMEOUT;
-use super::types::{OscQueryError, RgbValue};
+use super::types::{ColorSource, OscQueryError, RgbValue};
 
 /// Tracing target marking one *actual* tty round-trip attempt for an OSC code.
 ///
@@ -25,8 +23,7 @@ use super::types::{OscQueryError, RgbValue};
 ///
 /// The event carries a `code` field; a dedicated target keeps it distinguishable
 /// from the outcome/fallback events this module also logs at `debug`.
-#[cfg(unix)]
-pub(super) const OSC_QUERY_ATTEMPT_TARGET: &str = "biscuit_terminal::osc_query_attempt";
+pub(crate) const OSC_QUERY_ATTEMPT_TARGET: &str = "biscuit_terminal::osc_query_attempt";
 
 /// Human-readable name for an OSC color query code.
 fn osc_color_name(code: u8) -> &'static str {
@@ -51,29 +48,26 @@ fn osc_color_name(code: u8) -> &'static str {
 /// The live step for OSC 10 and 11 is one batched round trip shared by both
 /// codes and cached per process, so building a `Terminal` (which wants both)
 /// costs the terminal one exchange.
-pub(super) fn query_osc_color(code: u8) -> Option<RgbValue> {
-    resolve_color(code, || live_color_cached(code))
+///
+/// The color is [`ColorSource::Measured`] only when the live query answered.
+pub(super) fn query_osc_color(code: u8) -> Option<(RgbValue, ColorSource)> {
+    resolve_color(code, true, || live_color_cached(code))
 }
 
 /// Query terminal color with a custom timeout (one uncached live attempt).
 pub(super) fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Option<RgbValue> {
-    resolve_color(code, || {
+    resolve_color(code, true, || {
         live_colors(&[code], timeout).into_iter().next().flatten()
     })
+    .map(|(color, _)| color)
 }
 
-/// The live OSC 10/11 answers, queried together once per process.
-#[cfg(unix)]
-static LIVE_FG_BG: std::sync::OnceLock<[Option<RgbValue>; 2]> = std::sync::OnceLock::new();
-
-#[cfg(unix)]
+/// The live OSC 10/11 answers come from the once-per-process startup
+/// exchange, which the graphics probe joins.
 fn live_color_cached(code: u8) -> Option<RgbValue> {
     match code {
         10 | 11 => {
-            let [fg, bg] = *LIVE_FG_BG.get_or_init(|| {
-                let answers = live_colors(&[10, 11], DEFAULT_TIMEOUT);
-                [answers[0], answers[1]]
-            });
+            let [fg, bg] = crate::discovery::startup_exchange::live_fg_bg();
             if code == 10 { fg } else { bg }
         }
         _ => live_colors(&[code], DEFAULT_TIMEOUT)
@@ -83,13 +77,7 @@ fn live_color_cached(code: u8) -> Option<RgbValue> {
     }
 }
 
-#[cfg(not(unix))]
-fn live_color_cached(_code: u8) -> Option<RgbValue> {
-    None
-}
-
 /// One round trip asking for every code in `codes`; one answer per code.
-#[cfg(unix)]
 fn live_colors(codes: &[u8], timeout: Duration) -> Vec<Option<RgbValue>> {
     for &code in codes {
         tracing::debug!(
@@ -121,29 +109,66 @@ fn live_colors(codes: &[u8], timeout: Duration) -> Vec<Option<RgbValue>> {
     }
 }
 
-#[cfg(not(unix))]
-fn live_colors(codes: &[u8], _timeout: Duration) -> Vec<Option<RgbValue>> {
-    vec![None; codes.len()]
-}
-
-/// The gate and fallback chain around a live color lookup.
-fn resolve_color(code: u8, live: impl FnOnce() -> Option<RgbValue>) -> Option<RgbValue> {
+/// Whether a live color query may be sent: a terminal on stdout, not CI,
+/// not a Windows SSH server session, a terminal known to answer, no
+/// multiplexer, and probing not turned off by `BISCUIT_TERMINAL_PROBE` (any
+/// value other than `auto` turns it off).
+pub(crate) fn color_query_wanted() -> bool {
     let tty = is_tty();
     let ci = is_ci();
     if !tty {
-        tracing::debug!(code, "OSC{} query skipped: not a TTY", code);
+        tracing::debug!("color query skipped: not a TTY");
     }
     if ci {
-        tracing::debug!(code, "OSC{} query skipped: CI environment", code);
+        tracing::debug!("color query skipped: CI environment");
     }
-
-    // Try actual OSC query first (if terminal supports it)
-    if tty
-        && !ci
+    let probe_allowed = std::env::var_os(crate::discovery::detection::PROBE_ENV)
+        .is_none_or(|value| value == "auto");
+    // The Windows OpenSSH server's console host sits between this program
+    // and the client's terminal; it is never queried.
+    let windows_ssh_server = cfg!(windows) && std::env::var_os("SSH_CONNECTION").is_some();
+    tty && !ci
+        && probe_allowed
+        && !windows_ssh_server
         && super::support::answers_color_queries(&get_terminal_app())
         && detect_multiplexer().is_none()
-        && let Some(color) = live()
-    {
+}
+
+/// Whether the OSC 4 palette query may be sent: exactly when the colors may
+/// be ([`color_query_wanted`]), on every platform. On native Windows it rides
+/// the same console query backend as OSC 10/11; a terminal that does not
+/// answer leaves the palette unknown, and diagrams use background-derived
+/// accents.
+pub(crate) fn palette_query_wanted() -> bool {
+    color_query_wanted()
+}
+
+/// The fallback chain without a live query, for a terminal constructed with
+/// probing off. Always an estimate.
+pub(crate) fn heuristic_color(code: u8) -> Option<RgbValue> {
+    resolve_color(code, false, || None).map(|(color, _)| color)
+}
+
+/// The gate and fallback chain around a live color lookup.
+fn resolve_color(
+    code: u8,
+    live_allowed: bool,
+    live: impl FnOnce() -> Option<RgbValue>,
+) -> Option<(RgbValue, ColorSource)> {
+    let answer = if live_allowed && color_query_wanted() { live() } else { None };
+    let colorfgbg = std::env::var("COLORFGBG").ok();
+    sourced_color(code, answer, colorfgbg.as_deref(), &get_terminal_app())
+}
+
+/// The terminal's `answer` to the live query when there is one, else the
+/// `COLORFGBG` and terminal-app estimates.
+fn sourced_color(
+    code: u8,
+    answer: Option<RgbValue>,
+    colorfgbg: Option<&str>,
+    term_app: &TerminalApp,
+) -> Option<(RgbValue, ColorSource)> {
+    if let Some(color) = answer {
         tracing::debug!(
             code,
             r = color.r,
@@ -153,14 +178,10 @@ fn resolve_color(code: u8, live: impl FnOnce() -> Option<RgbValue>) -> Option<Rg
             "OSC{} color detected via actual query",
             code
         );
-        return Some(color);
+        return Some((color, ColorSource::Measured));
     }
-    #[cfg(not(unix))]
-    let _ = live;
-
-    // Fallback 1: Try COLORFGBG environment variable
-    if let Ok(colorfgbg) = std::env::var("COLORFGBG")
-        && let Some(color) = parse_colorfgbg(&colorfgbg, code)
+    if let Some(colorfgbg) = colorfgbg
+        && let Some(color) = parse_colorfgbg(colorfgbg, code)
     {
         tracing::debug!(
             code,
@@ -172,12 +193,12 @@ fn resolve_color(code: u8, live: impl FnOnce() -> Option<RgbValue>) -> Option<Rg
             "OSC{} color detected via COLORFGBG env var",
             code
         );
-        return Some(color);
+        // A palette index mapped to the standard ANSI colors, and inherited
+        // through multiplexers and SSH: an estimate, not the terminal's color.
+        return Some((color, ColorSource::Estimated));
     }
 
-    // Fallback 2: Terminal app defaults
-    let term_app = get_terminal_app();
-    if let Some(color) = get_terminal_default_color(&term_app, code) {
+    if let Some(color) = get_terminal_default_color(term_app, code) {
         tracing::debug!(
             code,
             terminal = ?term_app,
@@ -188,7 +209,7 @@ fn resolve_color(code: u8, live: impl FnOnce() -> Option<RgbValue>) -> Option<Rg
             "OSC{} color detected via terminal defaults",
             code
         );
-        return Some(color);
+        return Some((color, ColorSource::Estimated));
     }
 
     // Suppress unused warnings on non-unix
@@ -265,11 +286,6 @@ pub(crate) fn detect_multiplexer() -> Option<&'static str> {
 /// [`OscQueryError::Timeout`] when the terminal answered nothing,
 /// [`OscQueryError::Unsupported`] when it answered DA1 but not the query.
 ///
-/// ## Platform Support
-///
-/// Unix only. On other platforms this returns
-/// `Err(OscQueryError::Unsupported)`.
-#[cfg(unix)]
 pub fn query_osc_actual(code: u8, timeout: Duration) -> Result<RgbValue, OscQueryError> {
     let response = query_osc_batch(&[code], timeout)?;
     find_osc_color(&response, code)
@@ -277,7 +293,6 @@ pub fn query_osc_actual(code: u8, timeout: Duration) -> Result<RgbValue, OscQuer
 }
 
 /// Send one OSC `?` query per code in a single write and return the raw reply.
-#[cfg(unix)]
 fn query_osc_batch(codes: &[u8], timeout: Duration) -> Result<Vec<u8>, OscQueryError> {
     use crate::discovery::tty_query::{TtyQueryError, round_trip};
 
@@ -299,13 +314,13 @@ fn query_osc_batch(codes: &[u8], timeout: Duration) -> Result<Vec<u8>, OscQueryE
     round_trip(&request, timeout).map_err(|e| match e {
         TtyQueryError::Silent => OscQueryError::Timeout(timeout),
         TtyQueryError::Unanswered => OscQueryError::Unsupported(codes[0]),
+        TtyQueryError::InputPending => OscQueryError::IoError(e.to_string()),
         TtyQueryError::Io(e) => OscQueryError::IoError(e),
     })
 }
 
 /// Find and parse the reply for `code` among the OSC replies in `response`.
-#[cfg(any(unix, test))]
-fn find_osc_color(response: &[u8], code: u8) -> Option<RgbValue> {
+pub(crate) fn find_osc_color(response: &[u8], code: u8) -> Option<RgbValue> {
     let mut from = 0;
     while let Some(rel) = response[from..].windows(2).position(|w| w == b"\x1b]") {
         let start = from + rel;
@@ -315,12 +330,6 @@ fn find_osc_color(response: &[u8], code: u8) -> Option<RgbValue> {
         from = start + 2;
     }
     None
-}
-
-/// Stub for non-Unix platforms.
-#[cfg(not(unix))]
-pub fn query_osc_actual(code: u8, _timeout: Duration) -> Result<RgbValue, OscQueryError> {
-    Err(OscQueryError::Unsupported(code))
 }
 
 #[cfg(test)]
@@ -371,6 +380,26 @@ mod tests {
     }
 
     #[test]
+    fn only_a_live_answer_is_measured() {
+        let kitty = TerminalApp::Kitty;
+        let answer = RgbValue::new(40, 44, 52);
+        assert_eq!(
+            sourced_color(11, Some(answer), Some("15;0"), &kitty),
+            Some((answer, ColorSource::Measured))
+        );
+        assert_eq!(
+            sourced_color(11, None, None, &kitty),
+            Some((RgbValue::new(30, 30, 30), ColorSource::Estimated)),
+            "a per-app default is an estimate"
+        );
+        assert!(
+            matches!(sourced_color(11, None, Some("15;0"), &kitty), Some((_, ColorSource::Estimated))),
+            "a COLORFGBG index is an estimate"
+        );
+        assert_eq!(sourced_color(11, None, None, &TerminalApp::AppleTerminal), None);
+    }
+
+    #[test]
     fn find_osc_color_picks_each_code_from_a_batched_reply() {
         let reply = b"\x1b]10;rgb:e5e5/e5e5/e5e5\x07\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\";
         assert_eq!(find_osc_color(reply, 10), Some(RgbValue::new(229, 229, 229)));
@@ -395,7 +424,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn test_query_osc_actual_not_tty_in_tests() {
         let result = query_osc_actual(11, Duration::from_millis(50));
 
@@ -409,12 +437,5 @@ mod tests {
                 panic!("Unexpected error variant: {:?}", e);
             }
         }
-    }
-
-    #[test]
-    #[cfg(not(unix))]
-    fn test_query_osc_actual_unsupported_non_unix() {
-        let result = query_osc_actual(11, Duration::from_millis(50));
-        assert!(matches!(result, Err(OscQueryError::Unsupported(11))));
     }
 }

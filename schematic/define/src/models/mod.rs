@@ -11,6 +11,7 @@
 //! - [`StructDef`] - Structure definition with fields
 //! - [`EnumDef`] - Enumeration definition with variants
 //! - [`TypeAlias`] - Type alias definition
+//! - [`UnionDiscriminator`] - Property that selects a union alias's alternative
 //! - [`FieldDef`] - Field definition for structs
 //! - [`EnumVariant`] - Variant definition for enums
 //! - [`TypeRef`] - Type reference (primitives, arrays, named types, combinators)
@@ -58,7 +59,7 @@ mod enums;
 mod structs;
 mod type_ref;
 
-pub use aliases::TypeAlias;
+pub use aliases::{TypeAlias, UnionDiscriminator};
 pub use enums::{EnumDef, EnumVariant};
 pub use structs::{FieldDef, StructDef};
 pub use type_ref::{PrimitiveType, TypeRef};
@@ -68,6 +69,10 @@ pub use type_ref::{PrimitiveType, TypeRef};
 /// This represents a collection of types (structs, enums, aliases) that can be
 /// generated as Rust code. The optional `module_path` specifies where the
 /// generated types should be placed.
+///
+/// Serde form of the catalog and its models: an absent optional member is
+/// omitted when written and read as `None`; an explicit `null` and an unknown
+/// member are rejected.
 ///
 /// ## Examples
 ///
@@ -81,9 +86,11 @@ pub use type_ref::{PrimitiveType, TypeRef};
 ///
 /// assert!(catalog.types.is_empty());
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModelCatalog {
     /// Optional module path for generated types (e.g., "my_api::types").
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::serde_presence::non_null")]
     pub module_path: Option<String>,
     /// Collection of model definitions.
     pub types: Vec<ModelDef>,
@@ -120,10 +127,11 @@ pub struct ModelCatalog {
 ///     name: "UserId".to_string(),
 ///     description: None,
 ///     target: TypeRef::Primitive(PrimitiveType::String),
+///     discriminator: None,
 /// });
 /// ```
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ModelDef {
     /// A struct (object) definition.
     Struct(StructDef),
@@ -178,6 +186,7 @@ mod tests {
             name: "Id".to_string(),
             description: None,
             target: TypeRef::Primitive(PrimitiveType::String),
+            discriminator: None,
         });
         assert!(matches!(model, ModelDef::Alias(_)));
     }
@@ -224,6 +233,7 @@ mod tests {
                     name: "UserId".to_string(),
                     description: None,
                     target: TypeRef::Primitive(PrimitiveType::String),
+                    discriminator: None,
                 }),
             ],
         };
@@ -312,6 +322,7 @@ mod tests {
                 name: "UserGroups".to_string(),
                 description: Some("Groups of optional users".to_string()),
                 target: nested_type.clone(),
+                discriminator: None,
             })],
         };
 

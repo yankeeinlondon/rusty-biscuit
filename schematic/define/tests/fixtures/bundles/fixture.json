@@ -1,0 +1,820 @@
+{
+  "api": {
+    "auth": {
+      "Basic": {
+        "password_env": {
+          "names": [
+            "FIXTURE_PASSWORD",
+            "FIXTURE_PASSWORD_OLD"
+          ]
+        },
+        "username_env": {
+          "names": [
+            "FIXTURE_USER"
+          ]
+        }
+      }
+    },
+    "auth_policy": {
+      "env_fallback": "Basic",
+      "explicit": [
+        "Basic",
+        {
+          "OAuth2": {
+            "authorization_url": "https://auth.example.com/authorize",
+            "client_auth": "None",
+            "default_scopes": [
+              "read",
+              "write"
+            ],
+            "grant_type": "AuthorizationCodePkce",
+            "pkce": "Supported",
+            "revocation_url": "https://auth.example.com/revoke",
+            "token_url": "https://auth.example.com/token"
+          }
+        },
+        {
+          "OAuth2": {
+            "client_auth": "ClientSecretPost",
+            "default_scopes": [],
+            "grant_type": "ClientCredentials",
+            "token_url": "https://auth.example.com/token"
+          }
+        },
+        {
+          "OAuth2": {
+            "client_auth": "ClientSecretBasic",
+            "default_scopes": [
+              "read"
+            ],
+            "device_authorization_url": "https://auth.example.com/device",
+            "grant_type": "DeviceCode",
+            "token_url": "https://auth.example.com/token"
+          }
+        }
+      ]
+    },
+    "base_url": "https://api.example.com/v1",
+    "cross_origin": "SameOrigin",
+    "description": "Bundle fixture API",
+    "endpoints": [
+      {
+        "description": "Get a node tree",
+        "errors": [
+          {
+            "shape": "Empty",
+            "status": {
+              "Exact": 404
+            }
+          },
+          {
+            "content_type": "text/html",
+            "shape": "Text",
+            "status": {
+              "Range": {
+                "hi": 429,
+                "lo": 420
+              }
+            }
+          }
+        ],
+        "headers": [],
+        "id": "GetNode",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "path": [
+            {
+              "description": "Node id",
+              "explode": false,
+              "name": "id",
+              "param_type": "Integer",
+              "required": true,
+              "style": "Simple"
+            }
+          ],
+          "query": []
+        },
+        "path": "/nodes/{id}",
+        "rate_limit": {
+          "limit_header": "node-limit",
+          "remaining_header": "node-remaining",
+          "reset_header": "node-reset",
+          "reset_unit": "epoch_seconds",
+          "retry_after_header": "retry-after"
+        },
+        "response": [
+          {
+            "shape": {
+              "Json": {
+                "Named": "Node"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "deprecated": true,
+        "description": "List parents",
+        "headers": [],
+        "id": "ListParents",
+        "method": "GET",
+        "params": {
+          "cookie": [],
+          "header": [],
+          "query": [
+            {
+              "deprecated": true,
+              "explode": false,
+              "name": "order",
+              "param_type": {
+                "Enum": [
+                  "asc",
+                  "desc"
+                ]
+              },
+              "required": false,
+              "style": "Form"
+            }
+          ]
+        },
+        "path": "/parents",
+        "response": [
+          {
+            "shape": {
+              "Json": {
+                "Array": {
+                  "Named": "Parent"
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "auth": {
+          "Policy": {
+            "policy": {
+              "explicit": [
+                "Basic"
+              ]
+            }
+          }
+        },
+        "description": "Items by key",
+        "headers": [],
+        "id": "Lookup",
+        "method": "GET",
+        "path": "/lookup",
+        "response": [
+          {
+            "shape": {
+              "Json": {
+                "Map": {
+                  "Named": "Item"
+                }
+              }
+            }
+          }
+        ],
+        "retry_guidance": {
+          "backoff": {
+            "fixed": {
+              "delay_ms": 100
+            }
+          },
+          "honor_retry_after": false,
+          "max_attempts": 2,
+          "retry_on": [
+            {
+              "code": 503
+            }
+          ]
+        }
+      },
+      {
+        "auth": "Public",
+        "description": "Arbitrary JSON",
+        "headers": [],
+        "id": "Raw",
+        "method": "GET",
+        "no_declared_errors": true,
+        "path": "/raw",
+        "response": [
+          {
+            "shape": {
+              "Json": {
+                "Primitive": "Json"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "description": "Create a pet",
+        "headers": [],
+        "id": "CreatePet",
+        "method": "POST",
+        "path": "/pets",
+        "request": {
+          "Json": {
+            "Named": "Pet"
+          }
+        },
+        "response": [
+          {
+            "shape": {
+              "Json": {
+                "Optional": {
+                  "Named": "Thing"
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "description": "Reply whole or as events",
+        "headers": [],
+        "id": "Converse",
+        "method": "POST",
+        "path": "/converse",
+        "response": [
+          {
+            "note": "when stream is false",
+            "shape": {
+              "Json": {
+                "Named": "Reply"
+              }
+            },
+            "variant": "Whole"
+          },
+          {
+            "note": "when stream is true",
+            "shape": {
+              "Stream": {
+                "end": {
+                  "EventNamed": "done"
+                },
+                "framing": {
+                  "Sse": {
+                    "Named": "Event"
+                  }
+                },
+                "keep": true
+              }
+            }
+          },
+          {
+            "fallback": true,
+            "shape": "Binary",
+            "variant": "Attachment"
+          }
+        ]
+      },
+      {
+        "description": "Tagged replies, audio, or nothing",
+        "headers": [],
+        "id": "Submit",
+        "method": "POST",
+        "path": "/submit",
+        "response": [
+          {
+            "json_tag": {
+              "Field": {
+                "name": "kind",
+                "value": "reply"
+              }
+            },
+            "shape": {
+              "Json": {
+                "Named": "Reply"
+              }
+            }
+          },
+          {
+            "json_tag": {
+              "Field": {
+                "name": "kind",
+                "value": "event"
+              }
+            },
+            "shape": {
+              "Json": {
+                "Named": "Event"
+              }
+            }
+          },
+          {
+            "content_type": "audio/mpeg",
+            "shape": {
+              "Stream": {
+                "end": "ConnectionClose",
+                "framing": "Bytes"
+              }
+            }
+          },
+          {
+            "shape": "Empty",
+            "statuses": [
+              204
+            ]
+          }
+        ]
+      },
+      {
+        "description": "Events per line",
+        "headers": [],
+        "id": "Follow",
+        "method": "GET",
+        "path": "/follow",
+        "response": [
+          {
+            "shape": {
+              "Stream": {
+                "end": {
+                  "FieldEquals": {
+                    "field": "kind",
+                    "value": "end"
+                  }
+                },
+                "framing": {
+                  "Ndjson": {
+                    "Named": "Event"
+                  }
+                }
+              }
+            },
+            "statuses": [
+              200
+            ]
+          }
+        ]
+      }
+    ],
+    "env_auth": [],
+    "errors": [
+      {
+        "shape": {
+          "Json": {
+            "Named": "Problem"
+          }
+        },
+        "status": {
+          "Range": {
+            "hi": 599,
+            "lo": 500
+          }
+        }
+      },
+      {
+        "shape": "Text",
+        "status": {
+          "Exact": 404
+        }
+      }
+    ],
+    "graphql": {
+      "address": [
+        {
+          "ReplaceSuffix": {
+            "suffix": "/api/v3",
+            "with": "/api/graphql"
+          }
+        },
+        {
+          "Append": "/graphql"
+        }
+      ],
+      "operations": [
+        {
+          "data": {
+            "Named": "IssuesData"
+          },
+          "description": "Issues of an owner",
+          "document": "query Issues($owner: String!, $first: Int, $after: String) { issues { id } }",
+          "errors": [
+            {
+              "shape": {
+                "Json": {
+                  "Named": "Problem"
+                }
+              },
+              "status": {
+                "Exact": 403
+              }
+            }
+          ],
+          "id": "Issues",
+          "kind": "Query",
+          "operation_name": "Issues",
+          "pagination": {
+            "alternates": [],
+            "item_type": "Item",
+            "items": {
+              "projection": [],
+              "record": [
+                {
+                  "key": "issues"
+                },
+                "each"
+              ]
+            },
+            "pagination": {
+              "policy": "explicit",
+              "strategy": {
+                "constants": [],
+                "kind": {
+                  "forward": {
+                    "boundary": {
+                      "boundary": "exclusive"
+                    },
+                    "parts": [
+                      {
+                        "param": {
+                          "in": "body",
+                          "name": [
+                            "variables",
+                            "after"
+                          ]
+                        },
+                        "source": {
+                          "from": "field",
+                          "source": {
+                            "at": [
+                              "pageInfo",
+                              "endCursor"
+                            ],
+                            "from": "body"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "kind": "cursor",
+                  "more": {
+                    "polarity": "true_means_more",
+                    "signal": "flag",
+                    "source": {
+                      "at": [
+                        "pageInfo",
+                        "hasNextPage"
+                      ],
+                      "from": "body"
+                    }
+                  },
+                  "resumable": false,
+                  "size": {
+                    "adjustable": false,
+                    "max": 100,
+                    "min": 1,
+                    "param": {
+                      "in": "body",
+                      "name": [
+                        "variables",
+                        "first"
+                      ]
+                    }
+                  }
+                },
+                "terminal_values": []
+              }
+            }
+          },
+          "variables": {
+            "Typed": {
+              "Named": "IssuesVars"
+            }
+          }
+        },
+        {
+          "data": {
+            "Primitive": "Json"
+          },
+          "description": "Touch nothing",
+          "document": "",
+          "id": "Touch",
+          "kind": "Mutation",
+          "no_declared_errors": true,
+          "variables": "Unit"
+        }
+      ]
+    },
+    "headers": [
+      [
+        "X-Fixture-Version",
+        "2026-10-21"
+      ]
+    ],
+    "name": "Fixture",
+    "rate_limit": {
+      "limit_header": "api-limit",
+      "remaining_header": "api-remaining",
+      "reset_header": "api-reset",
+      "reset_unit": "epoch_seconds",
+      "retry_after_header": "retry-after"
+    },
+    "retry_guidance": {
+      "backoff": {
+        "exponential": {
+          "base_ms": 250,
+          "cap_ms": 8000
+        }
+      },
+      "honor_retry_after": true,
+      "max_attempts": 3,
+      "retry_on": [
+        {
+          "code": 429
+        },
+        {
+          "range": {
+            "end": 599,
+            "start": 500
+          }
+        }
+      ]
+    },
+    "schemas": [
+      {
+        "name": "Node",
+        "rust_path": "::fixture::models::Node",
+        "schema": {
+          "properties": {
+            "children": {
+              "items": {
+                "$ref": "#/components/schemas/Node"
+              },
+              "type": "array"
+            },
+            "value": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "value",
+            "children"
+          ],
+          "title": "Node",
+          "type": "object"
+        }
+      },
+      {
+        "name": "Parent",
+        "rust_path": "::fixture::models::Parent",
+        "schema": {
+          "properties": {
+            "child": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Child"
+                },
+                {
+                  "enum": [
+                    null
+                  ],
+                  "nullable": true
+                }
+              ]
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "title": "Parent",
+          "type": "object"
+        }
+      },
+      {
+        "name": "Child",
+        "schema": {
+          "properties": {
+            "parent": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Parent"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "type": "object"
+        }
+      },
+      {
+        "name": "Item",
+        "rust_path": "::fixture::models::Item",
+        "schema": {
+          "properties": {
+            "id": {
+              "description": "Item identifier.",
+              "example": "item-1",
+              "type": "string"
+            },
+            "note": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "title": "Item",
+          "type": "object"
+        }
+      },
+      {
+        "name": "Cat",
+        "rust_path": "::fixture::models::Cat",
+        "schema": {
+          "properties": {
+            "meows": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "meows"
+          ],
+          "title": "Cat",
+          "type": "object"
+        }
+      },
+      {
+        "name": "Dog",
+        "rust_path": "::fixture::models::Dog",
+        "schema": {
+          "properties": {
+            "barks": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "barks"
+          ],
+          "title": "Dog",
+          "type": "object"
+        }
+      },
+      {
+        "name": "Pet",
+        "rust_path": "::fixture::models::Pet",
+        "schema": {
+          "oneOf": [
+            {
+              "$ref": "#/components/schemas/Cat"
+            },
+            {
+              "$ref": "#/components/schemas/Dog"
+            }
+          ]
+        }
+      },
+      {
+        "name": "Thing",
+        "rust_path": "crate::bundle_support::models::Widget",
+        "schema": {
+          "properties": {
+            "size": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "size"
+          ],
+          "title": "Widget",
+          "type": "object"
+        }
+      },
+      {
+        "name": "Problem",
+        "rust_path": "::fixture::models::Problem",
+        "schema": {
+          "properties": {
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "message"
+          ],
+          "title": "Problem",
+          "type": "object"
+        }
+      },
+      {
+        "name": "IssuesVars",
+        "rust_path": "::fixture::models::IssuesVars",
+        "schema": {
+          "properties": {
+            "after": {
+              "nullable": true,
+              "type": "string"
+            },
+            "first": {
+              "format": "uint32",
+              "minimum": 0,
+              "nullable": true,
+              "type": "integer"
+            },
+            "owner": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner"
+          ],
+          "title": "IssuesVars",
+          "type": "object"
+        }
+      },
+      {
+        "name": "IssuesData",
+        "rust_path": "::fixture::models::IssuesData",
+        "schema": {
+          "properties": {
+            "issues": {
+              "items": {
+                "$ref": "#/components/schemas/Item"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "issues"
+          ],
+          "title": "IssuesData",
+          "type": "object"
+        }
+      },
+      {
+        "name": "Reply",
+        "rust_path": "::fixture::models::Reply",
+        "schema": {
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "title": "Reply",
+          "type": "object"
+        }
+      },
+      {
+        "name": "Event",
+        "rust_path": "::fixture::models::Event",
+        "schema": {
+          "properties": {
+            "kind": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "title": "Event",
+          "type": "object"
+        }
+      }
+    ],
+    "secret_names": []
+  },
+  "format_version": 1,
+  "models": {
+    "types": [
+      {
+        "Alias": {
+          "name": "Pet",
+          "target": {
+            "OneOf": [
+              {
+                "Named": "Cat"
+              },
+              {
+                "Named": "Dog"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}
