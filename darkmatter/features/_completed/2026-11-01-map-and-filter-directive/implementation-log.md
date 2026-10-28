@@ -283,12 +283,195 @@ decisions_for_review:
     A static collection failure in the pre-check drops the recovered warnings of earlier regions (the analysis fails as a whole), while runtime failures keep them. The spec's "preserve warnings reported before every failure" arguably covers the static case too. I left it unchanged and the corpus test uses a runtime failure. Redo cost if reversed: make the pre-check collect warnings before returning its error, plus one test.
   - |-
     The acceptance case table lives in Rust (struct tables expanded one `#[test]` per row) rather than in data files under `tests/fixtures/collection_blocks/`; the fixtures directory holds only the two executable documents and their expected output. The plan suggested a fixture-based corpus. Moving the tables is mechanical.
-message_to_agent: |-
-  Phase 5 delivered the CLI controls, DMLS projection, and the acceptance corpus. Phase 6 is documentation and final validation. Notes:
-  - Docs I touched: darkmatter/docs/cli/{compose,policy,report-json}.md (new flags, recoveries, `collection-blocks`, collection failure reporting) and darkmatter/dmls/docs/{autocomplete,diagnostics,features,hover}.md. Re-read them when writing the final pages; the `docs/inline/{map,filter}.md` and `docs/iterables.md` pages are still the Planned versions.
-  - `lib/tests/l1/collection_blocks/docs_corpus.rs` parses the shipped examples of map.md, filter.md and iterables.md (fenced `md` blocks with a column-0 opener; skips blocks whose opener contains `<` or `...`; prose containing "mismatched", "invalid" or "malformed" marks an expected rejection with dm.collection.malformed; floors of 5/5/3 parsed examples). Keep those conventions when rewriting the pages, or update the test.
-  - Known gaps listed in decisions_for_review: budget failures have no source location; the CLI-side `CollectionFailure` wrapper; no `person.<field>` member completion.
-  - Skill updates (darkmatter skill, rust-testing if needed) are still pending for Phase 6. Gates this phase: darkmatter `just test` 13,442 passed / 10 skipped, `just lint` clean, tier coverage stranded 0.
+  - |-
+    Phase 6 documentation departures from the plan's wording. (1) The plan says the options getters are same-named without `with_`; the shipped getter is `ComposeOptions::iteration_limits()` returning `IterationLimits` (`max_visits()`, `max_expansion_bytes()`), so the docs and skill describe that. (2) The plan's `collection_blocks/discovery.rs` was never created (see the earlier reference-validation decision); the skill points at `preflight/collect.rs` and `reference/graph.rs`. Alternative for (1): add two forwarding getters on `ComposeOptions`; trivial. The dated spec is unchanged.
+  - |-
+    The opt-in `just test-prompts` run reports one failure, `condition_keys_match_the_shipped_claudine_schema` ("lifecycle.yaml no longer declares `conditional-1.when`"). It is a draft-prompt schema finding, not a grammar failure: the other nine grammar-corpus tests pass, and this phase changed no source or prompt. Left as informational, per the plan.
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+  - darkmatter/README.md
+  - darkmatter/docs/darkmatter-compose-pipeline.md
+  - darkmatter/docs/inline/filter.md
+  - darkmatter/docs/inline/map.md
+  - darkmatter/docs/inline/page-blocks.md
+  - darkmatter/docs/inline/shell-blocks.md
+  - darkmatter/docs/inline/shell-expansion.md
+  - darkmatter/docs/iterables.md
+  - darkmatter/docs/topics/compose-requests.md
+  - darkmatter/docs/topics/dmls.md
+  - darkmatter/docs/topics/expression-engine.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/compose.md
+  - .claude/skills/darkmatter/dmls.md
+  - .claude/skills/darkmatter/expressions.md
+  - .claude/skills/darkmatter/testing.md
+source_code:
+  - claudine/lib/src/composition/lifecycle/prewarm/classify/tests.rs
+  - claudine/lib/src/composition/prepare/bootstrap/tests.rs
+  - claudine/lib/tests/l1/collection_host_compat.rs
+  - claudine/lib/tests/l1/main.rs
+  - darkmatter/cli/src/args/command.rs
+  - darkmatter/cli/src/args/mod.rs
+  - darkmatter/cli/src/args/parsers.rs
+  - darkmatter/cli/src/args/policy.rs
+  - darkmatter/cli/src/collection_failure.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/src/commands/compose/report.rs
+  - darkmatter/cli/src/commands/mod.rs
+  - darkmatter/cli/src/commands/render.rs
+  - darkmatter/cli/src/io/mod.rs
+  - darkmatter/cli/src/lib.rs
+  - darkmatter/cli/tests/l1/collection_blocks.rs
+  - darkmatter/cli/tests/l1/compose_collection_controls.rs
+  - darkmatter/cli/tests/l1/main.rs
+  - darkmatter/dmls/src/diagnostics/codes.rs
+  - darkmatter/dmls/src/overlay/collections.rs
+  - darkmatter/dmls/src/overlay/directives.rs
+  - darkmatter/dmls/src/overlay/expressions.rs
+  - darkmatter/dmls/src/overlay/mod.rs
+  - darkmatter/dmls/src/providers/collections.rs
+  - darkmatter/dmls/src/providers/dsl.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/src/providers/mod.rs
+  - darkmatter/dmls/src/providers/semantic_tokens.rs
+  - darkmatter/dmls/src/semantic_legend.rs
+  - darkmatter/dmls/tests/fixtures/mapping_only_corpus/baseline.json
+  - darkmatter/dmls/tests/l1/call_check_agreement.rs
+  - darkmatter/dmls/tests/l1/collection_editor.rs
+  - darkmatter/dmls/tests/l1/expression_scopes.rs
+  - darkmatter/dmls/tests/l1/main.rs
+  - darkmatter/dmls/tests/l1/type_scope_ownership_guard.rs
+  - darkmatter/lib/src/lifecycle/preflight/shell_walk.rs
+  - darkmatter/lib/src/markdown/cleanup/protect.rs
+  - darkmatter/lib/src/markdown/compose/block_pairs.rs
+  - darkmatter/lib/src/markdown/compose/body_origin.rs
+  - darkmatter/lib/src/markdown/compose/cache/hashing.rs
+  - darkmatter/lib/src/markdown/compose/cache/runtime.rs
+  - darkmatter/lib/src/markdown/compose/call_precheck.rs
+  - darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+  - darkmatter/lib/src/markdown/compose/collection_blocks/diagnostics.rs
+  - darkmatter/lib/src/markdown/compose/collection_blocks/engine.rs
+  - darkmatter/lib/src/markdown/compose/collection_blocks/error.rs
+  - darkmatter/lib/src/markdown/compose/collection_blocks/mod.rs
+  - darkmatter/lib/src/markdown/compose/collection_blocks/parser.rs
+  - darkmatter/lib/src/markdown/compose/collection_blocks/scopes.rs
+  - darkmatter/lib/src/markdown/compose/collection_blocks/types.rs
+  - darkmatter/lib/src/markdown/compose/conditions.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/groups.rs
+  - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/context/report.rs
+  - darkmatter/lib/src/markdown/compose/directive_targets.rs
+  - darkmatter/lib/src/markdown/compose/directives_api.rs
+  - darkmatter/lib/src/markdown/compose/expression/absence.rs
+  - darkmatter/lib/src/markdown/compose/expression/ast.rs
+  - darkmatter/lib/src/markdown/compose/expression/binding.rs
+  - darkmatter/lib/src/markdown/compose/expression/call_check.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/roots.rs
+  - darkmatter/lib/src/markdown/compose/expression/error.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+  - darkmatter/lib/src/markdown/compose/expression/iterable.rs
+  - darkmatter/lib/src/markdown/compose/expression/iteration.rs
+  - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/parser.rs
+  - darkmatter/lib/src/markdown/compose/expression/prepared.rs
+  - darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+  - darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs
+  - darkmatter/lib/src/markdown/compose/expression/scope/lexical.rs
+  - darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+  - darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+  - darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+  - darkmatter/lib/src/markdown/compose/inline/collection_blocks.rs
+  - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+  - darkmatter/lib/src/markdown/compose/inline/mod.rs
+  - darkmatter/lib/src/markdown/compose/inline/page_blocks.rs
+  - darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+  - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/nested.rs
+  - darkmatter/lib/src/markdown/compose/page_blocks/guards.rs
+  - darkmatter/lib/src/markdown/compose/page_blocks/parser.rs
+  - darkmatter/lib/src/markdown/compose/parse_utils.rs
+  - darkmatter/lib/src/markdown/compose/perf.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/operations.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+  - darkmatter/lib/src/markdown/compose/policy.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+  - darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+  - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+  - darkmatter/lib/src/markdown/compose/shell_blocks/parser.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+  - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+  - darkmatter/lib/src/markdown/compose/site_scope.rs
+  - darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+  - darkmatter/lib/src/markdown/compose/type_tests.rs
+  - darkmatter/lib/src/markdown/errors/mod.rs
+  - darkmatter/lib/src/markdown/reference/graph.rs
+  - darkmatter/lib/src/markdown/types.rs
+  - darkmatter/lib/tests/fixtures/collection_blocks/filter.expected.md
+  - darkmatter/lib/tests/fixtures/collection_blocks/filter.md
+  - darkmatter/lib/tests/fixtures/collection_blocks/map.expected.md
+  - darkmatter/lib/tests/fixtures/collection_blocks/map.md
+  - darkmatter/lib/tests/l1/binding_contract.rs
+  - darkmatter/lib/tests/l1/collection_analysis.rs
+  - darkmatter/lib/tests/l1/collection_blocks.rs
+  - darkmatter/lib/tests/l1/collection_blocks/budget.rs
+  - darkmatter/lib/tests/l1/collection_blocks/docs_corpus.rs
+  - darkmatter/lib/tests/l1/collection_blocks/grammar.rs
+  - darkmatter/lib/tests/l1/collection_blocks/pipeline.rs
+  - darkmatter/lib/tests/l1/collection_blocks/scope_schedule.rs
+  - darkmatter/lib/tests/l1/collection_blocks/support.rs
+  - darkmatter/lib/tests/l1/collection_blocks/types_values.rs
+  - darkmatter/lib/tests/l1/collection_discovery.rs
+  - darkmatter/lib/tests/l1/collection_effects.rs
+  - darkmatter/lib/tests/l1/collection_execution.rs
+  - darkmatter/lib/tests/l1/context_construction_guard.rs
+  - darkmatter/lib/tests/l1/entry_point_parity.rs
+  - darkmatter/lib/tests/l1/expression_type_scope.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - darkmatter/lib/tests/l1/scope_site_conformance.rs
+  - darkmatter/lib/tests/l1/semantic_results_never_persist.rs
+  - darkmatter/lib/tests/l1/shared_diagnostics.rs
+documentation:
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/darkmatter/compose.md
+  - .claude/skills/darkmatter/dmls.md
+  - .claude/skills/darkmatter/expressions.md
+  - .claude/skills/darkmatter/testing.md
+  - darkmatter/README.md
+  - darkmatter/dmls/docs/autocomplete.md
+  - darkmatter/dmls/docs/diagnostics.md
+  - darkmatter/dmls/docs/features.md
+  - darkmatter/dmls/docs/hover.md
+  - darkmatter/docs/cli/compose.md
+  - darkmatter/docs/cli/policy.md
+  - darkmatter/docs/cli/report-json.md
+  - darkmatter/docs/darkmatter-compose-pipeline.md
+  - darkmatter/docs/inline/filter.md
+  - darkmatter/docs/inline/map.md
+  - darkmatter/docs/inline/page-blocks.md
+  - darkmatter/docs/inline/shell-blocks.md
+  - darkmatter/docs/inline/shell-expansion.md
+  - darkmatter/docs/iterables.md
+  - darkmatter/docs/topics/compose-requests.md
+  - darkmatter/docs/topics/dmls.md
+  - darkmatter/docs/topics/expression-engine.md
+completed_phase: 6
+implemented: true
 ---
 
 # Implementation Log for 2026-11-01-map-and-filter-directive (6 phases)
@@ -543,3 +726,43 @@ Boundary: the CLI suites spawn the real `md` binary (F3-style process wiring, sm
 - CI scope gate skip does not apply: sources changed.
 - Cross-OS: no new `#[cfg]`, path, or process code beyond the recorder tests, which use the shared fixture and temp-dir paths; `just cross-check` not run.
 - Skill update deferred to Phase 6.
+
+## Phase 6
+
+Scope: Waves 11–12 (documentation, skills, final verification). Source files changed: none. Packages verified: `darkmatter`, `darkmatter-cli`, `dmls`, with `claudine` for compatibility.
+
+### Documentation
+
+- `docs/inline/{map,filter}.md`: added `kind: canonical-documentation`, removed every Planned notice, named the real library builders (`with_allow_untyped_{map,filter}_variables`, `with_max_iteration_visits`, `with_max_expansion_bytes`) and CLI flags. Examples keep the `docs_corpus.rs` conventions, which still pass.
+- `docs/iterables.md`: Planned wording replaced with links to both directives.
+- New sections: pipeline page (structural preparation with a Mermaid flow), page blocks (shared traversal), shell expansion and shell blocks (locals, template approval), compose requests (limits), DMLS topic, expression-engine topic (callbacks and `local`), README overview link.
+- `docs/topics/darkmatter-expressions.md`, `docs/cli/{policy,report-json}.md`: reviewed, already agree with the shipped behavior; unchanged.
+- Skill `.claude/skills/darkmatter/{SKILL,compose,expressions,testing,dmls}.md`: shared modules, retained scopes, budgets, discovery boundary, diagnostics, tests. The `os` skill needed no new fact.
+
+### Source audit
+
+Searched `collection_blocks/` and `expression/iteration.rs` for raw `canonicalize` (none), ignored parse failures (`.ok()` only in the lenient editor scan in `parser.rs`/`scopes.rs`, by design), and unchecked appends (writes go through the `ExpansionWriter`). No defect found.
+
+### Requirement-to-test evidence
+
+The acceptance ledger is the Phase 5 table above plus the earlier phases' tables; Phase 6 added no behavior. `docs_corpus` (6 tests) is the executable check on the rewritten pages and passed in the full run.
+
+### Verification
+
+- `just test` (darkmatter, cli, dmls, zed-dmls-cli): 13,442 run, 13,442 passed, 10 skipped.
+- `just lint`: clean. `just doctest`: 235 passed, 10 ignored. `just build`: ok. `just check-tier-coverage darkmatter`: stranded 0.
+- `just test claudine`: 11,997 passed, 17 skipped.
+- `just test-prompts`: 9 of 10 grammar-corpus tests pass; one informational draft-prompt schema failure (see decisions).
+- WSL2 environment validation is unproven (host unreachable); see the environment table below.
+- CI scope calculator skip does not apply: the docs are read by `docs_corpus` and the gates ran.
+
+### Environment validation (`just cross-check darkmatter`, uncommitted tree, archive mode)
+
+| Environment | Result |
+| --- | --- |
+| macOS (local) | `just test`: 13,442 passed, 10 skipped |
+| Linux (`build-linux`) | 10,419 passed, 66 skipped (second attempt; the first failed with an SSH banner timeout, and an earlier run was cut short by my own 580 s limit during compile) |
+| Native Windows (`build-win-native`) | 10,366 passed, 66 skipped |
+| WSL2 (`build-win`) | **Unproven**: SSH to the host timed out (`connect ... Operation timed out`) before any test ran. No observation was recorded; no receipt reuse is claimed. |
+
+`darkmatter-cli` and `dmls` are covered by the same area run on each host. The WSL2 leg needs a rerun of `just cross-check darkmatter --os wsl` once `build-win` is reachable. This phase changed no source, and earlier phases added no OS-specific code, so no environment-specific defect is expected.
