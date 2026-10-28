@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 
 use claudine::composition::{
-    CompositionError, TriggerFindings, build_schema_status_report, drop_invalid_optionals,
+    CompositionError, DroppedOptionalSource, DroppedOptionalStage, TriggerFindings, build_schema_status_report, drop_invalid_optionals,
     pre_validate_schema, resolve_composition_source_in_context,
 };
 use darkmatter::markdown::Markdown;
@@ -76,6 +76,35 @@ impl Fixture {
         pre_validate_schema(&self.source(document), None, None, &context, findings)
     }
 }
+
+impl Fixture {
+    #[allow(clippy::result_large_err, reason = "the public verdict's own result, returned unchanged")]
+    fn verdict_with(
+        &self,
+        document: &Path,
+        overrides: Option<&serde_json::Value>,
+        launch_dir: Option<&Path>,
+        findings: &TriggerFindings,
+    ) -> Result<claudine::composition::PreValidatedSchema, CompositionError> {
+        let context = build_resolution_context(&self.snapshot()).expect("fixture context");
+        pre_validate_schema(&self.source(document), overrides, launch_dir, &context, findings)
+    }
+}
+
+/// Discovery and effective-preparation counts of the work `body` does.
+#[cfg(feature = "work-counters")]
+fn counted<T>(body: impl FnOnce() -> T) -> (T, u64, u64) {
+    use darkmatter::work_counters::{Work, snapshot};
+    let before = snapshot();
+    let value = body();
+    let delta = snapshot().since(&before);
+    (value, delta.get(Work::TriggerDiscovery), delta.get(Work::EffectivePreparation))
+}
+
+/// A trigger selected by a string or numeric `count`, requiring `ticket`. The
+/// optional numeric `count` is declared by the document's own `$schema`:
+/// cleanup drops only values the authored schema declares optional.
+const COUNT_TRIGGER: &str = "kind: schema-trigger\nmatch:\n  group:\n    - count: string(required)\n    - count: number(required)\n$schema:\n  ticket: string(required)\n";
 
 fn sources(findings: &TriggerFindings) -> Vec<TriggerSource> {
     findings.warnings().into_iter().map(|warning| warning.source).collect()
@@ -191,5 +220,215 @@ fn a_composition_warning_and_a_check_finding_are_one_trigger() {
         .expect("the prompt composes");
     findings.record_compose_warnings(&report.warnings);
 
+    assert_eq!(sources(&findings), [fixture.trigger("memory.yaml")]);
+}
+
+#[cfg(feature = "work-counters")]
+#[test]
+fn a_matching_disk_trigger_is_discovered_once_and_prepared_twice() {
+    let fixture = Fixture::new();
+    fixture.write_trigger("a-gate.yaml", GATE_TRIGGER);
+    let document = fixture.document("counted.md", "gate: yes\ncount: 3");
+    let context = build_resolution_context(&fixture.snapshot()).expect("fixture context");
+    let source = fixture.source(&document);
+    let findings = TriggerFindings::default();
+
+    for _ in 0..2 {
+        let (verdict, discoveries, preparations) =
+            counted(|| pre_validate_schema(&source, None, None, &context, &findings));
+        verdict.expect("a valid `count` satisfies the trigger");
+        assert_eq!((discoveries, preparations), (1, 2));
+    }
+}
+
+#[test]
+fn cleanup_that_removes_the_selecting_value_ends_the_trigger_for_the_verdict() {
+    let fixture = Fixture::new();
+    fixture.write_trigger("b-count.yaml", COUNT_TRIGGER);
+    let valid = fixture.document("valid.md", "$schema:\n  count: number\ncount: 3");
+    let wrong = fixture.document("wrong.md", "$schema:\n  count: number\ncount: many");
+    let findings = TriggerFindings::default();
+
+    let error = fixture.verdict(&valid, &findings).expect_err("`ticket` is required");
+    assert!(matches!(error, CompositionError::MissingProperties { .. }), "{error:?}");
+
+    #[cfg(feature = "work-counters")]
+    let (verdict, discoveries, preparations) = counted(|| fixture.verdict(&wrong, &findings));
+    #[cfg(not(feature = "work-counters"))]
+    let verdict = fixture.verdict(&wrong, &findings);
+    let pre = verdict.expect("the cleaned document no longer selects the trigger");
+    #[cfg(feature = "work-counters")]
+    assert_eq!((discoveries, preparations), (1, 2));
+
+    assert!(!pre.source.markdown.frontmatter().as_map().contains_key("count"));
+    let [dropped] = &pre.dropped_optionals[..] else {
+        panic!("one drop expected: {:?}", pre.dropped_optionals);
+    };
+    assert_eq!(dropped.property, "count");
+    assert_eq!(dropped.source, DroppedOptionalSource::Frontmatter);
+    assert_eq!(dropped.stage, DroppedOptionalStage::PreValidation);
+    assert!(!dropped.reason.is_empty());
+}
+
+#[test]
+fn cleaned_overrides_rematch_and_surviving_caller_origins_stay_wired() {
+    let fixture = Fixture::new();
+    fixture.write_trigger("b-count.yaml", COUNT_TRIGGER);
+    fixture.write_trigger(
+        "c-input.yaml",
+        "kind: schema-trigger\nmatch:\n  gate: string(required)\n$schema:\n  input: file(required;match(**/*spec*.md);eager)\n",
+    );
+    let document = fixture.document("overrides.md", "gate: yes\n$schema:\n  count: number");
+    let launch_dir = fixture.root.join("launch");
+    std::fs::create_dir_all(&launch_dir).expect("launch dir");
+    std::fs::write(launch_dir.join("launch-spec.md"), "x\n").expect("launch file");
+    let findings = TriggerFindings::default();
+
+    let overrides = serde_json::json!({ "count": "many", "input": "launch-spec.md" });
+    let pre = fixture
+        .verdict_with(&document, Some(&overrides), Some(&launch_dir), &findings)
+        .expect("the cleaned overrides no longer select the `ticket` trigger");
+    assert_eq!(pre.set_overrides, Some(serde_json::json!({ "input": "launch-spec.md" })));
+    let [dropped] = &pre.dropped_optionals[..] else {
+        panic!("one drop expected: {:?}", pre.dropped_optionals);
+    };
+    assert_eq!(dropped.property, "count");
+    assert_eq!(dropped.source, DroppedOptionalSource::Override);
+    assert_eq!(dropped.stage, DroppedOptionalStage::PreValidation);
+
+    let absent = serde_json::json!({ "count": "many", "input": "everywhere" });
+    let error = fixture
+        .verdict_with(&document, Some(&absent), Some(&launch_dir), &findings)
+        .expect_err("an unmatched file reference stays a rejected `input`");
+    assert!(
+        matches!(&error, CompositionError::SchemaValidation { problems, .. } if problems == &["/input"]),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn an_unmatched_document_gets_no_effective_schema_and_is_returned_unchanged() {
+    let fixture = Fixture::new();
+    fixture.write_trigger("a-gate.yaml", GATE_TRIGGER);
+    let document = fixture.document("plain.md", "title: Plain");
+    let overrides = serde_json::json!({ "other": 1 });
+    let original = fixture.source(&document);
+    let findings = TriggerFindings::default();
+
+    let pre = fixture
+        .verdict_with(&document, Some(&overrides), None, &findings)
+        .expect("nothing applies");
+
+    assert_eq!(pre.source.markdown.frontmatter().as_map(), original.markdown.frontmatter().as_map());
+    assert_eq!(pre.set_overrides, Some(overrides));
+    assert!(pre.dropped_optionals.is_empty());
+    assert_eq!(sources(&findings), [fixture.trigger("memory.yaml")], "the skipped trigger still warns");
+}
+
+#[test]
+fn a_malformed_authored_schema_is_a_parse_error_beside_recorded_findings() {
+    let fixture = Fixture::new();
+    let document = fixture.document(
+        "bad-grammar.md",
+        "$schema:\n  spec: 'file(required, match(**/*spec*.md))'\nspec: x",
+    );
+    let findings = TriggerFindings::default();
+
+    let error = fixture.verdict(&document, &findings).expect_err("the grammar is invalid");
+
+    let CompositionError::SchemaParse { source_path, property, .. } = &error else {
+        panic!("expected SchemaParse: {error:?}");
+    };
+    assert_eq!(source_path, &fixture.source(&document).resolved_path);
+    assert_eq!(property.as_deref(), Some("spec"));
+    assert_eq!(sources(&findings), [fixture.trigger("memory.yaml")], "recorded before the error");
+}
+
+#[test]
+fn the_first_reason_for_a_trigger_survives_later_changes_to_its_file() {
+    let fixture = Fixture::new();
+    let document = fixture.document("reason.md", "title: Reason");
+    let findings = TriggerFindings::default();
+    fixture.verdict(&document, &findings).expect("passes");
+    let first = findings.warnings()[0].message.clone();
+
+    fixture.write_trigger("memory.yaml", "kind: schema-trigger\nmatch: 42\n");
+    fixture.verdict(&document, &findings).expect("passes");
+
+    let [warning] = &findings.warnings()[..] else {
+        panic!("one finding expected");
+    };
+    assert_eq!(warning.message, first);
+    assert_eq!(findings.take_undelivered().len(), 1);
+    fixture.verdict(&document, &findings).expect("passes");
+    assert!(findings.take_undelivered().is_empty());
+}
+
+/// Each call discovers afresh: creation, replacement, removal, and repair of
+/// a trigger between synchronous calls are all seen.
+#[test]
+fn separate_calls_see_trigger_creation_replacement_removal_and_repair() {
+    let fixture = Fixture::new();
+    let document = fixture.document("fresh.md", "title: Fresh\ngate: yes");
+    let findings = TriggerFindings::default();
+    let trigger = "need-ticket.yaml";
+
+    fixture.verdict(&document, &findings).expect("no trigger applies");
+
+    fixture.write_trigger(trigger, "kind: schema-trigger\nmatch:\n  gate: string(required)\n$schema:\n  ticket: string(required)\n");
+    let error = fixture.verdict(&document, &findings).expect_err("`ticket` is required");
+    assert!(matches!(error, CompositionError::MissingProperties { .. }), "{error:?}");
+
+    fixture.write_trigger(trigger, "kind: schema-trigger\nmatch:\n  gate: string(required)\n$schema:\n  title: string(required)\n");
+    fixture.verdict(&document, &findings).expect("the replaced trigger is satisfied");
+
+    std::fs::remove_file(fixture.root.join("home/schemas").join(trigger)).expect("remove");
+    fixture.verdict(&document, &findings).expect("the removed trigger no longer applies");
+
+    fixture.write_trigger(trigger, "kind: schema-trigger\nmatch:\n");
+    fixture.verdict(&document, &findings).expect("a malformed trigger is skipped");
+    assert_eq!(sources(&findings), [fixture.trigger("memory.yaml"), fixture.trigger(trigger)]);
+    assert_eq!(findings.take_undelivered().len(), 2);
+
+    fixture.write_trigger(trigger, "kind: schema-trigger\nmatch:\n  gate: string(required)\n$schema:\n  ticket: string(required)\n");
+    let error = fixture.verdict(&document, &findings).expect_err("the repaired trigger applies");
+    assert!(matches!(error, CompositionError::MissingProperties { .. }), "{error:?}");
+    assert!(findings.take_undelivered().is_empty(), "the earlier warning is not repeated");
+}
+
+/// A schema root file that is not UTF-8 fails the scan itself: nothing is
+/// prepared, no partial findings are published, and standalone cleanup leaves
+/// its input untouched. The next call recovers once the file is valid.
+#[test]
+fn a_scan_that_cannot_read_a_root_file_fails_once_and_recovers() {
+    let fixture = Fixture::new();
+    let broken = fixture.write_trigger("z-broken.yaml", "");
+    std::fs::write(&broken, [0xff]).expect("write invalid UTF-8");
+    let document = fixture.document("scan.md", "title: Scan\ngate: yes\ncount: 3");
+    let context = build_resolution_context(&fixture.snapshot()).expect("fixture context");
+    let findings = TriggerFindings::default();
+
+    #[cfg(feature = "work-counters")]
+    let (verdict, discoveries, preparations) = counted(|| fixture.verdict(&document, &findings));
+    #[cfg(not(feature = "work-counters"))]
+    let verdict = fixture.verdict(&document, &findings);
+    let error = verdict.expect_err("the scan fails");
+    assert!(matches!(error, CompositionError::SchemaLoad { .. }), "{error:?}");
+    assert!(error.to_string().contains("z-broken.yaml"), "{error}");
+    #[cfg(feature = "work-counters")]
+    assert_eq!((discoveries, preparations), (1, 0));
+    assert!(findings.warnings().is_empty(), "a failed scan publishes nothing");
+
+    let source = fixture.source(&document);
+    let overrides = serde_json::json!({ "count": "many" });
+    let (cleaned, cleaned_overrides, dropped) =
+        drop_invalid_optionals(source.clone(), Some(overrides.clone()), None, &context, &findings);
+    assert_eq!(cleaned.markdown.frontmatter().as_map(), source.markdown.frontmatter().as_map());
+    assert_eq!(cleaned_overrides, Some(overrides));
+    assert!(dropped.is_empty());
+
+    fixture.write_trigger("z-broken.yaml", GATE_TRIGGER);
+    let error = fixture.verdict(&document, &findings).expect("recovers");
+    let _ = error;
     assert_eq!(sources(&findings), [fixture.trigger("memory.yaml")]);
 }

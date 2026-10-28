@@ -1100,6 +1100,43 @@ warning: [schema_validation] ignoring invalid schema trigger /home/me/schemas/me
 `md` and DMLS skip an invalid trigger the same way; see
 [Schemas Applied by Triggers](../../../darkmatter/docs/topics/schemas/schema-triggers.md).
 
+#### How long discovered triggers live
+
+A single launch pre-validation discovers the trigger files once and keeps the
+loaded rules and payloads for the length of that call. Matching still happens
+twice, against each pass's own values: first the cleanup pass (which drops
+invalid optional values), then the verdict.
+
+```mermaid
+flowchart TD
+  D["discover triggers, record findings"] -->|scan error| E["return the error, nothing prepared"]
+  D --> O["original caller values"]
+  O --> C["cleanup: match and prepare"]
+  C --> N["cleaned values and caller records"]
+  N --> V["verdict: match and prepare"]
+  V --> R["release the loaded triggers"]
+```
+
+Example: a trigger matches when `count` is a string or a number and also
+requires `ticket`, while the document's own `$schema` declares `count` as an
+optional number. A document whose `count` is a string matches the trigger in
+the cleanup pass, so the invalid `count` is dropped. The verdict pass sees no
+`count`, no longer selects that trigger, and the launch proceeds without
+`ticket`. (Cleanup drops only values the document's own `$schema` declares
+optional; a property declared only by a trigger is never cleaned away.)
+
+- **Edits between calls are seen.** Each call (and each standalone cleanup,
+  status report, or launch schema load) discovers again, so a trigger created,
+  changed, removed, or repaired between calls takes effect.
+- **Edits between the two passes are not.** The loaded trigger contents are
+  not replaced mid-call, and discovery is not an atomic snapshot of the
+  filesystem.
+- **An authored `$schema` still resolves in each preparation.**
+- **A failed scan stops the call.** A root that cannot be enumerated or read
+  (for example a trigger file that is not valid UTF-8) fails with a schema
+  load error before any preparation; standalone cleanup instead returns its
+  input unchanged.
+
 ### In the editor
 
 DMLS has no Claudine dependency and reads the schemas only from disk, through

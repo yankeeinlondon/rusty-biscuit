@@ -94,9 +94,12 @@ globals (`fm`, `ctx`, `current`, `env`, `err`, `timing`) are declared in
 baseline. Trigger files are `kind: schema-trigger`; a top-level `match:` list
 is AND and `group:` is OR. A discovered trigger that fails to load (envelope,
 payload, or import) is skipped with Darkmatter's `InvalidTriggerFinding` and
-the valid ones still apply; `load_effective_schema` records it in
+the valid ones still apply; `discover_schema_owner` records it in
 `InvocationContext::trigger_findings()` (`composition/schema/findings.rs`)
-before the authored `$schema` resolves, so every preliminary check carries it,
+before the authored `$schema` resolves (one `pre_validate_schema` call
+discovers once and shares the loaded triggers between its cleanup and verdict
+preparations, matching each pass's current values; every other entry point
+— standalone cleanup, status, `load_effective_schema` — discovers on its own), so every preliminary check carries it,
 and the CLI prints one `[schema_validation]` warning per trigger per
 invocation, ahead of any unrelated error. It is never a `CompositionError`; a
 `$schema` naming a trigger is still `SchemaLoad`. Every
