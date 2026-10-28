@@ -328,6 +328,15 @@ pub(crate) fn load_catalog(
             }
         }
         let category = category.ok_or_else(|| invalid(format!("`types.{name}` has no `category(...)`")))?;
+        let declarations: Vec<_> = atoms
+            .iter()
+            .filter_map(|atom| match &atom.ty {
+                TypeExpr::Function(function_type) => Some((**function_type).clone()),
+                _ => None,
+            })
+            .collect();
+        super::call_binding::compile_declared_fact(name, &declarations)
+            .map_err(|error| invalid(format!("`types.{name}`: {error}")))?;
         let category_index = categories
             .iter()
             .position(|declared| declared.name == category)

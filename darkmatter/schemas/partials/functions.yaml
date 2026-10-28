@@ -75,6 +75,7 @@ types:
         function(
             parameters(x: unknown | null);
             returns(boolean);
+            narrows(x: unknown[]; true-iff);
             category(Type Predicates);
             example(is_array([1, 2, 3]) => true);
         ) -> Returns true when the value is an array.
@@ -82,6 +83,7 @@ types:
         function(
             parameters(x: unknown | null);
             returns(boolean);
+            narrows(x; false-implies);
             category(Type Predicates);
             example(is_empty("") => true);
         ) -> Returns true when the value is null, empty text, an empty array, or an empty object.
@@ -103,6 +105,7 @@ types:
         function(
             parameters(x: unknown | null);
             returns(boolean);
+            narrows(x: null; true-iff);
             category(Type Predicates);
             example(is_null(null) => true);
         ) -> Returns true when the value is null.
@@ -110,6 +113,7 @@ types:
         function(
             parameters(x: unknown | null);
             returns(boolean);
+            narrows(x: number; true-iff);
             category(Type Predicates);
             example(is_number(42) => true);
         ) -> Returns true when the value is a number; numeric text such as `"4"` is not.
@@ -117,6 +121,7 @@ types:
         function(
             parameters(x: unknown | null);
             returns(boolean);
+            narrows(x: object; true-iff);
             category(Type Predicates);
             example(is_object({a: 1}) => true);
         ) -> Returns true when the value is an object.
@@ -131,6 +136,7 @@ types:
         function(
             parameters(x: unknown | null);
             returns(boolean);
+            narrows(x: string; true-iff);
             category(Type Predicates);
             example(is_string("hello") => true);
         ) -> Returns true when the value is text.
@@ -625,6 +631,7 @@ types:
         function(
             parameters(value: unknown | null);
             returns(boolean);
+            narrows(value: file; true-implies);
             category(Filesystem);
             fallible;
             example(file_exists("fixture.md") => true);
@@ -712,6 +719,7 @@ types:
         function(
             parameters(value: unknown | null);
             returns(boolean);
+            narrows(value: file; true-implies);
             category(Filesystem);
             example(is_file_type("./docs/spec.md") => true);
             example(is_file_type("hello world") => true);

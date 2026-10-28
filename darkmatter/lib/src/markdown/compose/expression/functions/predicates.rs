@@ -4,19 +4,15 @@ use serde_json::Value;
 
 use super::{FunctionBinding, bound, json_number, numberlike_value};
 use crate::markdown::compose::expression::call_binding::BoundCall;
-use crate::markdown::compose::expression::call_binding::FactKind::{FalseImplies, TrueIff, TrueImplies};
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding::pure("is_null", &["isnull"], is_null).narrowing("x", TrueIff, Some("null")),
-    // True for `null` and empty values, so only the false side learns presence.
-    FunctionBinding::pure("is_empty", &["isempty"], is_empty).narrowing("x", FalseImplies, None),
-    FunctionBinding::pure("is_string", &["isstring"], is_string).narrowing("x", TrueIff, Some("string")),
-    FunctionBinding::pure("is_number", &["isnumber"], is_number).narrowing("x", TrueIff, Some("number")),
-    FunctionBinding::pure("is_array", &["isarray"], is_array).narrowing("x", TrueIff, Some("unknown[]")),
-    FunctionBinding::pure("is_object", &["isobject"], is_object).narrowing("x", TrueIff, Some("object")),
-    // True only for text a file parameter can take, so the true side proves
-    // `file`; the false side proves nothing (`"https://"` is still a string).
-    FunctionBinding::pure("is_file_type", &[], is_file_type).narrowing("value", TrueImplies, Some("file")),
+    FunctionBinding::pure("is_null", &["isnull"], is_null),
+    FunctionBinding::pure("is_empty", &["isempty"], is_empty),
+    FunctionBinding::pure("is_string", &["isstring"], is_string),
+    FunctionBinding::pure("is_number", &["isnumber"], is_number),
+    FunctionBinding::pure("is_array", &["isarray"], is_array),
+    FunctionBinding::pure("is_object", &["isobject"], is_object),
+    FunctionBinding::pure("is_file_type", &[], is_file_type),
     FunctionBinding::pure("is_positive", &["ispositive"], is_positive),
     FunctionBinding::pure("is_negative", &["isnegative"], is_negative),
     FunctionBinding::pure("is_integer", &["isinteger"], is_integer),

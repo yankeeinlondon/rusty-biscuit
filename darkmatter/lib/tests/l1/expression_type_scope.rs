@@ -237,17 +237,17 @@ fn type_predicates_narrow_a_declared_union_on_both_sides() {
 }
 
 #[test]
-fn file_exists_proves_a_present_string_without_touching_the_filesystem() {
+fn file_exists_proves_a_file_without_touching_the_filesystem() {
     // The path names nothing on disk (and would be fetched if it were run):
     // the true side holds anyway, because no handler runs.
     let frontmatter = json!({ "plan": "https://127.0.0.1:9/never-fetched.md" });
     let schema = schema("plan: [string, number]\n");
     let declared = DeclaredTypes::new(Some(&schema)).with_static_frontmatter(&frontmatter);
-    assert_eq!(narrowed(&declared, "file_exists(plan)", Polarity::True, "plan"), "string");
-    assert_eq!(narrowed(&declared, "fileExists(plan)", Polarity::True, "plan"), "string");
+    assert_eq!(narrowed(&declared, "file_exists(plan)", Polarity::True, "plan"), "file");
+    assert_eq!(narrowed(&declared, "fileExists(plan)", Polarity::True, "plan"), "file");
     let unknown = DeclaredTypes::new(None);
     assert_eq!(narrowed(&unknown, "file_exists(plan)", Polarity::False, "plan"), "unknown");
-    assert_eq!(narrowed(&unknown, "file_exists(plan)", Polarity::True, "plan"), "string");
+    assert_eq!(narrowed(&unknown, "file_exists(plan)", Polarity::True, "plan"), "file");
 }
 
 /// The specification's equality table, row by row.

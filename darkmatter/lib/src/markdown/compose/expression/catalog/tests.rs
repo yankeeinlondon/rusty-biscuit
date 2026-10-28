@@ -624,3 +624,67 @@ fn has_binary_and_has_command_share_one_probe() {
         );
     }
 }
+
+/// A `narrows` clause on each overload of `is_string`; `second` replaces the
+/// second overload's clause (`None` leaves it absent).
+fn with_narrows(first: &str, second: Option<&str>) -> String {
+    let add = |signature: &str, clause: &str| signature.replacen("returns(boolean);", &format!("returns(boolean); {clause};"), 1);
+    let one = "function(parameters(x: string); returns(boolean); category(Logical)) -> One.";
+    let two = "function(parameters(x: number, y: number); returns(boolean); category(Logical)) -> Two.";
+    let second = second.map_or_else(|| two.to_string(), |clause| add(two, clause));
+    FIXTURE.replacen(one, &add(one, first), 1).replacen(two, &second, 1)
+}
+
+/// Overloads share one declared fact: the control loads and every
+/// disagreement fails the whole file naming `types.is_string`.
+#[test]
+fn overloads_must_agree_on_the_declared_fact() {
+    let load = |source: &str| load_catalog(source, "fixture.yaml", EXAMPLE_FILES);
+    load(&with_narrows("narrows(x: string; true-iff)", Some("narrows(x: string; true-iff)"))).expect("control: same fact");
+    for (cell, source) in [
+        ("absent on the second", with_narrows("narrows(x: string; true-iff)", None)),
+        ("different kind", with_narrows("narrows(x: string; true-iff)", Some("narrows(x: string; true-implies)"))),
+        ("different target", with_narrows("narrows(x: string; true-iff)", Some("narrows(x: number; true-iff)"))),
+        ("presence versus type", with_narrows("narrows(x; false-implies)", Some("narrows(x: string; false-implies)"))),
+    ] {
+        let error = load(&source).expect_err(cell);
+        assert!(matches!(error, CatalogError::Invalid { .. }), "{cell}: {error:?}");
+        assert!(error.to_string().contains("`types.is_string`"), "{cell}: {error}");
+    }
+}
+
+/// Targets compare by meaning: description and constraint order do not make
+/// two overloads disagree.
+#[test]
+fn equivalent_target_spellings_agree() {
+    let source = with_narrows(
+        "narrows(x: string(min(1); max(5)); true-implies)",
+        Some("narrows(x: string(max(5); min(1)); true-implies)"),
+    );
+    load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).expect("equivalent spellings agree");
+}
+
+/// A clause naming a parameter only the later overload declares is not
+/// skipped on the overload that omits it: the grammar rejects it per overload.
+#[test]
+fn a_clause_naming_a_parameter_the_overload_omits_fails_the_load() {
+    let source = with_narrows("narrows(x: string; true-iff)", Some("narrows(y: string; true-implies)"));
+    let error = load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).expect_err("y is not declared");
+    assert!(error.to_string().contains("does not declare") || error.to_string().contains("different"), "{error}");
+    let only_later = FIXTURE.replacen(
+        "function(parameters(x: number, y: number); returns(boolean); category(Logical)) -> Two.",
+        "function(parameters(x: number, y: number); returns(boolean); narrows(y: number; true-implies); category(Logical)) -> Two.",
+        1,
+    );
+    let error = load_catalog(&only_later, "fixture.yaml", EXAMPLE_FILES).expect_err("only the later overload declares");
+    assert!(error.to_string().contains("`types.is_string`"), "{error}");
+}
+
+/// Overloads with one binding contract stay duplicates whatever their clauses say.
+#[test]
+fn duplicate_binding_contracts_stay_duplicates_despite_differing_clauses() {
+    let source = with_narrows("narrows(x: string; true-iff)", Some("narrows(x; false-implies)"))
+        .replacen("parameters(x: number, y: number)", "parameters(x: string)", 1);
+    let error = load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).expect_err("same contract");
+    assert!(error.to_string().contains("the same binding contract"), "{error}");
+}

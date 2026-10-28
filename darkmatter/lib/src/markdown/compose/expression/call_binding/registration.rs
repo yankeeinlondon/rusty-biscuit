@@ -1,7 +1,7 @@
 //! Function registrations: compiled overloads plus the Rust-side facts a
 //! signature cannot express (evaluation mode, source exclusions, numeric
-//! recovery, a narrowing fact), validated once when the registration is
-//! built.
+//! recovery), and the narrowing fact the signatures' `narrows(...)` clauses
+//! declare, validated once when the registration is built.
 
 use std::borrow::Cow;
 
@@ -9,8 +9,10 @@ use super::signature::{CompiledParameter, CompiledSignature};
 use super::translate::{NoNamedTypes, TranslateError, TypeResolver};
 use crate::markdown::coercion::{Shape, ValueKind};
 use crate::markdown::schemas::simplified::{
-    FunctionType, PropertyAtom, PropertyDef, TypeExpr, grammar::parse_type_definition, serialize_property_def,
+    FunctionType, NarrowsKind, PropertyAtom, PropertyDef, TypeExpr, grammar::parse_type_definition,
+    serialize_property_def,
 };
+use crate::markdown::schemas::simplified::types::{narrows_target_problem, returns_exact_boolean};
 
 /// When a function's arguments are evaluated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -59,11 +61,10 @@ pub enum FactType {
     Type(Cow<'static, str>),
 }
 
-/// A registered narrowing fact: what a call's boolean result proves about
+/// A narrowing fact, declared by a function's `narrows(...)` clauses: what a call's boolean result proves about
 /// the original value of the argument bound to `parameter`.
 ///
-/// Analysis reads it from the registration (built-ins and test or host
-/// functions alike); no predicate runs to narrow a type.
+/// Analysis reads it from the registration; no predicate runs to narrow a type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NarrowingFact {
     parameter: String,
@@ -228,7 +229,6 @@ pub struct RegistrationBuilder {
     evaluation: EvaluationMode,
     exclusions: Vec<(String, Vec<ValueKind>)>,
     recovery: Option<NumericRecovery>,
-    fact: Option<(String, FactKind, FactType)>,
     malformed_reference: Option<String>,
 }
 
@@ -240,7 +240,6 @@ impl RegistrationBuilder {
             evaluation: EvaluationMode::Eager,
             exclusions: Vec::new(),
             recovery: None,
-            fact: None,
             malformed_reference: None,
         }
     }
@@ -262,13 +261,6 @@ impl RegistrationBuilder {
             subject: subject.into(),
             fallback: fallback.into(),
         });
-        self
-    }
-
-    /// Registers the narrowing fact the function's boolean result proves
-    /// about the argument bound to `parameter`; a later call replaces it.
-    pub fn narrows(mut self, parameter: impl Into<String>, kind: FactKind, ty: FactType) -> Self {
-        self.fact = Some((parameter.into(), kind, ty));
         self
     }
 
@@ -382,10 +374,7 @@ impl RegistrationBuilder {
             }
         }
 
-        let fact = match self.fact {
-            Some((parameter, kind, ty)) => Some(compile_fact(&name, &overloads, parameter, kind, ty)?),
-            None => None,
-        };
+        let fact = compile_declared_fact(&name, &types)?;
 
         let malformed_reference = match self.malformed_reference {
             Some(parameter) => Some(reference_rule_index(&name, &overloads, parameter)?),
@@ -432,59 +421,131 @@ fn reference_rule_index(
     Ok(index)
 }
 
-/// Validates a narrowing fact against the compiled overloads.
-fn compile_fact(
+/// Compiles the narrowing fact a function's `narrows(...)` clauses declare.
+///
+/// The one authority for fact validity: registration and catalog loading both
+/// call it, and it re-checks what the grammar checks because a
+/// programmatically built [`FunctionType`] never passed through the grammar.
+/// `Ok(None)` means no overload declares a clause.
+///
+/// ## Errors
+///
+/// [`RegistrationError::InvalidFact`] when a declaring overload does not
+/// return exactly `boolean`, names a rest or undeclared parameter, or has an
+/// unusable target; when an overload omits the clause or the parameter, or
+/// disagrees with another on parameter, position, kind, or target; or when a
+/// `true-iff` target is not `null` or one bare value family.
+pub(crate) fn compile_declared_fact(
     function: &str,
-    overloads: &[CompiledSignature],
-    parameter: String,
-    kind: FactKind,
-    ty: FactType,
-) -> Result<NarrowingFact, RegistrationError> {
+    overloads: &[FunctionType],
+) -> Result<Option<NarrowingFact>, RegistrationError> {
     let fail = |message: String| RegistrationError::InvalidFact {
         function: function.to_string(),
         message,
     };
-    if overloads.iter().any(|signature| !matches!(signature.returns(), Shape::Boolean { .. })) {
-        return Err(fail("only a function returning `boolean` can narrow".to_string()));
-    }
-    let mut positions = overloads.iter().filter_map(|signature| signature.parameter(&parameter));
-    let Some(first) = positions.next() else {
-        return Err(RegistrationError::UnknownParameter {
-            function: function.to_string(),
-            rule: "narrows",
-            parameter,
-        });
+    let Some(first) = overloads.iter().position(|overload| overload.narrows.is_some()) else {
+        return Ok(None);
     };
-    let index = first.index();
-    if first.is_rest() || positions.any(|other| other.index() != index || other.is_rest()) {
-        return Err(fail(format!("parameter `{parameter}` must be a single argument at one position in every overload")));
-    }
-    let target = match &ty {
-        FactType::NonNull => None,
-        FactType::Type(text) => {
-            let def = parse_type_definition(function, text)
-                .map_err(|error| fail(format!("`{text}` does not parse: {error}")))?;
-            let PropertyDef::Single(atom) = def else {
-                return Err(fail(format!("`{text}` must be a single type, not a union")));
-            };
-            if matches!(atom.ty, TypeExpr::Union(_)) {
-                return Err(fail(format!("`{text}` must be a single type, not a union")));
-            }
-            if kind == FactKind::TrueIff && !crate::markdown::compose::expression::scope::is_exact_fact_type(&atom) {
-                return Err(fail(format!(
-                    "a true-iff fact needs `null` or the bare type of one value family, not `{text}`"
-                )));
-            }
-            Some(atom)
+    let mut compiled: Option<(NarrowingFact, String)> = None;
+    for (index, overload) in overloads.iter().enumerate() {
+        let Some(clause) = &overload.narrows else {
+            return Err(fail(format!(
+                "overload {} declares `narrows` but overload {} does not; every overload must declare the same fact",
+                first + 1,
+                index + 1
+            )));
+        };
+        if !returns_exact_boolean(&overload.returns) {
+            return Err(fail(format!(
+                "overload {}: `narrows` requires `returns(boolean)`",
+                index + 1
+            )));
         }
-    };
-    Ok(NarrowingFact {
-        parameter,
-        index,
-        kind,
-        ty,
-        target,
-    })
+        let Some(position) = overload
+            .parameters
+            .as_slice()
+            .iter()
+            .position(|parameter| parameter.name == clause.parameter)
+        else {
+            return Err(fail(format!(
+                "overload {}: `narrows` names parameter `{}`, which this overload does not declare",
+                index + 1,
+                clause.parameter
+            )));
+        };
+        if overload.parameters.as_slice()[position].rest {
+            return Err(fail(format!(
+                "overload {}: `narrows` names parameter `{}`, which is a rest parameter",
+                index + 1,
+                clause.parameter
+            )));
+        }
+        let (ty, target, key) = match &clause.target {
+            None => (FactType::NonNull, None, String::new()),
+            Some(atom) => {
+                if let Some(problem) = narrows_target_problem(atom) {
+                    return Err(fail(format!("overload {}: {problem}", index + 1)));
+                }
+                if matches!(atom.ty, TypeExpr::Union(_)) {
+                    return Err(fail(format!(
+                        "overload {}: a narrowing target must be a single type, not a union",
+                        index + 1
+                    )));
+                }
+                if clause.kind == NarrowsKind::TrueIff
+                    && !crate::markdown::compose::expression::scope::is_exact_fact_type(atom)
+                {
+                    return Err(fail(format!(
+                        "overload {}: a true-iff fact needs `null` or the bare type of one value family, not `{}`",
+                        index + 1,
+                        canonical_target(atom)
+                    )));
+                }
+                let key = canonical_target(atom);
+                (FactType::Type(Cow::Owned(key.clone())), Some(atom.clone()), key)
+            }
+        };
+        let kind = match clause.kind {
+            NarrowsKind::TrueImplies => FactKind::TrueImplies,
+            NarrowsKind::TrueIff => FactKind::TrueIff,
+            NarrowsKind::FalseImplies => FactKind::FalseImplies,
+        };
+        let fact = NarrowingFact {
+            parameter: clause.parameter.clone(),
+            index: position,
+            kind,
+            ty,
+            target,
+        };
+        match &compiled {
+            None => compiled = Some((fact, key)),
+            Some((earlier, earlier_key)) => {
+                if earlier.parameter != fact.parameter
+                    || earlier.index != fact.index
+                    || earlier.kind != fact.kind
+                    || *earlier_key != key
+                    || earlier.ty != fact.ty
+                {
+                    return Err(fail(format!(
+                        "overloads {} and {} declare different `narrows` facts; every overload must declare the same one",
+                        first + 1,
+                        index + 1
+                    )));
+                }
+            }
+        }
+    }
+    Ok(compiled.map(|(fact, _)| fact))
+}
+
+/// A target's spelling independent of its description, constraint order, and
+/// source location.
+fn canonical_target(atom: &PropertyAtom) -> String {
+    let mut atom = atom.clone();
+    atom.description = None;
+    atom.constraints.sort_by_key(|constraint| format!("{constraint:?}"));
+    atom.array_constraints.sort_by_key(|constraint| format!("{constraint:?}"));
+    serialize_property_def(&PropertyDef::Single(atom))
 }
 
 /// Recovery needs a required subject, an optional numeric fallback, and a

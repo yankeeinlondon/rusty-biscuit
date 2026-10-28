@@ -6,8 +6,10 @@
 //! (keys sorted at every level, pretty-printed, one trailing newline). The
 //! reader ([`HostFunctions::analysis_only`]) treats the file as inert data
 //! and rebuilds every registration through the same [`RegistrationBuilder`]
-//! from the catalog's signatures, so a fact the catalog cannot carry fails
-//! exactly as it would in the host. It is strict: a duplicate key, trailing
+//! from the catalog's signatures. The catalog's `narrows(...)` clause is the
+//! authority for the narrowing fact; the artifact's `facts` entry is derived
+//! output, and a recorded fact that differs from the catalog's (including a
+//! missing or extra one) makes the function incomplete. It is strict: a duplicate key, trailing
 //! content, an unknown field, or a field that is absent, `null`, or of the
 //! wrong type is never defaulted. A problem with the whole file makes every
 //! catalog function incomplete; a problem with one function's entry makes
@@ -367,14 +369,26 @@ fn rebuild(
     if let Some((subject, fallback)) = &recovery {
         builder = builder.numeric_recovery(subject.clone(), fallback.clone());
     }
-    if let Some(fact) = parsed_facts.first() {
-        builder = builder.narrows(fact.parameter.clone(), fact.kind, fact.ty.clone());
-    }
     if let Some((parameter, _)) = &malformed {
         builder = builder.false_for_malformed_reference(parameter.clone());
     }
     let registration = catalog.build(builder).map_err(|error| format!("does not register: {error}"))?;
 
+    match (parsed_facts.first(), registration.narrowing_fact()) {
+        (None, Some(built)) => {
+            return Err(format!(
+                "records no fact, but the catalog declares one for `{}`",
+                built.parameter()
+            ));
+        }
+        (Some(fact), None) => {
+            return Err(format!(
+                "records a fact for `{}`, but the catalog declares none",
+                fact.parameter
+            ));
+        }
+        _ => {}
+    }
     if let (Some(fact), Some(built)) = (parsed_facts.first(), registration.narrowing_fact())
         && fact.position != built.index()
     {
@@ -383,6 +397,14 @@ fn rebuild(
             fact.position,
             fact.parameter,
             built.index()
+        ));
+    }
+    if let (Some(fact), Some(built)) = (parsed_facts.first(), registration.narrowing_fact())
+        && (fact.parameter != built.parameter() || fact.kind != built.kind() || fact.ty != *built.fact_type())
+    {
+        return Err(format!(
+            "records a fact that differs from the one the catalog declares for `{}`",
+            built.parameter()
         ));
     }
     if let (Some((parameter, recorded)), Some(built)) = (&malformed, registration.malformed_reference_parameter())

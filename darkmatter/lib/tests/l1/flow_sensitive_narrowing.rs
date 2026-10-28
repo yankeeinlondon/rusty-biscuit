@@ -21,6 +21,7 @@ use darkmatter::markdown::compose::expression::{
 };
 use darkmatter::markdown::compose::page_blocks::BodyGuards;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeSource};
+use darkmatter::markdown::schemas::simplified::{PropertyAtom, PropertyDef, TypeExpr, grammar::parse_type_definition};
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, SimplifiedSchema, parse_yaml_schema};
 use serde_json::json;
 use tempfile::TempDir;
@@ -56,12 +57,25 @@ fn category_of(declared: &DeclaredTypes<'_>, expression: &str, function: &str) -
         .category()
 }
 
-/// A one-argument predicate counting its entries, registered with `fact`.
-fn predicate(name: &str, fact: Option<(FactKind, FactType)>) -> TestFunctionGuard {
-    let mut builder = FunctionRegistration::builder(name, "function(parameters(value: unknown | null); returns(boolean))");
-    if let Some((kind, ty)) = fact {
-        builder = builder.narrows("value", kind, ty);
+/// The `narrows(...)` clause text declaring `fact` on `value`.
+fn clause(kind: FactKind, ty: &FactType) -> String {
+    let kind = match kind {
+        FactKind::TrueImplies => "true-implies",
+        FactKind::TrueIff => "true-iff",
+        FactKind::FalseImplies => "false-implies",
+    };
+    match ty {
+        FactType::NonNull => format!("narrows(value; {kind})"),
+        FactType::Type(text) => format!("narrows(value: {text}; {kind})"),
     }
+}
+
+/// A one-argument predicate counting its entries, declaring `fact` in its
+/// signature.
+fn predicate(name: &str, fact: Option<(FactKind, FactType)>) -> TestFunctionGuard {
+    let narrows = fact.map(|(kind, ty)| format!("; {}", clause(kind, &ty))).unwrap_or_default();
+    let signature = format!("function(parameters(value: unknown | null); returns(boolean){narrows})");
+    let builder = FunctionRegistration::builder(name, signature);
     hooks::register(builder.build().expect("the predicate registers"), Arc::new(|_| Ok(json!(true))))
 }
 
@@ -174,37 +188,80 @@ mod registered_facts {
         assert_eq!(narrowed(&declared, "looks_empty(x)", Polarity::True, "x"), "number | null");
     }
 
-    /// Registration validates a fact before anything evaluates.
+    /// Registration validates a declared fact before anything evaluates:
+    /// the grammar rejects what is wrong with one clause, the shared
+    /// compiler what is wrong across overloads or with a family.
     #[test]
     fn registration_rejects_invalid_facts() {
-        let build = |signature: &str, parameter: &str, kind: FactKind, fact: FactType| {
-            FunctionRegistration::builder("pred", signature).narrows(parameter, kind, fact).build()
+        let build = |returns: &str, parameter: &str, kind: FactKind, fact: &FactType| {
+            let clause = clause(kind, fact).replacen("(value", &format!("({parameter}"), 1);
+            let signature = format!("function(parameters(value: unknown | null); returns({returns}); {clause})");
+            FunctionRegistration::builder("pred", signature).build()
         };
-        let boolean = "function(parameters(value: unknown | null); returns(boolean))";
         assert!(matches!(
-            build("function(parameters(value: unknown | null); returns(number))", "value", FactKind::TrueIff, ty("number")),
-            Err(RegistrationError::InvalidFact { .. })
+            build("number", "value", FactKind::TrueIff, &ty("number")),
+            Err(RegistrationError::Grammar { .. })
         ));
         assert!(matches!(
-            build(boolean, "other", FactKind::TrueImplies, ty("number")),
-            Err(RegistrationError::UnknownParameter { rule: "narrows", .. })
+            build("boolean", "other", FactKind::TrueImplies, &ty("number")),
+            Err(RegistrationError::Grammar { .. })
         ));
         for not_a_family in ["file", "string(min(3))", "enum(a, b)"] {
             assert!(
-                matches!(build(boolean, "value", FactKind::TrueIff, ty(not_a_family)), Err(RegistrationError::InvalidFact { .. })),
+                matches!(build("boolean", "value", FactKind::TrueIff, &ty(not_a_family)), Err(RegistrationError::InvalidFact { .. })),
                 "{not_a_family}"
             );
-            assert!(build(boolean, "value", FactKind::TrueImplies, ty(not_a_family)).is_ok(), "{not_a_family}");
+            assert!(build("boolean", "value", FactKind::TrueImplies, &ty(not_a_family)).is_ok(), "{not_a_family}");
         }
         assert!(matches!(
-            build(boolean, "value", FactKind::TrueImplies, ty("string | number")),
-            Err(RegistrationError::InvalidFact { .. })
+            build("boolean", "value", FactKind::TrueImplies, &ty("string | number")),
+            Err(RegistrationError::Grammar { .. })
         ));
         for family in ["string", "number", "boolean", "object", "unknown[]", "null"] {
-            let fact = build(boolean, "value", FactKind::TrueIff, ty(family)).expect(family);
+            let fact = build("boolean", "value", FactKind::TrueIff, &ty(family)).expect(family);
             let fact = fact.narrowing_fact().expect("registered");
             assert_eq!((fact.parameter(), fact.index(), fact.kind()), ("value", 0, FactKind::TrueIff));
         }
+    }
+
+    /// Every overload must declare the same fact; a programmatic overload
+    /// that skipped the grammar is checked by the compiler, not skipped.
+    #[test]
+    fn registration_rejects_overloads_that_disagree_on_the_fact() {
+        let one = "function(parameters(value: unknown | null); returns(boolean); narrows(value: string; true-iff))";
+        let build = |second: &str| FunctionRegistration::builder("pred", format!("{one} | {second}")).build();
+        let invalid = |result: Result<FunctionRegistration, RegistrationError>| {
+            matches!(result, Err(RegistrationError::InvalidFact { .. }))
+        };
+        assert!(
+            build("function(parameters(value: unknown | null, extra: string); returns(boolean); narrows(value: string; true-iff))")
+                .is_ok(),
+            "control: both overloads declare the same fact"
+        );
+        assert!(invalid(build("function(parameters(value: unknown | null, extra: string); returns(boolean))")), "absent");
+        assert!(invalid(build(
+            "function(parameters(value: unknown | null, extra: string); returns(boolean); narrows(value: number; true-iff))"
+        )), "different target");
+        assert!(invalid(build(
+            "function(parameters(value: unknown | null, extra: string); returns(boolean); narrows(value: string; true-implies))"
+        )), "different kind");
+        assert!(invalid(build(
+            "function(parameters(extra: string, value: unknown | null); returns(boolean); narrows(value: string; true-iff))"
+        )), "different position");
+        assert!(invalid(build(
+            "function(parameters(value: unknown | null, extra: string); returns(boolean); narrows(extra; false-implies))"
+        )), "different parameter and kind");
+
+        // Only the later overload lacks the parameter the clause names.
+        let parse = |text: &str| match parse_type_definition("pred", text).expect("parses") {
+            PropertyDef::Single(PropertyAtom { ty: TypeExpr::Function(function), .. }) => *function,
+            other => panic!("one function, found {other:?}"),
+        };
+        let first = parse(one);
+        let mut later = parse("function(parameters(other: unknown | null, extra: string); returns(boolean); narrows(other; false-implies))");
+        later.narrows.as_mut().expect("clause").parameter = "value".into();
+        let result = FunctionRegistration::builder_from_types("pred", vec![first, later]).build();
+        assert!(matches!(result, Err(RegistrationError::InvalidFact { .. })), "{:?}", result.map(|_| ()));
     }
 }
 

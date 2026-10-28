@@ -1,5 +1,4 @@
 use super::FunctionBinding;
-use crate::markdown::compose::expression::call_binding::FactKind::TrueImplies;
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
     FunctionBinding::context("absolute", &[], super::absolute_fn),
@@ -7,7 +6,6 @@ pub(super) const BINDINGS: &[FunctionBinding] = &[
     // The handler returns false for `null`, every non-text value, and
     // malformed reference text, which it never looks up.
     FunctionBinding::context("file_exists", &["fileexists"], super::file_exists_fn)
-        .narrowing("value", TrueImplies, Some("string"))
         .false_for_malformed_reference("value"),
     FunctionBinding::context("find_files", &["findfiles"], super::find_files_fn),
     FunctionBinding::context("has_command", &["hascommand"], super::has_command_fn),

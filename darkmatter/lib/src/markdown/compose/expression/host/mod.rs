@@ -236,8 +236,7 @@ pub struct HostFunctionsBuilder {
 impl HostFunctionsBuilder {
     /// Registers `canonical` (its catalog name) with `aliases`. `configure`
     /// adds the registration facts to the builder over the catalog's
-    /// signatures ([`RegistrationBuilder::narrows`],
-    /// [`RegistrationBuilder::reject_sources`],
+    /// signatures ([`RegistrationBuilder::reject_sources`],
     /// [`RegistrationBuilder::numeric_recovery`],
     /// [`RegistrationBuilder::false_for_malformed_reference`]).
     pub fn function(

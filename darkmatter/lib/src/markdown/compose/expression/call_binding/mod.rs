@@ -51,6 +51,7 @@ pub use registration::{
     EvaluationMode, FactKind, FactType, FunctionRegistration, NarrowingFact, NumericRecovery, RegistrationBuilder,
     RegistrationError,
 };
+pub(crate) use registration::compile_declared_fact;
 pub use signature::{CompiledParameter, CompiledSignature};
 pub use translate::{
     NoNamedTypes, PropertyShape, TranslateError, TypeResolver, property_shape_from_def,
