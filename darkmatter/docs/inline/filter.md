@@ -22,6 +22,13 @@ Both `->` and `=>` are accepted with identical semantics in all anonymous
 functions. Sources are written directly, such as `tasks`, `ctx.packages`,
 `fm.tasks`, or `local.team.members`, without interpolation delimiters.
 
+Sources initially support identifiers and dotted properties, including dashed
+identifiers; bracket access, calls, and operators are not source syntax. Put the
+optional positional function before named options. Callback and condition
+values are quoted on one opener line. Unknown or duplicate options, bare flags,
+extra positional arguments, and empty callback/condition values are errors,
+even in a skipped region. Option names and ordering values are case-sensitive.
+
 ```md
 ---
 $schema:
@@ -107,8 +114,10 @@ Output:
 - Ada: 90
 ```
 
-The pattern binds the input entry, not the predicate's truthy result. Nested
-patterns, defaults, and rest bindings are outside the initial scope. Missing
+The pattern binds the input entry, not the predicate's truthy result. Patterns
+are nonempty with distinct identifier fields; extra input fields are allowed.
+Aliases, quoted/computed keys, array patterns, nested patterns, defaults, rest
+bindings, and trailing commas are outside the initial grammar. Missing
 pattern fields are errors: reject provably incompatible input shapes
 statically and check uncertain shapes at runtime.
 
@@ -159,7 +168,7 @@ Ordinary frontmatter inheritance retains its existing behavior.
 | `when="expression"` | Gate the entire block once using the enclosing scope |
 | `filter="item => predicate"` | Additional per-item selection after the positional predicate |
 | `sort="item => key"` | Sort selected original items by a computed key |
-| `sort-order="desc"` | Descending instead of default ascending order |
+| `sort-order="asc"` or `sort-order="desc"` | Ascending by default; requires `sort=` |
 | `while="item => predicate"` | Stop before the first falsey result |
 | `until="item => predicate"` | Stop before the first truthy result |
 
@@ -217,7 +226,7 @@ For declared people with `active`, `name`, and numeric `age` properties:
 Sort keys are computed once per selected item, before stopping. Numeric keys
 compare numerically; string keys use case-sensitive, locale-independent
 ordering. Equal keys preserve their previous order even in a descending sort.
-Missing or null keys, mixed numeric/string keys, and object or array keys are
+Missing or null keys, boolean keys, mixed numeric/string keys, and object or array keys are
 errors. Use an explicit fallback or normalization in the selector when needed,
 such as `sort="person => lower(person.name)"`.
 
@@ -230,7 +239,12 @@ Maps, filters, and conditional regions share one Markdown-aware structural
 traversal. Document frontmatter preparation finishes before body evaluation.
 An outer false condition skips an inner filter; an inner condition can read an
 outer iteration's local bindings. Iterations do not rerun frontmatter or
-restart the whole document pipeline.
+restart the whole document pipeline. Finish structural callbacks and body
+preparation before ordinary body interpolation, then run the existing body
+shell, link-resolution, transclusion, cleanup, and normalization stages. A later
+predicate failure can prevent earlier bodies' shell commands from running.
+Children retain existing concurrency and output placement. Explicit expression
+effects, including `as_markdown()`, run when their expression evaluates.
 
 Carry immutable lexical scopes and source provenance through interpolation,
 shell handling, and transclusion. Repeated bodies remain authored templates.
@@ -257,12 +271,52 @@ of selection conditions. For a string-typed `pkg`:
 ```
 
 The existing [shell approval system](./preflight-checks.md) requests permission
-for the typed template `just test {string}`, without enumerating packages or
+for the typed template `just test {{ string }}`, without enumerating packages or
 executing the predicate. At each reached execution, the actual value passes
 through existing template argument checks. A placeholder cannot add shell
 operators, redirection, or additional commands. A type declaration establishes
 an argument's type, not authorization. No filter-specific permission system
 is introduced.
+
+Local-dependent shell placeholders are execution-time values and require typed
+template approval; their absence during discovery is not a missing-value error.
+Unrelated approval-time placeholders retain their existing validation. Each
+reached execution validates actual arguments, and a null argument is missing.
+Unknown types retain the existing broad scalar fallback, not permission for null
+or container arguments. Numeric constraints remain runtime validators behind
+the existing string approval hole.
+
+Repeated commands retain the request-wide shell result cache. Use
+`::shell --no-cache` or `::shell-block no_cache=true` when each reached occurrence
+must launch a fresh process. Authorization and argument checks precede reuse.
+
+## Discovering Child Documents
+
+This behavior is planned. Composition preflight can enumerate a typed
+collection and evaluate supported read-side expressions to discover child
+files. For example, declare `chapters` as `file[](required)` and populate it
+with `chapters: "{{ find_files('./chapters/*.md') }}"`:
+
+```md
+::filter chapters
+::file {{i}}
+::end-filter
+```
+
+Preflight inspects candidate children before collection conditions, filtering,
+or stopping can exclude them. It can therefore read files and evaluate
+expressions needed to compute targets for items that rendering later skips.
+The same rule applies when explicit parameters passed from locals determine a
+child's own transclusions. Schema validation and DMLS remain passive; preflight
+does not execute shell commands or render repeated bodies.
+
+Targets that depend on pending shell output or other execution results that
+discovery cannot faithfully produce fail during preflight. A declared type or
+predicate refinement establishes file suitability, but does not replace target
+discovery or authorize a command. At execution, each target must match the
+discovered graph for its iteration scope; a newly encountered target fails
+without late approval. Retaining the target graph does not promise to cache
+arbitrary callback results.
 
 ## Failures, Limits, and Diagnostics
 
@@ -272,13 +326,36 @@ retain their existing failure policies and explicit recoveries. Missing/null
 sources and empty selections render nothing. Already performed effects are
 not rolled back if a later iteration fails.
 
-Maps and filters share request-wide iteration and generated-output budgets,
-including across nested maps, filters, and transcluded documents. Count each
-source item visited once, even when rejected by the first predicate. Sorting
-or testing an item again at a later stage does not count it again. Budget
-exhaustion fails composition. Existing transclusion depth limits remain
-separate. Defaults and public configuration controls are to be selected before
-implementation using representative workloads.
+Maps and filters share two budgets across expression calls, nested directives,
+and transcluded documents:
+
+- **100,000 item visits** by default. Rejected items count; later pipeline
+  stages do not count the same visit again. Nested calls share the allowance.
+- **16 MiB (16,777,216 bytes) of cumulative UTF-8 expansion work** by default.
+  Count bytes materialized into collection expansions, including inserted
+  expression, shell, and child output. Nested output counts again when copied
+  into an enclosing expansion; cached fragments count whenever inserted.
+
+For example, a 1 MiB inner expansion copied into an outer expansion consumes
+2 MiB even if the final document contains only 1 MiB. Ordinary pipeline passes,
+buffer reallocations, unrelated source text, and preflight copies add no charge.
+Expression result arrays consume visits but are values, not rendered bytes.
+These limits do not bound arbitrary allocations inside expression handlers or
+subprocesses before their output reaches the document.
+
+Library options and the planned CLI controls accept positive limits:
+
+```sh
+md compose report.md --max-iteration-visits 200000 --max-expansion-bytes 33554432
+```
+
+The byte flag takes an integer byte count. Zero, negative, and overflowing
+values are rejected; there is no unlimited setting. Budget exhaustion fails
+composition, including through nested expression fallbacks. An exactly full
+budget succeeds; an append that would exceed it fails before the append.
+Preflight does not spend the execution allowance. Existing transclusion depth
+limits remain separate. Standalone expression sessions share the same default
+visit limit across nested calls.
 
 Diagnostics name the authored file, line, expression, original index or key,
 and nested iteration path. Report static defects once; attach iteration
@@ -297,3 +374,11 @@ blocks stays literal. Maps, filters, and conditional blocks must nest without
 crossing boundaries. A mismatched closer reports its location and the still-open
 inner block. Preserve list/block-quote container context and body indentation
 through the shared structural scanner.
+
+The shared scanner also pairs shell blocks. A repeated `::shell-block` keeps its
+own `::end-block`; collection openers inside its command body are invalid.
+Quoted map/filter pairs are active within matching blockquote containers,
+including their full quote depth. Existing quoted `::block` examples remain
+literal; use the collection's `when=` option for a quoted collection condition.
+Match indentation relative to the Markdown container, and preserve loaded LF or
+CRLF boundaries, including a closer at end of file without a final newline.

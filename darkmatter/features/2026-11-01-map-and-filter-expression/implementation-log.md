@@ -1,6 +1,6 @@
 ---
-spec: "/Volumes/coding/wt/rusty-biscuit/feat-pipeline/darkmatter/features/2026-10-20-map-and-filter/spec.md"
-plan: "darkmatter/features/2026-10-20-map-and-filter/plan.md"
+spec: 2026-11-01-map-and-filter-expression
+plan: plan.md
 implemented_by: "claude/opus"
 started_phase: "1"
 source_files_during_phase_1: []
@@ -8,31 +8,186 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages: []
-human_review: true
-human_review_items:
-    - |-
-        **The feature this one is built on has not been implemented yet.**
-
-        Map and filter need a shared way to describe and check function signatures (what arguments a function takes, and their types). That shared system is the job of a separate feature, `2026-10-28-schema-enhancements`. Today it is only a finished spec: none of its 22 plan tasks are done, and the file this feature is supposed to add `map` and `filter` to (`darkmatter/schemas/partials/functions.yaml`) does not exist. The plan forbids building a stand-in. So Phase 2 cannot be finished as written, and someone has to decide what happens next before Phase 2 starts.
-
-        - **Option A: pause this feature and implement schema-enhancements first.** *Pros:* matches the plan exactly, with no temporary code and no second function catalog. *Cons:* schema-enhancements is a large, 6-phase piece of work, so map and filter are delayed by all of it.
-        - **Option B: split Phase 2 and continue now with what does not depend on it.** The new `x => ...` syntax, the rules for which names are visible inside a callback, and the editor plumbing do not need the shared signature format. Only signature checking (Phase 2) and adding catalog entries (Phase 3) wait for schema-enhancements. *Pros:* the parser and scope work, which is the riskiest part, starts now and has its own tests. *Cons:* until the catalog work lands, `map`/`filter` cannot be published or checked for wrong argument counts or types, and the plan's phase order has to be redrawn.
-        - **Option C: add map and filter to today's catalog (`darkmatter/docs/schemas/expression-functions.yaml`) and move them across later.** *Pros:* fastest route to a working feature. *Cons:* the spec explicitly rules out a temporary catalog form and a parallel checking path, and this one would have to be migrated again.
-
-        **Recommendation: Option B.** It keeps to the spec (no temporary format, no second catalog) while getting the parts with the most design risk built and tested now. Option A is the right choice if schema-enhancements is already next in the queue anyway.
-    - |-
-        **Please confirm three policy recommendations the spec left open.** Phase 2 builds the warnings and errors, so they need settling before it starts. The details and reasons are in the implementation log under "Rulings and dispositions".
-
-        1. **Warn when a callback's name hides a document property** (for example, `filter(tags, tags => ...)` when the document has a `tags` field). *Recommended:* yes, but only when the hidden property is actually declared in that document. Writing `fm.tags` still reads the document and gets no warning. Reusing an outer callback's name gets no warning either. *Alternative:* no warning at all, which is simpler but lets accidental shadowing go unnoticed.
-        2. **Names for the new errors and warnings.** *Recommended:* `dm.expression.misplaced_callback` (a callback written where one is not allowed), `dm.expression.reserved_callback_parameter` (a callback named `ctx`, `fm`, `null`, or a host name such as `seq`), and `dm.expression.callback_shadows_property` (the warning above). An error inside a callback keeps the error code it already had, and its message gains `map(): item 2: ...`. *Alternative:* give wrapped errors a new code of their own. That is not recommended, because existing code that sorts errors by code (file-not-found, fatal versus warning, Claudine's error display) would stop recognizing them.
-        3. **Limits on running callbacks.** *Recommended:* run items one at a time, in order, under the same permissions, timeouts, and caches as the surrounding expression. Add no new size or nesting limit, and do not undo side effects from items that ran before a failing item. *Alternative:* add a maximum list size or a time budget. That needs a number to be chosen, and the spec gives no basis for one.
+human_review: false
 message_to_agent: |-
-    Phase 1 produced design contracts only; no code was written. Read the implementation log's "Phase 1" section before you start. It covers the callback AST (`CallArgument::{Value, Callback}`, not an `Expr::Lambda`), the explicit stack-allocated `Locals` environment threaded beside `AbsenceScope` (not a forwarding `EvaluationLookup` wrapper), `EvaluationMode::Callback` registry dispatch, the `ExpressionError::Callback` wrapper with `root_cause()`, and the table of every AST consumer that must become binder-aware.
-
-    Do not start Phase 2 until the human review items are answered. The prerequisite `2026-10-28-schema-enhancements` is unimplemented, so the "Check callback signatures" task cannot be done as written. The parser and passive-scope tasks can proceed only if the author picks the split option. Watch for these traps: the lexer folds `dep.name` into one Variable token, so match locals on the root segment; caller-file provenance is keyed by frontmatter pointer (`caller_file_occurrence`); branch facts about a same-named document property must be dropped inside a callback body; DMLS uses `BindingView::baseline()`, so it cannot see Claudine host globals; `null` is a variable root and must be a forbidden parameter name.
-
-    Phase 1 gates: `affected_scope.py` reported non-empty packages because of uncommitted work this feature did not make (the strict-equality docs and a Claudine schema test), so `just test` and `just lint` were run in darkmatter. See the log for results.
+    Phase 1 produced design contracts only; no source code or prototype was written.
+    Read the Current Handoff below before Phase 2. The author requested alignment
+    with the directive form on 2026-10-27. The earlier prerequisite blocker,
+    identifier-only callback, stack-only Locals chain, array-only inputs,
+    unknown-only typing, and shadow advisory are superseded. Use the updated
+    spec and unstarted plan. Product rulings, including budgets, are settled;
+    diagnostic API and Rust option names follow existing conventions;
+    do not treat the historical human-review proposals as current gates.
 ---
+
+# Implementation Log for 2026-11-01-map-and-filter-expression
+
+## Current Handoff — 2026-10-27
+
+The author requested reconciliation with `2026-11-01-map-and-filter-directive`
+after reviewing both designs. This update changes the spec, unstarted plan,
+and implementation contracts only. No callback runtime, parser, or editor code
+has been implemented. Phase 1 remains complete as design work; Phases 2–5 are
+unstarted.
+
+The shared schema/signature infrastructure and type-aware evaluation are now
+implemented, as the plan's earlier reconciliation already records. The
+historical missing-prerequisite gate no longer applies. Ordinary local
+shadowing is allowed without an advisory. All product rulings are settled;
+diagnostic identifiers and Rust option names remain implementation details,
+not unanswered shadowing, prerequisite-order, or budget approvals.
+
+### Reconciled behavior
+
+- Both `=>` and `->`, one identifier or shallow destructuring pattern, and
+  object-expression shorthand use shared expression grammar.
+- Arrays, schema-typed tuples, and insertion-ordered `{key,value}` object
+  entries are accepted. Both functions return arrays. Object filtering retains
+  entries, and expression mapping does not rebind its result to the input pattern.
+- All callback bindings live in `local`; bare names prefer the nearest local,
+  `local.name` addresses it explicitly, and `fm.name` bypasses shadowing. Null
+  bindings still shadow. Namespace/global names are protected by the binding view.
+- Preserve known item/field/map-result types and filter item types through the
+  existing TypeScope and narrowing engine. Unknown remains a fallback, not a
+  mandatory type for every local.
+- Expression callbacks remain required and iterable inputs may be arbitrary
+  expressions. Directive-only render options and source-declaration restrictions
+  do not transfer to expression functions.
+- Callbacks run sequentially under the enclosing request's authority and share
+  visited-item accounting with directives and nested composition. No fresh
+  unlimited budget is installed for an inner expression call.
+
+### Author ruling: file predicate narrowing
+
+Both `file_exists` and `is_file_type` narrow a checked value to `file` on true.
+The difference is the runtime existence check performed by `file_exists`.
+Update its current string-only narrowing registration through the shared fact
+mechanism, not a directive-specific special case. A false existence result
+cannot exclude `file`; a valid reference may be missing. Facts remain attached
+to checked values, not unrelated reevaluations of the same call text. This is
+an implementation requirement; no predicate code changed in this design update.
+The author explicitly ruled that schema-authored narrowing metadata is not a
+prerequisite. Use the existing Rust registration API; the later metadata feature
+will migrate its authority without blocking map/filter.
+
+### Author ruling: dynamic child discovery
+
+Extend existing composition preflight to enumerate typed collections and
+evaluate discovery-supported target-producing expressions. Inspect candidate
+children before collection conditions, selection, or stopping exclude them,
+including recursively through explicit local parameters. This can perform
+reads for skipped items, but validation and DMLS remain passive and discovery
+does not execute shell commands or render repeated bodies.
+
+Preserve rejection of dependencies on pending shell output or other execution
+results discovery cannot faithfully produce, including indirect dependencies
+through locals. Retained graph metadata distinguishes authored sites and
+iteration scopes. Newly encountered runtime targets fail without late approval;
+retaining the graph does not imply arbitrary callback-result caching. The
+literal-target-only restriction proposed in review was not adopted. This is a
+design ruling only; preflight code has not changed.
+
+### Author ruling: expansion budgets
+
+The author accepted 100,000 visits and 16 MiB (16,777,216 bytes) of cumulative
+UTF-8 collection expansion per root request. Share visits across expression and
+directive calls and nested composition, including rejected items. Standalone
+expression sessions use the same default visit limit with one shared counter.
+Expression arrays are values, not rendered bytes.
+
+Charge nested output again when copied into an enclosing expansion and cached
+fragments whenever inserted into an expansion. Ordinary pipeline passes,
+buffer reallocations, unrelated source text, and preflight copies add no charge.
+Fail before an append exceeds the allowance; exactly reaching it succeeds.
+Expose positive library controls and `--max-iteration-visits` /
+`--max-expansion-bytes`; reject zero, negative, and overflowing values, with no
+unlimited setting. Include limits in compose identity. Preflight does not spend
+the execution allowance. No benchmark gate is required to adopt these defaults.
+
+Both map/filter specs are finalized for planning; implementation is unstarted.
+Historical Phase 1 proposals below remain history, not unresolved gates.
+
+### Replacement contract: callback patterns
+
+The original `Callback { param: String, ... }` sketch is superseded:
+
+```text
+BindingPattern = Identifier(name) | Object(fields)
+Callback = { pattern: BindingPattern, body: Expr }
+CallArgument = Value(Expr) | Callback(Callback)
+```
+
+Use spanned counterparts for the pattern, each field, arrow, body, and callback.
+Object fields bind their same-named property initially; defaults, aliases, rest,
+and nested destructuring are not required. A pattern is one input parameter,
+regardless of the number of names it binds. Both arrows lower to the same
+semantics. Formatter normalization is allowed if both input spellings round-trip
+semantically. Directive callback slots consume the same callback representation;
+no second pattern parser and no callback-valued JSON representation.
+
+### Replacement contract: retainable lexical frames
+
+The historical stack-linked `Locals<'a>` sketch is not the sole scope contract.
+Use an immutable frame with a parent handle and multiple bindings, so an object
+pattern can bind all fields atomically after shape validation. Frames must be
+retainable through owned/shared handles when a directive carries its context
+into later pipeline stages; expression evaluation borrows a view of the same
+model for immediate callback execution. Do not introduce a second resolver or
+copy local values into frontmatter to extend their lifetime.
+
+Runtime bindings retain values, original source-item location, and per-value
+provenance, including caller-file origins. Passive bindings retain projected
+types and source spans without needing evaluated values. Both views share
+binding identities, explicit/implicit lookup, and shadowing rules. A guarded
+`local.x` and bare `x` name the same local subject; `fm.x` is a separate subject.
+The nearest binding wins even when null. Restoring the parent after success or
+failure must also restore its refinement facts.
+
+The former occurrence sketch `/files/{index}` is insufficient for all new
+inputs: object entry `value` must retain the original property origin, while
+`key` is the entry's key string. Destructured fields retain their respective
+origins; projection must not substitute a synthetic local path for the source
+path. Use the existing value-origin/file-argument machinery for these mappings.
+
+Before freezing APIs, prove both immediate expression evaluation and retained
+frame use after callback exit, including nested shadow restoration, local type
+projection, null shadowing, and file-origin preservation. This extends Phase 2
+coverage rather than requiring another open-ended design spike.
+
+### Dispatch, errors, and operational integration
+
+The registry-owned callback evaluation mode remains appropriate. Bind iterable
+inputs against the widened array/object/null signature and adapt them through
+the shared collection entry representation. Keep scalar-kind errors in the
+shared binder. The historical `ExpressionError::ArgType` proposal was already
+superseded by `ExpressionError::Call` and must not be revived.
+
+Extend callback error context from an index-only wrapper to a source-item
+location capable of an original array index or object key. Preserve nested
+wrappers and underlying typed cause, source span, diagnostic code, and fatality.
+Error accessors must remain transparent through callback context.
+
+Budget defaults, standalone session controls, and generated-output accounting
+must be finalized with the directive work before the affected runtime path.
+Iteration counts are shared across callbacks/directives/transcluded documents;
+expression arrays are values rather than rendered document bytes. Do not charge
+the same rendered bytes again just because they passed through an expression.
+
+### Verification of this reconciliation
+
+Documentation/design changes only. Check the spec, unstarted plan, and handoff
+for contradictory active instructions and run `git diff --check`. No production
+tests are warranted until implementation changes. The current acceptance matrix
+has twelve criteria, including patterns, retained scopes, known-type propagation,
+object entries, and shared budgets. Historical Phase 1 test results below are
+not evidence that callbacks are implemented.
+
+## Historical Phase 1 Record
+
+The following records the original planning session under its former identifier.
+Its proposals and prerequisite observations are historical; the current handoff
+and revised spec/plan supersede the conflicting contracts.
+
 
 # Implementation Log for 2026-10-20-map-and-filter (5 phases)
 

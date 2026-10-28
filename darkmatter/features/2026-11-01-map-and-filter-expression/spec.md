@@ -1,7 +1,7 @@
 ---
 kind: feature
 created: 2026-10-20
-status: draft-spec
+status: finalized-spec
 area: darkmatter
 clarified: false
 reviewed: false
@@ -28,6 +28,7 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 related:
+    - 2026-11-01-map-and-filter-directive
     - 2026-10-28-schema-enhancements
     - 2026-10-31-type-aware-evaluation
     - 2026-10-16-type-narrowing
@@ -101,292 +102,393 @@ written in the grammar this spec defines:
 character continues a name, so `depends-on` is the property and `a - b` (with
 spaces) is subtraction.
 
+**Dependency boundary:** `2026-10-27-schema-narrowing-metadata` is a separate,
+non-blocking metadata migration. Implement this feature against the existing
+registered `NarrowingFact` API, including true-implies `file` for both file
+predicates. Schema-authored narrowing syntax and host-artifact changes are not
+prerequisites and do not require a temporary or duplicate fact registry.
+
 ## Design
+
+### Relationship to the directives
+
+This expression form and `2026-11-01-map-and-filter-directive` share callback
+syntax, binding patterns, lexical scopes, iterable adaptation, type propagation,
+truthiness, order, error provenance, and iteration accounting. Build these once.
+
+Intentional differences remain:
+
+- Expressions return arrays; directives render repeated Markdown bodies.
+- Both expression functions require two arguments: an iterable expression and
+  a callback. Directive-only omitted-callback defaults do not apply.
+- The iterable argument may be any expression, including a literal or function
+  result. Unlike a directive source, it does not require a named, declared
+  collection. Known types are checked statically; uncertain values are checked
+  by the shared binder at runtime.
+- Block gating, sorting, stopping, and Markdown boundaries belong to directives.
+- An expression callback binds its input only. It does not rebind its result
+  to the parameter pattern; that second binding is a directive-body operation.
 
 ### The lambda argument
 
-A lambda is written `name => body`:
+A lambda is written `pattern => body` or `pattern -> body`. Both arrows have
+identical semantics and bind more loosely than all existing expression
+operators: `x -> a ? b : c` means `x -> (a ? b : c)`.
 
-- `name` is one identifier. It binds the current item while `body` is
-  evaluated.
-- `body` is any expression, including a ternary, a function call, or another
-  `map`/`filter` with its own lambda.
-- `=>` binds more loosely than every other operator, so `x => a ? b : c`
-  is `x => (a ? b : c)`.
+A pattern is one identifier or a shallow object destructuring pattern, such as
+`{key,value}`. Destructuring still consumes one item; it is not a multi-argument
+callback. The body may contain any existing expression, including nested
+`map`/`filter` calls. Object-expression shorthand `{key,value}` means
+`{key: key, value: value}`. Nested patterns, defaults, and rest bindings are
+outside the initial scope. Patterns must be nonempty with distinct identifier
+fields; aliases, quoted/computed keys, array patterns, and trailing commas are
+not supported. Extra input fields are ignored. Every bound name must satisfy
+the protected-name rules.
 
-**A lambda is an argument, never a value.** It may appear only in an argument
-position the function catalog declares as a function parameter. Everywhere
-else it is a parse error with its own diagnostic:
+Both arrows, pattern binding, and callback-body parsing use shared expression
+machinery. Quoted arrow text is not syntax, and commas inside a pattern do not
+terminate the enclosing call argument. Preserve pattern, field, arrow, body,
+and whole-callback spans through spanned and erased AST forms.
 
-- `{{ x => x }}`, `a: "{{ f }}"` where `f` would hold a lambda, a lambda inside
-  an array or object literal, or as an operand of an operator, are errors;
-- a lambda therefore never reaches frontmatter, interpolation output, JSON, or a
-  shell command, and the value model (`serde_json::Value`) does not change.
+**A callback is syntax, never a value.** In expressions it is allowed only in
+an argument position declared as a function parameter by the catalog. Directive
+callback positions are a second explicit consumer of the same representation.
+Top-level callback interpolation, callback values in arrays/objects, named or
+returned callbacks, and callbacks used as operator operands are rejected with
+located diagnostics. Parsing establishes the callback syntax; passive signature
+validation establishes whether the receiving argument position accepts it.
 
-This keeps closures out of the evaluator: a lambda is evaluated in place, by
-the function that receives it, while the enclosing scope is still live.
+This does not add closures or callable values to `serde_json::Value`.
 
-### Scope
+### Scope and the local namespace
 
-- The iterable argument is evaluated in the enclosing scope before the
-  callback parameter is bound. Within `body`, the nearest local parameter
-  takes precedence over the shorthand lookup of a frontmatter property.
-  Explicit `fm.name` access continues to read frontmatter.
-- The parameter shadows a document property of the same name inside `body`
-  only. `filter(tags, tags => tags != "x")` is valid but earns a lint advisory.
-  The advisory is the draft proposal; its policy still requires confirmation.
-- The parameter may not take the name of a namespace or global (`fm`, `ctx`,
-  `env`, `current`, `err`, `timing`, and the host globals such as Claudine's
-  `seq`, `loop`, `group`). That is an error, because shadowing `ctx` would
-  silently change what every `ctx.*` read inside the body means.
-- `body` may read anything the enclosing expression can: document properties,
-  namespaces, and the parameters of enclosing lambdas.
-- Reusing an enclosing lambda's parameter name follows these same scope
-  rules: the inner parameter hides it only inside the inner `body`. This
-  reuse introduces no additional prohibition or advisory.
-- The undeclared-property advisory (`dm.expression.undeclared_property`) never
-  reports a lambda parameter, and dot or bracket access on it
-  (`dep.name`, `dep[0]`) reads the item, not the document.
+The iterable argument is evaluated in the enclosing scope before the callback
+pattern is bound. Its bound names belong to the reserved `local` namespace:
 
-### `map(list, item => body)`
-
-Returns a new list holding `body` evaluated for each item, in order.
-
-```text
-map([1, 2, 3], n => n * 2)            → [2, 4, 6]
-map(["a", "b"], s => upper(s))        → ["A", "B"]
-map([], n => n * 2)                   → []
-map(null, n => n * 2)                 → []
-```
-
-### `filter(list, item => body)`
-
-Returns the items for which `body` is truthy, in their original order.
-Truthiness is the engine's existing rule (`null`, `false`, `0`, `""`, `[]`,
-and `{}` are falsy).
-
-```text
-filter([1, 2, 3, 4], n => n % 2 == 0) → [2, 4]
-filter(["a", "", "b"], s => s)        → ["a", "b"]
-filter([], n => true)                 → []
-filter(null, n => true)               → []
-```
-
-### Inputs and errors
-
-| `list` is | `map` / `filter` returns |
+| Read | Meaning inside a callback |
 | --- | --- |
-| an array | the result above |
-| `null`, including an absent property | `[]` |
-| a string, number, boolean, or object | a type error naming the function and the received type |
+| `name` | Nearest local binding, otherwise normal lookup |
+| `local.name` | Nearest local binding only |
+| `fm.name` | Frontmatter property even when shadowed by a local |
 
-- Both functions always return arrays on success. Each takes two arguments:
-  an array or `null`, and a one-parameter inline function. This does not
-  introduce a variadic calling convention.
-- `body` is evaluated once per item, in order, and never for an empty list
-  or `null` input. A `null` element inside an array is an actual item and is
-  mapped or tested normally; it is not treated as an absent iterable.
-  Passive syntax and schema validation still applies to the callback even
-  when no items will be evaluated; it performs no callback I/O.
-- An error inside `body` fails the whole call. The message names the function
-  and the zero-based index of the failing item, then carries the inner error,
-  for example: `filter(): item 2: frontmatter(): file argument not resolved`.
-  Evaluation stops at the first callback error; later items are not evaluated.
-  Nested calls retain each enclosing function and failing item index while
-  preserving the underlying error's source provenance.
-- `filter` does not stop early because of a truthy or falsy result: it tests
-  every item unless an error stops the call.
+Locals may shadow frontmatter and enclosing locals without a shadow advisory.
+A present null binding still shadows; it never falls through to frontmatter.
+Outer unshadowed locals remain accessible. Reserved namespace/global names
+cannot be bound, using the site's actual binding view rather than a hardcoded
+list. This includes `local` itself and unavailable registered host globals.
 
-### Function catalog
+Entering a scope must isolate facts about a same-named document property or
+outer local. Leaving it, including on failure, restores the enclosing scope.
+Locals never mutate frontmatter or leak into siblings. Explicit and implicit
+local reads share binding identity and refinement facts; `fm.name` remains a
+separate subject. The shared static read inventory must recognize both forms
+and never misreport them as undeclared document properties or host-global reads.
 
-Darkmatter owns the expression engine and the function signatures, typed
-through `SimplifiedSchema`. The Darkmatter schema checker and DMLS must
-understand and enforce the signatures of both functions. The iterable
-parameter accepts `unknown[] | null`; the callback takes one
-`unknown | null` item and returns `unknown | null`; the function result is
-always `unknown[]`. The explicit null arms preserve null items and results
-under the shared function-signature rules; array item types retain their
-normal semantics. `filter` applies existing truthiness to the callback result.
+### Iterables, order, and destructuring
 
-`darkmatter/schemas/partials/functions.yaml` gains both functions using the shared
-`SimplifiedSchema` function-signature contract defined by
-`2026-10-28-schema-enhancements`. That shared grammar is a prerequisite and is
-now implemented: the catalog is loaded by
-`darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs`, every
-function names one declared `category(...)` (`Collection` already exists),
-and calls bind through `compose/expression/call_binding/`. This feature does
-not introduce a temporary catalog representation or a parallel checking
-path.
+| Iterable argument | Runtime behavior |
+| --- | --- |
+| Array or tuple | Visit elements in source order |
+| Object | Visit `{key: string, value: any}` entries in insertion order |
+| Null, including an absent property | Return `[]` without invoking the callback |
+| Empty collection | Return `[]` without invoking the callback |
+| Non-null scalar | Shared binding type error naming the function and received type |
 
-The shared registration and checking machinery must accept inline lambda
-arguments for these executable functions. This amends the schema-enhancement
-rule that rejects executable registrations with function parameters (delivered
-as `RegistrationError::FunctionValued` in `call_binding/registration.rs`), but
-does not allow first-class function values. Schema checking and DMLS remain
-passive: they validate the callback's form and signature without executing it
-or performing the callback's I/O. No broader catalog or schema rewrite is
-authorized by this feature.
+Both object-entry fields exist, including when the value is null. Preserve
+more precise declared value types: a dictionary of `Person` supplies
+`value: Person`; heterogeneous objects supply the union of property value
+types. Arrays and tuples retain known element types. Null elements remain
+actual items, unlike a null source.
 
-The schema-enhancements inline example form, `example(call => result)`, splits
-at the `=>` outside every parenthesis, so a lambda inside the call is not
-mistaken for the separator:
+An input must satisfy its parameter pattern before the callback runs. A present
+null field is distinct from a missing field. Reject provably incompatible
+patterns statically; validate uncertain shapes at runtime. Expressions do not
+require the callback result to satisfy that input pattern.
 
-```yaml
-example(filter([1, 2, 3], n => n > 1) => [2, 3])
+Both functions always return arrays. Filtering an object returns retained
+entry objects, not a reconstructed dictionary. Insertion order must survive
+loading, conversion, and composition on every supported OS.
+
+### `map(iterable, pattern => body)`
+
+Evaluate the body once per item, in order, and return its results as an array.
+Retain null results as array elements.
+
+```text
+map([1, 2, 3], n => n * 2)                  → [2, 4, 6]
+map(["a", "b"], s -> upper(s))              → ["A", "B"]
+map({Ada: 90, Grace: 70}, {key,value} => key) → ["Ada", "Grace"]
+map([], n => n * 2)                         → []
+map(null, n -> n * 2)                       → []
 ```
 
-The delivered example parser already splits at the first `=>` outside every
-parenthesis (`find_top_level` in `schemas/simplified/grammar.rs`); this spec
-adds the regression test for a lambda inside the call.
+`{key,value} => key` is valid here because there is no directive body requiring
+rebinding the resulting string to `{key,value}`.
 
-### Surfaces
+### `filter(iterable, pattern => body)`
 
-The functions are expression functions, so they are available on every
-surface that evaluates expressions: frontmatter interpolation, `::block when`,
-lifecycle `when:`, and `md compose`. Claudine consumes Darkmatter's expression
-engine and therefore gains access to these functions without a separate
-opt-in. No production prompt migration or dependency policy change is
-required by this feature. The editor (DMLS) must:
+Retain the original items whose callback result is truthy, in source order.
+The result is never an array of predicate results. Use existing truthiness:
+null, false, zero, an empty string, an empty array, and an empty object are
+falsey. Other values are truthy.
 
-- highlight `=>` and the parameter, and resolve a hover on the parameter to
-  "lambda parameter of `filter`";
-- offer the parameter in completions inside `body`, ahead of document
-  properties;
-- report a misplaced lambda and a namespace-named parameter as diagnostics
-  with source spans on the lambda.
+```text
+filter([1, 2, 3, 4], n -> n % 2 == 0)        → [2, 4]
+filter(["a", "", "b"], s => s)              → ["a", "b"]
+filter({Ada: 90, Grace: 70}, {key,value} => value >= 80)
+                                            → [{key: "Ada", value: 90}]
+filter([], n => true)                        → []
+filter(null, n -> true)                      → []
+```
+
+A truthy/falsey result does not stop iteration. Every item is tested unless an
+error or shared budget exhaustion stops the call.
+
+### Type propagation and passive validation
+
+Reuse the existing `TypeScope`, call checker, and narrowing infrastructure.
+A callback local receives the iterable's known item type, projected through
+its pattern. Never take the type of a same-named frontmatter property and never
+erase available item information merely because the catalog's signature is broad.
+
+- For `people: Person[]`, `person` in either function has type `Person`.
+- `map(people, person => person.name)` has an array element type derived from
+  the declared `name` property.
+- `filter(people, person => person.active)` preserves the person element type;
+  apply existing predicate refinements where the shared engine can prove them.
+- Tuple and union sources combine possible item types. Optional/null source
+  arms contribute no items, while null element/result arms remain represented.
+- Unknown input or result shapes remain unknown where analysis cannot establish
+  more; open-object entries not covered by declared properties remain unknown.
+  Do not invent a separate general-purpose inference engine.
+
+All callback bodies receive passive syntax, signature, pattern, and call checks,
+including for empty/null input and dead branches. A category 5 call such as
+`map([], x => min(true, 5))` rejects before execution. Passive checking and DMLS
+perform no callback I/O or provider evaluation. Guard facts about a local end
+with its scope and do not narrow an unrelated document property.
+
+### File predicate narrowing
+
+Both `is_file_type(value)` and `file_exists(value)` narrow the checked value to
+`file` on a truthy result. The former checks file-reference syntax; the latter
+also checks that the referenced file exists. Existence is an observation at the
+time of that check, not a guarantee that a later read cannot fail. Preserve the
+existing resolver and remote-access policy rather than adding another path grammar.
+
+An unknown value does not satisfy a required file type by itself. Either guard
+can establish that suitability for a bound value. A false `file_exists` result
+proves no negative file-type fact: a valid reference may name a missing file.
+Use the shared predicate registration's true-implies `file` fact for both
+predicates; `file_exists` must no longer project only `string`.
+
+Facts apply to the value actually checked. They do not transfer to a separately
+reevaluated read-side call merely because its expression text is identical.
+For example, computing candidates once and filtering their bindings preserves
+that identity:
+
+```text
+filter(map(manifests, t => frontmatter(t, 'include')),
+       candidate => file_exists(candidate))
+```
+
+The retained candidates have file suitability through the shared refinement
+engine. Do not introduce implicit cross-callback memoization to make repeated
+`frontmatter(...)` reads appear to be the same value. Composition preflight may
+evaluate discovery-supported expressions to enumerate typed collections and
+identify child targets. It inspects candidate children before collection
+conditions, selection, or stopping can exclude them, including recursively
+through explicit local parameters. Schema validation and DMLS remain passive.
+Targets dependent on pending shell output or other execution results discovery
+cannot faithfully produce still fail preflight. Retained graph metadata must
+distinguish iteration scopes; newly encountered runtime targets fail without
+late approval. Graph reuse does not imply arbitrary callback-result caching.
+
+### Function catalog and registration
+
+The catalog remains `darkmatter/schemas/partials/functions.yaml`, loaded by
+`compose/expression/catalog/mod.rs`, under the shared SimplifiedSchema contract.
+Both functions have two arguments: `unknown[] | object | null` and a one-item
+callback with broad input/output compatibility, including explicit null arms.
+Runtime tuples are arrays with tuple schema information. Results are arrays;
+the catalog's broad result contract must admit null elements/results as well.
+
+The callback signature's broad fallback is not the call site's inferred type.
+Implement shared iterable-item and callback-result type projection so the call
+checker, composition, and DMLS retain known types. Pattern arity is one input
+item regardless of how many names it binds. Use the existing binder for invalid
+source kinds; do not reintroduce per-handler argument validators.
+
+Extend executable registration for callback parameters without permitting
+function-valued returns or stored callable values. A callback evaluation mode
+must bypass ordinary eager value-argument evaluation while retaining registry
+ownership of dispatch and signatures. `map` and `filter` are not lifecycle
+verbs: YAML verb operands cannot carry callback syntax. Keep the existing
+catalog-derived lifecycle inventories' exclusion for callback-taking functions.
+
+Catalog `example(call => result)` parsing must distinguish both callback arrows
+inside a call from the top-level example separator. Add executable examples for
+both arrows, objects/destructuring, empty/null input, and nested callbacks.
+
+### Shared callback and lexical-frame implementation contracts
+
+Use one callback node with a reusable binding pattern, not `param: String`:
+
+```text
+BindingPattern = Identifier(name) | Object(fields)
+Callback = { pattern: BindingPattern, body: Expr }
+CallArgument = Value(Expr) | Callback(Callback)
+```
+
+Each object field binds its same-named property in the initial grammar. Maintain
+spanned equivalents; arrows may normalize in formatting but both must parse.
+The directive parser consumes this callback representation without embedding
+callbacks in value expressions or maintaining a separate pattern parser.
+
+Use one immutable lexical-frame model for runtime and static binding identity.
+Each frame contains the pattern's bindings and a parent handle. Runtime bindings
+retain values and provenance; analysis bindings retain declared/projected types
+and source spans without requiring runtime values. Share binding identities and
+lookup rules across these views, not a second independent name resolver.
+
+Frame storage must support retained scopes: owned or reference-counted handles
+can outlive a callback stack frame when a directive carries its scope into later
+body stages. An immediate expression callback can use a short-lived view of
+that same frame model. Do not make a borrowed linked `Locals<'a>` chain the only
+public representation, and do not fix delayed evaluation by copying locals into
+frontmatter. Reuse the enclosing composition request, observer, context, and
+file-value origins; never recapture process state.
+
+### Failures, effects, and shared budgets
+
+Evaluate the iterable once and callbacks sequentially. The first failure stops
+the call; no partial successful result is returned and completed effects are
+not rolled back. Existing permissions, timeouts, caches, and shell authorization
+remain authoritative. Neither a callback nor a declared type grants permission.
+
+Wrap failures as typed context carrying the function, original array index or
+object key, and underlying cause. Nested calls preserve the complete iteration
+path and original expression/source spans. Fatality, diagnostic identity, and
+file-resolution failure accessors must still reach the underlying cause.
+
+Use the same visited-item budget as directive iteration during composition,
+including nested expression calls inside directives and transcluded documents.
+A rejected filter item still counts. Count once per source-item visit per
+invocation; a nested invocation's visits are additional work. Standalone
+expression entry points receive an evaluation-session budget rather than a
+fresh unlimited allowance per nested call. Budget exhaustion stops the session
+and remains request-fatal through nested composition and expression fallbacks;
+handling an ordinary callback error cannot reset its counters. Passive checking
+consumes no runtime iteration budget. The default is 100,000 visits per root
+request or standalone evaluation session, configurable through positive library
+limits; `md compose` exposes `--max-iteration-visits`. Reject zero, negative,
+and overflowing values, with no unlimited setting.
+
+Generated document output remains governed by the composition output budget;
+expression arrays are values, not rendered bytes. Do not double-charge rendered
+output merely because it passed through an expression result. Composition
+allows 16 MiB (16,777,216 bytes) of cumulative UTF-8 collection expansion by
+default, configurable through library options and `--max-expansion-bytes`.
+Nested output copied into an enclosing expansion and cached fragments inserted
+into an expansion count each time; ordinary pipeline passes and buffer
+reallocations do not. Unrelated source text and preflight copies do not count.
+Fail before an append exceeds the limit; exactly reaching it succeeds. Both
+limits remain shared through nested composition and participate in composition
+identity. These limits do not cap arbitrary handler-internal allocations.
+
+### Surfaces and editor behavior
+
+Both functions work in every expression surface: frontmatter and body
+interpolation, conditional expressions, lifecycle expressions, and `md compose`.
+Claudine uses the same engine without a separate feature opt-in. No production
+prompt migration or dependency-policy change is required.
+
+DMLS highlights both arrows and every pattern binding, shows the owning function
+and projected type on hover, offers nearest locals and `local.*` members inside
+the callback, and restores outer bindings after exit. Explicit `fm.*` completion
+continues to describe frontmatter. Incomplete callbacks use shared parser recovery,
+not a separate editor grammar.
 
 ## Non-goals
 
-- Lambdas as values: storing, returning, or passing a named function.
-- Multi-parameter lambdas, including an item index (`(item, i) => ...`). This
-  feature takes a single item parameter; index access is deferred.
-- A single-result file search. If one is added later it is named
-  `find_first_file`, not `find_file`.
-- `reduce`, `sort_by`, `find`, `some`, `every`, `flat_map`. Each is a small
-  addition once lambdas exist, and each should be justified by a use.
-- Type inference for lambda bodies. `2026-10-31-type-aware-evaluation` owns
-  type-aware evaluation and `2026-10-16-type-narrowing` owns narrowing; a
-  lambda parameter's type is `unknown` until they extend it.
+- First-class callbacks, named callable values, or returned closures.
+- Multiple input parameters or index parameters such as `(item, i) => ...`.
+- Nested patterns, destructuring defaults/rest, or object reconstruction by filter.
+- Directive-only rendering options or implicit result-to-pattern rebinding.
+- A new general-purpose inference engine or separate callback permission system.
+- `reduce`, `sort_by`, `find`, `some`, `every`, `flat_map`, or a new file-search function.
 
 ## Acceptance Criteria
 
-1. `map` and `filter` evaluate as in the tables and examples above, in
-   interpolation, `::block when`, and lifecycle `when:`.
-2. A controlled fixture exercised through Claudine's normal lifecycle
-   expression path uses `filter` to select dependencies from fixture
-   specifications and drives a `when:`/`error:` rule. It rejects the fixture
-   with an unimplemented dependency and accepts the fixture with all
-   dependencies implemented. The check must not depend on the current
-   lifecycle state of repository specifications or modify a production
-   prompt's policy.
-3. A lambda outside a function-parameter position is a parse error with a
-   dedicated diagnostic and span, in `md compose` and in DMLS.
-4. A parameter named after a namespace or global is an error; a parameter
-   named after a document property shadows it inside `body` only, with an
-   advisory.
-5. A lambda parameter is never reported as an undeclared property.
-6. An error inside `body` names the function and item index, stops evaluation
-   before later items, and preserves the inner error's source provenance.
-   Nested failures retain each enclosing function and item index.
-7. `null` or absent input and empty arrays return `[]` without evaluating
-   the callback; other non-array input is a type error. Arrays containing
-   `null` elements evaluate the callback for those elements normally, and
-   `map` preserves null callback results as array elements. Empty and null
-   iterables still receive passive callback syntax and signature validation
-   without callback execution or I/O.
-8. Nested lambdas see their enclosing parameters
-   (`map(groups, g => filter(g.items, i => i != g.skip))`).
-9. Both functions are in the catalog with executable examples, and the
-   expressions topic documents lambdas, scope, and both functions.
-10. DMLS highlights the arrow and parameter, identifies the owning function
-    on parameter hover, and offers local parameters ahead of document
-    properties in callback completions. After leaving a callback, its local
-    parameter is no longer offered or resolved; enclosing bindings are
-    restored after an inner callback ends.
-11. Schema checking and DMLS reject missing or extra arguments, a non-function
-    callback argument, and callbacks with anything other than one item
-    parameter through the shared signature rules. Valid inline callbacks
-    are accepted consistently without passive validation executing them.
+1. Both functions evaluate as documented through interpolation, conditionals,
+   lifecycle evaluation, and `md compose`, with typed whole-value results and
+   produced strings retaining data provenance.
+2. A hermetic Claudine lifecycle fixture uses filter over dependency specs to
+   drive `when:`/`error:` through its normal preparation/execution path. It
+   accepts implemented/empty dependencies and rejects an unimplemented one
+   without depending on live repository specs or changing production prompts.
+3. Both arrows and shallow patterns parse through the shared spanned/erased
+   AST, including nested calls, ternaries, comma boundaries, and quoted arrows.
+   Misplaced callbacks, invalid patterns, and invalid argument positions have
+   located library/CLI/DMLS diagnostics without first-class callback leakage.
+4. Reserved namespace/global bindings are rejected. Local/frontmatter shadowing
+   is valid without an advisory. Explicit `local.*`, explicit `fm.*`, bare
+   reads, null shadowing, nested reuse, and scope restoration agree.
+5. Bound roots and members are not reported as undeclared document properties.
+   Actual undeclared reads still follow existing absence rules. Missing iterable
+   arguments are handled by the nullable signature and return `[]`.
+6. Callback errors stop subsequent evaluation, name the original index/key,
+   preserve nested iteration paths and source spans, and retain typed causes
+   and fatality through report-json and other diagnostic consumers.
+7. Arrays, typed tuples, and insertion-ordered object entries work. Empty/null
+   inputs perform no callbacks; null elements/results remain actual values.
+   Non-null scalars fail through the binder. Object filter results are entry
+   arrays and expression-map results need not satisfy the input pattern.
+8. Nested callbacks capture enclosing locals and share the directive-compatible
+   frame model. Test retained frame lifetime independently of a callback stack,
+   source provenance, and restoration after success or failure.
+9. The authoritative catalog registers both functions with executable examples
+   and matching signatures. Callbacks are excluded from lifecycle verbs. Topic
+   docs describe arrows, patterns, iterable types, locals, budgets, and results.
+10. DMLS highlights both arrows and patterns, offers scoped completion/hover with
+    known types, handles incomplete input, and never executes providers during
+    analysis. Composition and editor diagnostic codes and spans agree.
+11. Shared validation rejects wrong arity, non-callback arguments, invalid
+    patterns, and provably invalid calls even on empty/null sources. Known input,
+    field, map-result, and filter-item types propagate; unknowns remain unknown
+    where justified, and shadowed document facts never leak into local facts.
+    Both file predicates refine a checked binding to `file`; absent-file false
+    results do not exclude `file`, and separate call evaluations do not share
+    a fact solely because their source text matches.
+12. Ordered/counted fakes prove one iterable evaluation, one callback per visited
+    item, first-error stop, and shared budget enforcement across nested calls.
+    Once directives land, add composition coverage showing expression calls
+    cannot reset the enclosing directive budget or evade its output accounting.
 
-## Decisions
+## Decisions and Reconciliation
 
-- **Reconciled with the implemented `2026-10-28-schema-enhancements`
-  (2026-10-23).** That prerequisite is now code. The function-catalog
-  section names its delivered loader, registration rule, and example parser,
-  and the decisions below cover the seams it created. No outcome of this spec
-  changed.
-- **Calls inside a callback body are design-time checked with the parameter
-  typed `unknown`.** *Decision:* the shared call check
-  (`check_expression_calls`, used by composition's call precheck and by DMLS)
-  walks callback bodies under a scope in which the parameter is a local of
-  type `unknown`. It never takes the type of a same-named declared document
-  property. A category 5 call in a body rejects the document at composition,
-  as anywhere else, even when the iterable is empty or `null`. *Alternatives:*
-  skip callback bodies (a known-invalid call would then survive until a
-  non-empty list reaches it); type the parameter from the document
-  (`filter(tags, tags => min(tags, 5))` with `tags: boolean(required)` would
-  be falsely rejected). *Why:* the prerequisite rejects a category 5 call
-  anywhere in a document, including code that does not run. This spec
-  requires passive checking of callbacks on empty input and types the
-  parameter `unknown`. *Downsides:* under `expressions.strict`, a typed call
-  on the parameter (`map(xs, x => min(x, 5))`) gets the category 4 warning
-  until type-aware evaluation types items.
-- **A non-array iterable is a binding type error.** *Decision:* the iterable
-  binds against `unknown[] | null` through the shared binder, so a string,
-  number, boolean, or object is the binder's type error
-  (`ExpressionError::Call` carrying a type-kind `CallBindingError`), naming
-  the function and the received type. *Alternatives:* a callback-specific
-  type error. *Why:* the prerequisite replaced the old per-function
-  `ArgType`/`Arity` errors with one binder error, and handlers no longer check
-  types themselves. *Downsides:* the message follows the binder's wording
-  rather than a `map`-specific one.
-- **`map` and `filter` are not lifecycle verbs.** *Decision:* they are
-  callable in lifecycle expressions (`when:`, interpolated values) but are not
-  added to the expression-function verb lists in
-  `darkmatter/schemas/partials/{lifecycle,md-lifecycle}.yaml` and
-  `claudine/schemas/{action,lifecycle}.yaml`. The lifecycle parity tests,
-  which derive those lists from the function catalog, exclude functions with
-  a callback parameter. *Alternatives:* add them as verbs. *Why:* a verb's
-  operands are YAML values, and a lambda is never a value, so a verb form could
-  not supply the callback. *Downsides:* the parity tests need one documented
-  exclusion class.
+- The shared schema/signature infrastructure and type-aware evaluation
+  prerequisites are implemented. Use their catalog, binder, TypeScope, static
+  read inventory, and diagnostic registry; no temporary catalog is needed.
+- **2026-10-27 author-directed alignment:** supersedes the earlier one-arrow,
+  identifier-only, array-only, unknown-only, and proposed shadow-advisory
+  contracts. Both forms share patterns, `local`, iterable semantics, known-type
+  projection, and iteration budgets. The implementation log preserves the
+  phase-one historical proposals and records the current handoff.
+- The former `param: String` and stack-only borrowed `Locals` sketches are
+  superseded by reusable binding patterns and retainable lexical frames.
+- Invalid iterable kinds remain shared binder errors; broadening valid kinds
+  does not introduce a new argument-error subsystem.
+- Required expression callbacks, arbitrary iterable expressions, array results,
+  and lack of directive rendering options are intentional surface differences.
 
-- **Reconciliation with `2026-10-31-type-aware-evaluation` (implemented
-  2026-10-24).** *Decision:* the callback local joins the analysis that
-  feature built, under these rules: (1) the type scope is now
-  flow-sensitive (`TypeScope`, `compose/expression/scope/`): a guard's fact
-  about a document property `x` never reaches a same-named local `x` inside a
-  body, and a fact proved about a local (`filter(xs, x => x != null && …)`)
-  ends with its body; (2) `static_access_reads` and `static_variable_reads`
-  (`compose/expression/absence.rs`) are the one read inventory, which
-  Claudine now uses for loop control variables, retired `seq`/`loop` reads,
-  and target identities, so both must leave a local and its member reads out
-  (otherwise `map(xs, loop => loop.count)` would read as Claudine's `loop`
-  global); (3) every new diagnostic code (misplaced lambda, forbidden
-  parameter, the shadow advisory if confirmed) is defined in the library and
-  added to `compose::policy::COMPOSE_DIAGNOSTIC_CODES`, so `md compose --deny
-  <code>`, `--help`, `--output report-json`, and DMLS's `codes.rs` share it;
-  (4) absence handling is type-based: an argument bound to a parameter
-  declaring `| null` handles a missing value, so the iterable's
-  `unknown[] | null` makes `map(missing, n => n)` silent for
-  `dm.expression.undeclared_property`, consistent with `map(null, …) → []`;
-  (5) that feature types constant indices (`list[0]`) but not callback
-  parameters, so the local stays `unknown`. *Alternatives:* a separate local
-  scope beside `TypeScope`; keeping the codes CLI-only. *Why:* these are the
-  shared contracts the implemented feature established; a second scope or
-  read walk is what its ownership guards reject. *Downsides:* the local must
-  be threaded through `TypeScope` and the read inventory rather than kept in
-  the new evaluator code alone.
+## Remaining Implementation Decisions
 
-## Open Questions
-
-1. **Document-property shadowing advisory.** Should an otherwise valid local
-   parameter that hides a shorthand frontmatter property produce the draft's
-   proposed advisory? Local scope and lookup semantics are already agreed;
-   this question concerns the advisory only.
-2. **Diagnostics.** The intended errors and advisories are described above,
-   but their precise diagnostic identities still need review under existing
-   diagnostic policies.
-3. **Operational constraints.** Expected list sizes, evaluation cost limits,
-   and the behavior of expensive or effectful expressions inside callbacks
-   have not yet been specified.
+1. Final diagnostic identities and public error/context shapes must follow the
+   existing library registry. No shadow-advisory decision remains open.
+2. Choose concrete Rust option/builder names using existing library conventions.
+   Implement the settled limits and accounting above; no budget policy decision
+   remains open.
+3. Document how the existing broad catalog signature expresses nullable result
+   elements while call-site projection preserves specific types. Use shared
+   signature/type machinery, not a callback-only schema dialect.

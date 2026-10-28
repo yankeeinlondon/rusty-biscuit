@@ -26,6 +26,13 @@ Both `->` and `=>` are accepted and have identical semantics in mapping,
 filtering, sorting, and stopping functions. Sources are written directly, such as `data`,
 `ctx.packages`, or `team.members`, without `{{ }}` interpolation delimiters.
 
+Sources initially support identifiers and dotted properties, including dashed
+identifiers; bracket access, calls, and operators are not source syntax. Put the
+optional positional function before named options. Callback and condition
+values are quoted on one opener line. Unknown or duplicate options, bare flags,
+extra positional arguments, and empty callback/condition values are errors,
+even in a skipped region. Option names and ordering values are case-sensitive.
+
 ## Expressions
 
 The simplest expression is _no expression at all_ and the map directive allows for that. So this example is perfectly valid:
@@ -305,8 +312,10 @@ recovery rules as any other source.
 ### Destructuring
 
 The initial design supports shallow object destructuring, such as
-`{key,value}`. Nested patterns, defaults, and rest bindings are outside the
-initial scope. Object expressions support the shorthand `{key,value}` for
+`{key,value}`. Patterns are nonempty and contain distinct identifier fields.
+Aliases, quoted/computed keys, array patterns, nested patterns, defaults, rest
+bindings, and trailing commas are outside the initial grammar. Extra input
+fields are allowed. Object expressions support the shorthand `{key,value}` for
 `{key: key, value: value}`.
 
 For the string-valued `data` object above, this mapping exposes the transformed
@@ -347,13 +356,13 @@ string `name` and numeric `age` properties.
 | Situation | Behavior |
 | --- | --- |
 | Default direction | Ascending |
-| Descending | `sort-order="desc"` |
+| Direction | `sort-order="asc"` (default) or `sort-order="desc"`; requires `sort=` |
 | Equal keys | Stable: preserve their previous relative order |
 | Numeric keys | Numeric comparison |
 | String keys | Case-sensitive, locale-independent comparison |
 | Missing or null key | Error; provide an explicit fallback if needed |
 | Mixed numeric and string keys | Error; no implicit comparison-type conversion |
-| Object or array key | Error in the initial implementation |
+| Boolean, object, or array key | Error |
 
 For case-insensitive sorting, select a normalized key explicitly:
 
@@ -470,9 +479,13 @@ item, traverse the authored body with that iteration's result bindings.
 Preserve the scope and source provenance for later interpolation, shell, and
 transclusion stages. Reuse the existing expression evaluator, condition
 semantics, and composition request. An iteration does not restart the full
-document pipeline or rerun frontmatter preparation. This defines logical
-evaluation order without requiring every composition stage to execute during
-the structural walk.
+document pipeline or rerun frontmatter preparation. Finish structural callback
+evaluation and body preparation before ordinary body interpolation, then run
+the existing body shell stages, link resolution, transclusion, cleanup, and
+normalization. A later callback failure can prevent earlier bodies' shell
+commands from running. Child transclusions retain existing concurrency and
+output placement. Explicit effects invoked by an expression, including
+`as_markdown()`, still run when that expression evaluates.
 
 ### Authored syntax and inserted data
 
@@ -525,7 +538,7 @@ For a local `pkg` declared as a string:
 ::end-map
 ```
 
-The approval request describes the typed template `just test {string}`. It
+The approval request describes the typed template `just test {{ string }}`. It
 does not require enumerating package names or separately approving every
 iteration. The type comes from the local binding's declaration; that type is
 not itself permission to execute the command.
@@ -535,6 +548,46 @@ validation. Each reached execution supplies its actual value through those
 checks. A placeholder fills an argument and cannot introduce shell operators,
 redirection, or additional commands. Approval covers the template across
 iterations; runtime conditions determine which approved executions occur.
+
+Local-dependent shell placeholders are execution-time values and require typed
+template approval; their absence during discovery is not a missing-value error.
+Unrelated approval-time placeholders retain their existing validation. Each
+reached execution validates actual arguments, and a null argument is missing.
+Unknown types retain the existing broad scalar fallback, not permission for null
+or container arguments. Numeric constraints remain runtime validators behind
+the existing string approval hole.
+
+Repeated commands retain the request-wide shell result cache. Use
+`::shell --no-cache` or `::shell-block no_cache=true` when each reached occurrence
+must launch a fresh process. Authorization and argument checks precede reuse.
+
+## Discovering Child Documents
+
+This behavior is planned. Composition preflight can enumerate a typed
+collection and evaluate supported read-side expressions to discover child
+files. For example, declare `chapters` as `file[](required)` and populate it
+with `chapters: "{{ find_files('./chapters/*.md') }}"`:
+
+```md
+::map chapters
+::file {{i}}
+::end-map
+```
+
+Preflight inspects candidate children before collection conditions, filtering,
+or stopping can exclude them. It can therefore read files and evaluate
+expressions needed to compute targets for items that rendering later skips.
+The same rule applies when explicit parameters passed from locals determine a
+child's own transclusions. Schema validation and DMLS remain passive; preflight
+does not execute shell commands or render repeated bodies.
+
+Targets that depend on pending shell output or other execution results that
+discovery cannot faithfully produce fail during preflight. A declared type or
+predicate refinement establishes file suitability, but does not replace target
+discovery or authorize a command. At execution, each target must match the
+discovered graph for its iteration scope; a newly encountered target fails
+without late approval. Retaining the target graph does not promise to cache
+arbitrary callback results.
 
 ## Failures, Limits, and Diagnostics
 
@@ -551,18 +604,36 @@ options retain their meaning. A failed map does not report earlier rendered
 iterations as a successful composition. Effects already performed, such as
 commands in earlier iterations, are not rolled back.
 
-Two request-wide budgets are shared across nested maps, filters, and transcluded
-documents:
+Maps and filters share two budgets across expression calls, nested directives,
+and transcluded documents:
 
-- **Iteration budget:** counts source items visited, including items rejected
-  by filtering. Subsequent processing stages do not count the same item again.
-- **Generated-output budget:** bounds expansion even when a small collection
-  produces large bodies.
+- **100,000 item visits** by default. Rejected items count; later pipeline
+  stages do not count the same visit again. Nested calls share the allowance.
+- **16 MiB (16,777,216 bytes) of cumulative UTF-8 expansion work** by default.
+  Count bytes materialized into collection expansions, including inserted
+  expression, shell, and child output. Nested output counts again when copied
+  into an enclosing expansion; cached fragments count whenever inserted.
 
-Nested maps and filters do not receive fresh allowances. Budget exhaustion fails
-composition; existing transclusion depth limits continue to apply separately.
-Exact defaults and public configuration controls remain to be selected before
-implementation, using representative workloads.
+For example, a 1 MiB inner expansion copied into an outer expansion consumes
+2 MiB even if the final document contains only 1 MiB. Ordinary pipeline passes,
+buffer reallocations, unrelated source text, and preflight copies add no charge.
+Expression result arrays consume visits but are values, not rendered bytes.
+These limits do not bound arbitrary allocations inside expression handlers or
+subprocesses before their output reaches the document.
+
+Library options and the planned CLI controls accept positive limits:
+
+```sh
+md compose report.md --max-iteration-visits 200000 --max-expansion-bytes 33554432
+```
+
+The byte flag takes an integer byte count. Zero, negative, and overflowing
+values are rejected; there is no unlimited setting. Budget exhaustion fails
+composition, including through nested expression fallbacks. An exactly full
+budget succeeds; an append that would exceed it fails before the append.
+Preflight does not spend the execution allowance. Existing transclusion depth
+limits remain separate. Standalone expression sessions share the same default
+visit limit across nested calls.
 
 Diagnostics identify the authored file, line, and expression, plus the original
 source index or object key and any enclosing iteration path. For example,
@@ -605,3 +676,11 @@ Report the unexpected closer and identify the still-open inner block. Use the
 same Markdown-aware structural scanner for maps and conditional regions,
 retaining source spans and container context rather than discovering map
 boundaries with a separate regular-expression pass.
+
+The shared scanner also pairs shell blocks. A repeated `::shell-block` keeps its
+own `::end-block`; collection openers inside its command body are invalid.
+Quoted map/filter pairs are active within matching blockquote containers,
+including their full quote depth. Existing quoted `::block` examples remain
+literal; use the collection's `when=` option for a quoted collection condition.
+Match indentation relative to the Markdown container, and preserve loaded LF or
+CRLF boundaries, including a closer at end of file without a final newline.
