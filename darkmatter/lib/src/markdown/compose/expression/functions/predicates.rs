@@ -104,3 +104,39 @@ fn round(call: &BoundCall<'_>) -> Result<Value, String> {
     let selected = bound(call.args().selected(0), "round", 0)?;
     json_number(numberlike_value(selected, "round")?.round())
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::markdown::compose::expression::{DeclaredTypes, Polarity, Shape, TypeScope, parse};
+    use crate::markdown::schemas::{PropertyAtom, SimplifiedType};
+
+    fn shape_of_x_after(guard: &str, polarity: Polarity) -> Shape {
+        let declared = DeclaredTypes::new(None);
+        let scope = TypeScope::unguarded(&declared).assume(&parse(guard).unwrap(), polarity);
+        scope.type_of_expr(&parse("x").unwrap()).unwrap().shape().clone()
+    }
+
+    fn file() -> Shape {
+        Shape::Arms { arms: vec![PropertyAtom::bare(SimplifiedType::File)], nullable: false }
+    }
+
+    #[test]
+    fn file_exists_true_side_proves_a_file_like_is_file_type() {
+        assert_eq!(shape_of_x_after("file_exists(x)", Polarity::True), file());
+        assert_eq!(shape_of_x_after("fileExists(x)", Polarity::True), file());
+        assert_eq!(shape_of_x_after("is_file_type(x)", Polarity::True), file());
+    }
+
+    #[test]
+    fn file_exists_false_side_proves_nothing() {
+        assert_eq!(shape_of_x_after("file_exists(x)", Polarity::False), Shape::Unknown { non_null: false });
+    }
+
+    #[test]
+    fn file_exists_does_not_transfer_its_fact_to_an_independent_read() {
+        let declared = DeclaredTypes::new(None);
+        let scope = TypeScope::unguarded(&declared).assume(&parse("file_exists(frontmatter('t', 'include'))").unwrap(), Polarity::True);
+        let read = parse("frontmatter('t', 'include')").unwrap();
+        assert!(scope.type_of_expr(&read).is_none(), "a call result is not a stable subject, so no fact attaches");
+    }
+}

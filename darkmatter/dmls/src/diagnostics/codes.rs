@@ -182,6 +182,30 @@ pub mod code {
     /// is Darkmatter's.
     pub const EXPRESSION_INCOMPLETE_ANALYSIS: &str =
         darkmatter::markdown::compose::expression::INCOMPLETE_ANALYSIS_CODE;
+    /// A malformed `::map` / `::filter` region, header, or option. The code
+    /// is Darkmatter's (`collection_blocks::diagnostics`), as are the
+    /// collection codes below; composition reports under the same ones.
+    pub const COLLECTION_MALFORMED: &str = darkmatter::markdown::compose::collection_blocks::diagnostics::MALFORMED_CODE;
+    /// A `::map` source with no iterable declaration (a warning when the
+    /// untyped-source recovery is allowed).
+    pub const COLLECTION_UNTYPED_MAP_SOURCE: &str =
+        darkmatter::markdown::compose::collection_blocks::diagnostics::UNTYPED_MAP_SOURCE_CODE;
+    /// A `::filter` source with no iterable declaration (a warning when the
+    /// untyped-source recovery is allowed).
+    pub const COLLECTION_UNTYPED_FILTER_SOURCE: &str =
+        darkmatter::markdown::compose::collection_blocks::diagnostics::UNTYPED_FILTER_SOURCE_CODE;
+    /// A source known not to be iterable.
+    pub const COLLECTION_INVALID_SOURCE: &str =
+        darkmatter::markdown::compose::collection_blocks::diagnostics::INVALID_SOURCE_CODE;
+    /// A callback that does not parse or binds a protected name.
+    pub const EXPRESSION_INVALID_CALLBACK: &str =
+        darkmatter::markdown::compose::collection_blocks::diagnostics::INVALID_CALLBACK_CODE;
+    /// A pattern that cannot bind its input or result.
+    pub const COLLECTION_PATTERN_MISMATCH: &str =
+        darkmatter::markdown::compose::collection_blocks::diagnostics::PATTERN_MISMATCH_CODE;
+    /// A `sort=` key that is provably not a number or a string.
+    pub const COLLECTION_INVALID_SORT_KEY: &str =
+        darkmatter::markdown::compose::collection_blocks::diagnostics::INVALID_SORT_KEY_CODE;
     /// A fenced-code info string whose language token no grammar recognizes.
     pub const FENCE_UNKNOWN_LANGUAGE: &str = "dm.fence.unknown_language";
     /// A `::shell` / `::shell-block` / `$()` command the shell policy disallows.

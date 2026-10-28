@@ -14,6 +14,8 @@
 //! | body `{{ … }}` | body interpolation is enabled | fenced/indented code (unless `interpolate_code_blocks`), `{{{ … }}}`, literal tokens |
 //! | `::block when="…"` | page blocks are enabled | |
 //! | `::file`/`::code` `when=…` | a transclusion stage is enabled | |
+//! | `::map`/`::filter` gates and callbacks | collection blocks are enabled | |
+//! | body surfaces inside a `::map`/`::filter` body | its own stage is enabled | |
 //!
 //! The shell-command discovery pass composes a narrowed surface, but its
 //! check covers the surfaces of the composition it prepares, so it rejects
@@ -30,7 +32,12 @@
 //!
 //! A body expression is checked under the guards of every enclosing
 //! `::block` (when page blocks are enabled, the only case in which a false
-//! block is removed). A transcluded child runs its own pipeline node, so it is
+//! block is removed) and the locals of every enclosing `::map` / `::filter`
+//! body ([`BodyScopes`]), including bodies and branches no gate would reach:
+//! a runtime gate never excuses a statically invalid call. A region's static
+//! defects (source typing, protected names, patterns, sort keys) are
+//! rejected once, before any expression runs, and a waived untyped source is
+//! a warning the blocking policy sees with the others. A transcluded child runs its own pipeline node, so it is
 //! checked against its own schema and origin before its own evaluation;
 //! nothing a parent inserts is the parent's syntax.
 
@@ -46,7 +53,11 @@ use super::expression::{
 };
 use super::frontmatter_interpolation::{FrontmatterExpressionLocation, LocatedFrontmatterError};
 use super::value_origin::ValuePathSegment as Segment;
-use super::page_blocks::{BodyGuards, PageBlockError, PageBlockRegion};
+use super::collection_blocks::{
+    BodyScopes, CollectionAnalysisOptions, CollectionError, analyze_collection_blocks, diagnostics::COLLECTION_SOURCE,
+};
+use super::page_blocks::{PageBlockError, PageBlockRegion};
+use super::pipeline::operations::ComposeOperationSet;
 use super::value_origin::{FrontmatterProvenance, ValuePathSegment};
 use super::{ComposeOperation, ComposeSource, ComposeWarning, transclusion};
 use crate::markdown::Markdown;
@@ -113,6 +124,8 @@ struct Advisory {
 #[derive(Default)]
 struct Advisories {
     found: Vec<Advisory>,
+    /// Waived untyped collection sources, ranked by their body offset.
+    recovered: Vec<(Order, super::collection_blocks::RecoveredSource)>,
     /// Frontmatter string leaves ranked so far.
     leaves: usize,
 }
@@ -207,6 +220,12 @@ pub(crate) fn check_document(
     schema: Option<&EffectiveSchema>,
 ) -> Result<Vec<ComposeWarning>, PrecheckFailure> {
     let declared = DeclaredTypes::for_schema(schema);
+    // A declared host global is a declared root: a collection may iterate it,
+    // and a local may not shadow it.
+    let declared = match options.host_globals.as_ref() {
+        Some(globals) => declared.with_binding_view(globals.view()),
+        None => declared,
+    };
     let site = TypeScope::unguarded(&declared);
     let mut advisories = Advisories::default();
     let mut rejected = None;
@@ -220,6 +239,7 @@ pub(crate) fn check_document(
     }
     if let Some((order, rejection)) = rejected {
         advisories.found.retain(|advisory| advisory.order < order);
+        advisories.recovered.retain(|(at, _)| *at < order);
         let earlier = advisory_warnings(markdown, options, advisories);
         return Err(match rejection {
             Rejection::Frontmatter(failure) => PrecheckFailure::Frontmatter { failure, earlier },
@@ -237,9 +257,10 @@ pub(crate) fn check_document(
 
 fn advisory_warnings(markdown: &Markdown, options: &super::ComposeRequest, advisories: Advisories) -> Vec<ComposeWarning> {
     use biscuit_terminal::components::prose::Prose;
-    if advisories.found.is_empty() {
+    if advisories.found.is_empty() && advisories.recovered.is_empty() {
         return Vec::new();
     }
+    let recovered = advisories.recovered;
     let mut found = advisories.found;
     found.sort_by_key(|advisory| advisory.order);
     let document = match markdown.source().as_ref().unwrap_or(&options.source) {
@@ -253,9 +274,10 @@ fn advisory_warnings(markdown: &Markdown, options: &super::ComposeRequest, advis
     let loaded = markdown.loaded_source_context_for_errors();
     let body_origin = BodyOrigin::capture(markdown);
     let body = markdown.content();
-    found
+    let phrased: Vec<(Order, ComposeWarning)> = found
         .into_iter()
         .map(|advisory| {
+            let order = advisory.order;
             // The authored position of the finding, projected through the
             // YAML scalar or the body's rewrites into the loaded text.
             let position = loaded.as_ref().and_then(|context| {
@@ -288,7 +310,7 @@ fn advisory_warnings(markdown: &Markdown, options: &super::ComposeRequest, advis
             let detail = advisory.finding.message.strip_prefix(&format!("{function}: ")).unwrap_or(&advisory.finding.message);
             let message = format!("`{function}(…)`{location}: {}", Prose::escape_text(detail));
             let diagnostic = advisory.finding.at(document.clone(), position);
-            ComposeWarning {
+            let warning = ComposeWarning {
                 source: Some(ComposeWarning::EXPRESSION_SOURCE.to_string()),
                 code: Some(advisory.finding.code.to_string()),
                 identity: Some(WarningIdentity {
@@ -302,9 +324,45 @@ fn advisory_warnings(markdown: &Markdown, options: &super::ComposeRequest, advis
                 line_number: line,
                 diagnostic: Some(Box::new(diagnostic)),
                 ..ComposeWarning::new("interpolation", message)
-            }
+            };
+            (order, warning)
         })
-        .collect()
+        .collect();
+    let recovered = recovered.into_iter().map(|(order, found)| {
+        let line = markdown.frontmatter_line_count() + body.get(..found.span.start).map_or(0, |before| before.matches('\n').count()) + 1;
+        let mut diagnostic = found.diagnostic;
+        if let Some(source) = diagnostic.source.as_mut() {
+            source.file = document.clone();
+            source.line = line;
+        }
+        let location = match display.as_deref() {
+            Some(document) => format!(" at {document}:{line}"),
+            None => format!(" at line {line}"),
+        };
+        let warning = ComposeWarning {
+            source: Some(COLLECTION_SOURCE.to_string()),
+            code: Some(diagnostic.code.clone()),
+            identity: Some(WarningIdentity {
+                subject: WarningSubject::Expression {
+                    document: None,
+                    scope: Some("collection-source".to_string()),
+                    origin: ExpressionOrigin::Authored(found.span),
+                },
+            }),
+            path: document.clone(),
+            line_number: Some(line),
+            diagnostic: Some(Box::new(diagnostic)),
+            ..ComposeWarning::new("collection", format!("{}{location}", Prose::escape_text(&found_message(&found.reference, found.kind))))
+        };
+        (order, warning)
+    });
+    let mut all: Vec<(Order, ComposeWarning)> = phrased.into_iter().chain(recovered).collect();
+    all.sort_by_key(|(order, _)| *order);
+    all.into_iter().map(|(_, warning)| warning).collect()
+}
+
+fn found_message(reference: &str, kind: super::collection_blocks::CollectionKind) -> String {
+    format!("`::{}` source `{reference}` has no declared iterable type", kind.opener())
 }
 
 fn check_frontmatter(
@@ -389,8 +447,55 @@ fn check_body(
 ) -> Option<(usize, MarkdownError)> {
     let body = markdown.content();
     let page_blocks = options.call_check_covers(ComposeOperation::PageBlocks);
-    let guards = if page_blocks { BodyGuards::scan(body) } else { BodyGuards::default() };
+    let collections = options.call_check_covers(ComposeOperation::CollectionBlocks);
+    let mut covered = ComposeOperationSet::empty();
+    if page_blocks {
+        covered.insert(ComposeOperation::PageBlocks);
+    }
+    if collections {
+        covered.insert(ComposeOperation::CollectionBlocks);
+    }
     let mut rejections = Vec::new();
+    let mut guards = BodyScopes::scan(body, &covered);
+    if collections && (body.contains("::map") || body.contains("::filter")) {
+        let analysis_options = CollectionAnalysisOptions {
+            operations: covered,
+            binding_view: options.host_globals.as_ref().map(|globals| globals.view()),
+            allow_untyped_map_variables: options.allow_untyped_map_variables(),
+            allow_untyped_filter_variables: options.allow_untyped_filter_variables(),
+            // The error is re-anchored to the loaded file below; this names
+            // the span in the body.
+            source_path: Some(std::path::Path::new("document")),
+        };
+        match analyze_collection_blocks(body, site, &analysis_options) {
+            Ok(analysis) => {
+                for recovered in analysis.recovered {
+                    advisories.recovered.push(((BODY_RANK, recovered.span.start), recovered));
+                }
+                guards = analysis.scopes;
+            }
+            Err(error) => {
+                let at = collection_offset(&error);
+                rejections.push((at, collection_rejection(markdown, error)));
+            }
+        }
+        for expression_site in guards.expression_sites(site) {
+            let (checks, rejected) = checked(&expression_site.expression, &expression_site.scope);
+            advisories.record(
+                &checks,
+                &incomplete_host_calls(&expression_site.expression),
+                BODY_RANK,
+                expression_site.origin,
+                None,
+                None,
+            );
+            if let Some((check, at)) = rejected {
+                let start = expression_site.origin + at;
+                let error = rejection(None, &expression_site.text, check);
+                rejections.push((start, anchor_body(markdown, error, start..start + 1)));
+            }
+        }
+    }
 
     if page_blocks
         && body.contains("::block")
@@ -441,7 +546,7 @@ fn check_body(
 fn check_block_conditions(
     markdown: &Markdown,
     regions: &[PageBlockRegion],
-    guards: &BodyGuards,
+    guards: &BodyScopes,
     site: &TypeScope<'_>,
     advisories: &mut Advisories,
 ) -> Option<(usize, MarkdownError)> {
@@ -561,4 +666,33 @@ fn anchor_body(markdown: &Markdown, error: MarkdownError, span: std::ops::Range<
         _ => error,
     };
     anchored.with_on_disk_source(&markdown.full_source_context_for_errors())
+}
+
+/// The body offset a collection failure points at; `0` when it names none.
+fn collection_offset(error: &CollectionError) -> usize {
+    match error.site().map(|site| site.source.as_ref()) {
+        Some(SourceRef::OnDiskSpan { span, .. }) => span.range().start,
+        _ => 0,
+    }
+}
+
+/// A collection failure as the composition error, located in the loaded
+/// file the way body interpolation locates its own: analysis located it in
+/// the body text it was given.
+fn collection_rejection(markdown: &Markdown, error: CollectionError) -> MarkdownError {
+    let span = match error.site().map(|site| site.source.as_ref()) {
+        Some(SourceRef::OnDiskSpan { span, .. }) => Some(span.range()),
+        _ => None,
+    };
+    let located = match (span, markdown.loaded_source_context_for_errors(), BodyOrigin::capture(markdown)) {
+        (Some(span), Some(context), Some(origin)) => origin
+            .project(&span)
+            .and_then(|range| AuthoredSpan::locate(&context.content, range))
+            .map(|authored| SourceRef::OnDiskSpan { context, span: authored }),
+        _ => None,
+    };
+    match located {
+        Some(source) => error.with_source(source).into(),
+        None => error.into(),
+    }
 }

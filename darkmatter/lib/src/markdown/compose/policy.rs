@@ -68,6 +68,16 @@ pub const COMPOSE_DIAGNOSTIC_CODES: &[(&str, &str)] = &[
     (INVALID_FRONTMATTER_ASSIGNMENT_CODE, "an invalid `set=` assignment on a `::file` directive"),
     (REASSIGNED_FRONTMATTER_PROPERTY_CODE, "a property a `::file` directive assigns twice"),
     (SHELL_TIMEOUT_CODE, "a shell command timeout replaced by an empty string"),
+    (super::collection_blocks::diagnostics::MALFORMED_CODE, "a malformed `::map` / `::filter` region, header, or option"),
+    (super::collection_blocks::diagnostics::UNTYPED_MAP_SOURCE_CODE, "a `::map` source with no iterable declaration"),
+    (super::collection_blocks::diagnostics::UNTYPED_FILTER_SOURCE_CODE, "a `::filter` source with no iterable declaration"),
+    (super::collection_blocks::diagnostics::INVALID_SOURCE_CODE, "a `::map` / `::filter` source that is known not to be iterable"),
+    (super::collection_blocks::diagnostics::INVALID_CALLBACK_CODE, "a callback that does not parse or binds a protected name"),
+    (super::collection_blocks::diagnostics::PATTERN_MISMATCH_CODE, "a callback pattern that cannot bind its input or result"),
+    (super::collection_blocks::diagnostics::INVALID_SORT_KEY_CODE, "a `sort=` key that is not a number or a string"),
+    (super::collection_blocks::diagnostics::CALLBACK_FAILED_CODE, "a `::map` / `::filter` callback that failed"),
+    (super::collection_blocks::diagnostics::VISIT_LIMIT_CODE, "a collection iteration that exceeded the visit limit"),
+    (super::collection_blocks::diagnostics::EXPANSION_LIMIT_CODE, "a collection expansion that exceeded the byte limit"),
 ];
 
 /// Which reported diagnostics block a composition.

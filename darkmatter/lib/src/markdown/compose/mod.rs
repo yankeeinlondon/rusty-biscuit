@@ -116,6 +116,7 @@ pub mod policy;
 pub mod report_diagnostics;
 pub(crate) mod pipeline;
 pub(crate) mod schema_validation;
+pub(crate) mod site_scope;
 pub use schema_validation::effective_schema_for;
 pub mod subtree;
 mod unknown_identifiers;

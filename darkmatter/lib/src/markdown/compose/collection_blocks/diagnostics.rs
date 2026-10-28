@@ -6,6 +6,9 @@
 pub use crate::markdown::compose::expression::iteration::{EXPANSION_LIMIT_CODE, VISIT_LIMIT_CODE};
 pub use crate::markdown::compose::expression::parser::INVALID_CALLBACK_CODE;
 
+/// The producer identity of collection warnings in a compose report.
+pub const COLLECTION_SOURCE: &str = "darkmatter.collection";
+
 /// Invalid region, header, or options.
 pub const MALFORMED_CODE: &str = "dm.collection.malformed";
 

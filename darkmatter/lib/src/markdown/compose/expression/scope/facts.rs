@@ -52,7 +52,7 @@ pub(super) fn assume<'d>(scope: &TypeScope<'d>, guard: &Expr, polarity: Polarity
                 _ => scope.clone(),
             }
         }
-        subject => match (scope.declared().subject(subject), polarity) {
+        subject => match (scope.subject(subject), polarity) {
             (Some(subject), Polarity::True) => scope.refine(&subject, origin, Shape::truthy),
             _ => scope.clone(),
         },
@@ -113,10 +113,10 @@ fn predicate_fact<'d>(
     let Some(argument) = args.get(fact.index()) else {
         return scope.clone();
     };
-    let Some(subject) = scope.declared().subject(argument) else {
+    let Some(subject) = scope.subject(argument) else {
         return scope.clone();
     };
-    let definitions = scope.declared().definitions();
+    let definitions = scope.definitions();
     let target = fact.target();
     match (fact.kind(), polarity) {
         (FactKind::TrueIff, Polarity::True) => match target {
@@ -188,8 +188,7 @@ fn comparison<'d>(
     };
     // Whether the guard, as it holds on this side, says the operands are equal.
     let equal = equal == (polarity == Polarity::True);
-    let declared = scope.declared();
-    match (declared.subject(left), declared.subject(right)) {
+    match (scope.subject(left), scope.subject(right)) {
         (Some(subject), None) => against_operand(scope, &subject, literal_operand(right), equal, origin),
         (None, Some(subject)) => against_operand(scope, &subject, literal_operand(left), equal, origin),
         (Some(left), Some(right)) => {
@@ -215,7 +214,7 @@ fn against_operand<'d>(
         // Equal to a container is present and of its family; its elements
         // may be computed, so the value itself is not pinned.
         (Some(Operand::Container(family)), true) => {
-            let definitions = scope.declared().definitions();
+            let definitions = scope.definitions();
             scope.refine(subject, origin, |shape| shape.of_family(family, definitions))
         }
         (Some(Operand::Container(_)), false) | (None, _) => scope.clone(),

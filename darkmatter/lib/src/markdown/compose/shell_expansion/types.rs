@@ -1648,6 +1648,9 @@ pub(crate) struct PipelineRuntime {
     pub shell: ShellExpansionRuntime,
     pub cache: crate::markdown::compose::cache::RunLocalCache,
     pub remote_fetch: crate::markdown::compose::remote_fetch::RemoteFetchRuntime,
+    /// The request's visit and expansion-byte counters, shared by every
+    /// nested collection, child, and explicit nested composition.
+    pub iteration: crate::markdown::compose::expression::iteration::IterationBudget,
     /// The request's shared runtime context, grown as sources name groups.
     pub context_epoch: crate::markdown::compose::context::authority::SharedRequestContextEpoch,
     /// Every context group read by a source composed under this runtime — the
@@ -1692,6 +1695,7 @@ impl PipelineRuntime {
             shell: ShellExpansionRuntime::new(),
             cache,
             remote_fetch,
+            iteration: crate::markdown::compose::expression::iteration::IterationBudget::new(Default::default()),
             context_epoch: Default::default(),
             context_groups: crate::markdown::compose::ContextRequirements::from_groups([]),
             root_source: None,
@@ -1719,6 +1723,7 @@ impl PipelineRuntime {
             shell: ShellExpansionRuntime::new(),
             cache,
             remote_fetch,
+            iteration: crate::markdown::compose::expression::iteration::IterationBudget::new(Default::default()),
             context_epoch: Default::default(),
             context_groups: crate::markdown::compose::ContextRequirements::from_groups([]),
             root_source: None,
@@ -1726,6 +1731,16 @@ impl PipelineRuntime {
             preflight_validated: Default::default(),
             failed_warnings: Default::default(),
         }
+    }
+
+    /// This runtime counting against a fresh budget of `limits`.
+    #[must_use]
+    pub fn with_iteration_limits(
+        mut self,
+        limits: crate::markdown::compose::expression::iteration::IterationLimits,
+    ) -> Self {
+        self.iteration = crate::markdown::compose::expression::iteration::IterationBudget::new(limits);
+        self
     }
 
     /// Creates a child runtime sharing cycle detection and inheriting
@@ -1736,6 +1751,7 @@ impl PipelineRuntime {
             shell: self.shell.clone_for_child(),
             cache: self.cache.clone(),
             remote_fetch: self.remote_fetch.clone(),
+            iteration: self.iteration.clone(),
             context_epoch: std::sync::Arc::clone(&self.context_epoch),
             context_groups: crate::markdown::compose::ContextRequirements::from_groups([]),
             root_source: self.root_source.clone(),

@@ -33,6 +33,9 @@ pub(crate) struct BlockTemplates<'a> {
     pub guards: super::page_blocks::BodyGuards,
     pub scope: SiteScope<'a>,
     pub evaluator: &'a dyn HoleEvaluator,
+    /// Told which block is read, so a repeated body's placeholders read the
+    /// frame of the copy they lie in.
+    pub site: Option<&'a dyn super::site_scope::SiteHook>,
     /// The authored document, for template diagnostics.
     pub ctx: biscuit_terminal::errors::SourceContext,
 }
@@ -106,11 +109,7 @@ pub(crate) fn run_shell_blocks_stage_in(
     // Scan for block pairs (both page and shell)
     let pairs = super::block_pairs::scan_block_pairs_in(content, data).map_err(|e| {
         // Extract line number from BlockPairError
-        let line = match &e {
-            super::block_pairs::BlockPairError::UnmatchedEnd { line } => *line,
-            super::block_pairs::BlockPairError::UnterminatedBlock { line, .. } => *line,
-            super::block_pairs::BlockPairError::TrailingContent { line, .. } => *line,
-        };
+        let line = e.line();
         ShellBlockError::Parse {
             line,
             message: e.to_string(),
@@ -152,6 +151,9 @@ pub(crate) fn run_shell_blocks_stage_in(
     let mut report = ComposeReport::new();
 
     for pair in shell_pairs {
+        if let Some(site) = templates.and_then(|templates| templates.site) {
+            site.enter(pair.span.start);
+        }
         let region = parser::parse_shell_block_region(content, &pair)?;
         let body_text = &content[pair.body_span.clone()];
         let resolved = body::split_logical_commands(body_text, pair.start_line + 1).and_then(|commands| {

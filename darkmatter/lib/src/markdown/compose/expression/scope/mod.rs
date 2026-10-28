@@ -29,6 +29,8 @@
 //! ```
 
 mod facts;
+mod iterable;
+mod lexical;
 mod projection;
 mod raw;
 mod shape;
@@ -37,12 +39,15 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::markdown::compose::expression::Expr;
+use crate::markdown::schemas::DefinitionTable;
 use crate::markdown::span::SourceSpan;
 
+pub use iterable::{ItemFrame, PatternMismatch, SourceProjection, project_pattern, project_source};
+pub use lexical::{LexicalTypes, TypedLocal};
 pub use projection::{BindingId, DeclaredType, DeclaredTypes, Member, Subject};
 pub use raw::RawDeclarations;
 pub(crate) use projection::{Declaration, VariableClass};
-pub use shape::{PresenceEvidence, ScopedType, Shape};
+pub use shape::{PresenceEvidence, ScopedType, Shape, SortKeySupport};
 pub(crate) use shape::is_exact_fact_type;
 
 /// Which side of a guard a region is on.
@@ -136,6 +141,7 @@ impl WriteSet {
 pub struct TypeScope<'d> {
     declared: &'d DeclaredTypes<'d>,
     head: Option<Arc<Link>>,
+    lexical: Option<Arc<LexicalTypes>>,
 }
 
 /// One step of a scope's persistent history, newest first.
@@ -156,11 +162,67 @@ enum Step {
 impl<'d> TypeScope<'d> {
     /// The scope of a site that no guard encloses.
     pub fn unguarded(declared: &'d DeclaredTypes<'d>) -> Self {
-        Self { declared, head: None }
+        Self {
+            declared,
+            head: None,
+            lexical: None,
+        }
     }
 
     pub fn declared(&self) -> &'d DeclaredTypes<'d> {
         self.declared
+    }
+
+    /// This site inside the lexical `layer`. Facts already assumed stay, and
+    /// a fact about a binding the layer aliases (by local id) applies to
+    /// it under its new name. The scope this was called on is unchanged, so
+    /// dropping the result restores the outer meaning.
+    #[must_use]
+    pub fn within(&self, layer: Arc<LexicalTypes>) -> Self {
+        Self {
+            declared: self.declared,
+            head: self.head.clone(),
+            lexical: Some(layer),
+        }
+    }
+
+    /// This site with its lexical layer replaced by `lexical`, keeping every
+    /// fact. Use it to drop one callback's parameters after typing it, so the
+    /// next callback sees the enclosing locals but not its sibling's.
+    #[must_use]
+    pub fn with_lexical(&self, lexical: Option<Arc<LexicalTypes>>) -> Self {
+        Self {
+            declared: self.declared,
+            head: self.head.clone(),
+            lexical,
+        }
+    }
+
+    /// The innermost lexical layer at this site, if any.
+    pub fn lexical(&self) -> Option<&Arc<LexicalTypes>> {
+        self.lexical.as_ref()
+    }
+
+    /// The type definitions in force: the nearest lexical layer that owns a
+    /// table, else the declared layer's.
+    pub fn definitions(&self) -> &DefinitionTable {
+        self.lexical
+            .as_deref()
+            .and_then(LexicalTypes::definitions)
+            .unwrap_or_else(|| self.declared.definitions())
+    }
+
+    /// The stable subject `expr` reads at this site, resolving locals before
+    /// document properties; see [`DeclaredTypes::subject`].
+    pub fn subject(&self, expr: &Expr) -> Option<Subject> {
+        self.declared.subject_in(expr, self.lexical.as_deref())
+    }
+
+    /// Whether the variable read `path` resolves to a lexical local here.
+    pub fn resolves_to_local(&self, path: &str) -> bool {
+        self.declared
+            .variable_subject_in(path, self.lexical.as_deref())
+            .is_some_and(|subject| matches!(subject.binding(), BindingId::Local(_)))
     }
 
     /// The scope of the region on `polarity`'s side of `guard`.
@@ -188,14 +250,30 @@ impl<'d> TypeScope<'d> {
             }
             link = current.parent.as_deref();
         }
-        let (declared, shape) = self.declared.projected(subject);
+        let (declared, shape) = self.projected(subject);
         ScopedType::declared_base(declared, shape, self.declared.has_static_scalar(subject), written)
     }
 
     /// The type of the stable subject `expr` reads, or `None` when it reads
     /// none (a function result, a computed index).
     pub fn type_of_expr(&self, expr: &Expr) -> Option<ScopedType> {
-        self.declared.subject(expr).map(|subject| self.type_of(&subject))
+        self.subject(expr).map(|subject| self.type_of(&subject))
+    }
+
+    /// The declared type and shape of `subject`: a local's from the lexical
+    /// layers, anything else from the declared layer.
+    fn projected(&self, subject: &Subject) -> (DeclaredType, Shape) {
+        let BindingId::Local(id) = subject.binding() else {
+            return self.declared.projected(subject);
+        };
+        let Some(base) = self.lexical.as_ref().and_then(|layer| layer.shape_of(*id)) else {
+            return (DeclaredType::NoProjection, Shape::Unknown { non_null: false });
+        };
+        let shape = projection::walk(base.clone(), subject.path(), self.definitions());
+        match shape.to_definition() {
+            Some(def) => (DeclaredType::Property(def), shape),
+            None => (DeclaredType::NoProjection, shape),
+        }
     }
 
     /// Every subject a guard proves present at this site, in no particular
@@ -242,6 +320,7 @@ impl<'d> TypeScope<'d> {
         let mut joined = Self {
             declared: left.declared,
             head: left.shared_ancestor(right),
+            lexical: left.lexical.clone(),
         };
         let mut touched: Vec<&Subject> = Vec::new();
         for step in left_steps.iter().chain(&right_steps) {
@@ -288,6 +367,7 @@ impl<'d> TypeScope<'d> {
                 step,
                 parent: self.head.clone(),
             })),
+            lexical: self.lexical.clone(),
         }
     }
 

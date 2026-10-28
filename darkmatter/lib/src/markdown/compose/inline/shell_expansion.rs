@@ -9,6 +9,7 @@ use super::super::context::effective_state::ResolvingLookup;
 use super::super::expression::ExpressionFinder;
 use super::super::page_blocks::BodyGuards;
 use super::super::schema_validation::PreparedSchemas;
+use super::super::site_scope::{SiteHook, SiteLookup};
 use super::super::shell_expansion::site::{SiteFrame, SiteScope, TemplateSite, authored_context, prepare_site};
 use super::super::shell_expansion::template::LookupEvaluator;
 use super::super::shell_expansion::types::{ShellCommandOrigin, ShellDirective, ShellExpansionError};
@@ -76,7 +77,9 @@ pub(crate) fn run_stage(
         .filter(|_| authored.iter().any(Option::is_some))
         .map(|authored| BodyGuards::scan_body(authored.text(), line_offset))
         .unwrap_or_default();
-    let lookup = ResolvingLookup::new(state, options.expression_resolution_context(&runtime.remote_fetch));
+    let document = ResolvingLookup::new(state, options.expression_resolution_context(&runtime.remote_fetch));
+    // A repeated body's placeholders read the frame of the copy they lie in.
+    let lookup = SiteLookup::new(&document, &body.scopes, Some(&runtime.iteration));
     let evaluator = LookupEvaluator::new(&lookup);
     let scope = authored
         .iter()
@@ -97,6 +100,7 @@ pub(crate) fn run_stage(
     for (line, authored) in lines.into_iter().zip(authored) {
         let site = match (authored, &scope) {
             (Some((command, file_line, authored_offset)), Some(scope)) => {
+                lookup.enter(line.span.start);
                 let frame = match &line.parsed {
                     Ok(directive) => Some(SiteFrame::of(directive)),
                     Err(_) => parser::authored_directive_options(&command, file_line, &authored_ctx)?.map(|options| {
@@ -168,6 +172,9 @@ pub(crate) fn run_stage(
         super::super::pipeline::stop_if_blocked(report, options, None)?;
     }
 
+    for (span, output) in &replacements {
+        lookup.charge(span.start, output.len()).map_err(collection_budget)?;
+    }
     let before = markdown.content().to_string();
     let edits = apply_replacements_with_edits(markdown.content_mut(), replacements, EditOrigin::Data);
     body.advance(&before, &edits, markdown.content())?;
@@ -187,4 +194,9 @@ fn directive_extent(content: &str, data: &DataRanges, line: &parser::DirectiveLi
         from = at + 1;
     }
     line.span.start..content.len()
+}
+
+/// A budget exhaustion as the request-fatal composition error.
+pub(crate) fn collection_budget(error: super::super::expression::iteration::IterationError) -> crate::markdown::types::MarkdownError {
+    super::super::collection_blocks::CollectionError::Budget(Box::new(error)).into()
 }

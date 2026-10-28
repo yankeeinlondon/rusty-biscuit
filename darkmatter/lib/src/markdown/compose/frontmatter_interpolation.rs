@@ -147,6 +147,11 @@ impl FrontmatterSeedState {
 
 impl EvaluationLookup for FrontmatterSeedState {
     fn get(&self, path: &str) -> Option<Value> {
+        // `local` is bound only by a lexical scope, which wraps this lookup;
+        // seen here it has no bindings and never reads a data key.
+        if super::expression::is_local_path(path) {
+            return None;
+        }
         // The reserved lazy root, intercepted before every other surface so no
         // frontmatter key can shadow `current`.
         if let Some(resolved) = self.current.resolve(path, &self.context) {

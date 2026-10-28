@@ -306,7 +306,7 @@ pub fn project_hole(expression: &str, scope: &TypeScope<'_>) -> HoleType {
     {
         hole.approval = ApprovalType::for_declaration(&definition);
         hole.refinement = Some(Box::new(HoleRefinement {
-            definitions: reached_definitions(&definition, scope.declared().definitions()),
+            definitions: reached_definitions(&definition, scope.definitions()),
             definition,
             guards: narrowed.refinements().to_vec(),
         }));
@@ -324,6 +324,10 @@ fn declared_hole(expr: &Expr, scope: &TypeScope<'_>) -> HoleType {
         VariableClass::Document { key, rest: "" } => key,
         VariableClass::Namespace { .. } | VariableClass::Host { .. } => {
             return HoleType::fallback(TypeProvenance::ReservedRoot);
+        }
+        VariableClass::Local { .. } => return HoleType::fallback(TypeProvenance::NotBareProperty),
+        VariableClass::Document { .. } if scope.resolves_to_local(path) => {
+            return HoleType::fallback(TypeProvenance::NotBareProperty);
         }
         VariableClass::Document { .. } | VariableClass::WholeFrontmatter => {
             return HoleType::fallback(TypeProvenance::NotBareProperty);

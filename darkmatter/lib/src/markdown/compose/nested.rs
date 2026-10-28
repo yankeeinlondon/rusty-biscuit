@@ -350,6 +350,9 @@ fn is_structural(error: &MarkdownError) -> bool {
     transclusion_limit
         || error.pre_approval_violation().is_some()
         || error.shell_input_violation().is_some()
+        // A collection's typing, pattern, ordering, and budget failures end
+        // the request however a fallback handles the call that raised them.
+        || matches!(error, MarkdownError::Collection(_))
         || matches!(error, MarkdownError::BlockedDiagnostics { .. })
 }
 

@@ -5,9 +5,12 @@ pub(super) const BINDINGS: &[FunctionBinding] = &[
     FunctionBinding::context("absolute", &[], super::absolute_fn),
     FunctionBinding::context("relative", &[], super::relative_fn),
     // The handler returns false for `null`, every non-text value, and
-    // malformed reference text, which it never looks up.
+    // malformed reference text, which it never looks up. Only text a file
+    // parameter can take is ever true, so the true side proves `file`, as
+    // `is_file_type` does; the false side proves nothing, since a valid
+    // reference may name a file that is absent.
     FunctionBinding::context("file_exists", &["fileexists"], super::file_exists_fn)
-        .narrowing("value", TrueImplies, Some("string"))
+        .narrowing("value", TrueImplies, Some("file"))
         .false_for_malformed_reference("value"),
     FunctionBinding::context("find_files", &["findfiles"], super::find_files_fn),
     FunctionBinding::context("has_command", &["hascommand"], super::has_command_fn),

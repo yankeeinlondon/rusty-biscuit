@@ -19,7 +19,8 @@ use super::super::{
 use tracing::{debug, info};
 
 use transclusion::{ApplyTarget, ResolvedTransclusion, SectionSlot, TransclusionEngine};
-use super::super::body_origin::BodyProvenance;
+use super::super::body_origin::{BodyProvenance, EditOrigin};
+use super::super::site_scope::{SiteHook, SiteLookup};
 use super::super::value_origin::DataPaths;
 
 impl Markdown {
@@ -61,6 +62,9 @@ impl Markdown {
             ComposeOperation::PageBlocks => {
                 inline::page_blocks::run_stage(self, state, options, runtime, report, body, schemas)
             }
+            ComposeOperation::CollectionBlocks => {
+                inline::collection_blocks::run_stage(self, state, options, runtime, report, body, schemas)
+            }
             ComposeOperation::Interpolation => {
                 report.interpolations_applied =
                     inline::interpolation::run_stage(self, state, options, runtime, report, body, schemas)
@@ -99,10 +103,11 @@ impl Markdown {
         let sb_ctx = self.full_source_context_for_errors();
         let line_offset = self.frontmatter_line_count();
         body.data.ensure_describes(&self.content)?;
-        let lookup = super::super::context::effective_state::ResolvingLookup::new(
+        let document = super::super::context::effective_state::ResolvingLookup::new(
             state,
             options.expression_resolution_context(&runtime.remote_fetch),
         );
+        let lookup = SiteLookup::new(&document, &body.scopes, Some(&runtime.iteration));
         let evaluator = shell_expansion::template::LookupEvaluator::new(&lookup);
         let templates = body
             .authored
@@ -116,6 +121,7 @@ impl Markdown {
                     schemas.effective_for(self),
                 ),
                 evaluator: &evaluator,
+                site: Some(&lookup),
                 ctx: shell_expansion::site::authored_context(self, Some(authored.text())),
             });
         let (new_content, stage_report, edits) = shell_blocks::run_shell_blocks_stage_in(
@@ -127,6 +133,9 @@ impl Markdown {
             &sb_ctx,
             line_offset,
         )?;
+        for edit in edits.iter().filter(|edit| edit.origin == EditOrigin::Data) {
+            lookup.charge(edit.range.start, edit.replacement_len).map_err(inline::shell_expansion::collection_budget)?;
+        }
         body.advance(&self.content, &edits, &new_content)?;
         self.content = new_content;
         report.shell_blocks_applied += stage_report.shell_blocks_applied;
@@ -234,6 +243,7 @@ impl Markdown {
         let parse_start = perf_collector.is_enabled().then(std::time::Instant::now);
         body.data.ensure_describes(&self.content)?;
         let data = Some(&body.data);
+        let iteration = runtime.iteration.clone();
 
         let parsed_directives = if operations.iter().any(|op| {
             matches!(
@@ -312,6 +322,7 @@ impl Markdown {
                             &mut next_order,
                             resolved_cache.as_ref(),
                             watch.as_mut(),
+                            &body.scopes,
                         )?;
                     }
                 }
@@ -344,6 +355,7 @@ impl Markdown {
                             &mut next_order,
                             None,
                             watch.as_mut(),
+                            &body.scopes,
                         )?;
                     }
                 }
@@ -485,6 +497,11 @@ impl Markdown {
             }
         }
 
+        for (_, span, replacement, _) in &replacements {
+            body.scopes
+                .charge(&iteration, span.start, replacement.len())
+                .map_err(inline::shell_expansion::collection_budget)?;
+        }
         if !replacements.is_empty() {
             replacements.sort_by(|left, right| {
                 right
@@ -616,6 +633,8 @@ fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
         || error.pre_approval_violation().is_some()
         || error.shell_input_violation().is_some()
         || error.shell_span_failure()
+        // A collection failure never becomes a successful notice.
+        || matches!(error, MarkdownError::Collection(_))
 }
 
 #[cfg(test)]

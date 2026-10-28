@@ -210,6 +210,133 @@ pub struct IterationError {
     pub path: IterationPath,
 }
 
+/// The request-wide allowance counters, shared by every nested collection,
+/// child composition, and explicit nested composition of one request.
+///
+/// Clones share one counter. A reservation is checked before the work it
+/// pays for, so an exactly full allowance succeeds and the failing
+/// reservation charges nothing. Exhaustion is sticky: after the first failure
+/// every later reservation fails with the same error.
+///
+/// A [`discovery`](Self::discovery) budget charges nothing, because preflight
+/// does not consume execution allowances.
+#[derive(Debug, Clone)]
+pub struct IterationBudget {
+    shared: std::sync::Arc<BudgetState>,
+}
+
+#[derive(Debug)]
+struct BudgetState {
+    limits: IterationLimits,
+    charging: bool,
+    visits: std::sync::atomic::AtomicU64,
+    bytes: std::sync::atomic::AtomicU64,
+    exhausted: std::sync::Mutex<Option<IterationError>>,
+}
+
+impl IterationBudget {
+    /// A budget with nothing consumed.
+    pub fn new(limits: IterationLimits) -> Self {
+        Self::build(limits, true)
+    }
+
+    /// A budget that never charges: preflight reads collections to discover
+    /// children without consuming the execution allowances.
+    pub fn discovery(limits: IterationLimits) -> Self {
+        Self::build(limits, false)
+    }
+
+    fn build(limits: IterationLimits, charging: bool) -> Self {
+        Self {
+            shared: std::sync::Arc::new(BudgetState {
+                limits,
+                charging,
+                visits: std::sync::atomic::AtomicU64::new(0),
+                bytes: std::sync::atomic::AtomicU64::new(0),
+                exhausted: std::sync::Mutex::new(None),
+            }),
+        }
+    }
+
+    /// The configured allowances.
+    pub fn limits(&self) -> IterationLimits {
+        self.shared.limits
+    }
+
+    /// Whether reservations are charged.
+    pub fn is_charging(&self) -> bool {
+        self.shared.charging
+    }
+
+    /// What has been consumed so far.
+    pub fn usage(&self) -> ExpansionUsage {
+        use std::sync::atomic::Ordering::Acquire;
+        ExpansionUsage { visits: self.shared.visits.load(Acquire), bytes: self.shared.bytes.load(Acquire) }
+    }
+
+    /// The first exhaustion, once there was one.
+    pub fn exhausted(&self) -> Option<IterationError> {
+        self.shared.exhausted.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
+
+    /// Reserves one source-item visit.
+    ///
+    /// ## Errors
+    ///
+    /// [`IterationError`] when the allowance is spent; `path` names the item.
+    pub fn reserve_visit(&self, path: &IterationPath) -> Result<(), IterationError> {
+        self.reserve(IterationLimitKind::Visits, 1, path)
+    }
+
+    /// Reserves `bytes` of expansion work.
+    ///
+    /// ## Errors
+    ///
+    /// [`IterationError`] when the reservation would pass the allowance or
+    /// overflow `u64`.
+    pub fn reserve_bytes(&self, bytes: u64, path: &IterationPath) -> Result<(), IterationError> {
+        self.reserve(IterationLimitKind::ExpansionBytes, bytes, path)
+    }
+
+    /// Reserves everything `usage` records, as a cache reuse replays a
+    /// subtree's consumption.
+    ///
+    /// ## Errors
+    ///
+    /// [`IterationError`] for the first allowance that cannot cover it.
+    pub fn reserve_usage(&self, usage: ExpansionUsage, path: &IterationPath) -> Result<(), IterationError> {
+        self.reserve(IterationLimitKind::Visits, usage.visits, path)?;
+        self.reserve(IterationLimitKind::ExpansionBytes, usage.bytes, path)
+    }
+
+    fn reserve(&self, kind: IterationLimitKind, amount: u64, path: &IterationPath) -> Result<(), IterationError> {
+        use std::sync::atomic::Ordering::{Acquire, Release};
+        if !self.shared.charging {
+            return Ok(());
+        }
+        let mut exhausted = self.shared.exhausted.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(error) = exhausted.as_ref() {
+            return Err(error.clone());
+        }
+        let (counter, limit) = match kind {
+            IterationLimitKind::Visits => (&self.shared.visits, self.shared.limits.max_visits().get()),
+            IterationLimitKind::ExpansionBytes => (&self.shared.bytes, self.shared.limits.max_expansion_bytes().get()),
+        };
+        let used = counter.load(Acquire);
+        match used.checked_add(amount).filter(|total| *total <= limit) {
+            Some(total) => {
+                counter.store(total, Release);
+                Ok(())
+            }
+            None => {
+                let error = IterationError { kind, limit, used, requested: amount, path: path.clone() };
+                *exhausted = Some(error.clone());
+                Err(error)
+            }
+        }
+    }
+}
+
 fn kind_label(kind: IterationLimitKind) -> &'static str {
     match kind {
         IterationLimitKind::Visits => "iteration visit",
@@ -256,5 +383,62 @@ mod tests {
     fn limit_kinds_map_to_the_registered_codes() {
         assert_eq!(IterationLimitKind::Visits.code(), "dm.iteration.visit_limit");
         assert_eq!(IterationLimitKind::ExpansionBytes.code(), "dm.iteration.expansion_limit");
+    }
+
+    fn budget(visits: u64, bytes: u64) -> IterationBudget {
+        IterationBudget::new(IterationLimits::new(NonZeroU64::new(visits).unwrap(), NonZeroU64::new(bytes).unwrap()))
+    }
+
+    #[test]
+    fn an_exactly_full_allowance_succeeds_and_the_next_reservation_fails() {
+        let budget = budget(2, 10);
+        let path = IterationPath::empty();
+        assert!(budget.reserve_visit(&path).is_ok());
+        assert!(budget.reserve_visit(&path).is_ok());
+        let error = budget.reserve_visit(&path).unwrap_err();
+        assert_eq!((error.kind, error.limit, error.used, error.requested), (IterationLimitKind::Visits, 2, 2, 1));
+        assert_eq!(budget.usage().visits, 2, "the failing reservation charges nothing");
+        assert!(budget.reserve_bytes(10, &path).is_err(), "exhaustion is sticky across allowances");
+    }
+
+    #[test]
+    fn bytes_fail_before_the_append_that_would_exceed_them() {
+        let budget = budget(5, 10);
+        let path = IterationPath::empty();
+        assert!(budget.reserve_bytes(6, &path).is_ok());
+        let error = budget.reserve_bytes(5, &path).unwrap_err();
+        assert_eq!((error.kind, error.used, error.requested), (IterationLimitKind::ExpansionBytes, 6, 5));
+        assert_eq!(budget.usage().bytes, 6);
+        assert_eq!(budget.exhausted(), Some(error));
+    }
+
+    #[test]
+    fn a_reservation_that_overflows_u64_fails() {
+        let budget = IterationBudget::new(IterationLimits::new(NonZeroU64::MAX, NonZeroU64::MAX));
+        let path = IterationPath::empty();
+        assert!(budget.reserve_bytes(u64::MAX, &path).is_ok());
+        assert!(budget.reserve_bytes(1, &path).is_err());
+    }
+
+    #[test]
+    fn clones_share_one_counter_and_discovery_charges_nothing() {
+        let shared = budget(1, 1);
+        let other = shared.clone();
+        let path = IterationPath::empty();
+        shared.reserve_visit(&path).unwrap();
+        assert!(other.reserve_visit(&path).is_err());
+        let discovery = IterationBudget::discovery(IterationLimits::default());
+        for _ in 0..3 {
+            discovery.reserve_usage(ExpansionUsage { visits: u64::MAX, bytes: u64::MAX }, &path).unwrap();
+        }
+        assert_eq!(discovery.usage(), ExpansionUsage::default());
+    }
+
+    #[test]
+    fn usage_reservation_replays_both_allowances() {
+        let budget = budget(3, 100);
+        let path = IterationPath::empty();
+        budget.reserve_usage(ExpansionUsage { visits: 3, bytes: 100 }, &path).unwrap();
+        assert!(budget.reserve_usage(ExpansionUsage { visits: 1, bytes: 0 }, &path).is_err());
     }
 }

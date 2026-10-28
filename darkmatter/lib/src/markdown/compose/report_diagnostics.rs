@@ -211,6 +211,17 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
             },
             None,
         ),
+        MarkdownError::Collection(inner) => (
+            inner.code(),
+            match inner.site().map(|site| site.source.as_ref()) {
+                Some(SourceRef::OnDiskSpan { context, span }) => Some(DiagnosticSource {
+                    file: named(&context.display),
+                    line: span.line(),
+                    column: span.column(),
+                }),
+                _ => None,
+            },
+        ),
         MarkdownError::ShellBlock(_) => (SHELL_FAILURE_CODE, None),
         MarkdownError::Reference(_) => (REFERENCE_FAILURE_CODE, None),
         MarkdownError::ParameterBinding { .. } | MarkdownError::CallerFileClassificationChanged { .. } => {

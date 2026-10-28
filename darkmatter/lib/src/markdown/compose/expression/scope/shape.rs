@@ -214,6 +214,46 @@ impl ScopedType {
     }
 }
 
+/// Whether a type can be a `sort=` key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SortKeySupport {
+    /// The type does not decide it: unknown, or at least one alternative can
+    /// be a number or a string. The runtime key check applies.
+    Undecided,
+    /// No alternative can be a number or a string. The text names the type.
+    Unsupported(String),
+}
+
+impl Shape {
+    /// Whether values of this type can be an ordering key. Only a type with
+    /// no number or string alternative at all is provably unsupported; a
+    /// nullable or mixed union is left to the runtime check, which sees the
+    /// actual keys.
+    pub fn sort_key_support(&self, definitions: &DefinitionTable) -> SortKeySupport {
+        let Shape::Arms { arms, nullable } = self else {
+            return SortKeySupport::Undecided;
+        };
+        if arms.is_empty() {
+            return if *nullable {
+                SortKeySupport::Unsupported("null".to_string())
+            } else {
+                SortKeySupport::Undecided
+            };
+        }
+        let orderable = arms
+            .iter()
+            .any(|arm| arm_families(arm, definitions).iter().any(|family| matches!(family, Family::String | Family::Number)));
+        if orderable {
+            return SortKeySupport::Undecided;
+        }
+        let mut parts: Vec<String> = arms.iter().map(crate::markdown::schemas::simplified::serialize_property_atom).collect();
+        if *nullable {
+            parts.push("null".to_string());
+        }
+        SortKeySupport::Unsupported(parts.join(" | "))
+    }
+}
+
 impl Shape {
     /// The shape of a property declaration: [`Self::of_type`], plus `null`
     /// unless the shared presence rule makes the property required.

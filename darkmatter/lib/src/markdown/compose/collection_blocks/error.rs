@@ -118,6 +118,24 @@ impl CollectionError {
         }
     }
 
+    /// This failure located at `source` instead: the same finding re-anchored
+    /// to a richer authored context. A budget failure has no site and is
+    /// returned unchanged.
+    #[must_use]
+    pub fn with_source(mut self, source: SourceRef) -> Self {
+        match &mut self {
+            Self::Malformed { site, .. }
+            | Self::UntypedSource { site, .. }
+            | Self::InvalidSource { site, .. }
+            | Self::InvalidCallback { site, .. }
+            | Self::PatternMismatch { site, .. }
+            | Self::InvalidSortKey { site, .. }
+            | Self::CallbackFailed { site, .. } => *site.source = source,
+            Self::Budget(_) => {}
+        }
+        self
+    }
+
     /// The failure's location, when it has one.
     pub fn site(&self) -> Option<&CollectionSite> {
         match self {

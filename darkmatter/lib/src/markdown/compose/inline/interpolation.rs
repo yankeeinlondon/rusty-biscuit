@@ -15,6 +15,7 @@ use super::super::expression::absence::MissingRoot;
 use super::super::pipeline::{FinalVerdict, blocking_guard};
 use super::super::schema_validation::PreparedSchemas;
 use super::super::ComposeWarning;
+use super::super::site_scope::{SiteHook, SiteLookup};
 use super::super::{ComposeReport, EffectiveState};
 use serde_json::Value;
 use tracing::debug;
@@ -65,24 +66,38 @@ pub(crate) fn run_stage(
     // expression functions (`frontmatter`, `file_exists`, `markdown_title`, …)
     // resolve filesystem paths and — when remote reads are enabled — HTTP(S)
     // URL arguments through the run's remote-fetch runtime.
-    let lookup = DeferrableLookup {
+    let document = DeferrableLookup {
         inner: state::ResolvingLookup::new(
             state,
             options.expression_resolution_context(&runtime.remote_fetch),
         ),
         defer_not_captured: options.defer_missing_runtime_context,
     };
-    let evaluator = Evaluator::new(&lookup)
-        .with_presentation_values(state.presentation_values())
-        .observing_missing_roots();
     body.data.ensure_describes(markdown.content())?;
     let origin = body.origin.as_ref().filter(|origin| origin.describes(markdown.content()));
     let verdict = FinalVerdict { markdown, state, schemas };
-    let targets = rewrite_targets_guarded(markdown, &body.data, &evaluator, origin, report, options, verdict)?;
+    // A repeated body's sites read the frame of the copy they lie in; the
+    // text the target pass leaves has shifted, so the second pass reads the
+    // ranges carried past its edits.
+    let targets = {
+        let sited = SiteLookup::new(&document, &body.scopes, Some(&runtime.iteration));
+        let evaluator = Evaluator::new(&sited)
+            .with_presentation_values(state.presentation_values())
+            .observing_missing_roots();
+        let targets = rewrite_targets_guarded(
+            markdown, &body.data, &evaluator, origin, report, options, verdict, Some(&sited),
+        )?;
+        // An absent property in a whole-value directive target already warns as a
+        // skipped nullable target; a second warning would report one issue twice.
+        drop(evaluator.take_missing_roots());
+        targets
+    };
     report.add_warnings(targets.warnings);
-    // An absent property in a whole-value directive target already warns as a
-    // skipped nullable target; a second warning would report one issue twice.
-    drop(evaluator.take_missing_roots());
+    let scopes = body.scopes.after_edits(&targets.edits);
+    let lookup = SiteLookup::new(&document, &scopes, Some(&runtime.iteration));
+    let evaluator = Evaluator::new(&lookup)
+        .with_presentation_values(state.presentation_values())
+        .observing_missing_roots();
     let origin = origin.map(|origin| origin.after_edits(&targets.edits, &targets.output));
     let data = body.data.after_edits(&targets.edits, &targets.output);
     let authored = markdown.loaded_source_context_for_errors();
@@ -119,6 +134,7 @@ pub(crate) fn run_stage(
         options.expression_failure_policy(),
         "interpolation",
         guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
+        Some(&lookup),
     )
     .map_err(|failure| anchor_authored_failure(markdown, origin.as_ref(), failure))?;
     drop(guard);
@@ -130,6 +146,7 @@ pub(crate) fn run_stage(
             .advanced(markdown.content(), &targets.edits, &targets.output)?
             .advanced(&targets.output, &result.edits, &result.output)
     });
+    body.scopes = scopes.after_edits(&result.edits);
     body.data = data;
     *markdown.content_mut() = result.output;
     report.add_warnings(result.warnings);
@@ -152,6 +169,7 @@ pub(crate) fn run_stage(
 /// Out of line so its guard and failure temporaries stay out of
 /// `run_stage`'s frame, which recurs once per nested composition.
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 fn rewrite_targets_guarded<L: EvaluationLookup>(
     markdown: &Markdown,
     data: &DataRanges,
@@ -160,6 +178,7 @@ fn rewrite_targets_guarded<L: EvaluationLookup>(
     report: &ComposeReport,
     options: &crate::markdown::compose::ComposeRequest,
     verdict: FinalVerdict<'_>,
+    site: Option<&dyn SiteHook>,
 ) -> MarkdownResult<DirectiveTargetRewrite> {
     // A target's absent root is reported as a skipped target, never as an
     // undeclared read, so this pass judges warnings alone.
@@ -170,6 +189,7 @@ fn rewrite_targets_guarded<L: EvaluationLookup>(
         evaluator,
         markdown.frontmatter_line_count(),
         guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
+        site,
     )
     .map_err(|failure| anchor_authored_failure(markdown, origin, failure))
 }

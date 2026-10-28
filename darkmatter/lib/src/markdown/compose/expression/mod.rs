@@ -79,6 +79,7 @@ pub mod error;
 pub mod file_suggestions;
 pub mod functions;
 pub mod host;
+pub mod iterable;
 pub mod iteration;
 pub mod lexer;
 pub mod lint;
@@ -89,14 +90,18 @@ pub mod resolve_ctx;
 pub mod scope;
 pub mod semantics;
 
-pub use absence::{AccessStep, StaticAccessRead, StaticVariableRead, branch_scope, static_access_reads, static_variable_reads};
+pub use absence::{
+    AccessStep, StaticAccessRead, StaticVariableRead, branch_scope, static_access_reads, static_callback_reads,
+    static_variable_reads, static_variable_reads_in_scope,
+};
 pub use ast::{
     BinaryOp, BindingPattern, Callback, Expr, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind,
 };
 pub use binding::{
     Availability, BindingError, BindingView, BindingViewBuilder, EvaluationSession,
-    GlobalDeclaration, HostGlobals, LazyProvider, LexicalScope, LocalId, ResolvedBinding, RootClass, RuntimeBinding,
-    ScopeId, ScopedLookup, UnavailabilityReason, UnavailableBinding, is_reserved_namespace,
+    GlobalDeclaration, HostGlobals, LOCAL_ROOT, LazyProvider, LexicalScope, LocalBinding, LocalId, ProtectedLocalName,
+    ProtectedNameKind, ResolvedBinding, RootClass, RuntimeBinding, ScopeId, ScopedLookup, UnavailabilityReason,
+    UnavailableBinding, check_local_names, is_local_path, is_reserved_namespace,
 };
 pub use call_binding::{
     BoundArgs, BoundCall, CallBindingError, CallErrorKind, CompiledSignature, EvaluationMode, FunctionRegistration,
@@ -140,7 +145,8 @@ pub(crate) use path_projection::{
 pub use resolve_ctx::ResolutionContext;
 pub use scope::{
     BindingId, DeclaredType, DeclaredTypes, GuardOrigin, Member, Polarity, PresenceEvidence, RawDeclarations,
-    ScopedType, Shape, Subject, TypeScope, WriteSet,
+    ItemFrame, LexicalTypes, PatternMismatch, ScopedType, Shape, SortKeySupport, SourceProjection, Subject, TypeScope, TypedLocal,
+    WriteSet, project_pattern, project_source,
 };
 pub use lint::{ExpressionLint, ExpressionLintKind, is_whole_value_span, lint_expression, lint_spanned};
 pub use lexer::{
@@ -153,7 +159,8 @@ pub use parser::{
 };
 pub use prepared::{
     AuthoredMode, PreparationError, PreparedExpression, PreparedValue, ValidationDiagnostic,
-    evaluate_prepared, prepare_value, validate_expression, validate_prepared,
+    evaluate_prepared, prepare_value, validate_callback, validate_expression, validate_expression_in_scope,
+    validate_prepared,
 };
 
 use absence::{AbsenceScope, MissingRootObserver};

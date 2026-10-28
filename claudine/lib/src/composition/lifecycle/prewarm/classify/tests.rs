@@ -297,6 +297,7 @@ const DECIDED_ROOTS: &[(&str, bool)] = &[
     ("ctx", true),
     ("env", true),
     ("current", false),
+    ("local", false),
     ("loop", false),
     ("err", false),
     ("timing", false),

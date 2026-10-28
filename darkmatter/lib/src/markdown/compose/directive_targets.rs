@@ -1,6 +1,7 @@
 //! Typed evaluation and rewriting for interpolated transclusion targets.
 
 use crate::markdown::compose::ComposeWarning;
+use crate::markdown::compose::site_scope::SiteHook;
 use crate::markdown::compose::body_origin::{DataRanges, TextEdit};
 use crate::markdown::compose::directives_api::{
     BlockScanError, DirectiveKind, scan_darkmatter_blocks, scan_darkmatter_directives,
@@ -10,7 +11,8 @@ use crate::markdown::compose::expression::{
     BindingId, DeclaredType, DeclaredTypes, EvaluationLookup, Expr, Member, Subject, TypeScope, parse,
     scalar_string,
 };
-use crate::markdown::compose::page_blocks::BodyGuards;
+use crate::markdown::compose::collection_blocks::BodyScopes;
+use crate::markdown::compose::pipeline::operations::ComposeOperationSet;
 use crate::markdown::compose::expression::absence;
 use crate::markdown::compose::expression::lint::whole_value_span;
 use crate::markdown::compose::interpolation::rewrite::{BeforeEval, interpolate_value_guarded, reborrow, show_new_warnings};
@@ -117,12 +119,16 @@ fn target_nullability(scope: &TypeScope<'_>, expression: &Expr) -> TargetNullabi
     }
 }
 
-/// Passively analyzes whole-value targets and all enclosing page-block guards.
+/// Passively analyzes whole-value targets and all enclosing guards and
+/// collection regions.
 ///
-/// Each target's site is typed on the true side of every `::block when=`
-/// guard around it ([`BodyGuards`]), the facts composition can rely on once
-/// those blocks were selected; [`DirectiveTargetAnalysis::narrowed_paths`]
-/// lists the paths those guards prove present there.
+/// Each target's site is typed by [`BodyScopes`]: on the true side of every
+/// `::block when=` and `::map` / `::filter when=` gate around it, and inside
+/// every enclosing region's body frame, the facts composition can rely on
+/// once those regions were selected. A target in a collection body may read
+/// the region's locals; they never narrow a document property.
+/// [`DirectiveTargetAnalysis::narrowed_paths`] lists the document paths those
+/// guards prove present there.
 ///
 /// This function parses only in-memory source and supplied schema/frontmatter
 /// state. It does not evaluate expressions, resolve paths, fetch URLs, execute
@@ -133,10 +139,10 @@ pub fn analyze_directive_targets(
     static_frontmatter: &serde_json::Value,
 ) -> Result<Vec<DirectiveTargetAnalysis>, BlockScanError> {
     let directives = scan_darkmatter_directives(source);
-    // Unpaired block markers are this analysis's error; `BodyGuards` would
+    // Unpaired block markers are this analysis's error; `BodyScopes` would
     // only drop their facts.
     scan_darkmatter_blocks(source)?;
-    let guards = BodyGuards::scan(source);
+    let guards = BodyScopes::scan(source, &ComposeOperationSet::all());
     let declared = declared_types(effective_schema, static_frontmatter);
 
     let mut analyses = Vec::new();
@@ -283,6 +289,7 @@ pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
     evaluator: &Evaluator<L>,
     line_offset: usize,
     mut before_eval: BeforeEval<'_>,
+    site: Option<&dyn SiteHook>,
 ) -> Result<DirectiveTargetRewrite, LocatedInterpolationError> {
     let mut output = source.to_string();
     let mut replacements = 0usize;
@@ -307,6 +314,9 @@ pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
         };
 
         show_new_warnings(&mut before_eval, &warnings, &mut shown)?;
+        if let Some(site) = site {
+            site.enter(target.span.start);
+        }
         let expression = parse(&location.expression).ok();
         let (value, count, target_warnings) = interpolate_value_guarded(
             raw,
@@ -346,6 +356,12 @@ pub(crate) fn rewrite_directive_targets<L: EvaluationLookup>(
 
         match &evaluation.target {
             EvaluatedDirectiveTarget::Concrete(value) => {
+                crate::markdown::compose::interpolation::rewrite::charge(
+                    site,
+                    evaluation.span.start,
+                    value.len(),
+                    Some(evaluation.span.clone()),
+                )?;
                 output.replace_range(evaluation.span.clone(), value);
                 edits.push(TextEdit::data(evaluation.span.clone(), value.len()));
             }

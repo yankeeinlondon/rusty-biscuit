@@ -139,6 +139,8 @@ impl ArgumentType {
 /// |---|---|
 /// | a literal | that value |
 /// | a variable, or a constant path on one | its type in `scope` |
+/// | an object literal | a closed object declaring each member at its own type (shorthand `{a, b}` is `{a: a, b: b}`) |
+/// | an array literal | an array of the union of its items' types |
 /// | a call | the union of the declared `returns` of every overload its argument count can select |
 /// | `x \|\| y` | `x`'s type without `null`, joined with `y`'s type where `x` is falsy |
 /// | `c ? a : b` | `a`'s type where `c` holds, joined with `b`'s where it does not |
@@ -153,6 +155,19 @@ pub fn expression_type(expr: &SpannedExpr, scope: &TypeScope<'_>) -> ScopeShape 
     }
     match &expr.kind {
         SpannedExprKind::Paren(inner) => expression_type(inner, scope),
+        SpannedExprKind::ObjectLiteral(entries) => ScopeShape::object_of(
+            entries
+                .iter()
+                .map(|(key, value)| (key.value.clone(), expression_type(value, scope)))
+                .collect(),
+        ),
+        SpannedExprKind::ArrayLiteral(items) => ScopeShape::array_of(
+            &items
+                .iter()
+                .map(|item| expression_type(item, scope))
+                .reduce(|left, right| left.union(&right))
+                .unwrap_or(ScopeShape::Unknown { non_null: false }),
+        ),
         SpannedExprKind::FunctionCall { name, args } => call_returns(name, args.len()),
         SpannedExprKind::Fallback { primary, fallback } => {
             let present = expression_type(primary, scope).without_null();
@@ -1053,7 +1068,7 @@ pub fn check_expression_calls(expr: &SpannedExpr, site: &TypeScope<'_>) -> Vec<C
             .map(|arg| ArgumentType::of(arg, &branch_scope(expr, &arg.span, site.clone())))
             .collect();
         let spans = args.iter().map(|arg| arg.span.clone()).collect();
-        let definitions = site.declared().definitions();
+        let definitions = site.definitions();
         if let Some(check) = check_call_with_definitions(name, &types, call.span.clone(), spans, definitions) {
             checks.push(check);
         }

@@ -58,6 +58,11 @@ pub(crate) fn parse_page_blocks_in(
                 message: format!("Unexpected content after ::end-block: '{content}'"),
             }
         }
+        other => PageBlockError::ParseDirective {
+            ctx: Box::new(ctx.clone()),
+            line: other.line(),
+            message: other.to_string(),
+        },
     })?;
 
     // Filter to page blocks only and sort by start line (document order).

@@ -51,7 +51,7 @@
 //! is a variable plus the selectors applied to it, so `fm['key']` and
 //! `state.a[0]` keep the path they read.
 
-use super::ast::{Expr, SpannedExpr, SpannedExprKind};
+use super::ast::{Expr, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind};
 use super::scope::{DeclaredTypes, Polarity, TypeScope};
 use crate::markdown::span::SourceSpan;
 
@@ -186,6 +186,40 @@ pub fn static_variable_reads(expr: &SpannedExpr) -> Vec<StaticVariableRead<'_>> 
     let mut reads = Vec::new();
     walk_static(expr, AbsenceScope::default(), &mut reads);
     reads
+}
+
+/// [`static_variable_reads`] for an expression evaluated inside lexical
+/// scopes that bind `locals`.
+///
+/// A read is lexical, not a document read, when its root is one of `locals`
+/// (the implicit spelling) or the reserved `local` root (the explicit one);
+/// those reads are left out. Every other read is a free capture and is kept
+/// with its absence classification: `fm.x`, `ctx.*`, `current.*`, host
+/// globals, and document properties no local shadows. Pass every enclosing
+/// scope's names, nearest and outer alike.
+pub fn static_variable_reads_in_scope<'e>(expr: &'e SpannedExpr, locals: &[&str]) -> Vec<StaticVariableRead<'e>> {
+    let mut reads = static_variable_reads(expr);
+    reads.retain(|read| !is_lexical_read(read.path, locals));
+    reads
+}
+
+/// The free reads of a callback body: [`static_variable_reads_in_scope`]
+/// with the callback's own pattern names added to `outer_locals`.
+///
+/// This is what a callback contributes to document, context, and host
+/// dependencies; its parameters contribute none.
+pub fn static_callback_reads<'e>(callback: &'e SpannedCallback, outer_locals: &[&str]) -> Vec<StaticVariableRead<'e>> {
+    let mut locals: Vec<&str> = outer_locals.to_vec();
+    match &callback.pattern {
+        SpannedBindingPattern::Identifier(name) => locals.push(&name.value),
+        SpannedBindingPattern::Fields(fields) => locals.extend(fields.iter().map(|field| field.value.as_str())),
+    }
+    static_variable_reads_in_scope(&callback.body, &locals)
+}
+
+fn is_lexical_read(path: &str, locals: &[&str]) -> bool {
+    let root = root_of(path);
+    root == super::binding::LOCAL_ROOT || locals.contains(&root)
 }
 
 /// One selector applied to a variable read by [`static_access_reads`],
@@ -840,5 +874,32 @@ mod tests {
                 assert!(!proven || read.handles_absence, "`{source}` at {:?}", read.span);
             }
         }
+    }
+
+    fn callback(pattern: &str, body: &str) -> SpannedCallback {
+        SpannedCallback {
+            pattern: SpannedBindingPattern::Identifier(crate::markdown::span::Spanned::new(pattern.to_string(), 0..pattern.len())),
+            arrow: 0..0,
+            body: crate::markdown::compose::expression::parse_spanned(body).unwrap(),
+        }
+    }
+
+    #[test]
+    fn a_callback_contributes_free_captures_and_no_document_read_for_its_locals() {
+        let callback = callback("p", "p.name || title || fm.p || local.q || ctx.today || current.branch || seq.n");
+        let paths: Vec<&str> = static_callback_reads(&callback, &[]).iter().map(|read| read.path).collect();
+        assert_eq!(paths, ["title", "fm.p", "ctx.today", "current.branch", "seq.n"]);
+        let shadowed: Vec<&str> = static_callback_reads(&callback, &["title", "seq"]).iter().map(|read| read.path).collect();
+        assert_eq!(shadowed, ["fm.p", "ctx.today", "current.branch"]);
+    }
+
+    #[test]
+    fn lexical_exclusion_keeps_the_absence_classification_of_the_remaining_reads() {
+        let expr = crate::markdown::compose::expression::parse_spanned("x ? title : other").unwrap();
+        let reads = static_variable_reads_in_scope(&expr, &["x"]);
+        let flags: Vec<(&str, bool)> = reads.iter().map(|read| (read.path, read.handles_absence)).collect();
+        assert_eq!(flags, [("title", false), ("other", false)]);
+        let plain = static_variable_reads(&expr);
+        assert_eq!(plain.len(), 3, "the unscoped inventory still lists the shadowed name");
     }
 }

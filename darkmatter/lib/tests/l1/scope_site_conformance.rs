@@ -644,13 +644,13 @@ fn planned_projections_stay_unclaimed_at_body_shell() {
 }
 
 /// `file_exists` inspects its argument without converting it, so only text
-/// can make it true: its true side narrows a mixed declaration to `string`.
+/// can make it true: its true side narrows a mixed declaration to `file`.
 #[test]
-fn file_exists_true_side_narrows_a_mixed_declaration_to_string() {
+fn file_exists_true_side_narrows_a_mixed_declaration_to_file() {
     let text = format!(
         "{}::block when=\"file_exists(target)\"\n::shell git --version {{{{ target }}}}\n::end-block\n",
         frontmatter("")
     );
     let report = Doc::new(&text).preflight().unwrap();
-    assert_eq!(report.candidates[0].shape().unwrap().canonical_text(), "git --version {{ string }}");
+    assert_eq!(report.candidates[0].shape().unwrap().canonical_text(), "git --version {{ file }}");
 }

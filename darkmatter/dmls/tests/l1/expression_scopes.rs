@@ -413,13 +413,13 @@ fn a_file_exists_guard_narrows_without_touching_the_filesystem_or_network() {
         "Remote {{ remote }}.\n",
         "::file {{remote}}\n",
         "::end-block\n",
-        "::block when=\"file_exists(local)\"\n",
-        "Local {{ local }}.\n",
-        "::file {{local}}\n",
+        "::block when=\"file_exists(nearby)\"\n",
+        "Nearby {{ nearby }}.\n",
+        "::file {{nearby}}\n",
         "::end-block\n",
     );
     let text = format!(
-        "---\n$schema:\n  remote: file\n  local: file\n---\n\n{body}"
+        "---\n$schema:\n  remote: file\n  nearby: file\n---\n\n{body}"
     );
     let workspace = LspWorkspace::new();
     let listing = || {
@@ -433,7 +433,7 @@ fn a_file_exists_guard_narrows_without_touching_the_filesystem_or_network() {
     let mut session = Session::open(&workspace, &text);
     let files_before = listing();
 
-    for (prefix, name) in [("Remote {{", "remote"), ("Local {{", "local")] {
+    for (prefix, name) in [("Remote {{", "remote"), ("Nearby {{", "nearby")] {
         let hover = session.hover(offset_of(&text, prefix, name, 0));
         assert!(hover.contains("Type here: `file`"), "{name}: {hover}");
     }

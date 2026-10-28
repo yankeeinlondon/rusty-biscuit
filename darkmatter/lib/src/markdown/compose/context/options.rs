@@ -279,6 +279,19 @@ pub struct ComposeOptions {
     /// [`Self::ignore_invalid_references`]: every other failure still fails.
     pub(crate) allow_missing_transclusions: bool,
 
+    /// When `true`, a `::map` source with no iterable declaration is a
+    /// warning instead of an error. Waives only the static source-typing
+    /// requirement.
+    pub(crate) allow_untyped_map_variables: bool,
+
+    /// [`Self::allow_untyped_map_variables`] for `::filter` sources.
+    pub(crate) allow_untyped_filter_variables: bool,
+
+    /// Request-wide allowances for collection expansion: source items visited
+    /// and bytes materialized. Shared by nested collections, child
+    /// compositions, and explicit nested composition.
+    pub(crate) iteration_limits: super::super::expression::iteration::IterationLimits,
+
     /// Whether `@`-prefixed paths resolve to the git repository root.
     /// Default: true.
     pub(crate) resolve_repo_root: bool,
@@ -660,6 +673,9 @@ impl std::fmt::Debug for ComposeOptions {
             .field("code_fallback_language", &self.code_fallback_language)
             .field("ignore_invalid_references", &self.ignore_invalid_references)
             .field("allow_missing_transclusions", &self.allow_missing_transclusions)
+            .field("allow_untyped_map_variables", &self.allow_untyped_map_variables)
+            .field("allow_untyped_filter_variables", &self.allow_untyped_filter_variables)
+            .field("iteration_limits", &self.iteration_limits)
             .field("resolve_repo_root", &self.resolve_repo_root)
             .field("shell_timeout", &self.shell_timeout)
             .field("shell_policy_root", &self.shell_policy_root)
@@ -946,6 +962,9 @@ impl ComposeOptions {
             code_fallback_language: "txt".to_string(),
             ignore_invalid_references: None,
             allow_missing_transclusions: false,
+            allow_untyped_map_variables: false,
+            allow_untyped_filter_variables: false,
+            iteration_limits: Default::default(),
             resolve_repo_root: true,
             source_derivation: SourceDerivation::Ordinary,
             source_opening: None,
@@ -1592,6 +1611,45 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_max_transclusion_depth(mut self, max_depth: usize) -> Self {
         self.max_transclusion_depth = max_depth.max(1);
+        self
+    }
+
+    /// Reports a `::map` source with no iterable declaration as a warning
+    /// instead of an error.
+    ///
+    /// The recovery waives only the static source-typing requirement: a
+    /// source whose declaration is known to be unsuitable still fails, and
+    /// runtime shape checks, expression errors, and shell authorization still
+    /// apply. Default: `false`.
+    #[must_use]
+    pub fn with_allow_untyped_map_variables(mut self, allow: bool) -> Self {
+        self.allow_untyped_map_variables = allow;
+        self
+    }
+
+    /// [`Self::with_allow_untyped_map_variables`] for `::filter` sources.
+    /// Default: `false`.
+    #[must_use]
+    pub fn with_allow_untyped_filter_variables(mut self, allow: bool) -> Self {
+        self.allow_untyped_filter_variables = allow;
+        self
+    }
+
+    /// Sets how many source items one request may visit across every
+    /// `::map` / `::filter`, nested directive, and child composition.
+    /// Rejected items count; exhaustion fails the request. Default: 100,000.
+    #[must_use]
+    pub fn with_max_iteration_visits(mut self, visits: std::num::NonZeroU64) -> Self {
+        self.iteration_limits = self.iteration_limits.with_max_visits(visits);
+        self
+    }
+
+    /// Sets how many bytes of collection expansion one request may
+    /// materialize, nested copies included. Exhaustion fails the request.
+    /// Default: 16,777,216 (16 MiB).
+    #[must_use]
+    pub fn with_max_expansion_bytes(mut self, bytes: std::num::NonZeroU64) -> Self {
+        self.iteration_limits = self.iteration_limits.with_max_expansion_bytes(bytes);
         self
     }
 
@@ -2260,6 +2318,24 @@ impl ComposeOptions {
     pub fn max_transclusion_depth(&self) -> usize {
         self.max_transclusion_depth
     }
+
+    /// Whether an untyped `::map` source is a warning rather than an error.
+    #[must_use]
+    pub fn allow_untyped_map_variables(&self) -> bool {
+        self.allow_untyped_map_variables
+    }
+
+    /// Whether an untyped `::filter` source is a warning rather than an error.
+    #[must_use]
+    pub fn allow_untyped_filter_variables(&self) -> bool {
+        self.allow_untyped_filter_variables
+    }
+
+    /// The request-wide visit and expansion-byte allowances.
+    #[must_use]
+    pub fn iteration_limits(&self) -> super::super::expression::iteration::IterationLimits {
+        self.iteration_limits
+    }
 }
 
 impl Default for ComposeOptions {
@@ -2842,6 +2918,9 @@ impl ComposeOptions {
             code_fallback_language,
             ignore_invalid_references,
             allow_missing_transclusions,
+            allow_untyped_map_variables,
+            allow_untyped_filter_variables,
+            iteration_limits,
             resolve_repo_root,
             source_derivation,
             source_opening,
@@ -3031,6 +3110,14 @@ impl ComposeOptions {
 
         enc.field("allow_missing_transclusions");
         enc.bool(*allow_missing_transclusions);
+        enc.field("allow_untyped_map_variables");
+        enc.bool(*allow_untyped_map_variables);
+        enc.field("allow_untyped_filter_variables");
+        enc.bool(*allow_untyped_filter_variables);
+        enc.field("max_iteration_visits");
+        enc.u64(iteration_limits.max_visits().get());
+        enc.field("max_expansion_bytes");
+        enc.u64(iteration_limits.max_expansion_bytes().get());
 
         enc.field("resolve_repo_root");
         enc.bool(*resolve_repo_root);
@@ -3382,6 +3469,14 @@ impl ComposeOptions {
 
         cenc.field("allow_missing_transclusions");
         cenc.bool(*allow_missing_transclusions);
+        cenc.field("allow_untyped_map_variables");
+        cenc.bool(*allow_untyped_map_variables);
+        cenc.field("allow_untyped_filter_variables");
+        cenc.bool(*allow_untyped_filter_variables);
+        cenc.field("max_iteration_visits");
+        cenc.u64(iteration_limits.max_visits().get());
+        cenc.field("max_expansion_bytes");
+        cenc.u64(iteration_limits.max_expansion_bytes().get());
         // A cached result composed under a weaker policy must not stand in
         // for one whose warnings would block.
         cenc.field("blocking_policy");

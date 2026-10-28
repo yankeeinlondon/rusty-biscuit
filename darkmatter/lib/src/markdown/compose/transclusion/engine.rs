@@ -468,6 +468,7 @@ impl<'a> TransclusionEngine<'a> {
             &HashMap<String, crate::markdown::compose::preflight::PreflightResolvedTarget>,
         >,
         mut watch: Option<&mut crate::markdown::compose::pipeline::ReportWatch<'_>>,
+        scopes: &crate::markdown::compose::body_origin::ScopeRanges,
     ) -> MarkdownResult<()> {
         let ignore_invalid = self.resolve_ignore_invalid(options);
         let transclusion_opts = options.transclusion_options();
@@ -555,10 +556,13 @@ impl<'a> TransclusionEngine<'a> {
             }
 
             if let Some(expr) = &directive.options.when_expr {
-                let lookup = state::ResolvingLookup::new(
+                let document = state::ResolvingLookup::new(
                     state,
                     options.expression_resolution_context(remote_fetch),
                 );
+                // A directive in a repeated body reads the frame of its copy.
+                let lookup = crate::markdown::compose::site_scope::SiteLookup::new(&document, scopes, None);
+                crate::markdown::compose::site_scope::SiteHook::enter(&lookup, directive.span.start);
                 for warning in
                     crate::markdown::compose::conditions::collect_condition_context_warnings(
                         expr, &lookup, "condition",

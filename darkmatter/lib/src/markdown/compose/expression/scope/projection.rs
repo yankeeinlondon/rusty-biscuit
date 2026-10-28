@@ -11,7 +11,10 @@ use super::raw::RawDeclarations;
 use crate::markdown::compose::context::context_variable_descriptors;
 use crate::markdown::compose::expression::binding::{Availability, BindingView, LocalId, NULL_ROOT};
 use crate::markdown::compose::expression::fm_namespace::literal_index_key;
-use crate::markdown::compose::expression::{Expr, FmPath, fm_namespace_path, reserved_root_descriptors};
+use super::LexicalTypes;
+use crate::markdown::compose::expression::{
+    Expr, FmPath, LOCAL_ROOT, fm_namespace_path, reserved_root_descriptors,
+};
 use crate::markdown::schemas::catalog::GlobalCatalog;
 use crate::markdown::schemas::{
     DefinitionTable, EffectiveSchema, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
@@ -91,6 +94,18 @@ impl Subject {
         })
     }
 
+    /// The subject below local `id`, below constant `rest` (`a.b`, or empty).
+    pub(super) fn local(id: LocalId, rest: &str) -> Self {
+        Self {
+            binding: BindingId::Local(id),
+            path: rest
+                .split('.')
+                .filter(|segment| !segment.is_empty())
+                .map(|segment| Member::Field(segment.to_string()))
+                .collect(),
+        }
+    }
+
     pub fn binding(&self) -> &BindingId {
         &self.binding
     }
@@ -155,6 +170,11 @@ pub(crate) enum VariableClass<'p> {
     Namespace { root: &'p str, rest: &'p str },
     /// A host global root.
     Host { root: &'p str, rest: &'p str },
+    /// The reserved `local` root: `local.<name>.<rest>`. `name` is empty for
+    /// bare `local`, which names no binding. Bare locals (`x`) classify as
+    /// `Document`; only a [`TypeScope`](super::TypeScope)'s lexical layers
+    /// can tell them apart, because `DeclaredTypes` owns no locals.
+    Local { name: &'p str, rest: &'p str },
 }
 
 /// A top-level declaration lookup.
@@ -256,11 +276,19 @@ impl<'s> DeclaredTypes<'s> {
     /// the lazily refreshed `current` root, and the `null` spelling have
     /// none.
     pub fn subject(&self, expr: &Expr) -> Option<Subject> {
+        self.subject_in(expr, None)
+    }
+
+    /// [`Self::subject`] with lexical locals: a bare name or `local.<name>`
+    /// that `lexical` binds is a [`BindingId::Local`] subject, so `x` and
+    /// `local.x` are one subject while `fm.x` stays a document subject.
+    /// `local.<name>` with no such local has no subject.
+    pub(crate) fn subject_in(&self, expr: &Expr, lexical: Option<&LexicalTypes>) -> Option<Subject> {
         match expr {
-            Expr::Paren(inner) => self.subject(inner),
-            Expr::Variable(path) => self.variable_subject(path),
+            Expr::Paren(inner) => self.subject_in(inner, lexical),
+            Expr::Variable(path) => self.variable_subject_in(path, lexical),
             Expr::MemberAccess { base, name } => {
-                let mut subject = self.subject(base)?;
+                let mut subject = self.subject_in(base, lexical)?;
                 subject.path.extend(name.split('.').map(|segment| Member::Field(segment.to_string())));
                 Some(subject)
             }
@@ -271,7 +299,7 @@ impl<'s> DeclaredTypes<'s> {
                         path: Vec::new(),
                     });
                 }
-                let mut subject = self.subject(base)?;
+                let mut subject = self.subject_in(base, lexical)?;
                 subject.path.push(constant_member(index)?);
                 Some(subject)
             }
@@ -281,10 +309,31 @@ impl<'s> DeclaredTypes<'s> {
 
     /// The subject of the variable read `path`; see [`Self::subject`].
     pub(crate) fn variable_subject(&self, path: &str) -> Option<Subject> {
+        self.variable_subject_in(path, None)
+    }
+
+    /// [`Self::variable_subject`] resolving locals through `lexical`.
+    pub(crate) fn variable_subject_in(&self, path: &str, lexical: Option<&LexicalTypes>) -> Option<Subject> {
         if path == NULL_ROOT {
             return None;
         }
-        let (binding, rest) = match self.classify_variable(path) {
+        let class = self.classify_variable(path);
+        if let Some(lexical) = lexical {
+            match class {
+                VariableClass::Local { name, rest } => {
+                    return lexical.subject(name, rest);
+                }
+                VariableClass::Document { key, rest }
+                    if !crate::markdown::compose::expression::fm_namespace::is_fm_namespace(path) =>
+                {
+                    if let Some(subject) = lexical.subject(key, rest) {
+                        return Some(subject);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let (binding, rest) = match class {
             VariableClass::Document { key, rest } => (BindingId::Document(key.to_string()), rest),
             VariableClass::Namespace { root, rest } if root != CURRENT_ROOT => {
                 (BindingId::Namespace(root.to_string()), rest)
@@ -312,7 +361,10 @@ impl<'s> DeclaredTypes<'s> {
             None => {}
         }
         let (root, rest) = split_root(path);
-        if reserved_root_descriptors().iter().any(|descriptor| descriptor.name == root) {
+        if root == LOCAL_ROOT {
+            let (name, rest) = split_root(rest);
+            VariableClass::Local { name, rest }
+        } else if reserved_root_descriptors().iter().any(|descriptor| descriptor.name == root) {
             VariableClass::Namespace { root, rest }
         } else if self.host_availability(root).is_some() {
             VariableClass::Host { root, rest }
@@ -499,7 +551,8 @@ impl<'s> DeclaredTypes<'s> {
                     path => (DeclaredType::Namespace, typed(path)),
                 }
             }
-            // Declared lexical types are not projected yet.
+            // A local's type lives in the `TypeScope`'s lexical layers, which
+            // `DeclaredTypes` does not own; `TypeScope::type_of` answers it.
             BindingId::Local(_) => (DeclaredType::NoProjection, unknown),
             BindingId::Global(root) => {
                 let availability = self.host_availability(root).cloned().unwrap_or(Availability::Available);
@@ -546,7 +599,7 @@ impl<'s> DeclaredTypes<'s> {
 }
 
 /// `shape` after each constant step of `path`.
-fn walk(shape: Shape, path: &[Member], definitions: &DefinitionTable) -> Shape {
+pub(super) fn walk(shape: Shape, path: &[Member], definitions: &DefinitionTable) -> Shape {
     path.iter().fold(shape, |shape, member| member_shape(&shape, member, definitions))
 }
 
@@ -610,7 +663,7 @@ fn arm_member(atom: &PropertyAtom, member: &Member, definitions: &DefinitionTabl
 }
 
 /// The values of one item of the array alternative `atom`.
-fn item_shape(atom: &PropertyAtom) -> Shape {
+pub(super) fn item_shape(atom: &PropertyAtom) -> Shape {
     let mut item = atom.clone();
     item.is_array = false;
     item.array_constraints.clear();

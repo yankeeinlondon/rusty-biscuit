@@ -42,6 +42,7 @@ const INVENTORY: &[(&str, &str, Coverage)] = &[
     ("EvaluationSession", "markdown/compose/expression/binding.rs", Coverage::Probed),
     ("DeferrableLookup", "markdown/compose/inline/interpolation.rs", Coverage::Probed),
     ("ScopedLookup", "markdown/compose/expression/binding.rs", Coverage::Probed),
+    ("SiteLookup", "markdown/compose/site_scope.rs", Coverage::Probed),
     ("Doc", "markdown/compose/expression/binding.rs", Coverage::Fixture),
     ("TestLookup", "markdown/compose/expression/mod.rs", Coverage::Fixture),
     ("Nothing", "markdown/compose/expression/absence.rs", Coverage::Fixture),
@@ -108,7 +109,11 @@ fn context() -> ComposeContext {
 
 fn state() -> EffectiveState {
     EffectiveStateBuilder::new()
-        .with_frontmatter([("env".to_string(), json!(DOCUMENT_ENV))].into_iter().collect())
+        .with_frontmatter(
+            [("env".to_string(), json!(DOCUMENT_ENV)), ("local".to_string(), json!(DOCUMENT_ENV))]
+                .into_iter()
+                .collect(),
+        )
         .with_context(context())
         .build()
         .unwrap()
@@ -143,13 +148,31 @@ fn assert_reserved_roots_win(name: &str, lookup: &dyn EvaluationLookup) {
     );
 }
 
+/// `local` is the lexical namespace: with no scope it has no bindings and
+/// never reads the document's `local` key; `fm.local` does.
+#[track_caller]
+fn assert_local_root_is_not_the_document(name: &str, lookup: &dyn EvaluationLookup) {
+    for path in ["local", "local.x", "local.local"] {
+        let binding = lookup.resolve(path).unwrap();
+        assert!(
+            matches!(&binding, ResolvedBinding::Namespace { value: None }),
+            "{name}: `{path}` must be absent, got {binding:?}"
+        );
+    }
+    assert_eq!(
+        lookup.resolve("fm.local").unwrap().into_value(),
+        Some(json!(DOCUMENT_ENV)),
+        "{name}: fm.local reads the document"
+    );
+}
+
 #[test]
 fn every_production_lookup_keeps_bare_names_out_of_ctx() {
     let state = state();
     let file_context = biscuit_file::FileResolutionContext::new(std::env::temp_dir());
     let resolution = ResolutionContext::new(file_context.clone());
     let environment = std::collections::HashMap::new();
-    let data = json!({ "env": DOCUMENT_ENV });
+    let data = json!({ "env": DOCUMENT_ENV, "local": DOCUMENT_ENV });
     let view = std::sync::Arc::new(BindingView::builder(ScopeId::new("parity")).build().unwrap());
 
     for (name, _, coverage) in INVENTORY {
@@ -160,21 +183,25 @@ fn every_production_lookup_keeps_bare_names_out_of_ctx() {
             "EffectiveState" => {
                 assert_bare_name_is_a_document_property(name, &state);
                 assert_reserved_roots_win(name, &state);
+                assert_local_root_is_not_the_document(name, &state);
             }
             "ResolvingLookup" => {
                 let lookup = ResolvingLookup::new(&state, resolution.clone());
                 assert_bare_name_is_a_document_property(name, &lookup);
                 assert_reserved_roots_win(name, &lookup);
+                assert_local_root_is_not_the_document(name, &lookup);
             }
             "DeferrableLookup" => {
                 let lookup = deferrable_lookup_for_tests(&state, resolution.clone());
                 assert_bare_name_is_a_document_property(name, &lookup);
                 assert_reserved_roots_win(name, &lookup);
+                assert_local_root_is_not_the_document(name, &lookup);
             }
             "EvaluationSession" => {
                 let session = EvaluationSession::associate(view.clone(), &state, []).unwrap();
                 assert_bare_name_is_a_document_property(name, &session);
                 assert_reserved_roots_win(name, &session);
+                assert_local_root_is_not_the_document(name, &session);
             }
             "ScopedLookup" => {
                 // A local named like a reserved root must not shadow it.
@@ -182,25 +209,39 @@ fn every_production_lookup_keeps_bare_names_out_of_ctx() {
                 let lookup = ScopedLookup::new(&state, scope);
                 assert_bare_name_is_a_document_property(name, &lookup);
                 assert_reserved_roots_win(name, &lookup);
+                assert_local_root_is_not_the_document(name, &lookup);
+            }
+            "SiteLookup" => {
+                let ranges = crate::markdown::compose::body_origin::ScopeRanges::default();
+                let lookup = crate::markdown::compose::site_scope::SiteLookup::new(&state, &ranges, None);
+                assert_bare_name_is_a_document_property(name, &lookup);
+                assert_reserved_roots_win(name, &lookup);
+                assert_local_root_is_not_the_document(name, &lookup);
             }
             "FrontmatterSeedState" => {
                 let seed = FrontmatterSeedState::new(
-                    serde_json::Map::from_iter([("env".to_string(), json!(DOCUMENT_ENV))]),
+                    serde_json::Map::from_iter([
+                        ("env".to_string(), json!(DOCUMENT_ENV)),
+                        ("local".to_string(), json!(DOCUMENT_ENV)),
+                    ]),
                     context(),
                 );
                 assert_bare_name_is_a_document_property(name, &seed);
                 assert_reserved_roots_win(name, &seed);
+                assert_local_root_is_not_the_document(name, &seed);
             }
             "ShortcutLookup" => {
                 let lookup = ShortcutLookup::new(&data, &file_context);
                 assert_bare_name_is_a_document_property(name, &lookup);
                 assert_reserved_roots_win(name, &lookup);
+                assert_local_root_is_not_the_document(name, &lookup);
             }
             "CtxLookup" => {
                 // Context-only: there is no document to read, so only the
                 // fallback half applies.
                 let lookup = CtxLookup::new(Path::new("."), &environment);
                 assert_bare_name_is_a_document_property(name, &lookup);
+                assert_eq!(lookup.resolve("local.x").unwrap().into_value(), None);
             }
             other => panic!("{other} is marked Probed but has no probe"),
         }

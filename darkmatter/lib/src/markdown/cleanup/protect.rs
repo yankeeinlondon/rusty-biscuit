@@ -14,7 +14,7 @@ use std::ops::Range;
 
 use crate::markdown::MarkdownError;
 use crate::markdown::compose::block_pairs::{
-    BlockOpenKind, BlockPairError, scan_block_pairs_with_code_regions,
+    BlockOpenKind, BlockPairError, scan_block_pairs_with_regions,
 };
 use crate::markdown::compose::directives_api::scan_darkmatter_directives_with_code_regions;
 use crate::markdown::compose::expression::ExpressionFinder;
@@ -126,7 +126,7 @@ impl Protection {
         // Messages name no line: the caller locates the region in its own
         // (document) coordinates from `offset`, and a body-relative line
         // number in the detail would contradict it.
-        let pairs = scan_block_pairs_with_code_regions(source, None, &code.all).map_err(|error| {
+        let pairs = scan_block_pairs_with_regions(source, None, &code).map_err(|error| {
             let (line, message) = match error {
                 BlockPairError::UnmatchedEnd { line } => {
                     (line, "an `::end-block` has no matching opener".to_string())
@@ -137,6 +137,7 @@ impl Protection {
                 BlockPairError::TrailingContent { line, content } => {
                     (line, format!("unexpected content after `::end-block`: '{content}'"))
                 }
+                other => (other.line(), other.to_string()),
             };
             MalformedRegion { offset: line_number_offset(source, line), message }
         })?;

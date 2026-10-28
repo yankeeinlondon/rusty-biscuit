@@ -75,7 +75,8 @@ impl Markdown {
             options.max_transclusion_depth,
             options.cache_access_mode,
             remote_fetch,
-        );
+        )
+        .with_iteration_limits(options.iteration_limits());
         runtime.context_epoch.seed(options.context());
         runtime.root_source = Some((
             options.source.clone(),
