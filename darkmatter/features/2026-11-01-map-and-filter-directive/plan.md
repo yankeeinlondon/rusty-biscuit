@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-10-27
 total_phases: 6
-phase: 4
+phase: 6
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -122,6 +122,98 @@ packages:
 - darkmatter-cli
 - dmls
 - claudine
+source_files_during_phase_4:
+- darkmatter/lib/src/lifecycle/preflight/shell_walk.rs
+- darkmatter/lib/src/markdown/compose/body_origin.rs
+- darkmatter/lib/src/markdown/compose/cache/hashing.rs
+- darkmatter/lib/src/markdown/compose/cache/runtime.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/engine.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/scopes.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/context/report.rs
+- darkmatter/lib/src/markdown/compose/expression/iteration.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+- darkmatter/lib/src/markdown/compose/preflight/collect.rs
+- darkmatter/lib/src/markdown/compose/preflight/mod.rs
+- darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/site.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+- darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+- darkmatter/lib/src/markdown/reference/graph.rs
+- darkmatter/lib/tests/l1/collection_discovery.rs
+- darkmatter/lib/tests/l1/main.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+- darkmatter/cli/src/args/command.rs
+- darkmatter/cli/src/args/mod.rs
+- darkmatter/cli/src/args/parsers.rs
+- darkmatter/cli/src/args/policy.rs
+- darkmatter/cli/src/collection_failure.rs
+- darkmatter/cli/src/commands/compose.rs
+- darkmatter/cli/src/commands/compose/report.rs
+- darkmatter/cli/src/commands/mod.rs
+- darkmatter/cli/src/io/mod.rs
+- darkmatter/cli/src/lib.rs
+- darkmatter/cli/tests/l1/collection_blocks.rs
+- darkmatter/cli/tests/l1/compose_collection_controls.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/src/overlay/collections.rs
+- darkmatter/dmls/src/overlay/directives.rs
+- darkmatter/dmls/src/overlay/expressions.rs
+- darkmatter/dmls/src/overlay/mod.rs
+- darkmatter/dmls/src/providers/collections.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/mod.rs
+- darkmatter/dmls/src/providers/semantic_tokens.rs
+- darkmatter/dmls/src/semantic_legend.rs
+- darkmatter/dmls/tests/fixtures/mapping_only_corpus/baseline.json
+- darkmatter/dmls/tests/l1/call_check_agreement.rs
+- darkmatter/dmls/tests/l1/collection_editor.rs
+- darkmatter/dmls/tests/l1/main.rs
+- darkmatter/dmls/tests/l1/type_scope_ownership_guard.rs
+- darkmatter/lib/src/markdown/compose/call_precheck.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/scopes.rs
+- darkmatter/lib/tests/fixtures/collection_blocks/filter.expected.md
+- darkmatter/lib/tests/fixtures/collection_blocks/filter.md
+- darkmatter/lib/tests/fixtures/collection_blocks/map.expected.md
+- darkmatter/lib/tests/fixtures/collection_blocks/map.md
+- darkmatter/lib/tests/l1/collection_blocks.rs
+- darkmatter/lib/tests/l1/collection_blocks/budget.rs
+- darkmatter/lib/tests/l1/collection_blocks/docs_corpus.rs
+- darkmatter/lib/tests/l1/collection_blocks/grammar.rs
+- darkmatter/lib/tests/l1/collection_blocks/pipeline.rs
+- darkmatter/lib/tests/l1/collection_blocks/scope_schedule.rs
+- darkmatter/lib/tests/l1/collection_blocks/support.rs
+- darkmatter/lib/tests/l1/collection_blocks/types_values.rs
+- darkmatter/lib/tests/l1/context_construction_guard.rs
+- darkmatter/lib/tests/l1/entry_point_parity.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/scope_site_conformance.rs
+- darkmatter/lib/tests/l1/semantic_results_never_persist.rs
+- darkmatter/lib/tests/l1/shared_diagnostics.rs
+- claudine/lib/src/composition/lifecycle/prewarm/classify/tests.rs
+- claudine/lib/src/composition/prepare/bootstrap/tests.rs
+- claudine/lib/tests/l1/collection_host_compat.rs
+- claudine/lib/tests/l1/main.rs
+docs_updated_during_phase_5:
+- darkmatter/docs/cli/compose.md
+- darkmatter/docs/cli/policy.md
+- darkmatter/docs/cli/report-json.md
+- darkmatter/dmls/docs/autocomplete.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/dmls/docs/features.md
+- darkmatter/dmls/docs/hover.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
 ---
 
 # Map and Filter Directive Implementation Plan
@@ -783,7 +875,7 @@ graphs** before **Preserve cache semantics**, since both touch the transclusion
 engine. The coordinator owns `preflight/collect.rs` in Wave 8, avoiding parallel
 edits to that shared collector.
 
-- [ ] **Type local templates**
+- [x] **Type local templates**
   - Extend shell template candidate timing and `project_hole` with local
     subjects, type definitions, constraints, and shared guard refinements.
     Classify local-dependent holes through the shared static read inventory;
@@ -795,7 +887,7 @@ edits to that shared collector.
   - Preserve whitelist/blacklist and membership checks before request-wide
     shell result-cache reuse, plus both existing no-cache spellings and every
     logical command in a repeated shell block.
-- [ ] **Retain scoped graphs**
+- [x] **Retain scoped graphs**
   - Add authored-site/iteration/parameter/origin keys to preflight graph edges,
     non-Markdown targets, and runtime prepared transclusions. Implement strict
     scoped membership and child-subgraph selection; retire raw-target and
@@ -812,7 +904,7 @@ edits to that shared collector.
   - Test equal target bytes with different parameters, recursive child
     parameters, distinct file-opening contexts, root-only overrides, child
     diagnostics, and rejection of a runtime target absent from its scoped graph.
-- [ ] **Preserve cache semantics**
+- [x] **Preserve cache semantics**
   - Add semantic object-order fingerprints in `cache/hashing.rs` and the
     options/graph identity encoders without altering unordered-set semantics.
     Include explicit scoped values and origins where evaluated work is cached.
@@ -830,7 +922,7 @@ edits to that shared collector.
 
 Depends on Wave 7; this is one collector owner followed by serial integration.
 
-- [ ] **Discover scoped children**
+- [x] **Discover scoped children**
   - Extend `preflight/collect.rs::{collect_document, collect_recursive,
     DiscoverySiteContext}` with `BodyScopes`, typed collection enumeration,
     target/explicit-parameter dependency slicing, and transitive unavailable
@@ -846,7 +938,7 @@ Depends on Wave 7; this is one collector owner followed by serial integration.
     ordinary child read errors; reject unavailable execution dependencies at
     the authored target before any shell work. Discovery retains graph
     metadata, not evaluated body/callback result caches.
-- [ ] **Integrate approval membership**
+- [x] **Integrate approval membership**
   - Wire local-aware shell candidates, graph keys, budget authority, strict
     runtime target matching, and preflight warnings through
     `preflight/{approval,lifecycle,mod}.rs`, the in-pipeline preapproval gate,
@@ -874,7 +966,7 @@ scoped meaning. Existing transclusion and shell-template suites pass.
 Depends on Phase 4. CLI, DMLS, and library acceptance tests can proceed
 concurrently; each owner controls its own crate's production files/tests.
 
-- [ ] **Expose compose controls**
+- [x] **Expose compose controls**
   - Add `Option<NonZeroU64>` flags to `cli/src/args/command.rs::Command::Compose`,
     wire them through `commands/mod.rs` to `commands/compose.rs::run_compose`,
     and apply library options before reference validation, lifecycle/preflight,
@@ -888,7 +980,7 @@ concurrently; each owner controls its own crate's production files/tests.
   - Add CLI wiring tests: positive custom limits, omitted defaults, zero,
     negative/overflowing flags, each recovery, blocked recovery before effects,
     normal Markdown output, typed failure location, and report-json parity.
-- [ ] **Project editor scopes**
+- [x] **Project editor scopes**
   - Extend DMLS `overlay/{directives,expressions}.rs`,
     `providers/dsl.rs::{with_site_scope, interpolation_completions,
     expression_diagnostics}`, `diagnostics/call_check.rs`, and code exports to
@@ -904,7 +996,7 @@ concurrently; each owner controls its own crate's production files/tests.
   - Prove library/DMLS static code/location agreement and zero callback I/O
     with analysis tripwires. Extend `dmls/tests/l1/call_check_agreement.rs`
     rather than maintaining another expected type/code registry.
-- [ ] **Prove directive semantics**
+- [x] **Prove directive semantics**
   - Add `lib/tests/l1/collection_blocks.rs` and focused submodules, registered
     in the existing consolidated L1 binary. Build a shared case corpus under
     `lib/tests/fixtures/collection_blocks/` with both kinds parameterized where
@@ -942,7 +1034,7 @@ concurrently; each owner controls its own crate's production files/tests.
 Depends on Wave 9. One integration owner connects the corpus to process and
 compatibility tests; this wave is serial.
 
-- [ ] **Prove invocation wiring**
+- [x] **Prove invocation wiring**
   - Add a small `cli/tests/l1/collection_blocks.rs` suite using
     `CliProcessFixture`. Run a representative successful map and filter through
     actual `md compose`, plus typed invalid input, preapproval denial in a
@@ -960,7 +1052,7 @@ compatibility tests; this wave is serial.
     Declare reads with `include_str!` or `manifest_dir!().join("...")` in the
     tested file, using the runtime harness macros for fixture paths/binaries.
     Internal prompts remain opt-in inputs.
-- [ ] **Verify host compatibility**
+- [x] **Verify host compatibility**
   - Extend existing scope-site conformance, shared diagnostics, entry-point
     parity, context/path construction, and semantic-cache guards with collection
     sites rather than broad exemptions. Add focused Claudine L1 cases using
