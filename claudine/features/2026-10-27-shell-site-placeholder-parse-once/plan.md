@@ -2,9 +2,19 @@
 kind: plan
 total_phases: 4
 created: 2026-10-27
-phase: 1
+phase: 2
 agent: codex/gpt-6.1-sol
-yolo: "true"
+source_files_during_phase_1:
+- darkmatter/lib/src/markdown/compose/expression/prepared.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- claudine/lib/src/composition/sequence/preflight/tests.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+- darkmatter
+- claudine
+yolo: 'true'
 ---
 
 # Shell-site placeholder syntax reuse
@@ -57,13 +67,13 @@ All paths below are repository-relative. Waves have globally unique numbers. Tas
 
 ### Wave 1
 
-- [ ] **Characterize precedence**
+- [x] **Characterize precedence**
   - Own `claudine/lib/src/composition/sequence/preflight/tests.rs`. Extend `graph_for`/`err_for` cases before any Claudine consumer migration. Use public graph construction, asserting concrete `CompositionError` variants, typed source chains, expression text, binding spans, and rendered messages.
   - Pin malformed expression alone, malformed beside `err`, malformed beside target identity, and each valid read both before and after the malformed occurrence. Pin first-task program-hole exact eligibility and later-task grammar refusal, plus malformed `set` extraction precedence.
   - Add padded/Unicode `set` and accepted suffix fixtures; assert diagnostic offsets against raw wrapper bytes and template spans against extracted command bytes. Preserve the existing late-namespace span behavior described in Rule 8.
   - Validate these tests against the unchanged preparation implementation using the area's narrowed `just test` filter. This supplies executable compatibility expectations before migration.
 
-- [ ] **Retain occurrence syntax**
+- [x] **Retain occurrence syntax**
   - Own Darkmatter `expression/prepared.rs` and `expression/mod.rs`. Implement Rules 2–4 and `validate_interpolation` from Rule 8. Reuse the validator's diagnostic mapping rather than duplicating traversal or relocation.
   - Add unit coverage alongside preparation code for mixed valid/invalid occurrences, first-error compatibility of `prepare_value`, repeated expression text at distinct spans, cached erasure, no placeholders, triple braces, literal tokens, and Unicode offsets.
   - Under `work-counters`, assert exactly one parser invocation per scanned occurrence, including failed parses. Repeated view access, validation, and erased-AST lookup add zero parses. Construction and validation invoke no file function or lazy provider.
