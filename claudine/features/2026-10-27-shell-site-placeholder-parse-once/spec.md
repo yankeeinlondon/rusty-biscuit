@@ -27,9 +27,12 @@ human_review: false
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-27
-review_iterations: 0
+review_iterations: 2
+completed: true
 related:
     - 2026-10-25-pipeline-work-reduction
+implemented: true
+implemented_by: "claude/sonnet"
 ---
 
 # Parse each shell placeholder once while preparing a sequence shell site

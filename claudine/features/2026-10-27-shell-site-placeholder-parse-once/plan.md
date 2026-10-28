@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 4
 created: 2026-10-27
-phase: 4
+phase: 5
 agent: codex/gpt-6.1-sol
 source_files_during_phase_1:
 - darkmatter/lib/src/markdown/compose/expression/prepared.rs
@@ -40,6 +40,44 @@ packages:
 - darkmatter
 - claudine
 yolo: 'true'
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+- claudine/docs/topics/pre-flight-checks.md
+- darkmatter/docs/inline/preflight-checks.md
+- darkmatter/docs/topics/expression-engine.md
+docs_created_during_phase_4:
+- claudine/features/2026-10-27-shell-site-placeholder-parse-once/implementation.md
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/claudine/SKILL.md
+source_code:
+- darkmatter/lib/src/markdown/compose/expression/prepared.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- claudine/lib/src/composition/sequence/preflight/tests.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/grammar.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+- darkmatter/lib/src/lifecycle/shell_template.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+- claudine/lib/src/composition/lifecycle/bindings.rs
+- claudine/lib/src/composition/lifecycle/bindings/tests.rs
+- claudine/lib/src/composition/sequence/preflight/shape.rs
+- claudine/lib/tests/l1/type_scope_ownership_guard.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/preflight/tests/scaling.rs
+documentation:
+- claudine/docs/topics/pre-flight-checks.md
+- darkmatter/docs/inline/preflight-checks.md
+- darkmatter/docs/topics/expression-engine.md
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/claudine/SKILL.md
+- claudine/features/2026-10-27-shell-site-placeholder-parse-once/implementation.md
+completed_phase: 4
+implemented: true
 ---
 
 # Shell-site placeholder syntax reuse
@@ -155,24 +193,24 @@ Checkpoint: exact parse counts pass with the feature enabled, all characterizati
 
 ### Wave 5
 
-- [ ] **Document syntax lifetime**
+- [x] **Document syntax lifetime**
   - Own `claudine/docs/topics/pre-flight-checks.md`, `darkmatter/docs/inline/preflight-checks.md`, `darkmatter/docs/topics/expression-engine.md`, `.claude/skills/darkmatter/expressions.md`, and `.claude/skills/claudine/SKILL.md`.
   - Describe one sequence shell-site's passive syntax collection, occurrence identity, wrapper coordinate mapping, and drop-at-return lifetime; distinguish static analysis from evaluation and approval-mode behavior. Include a compact example with repeated `{{ name }}` occurrences and a small Mermaid flow from raw source through shared analyses to existing resolution.
   - Document the parsed helper surface and continued text entry points. State that malformed syntax is retained without early reporting. Do not link current documentation to this feature. Existing READMEs are overviews and need no change because public behavior and installation are unchanged; dependencies remain unchanged.
 
-- [ ] **Audit static reuse**
+- [x] **Audit static reuse**
   - Review the integrated source against every Necessary Rule. Search `prepare_site`, refusal checks, `mark_late_holes`, and their new helpers for `parse`, `prepare_value`, `project_hole`, `late_roots_of`, and `placeholder_guard`; classify each remaining call as collection construction or excluded evaluation and remove static text reparses.
   - Verify the collection never enters stored templates, candidates, approval records, preflight fields, or global caches. Review documentation/comments on every behavior-touched symbol, and check additive API exports compile for existing consumers through the two area's suites.
   - This read-only audit can run concurrently with documentation. Correct defects in the owning source files after collecting the findings; rerun affected targeted tests before the final gates.
 
 ### Wave 6
 
-- [ ] **Run final gates**
+- [x] **Run final gates**
   - Sequentially run `just test` and `just lint` in `darkmatter/`, then `just test` and `just lint` in `claudine/`. Use the existing recipes without `cargo test`, `cargo fmt`, workspace-wide gates, or extra terminal tiers.
   - Confirm nextest output includes the exact-count test and the new static occurrence tests. Both justfiles already enable `work-counters`; a filtered-out counter test is an incomplete validation result.
   - Fix failures caused by this implementation and rerun the affected gate. Record unrelated environmental failures with their exact command and evidence in the implementation log; do not mark the corresponding gate passed.
 
-- [ ] **Record A6 evidence**
+- [x] **Record A6 evidence**
   - Run after final gates, with no simultaneous tests/builds or benchmark agents. Use the current host only and these two commands from the repository root:
     - `cargo bench --color=never -p claudine --features work-counters --bench pipeline_work_alloc -- A6`
     - `cargo bench --color=never -p claudine --bench pipeline_work -- A6_shell_preparation`

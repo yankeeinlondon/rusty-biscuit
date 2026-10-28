@@ -66,15 +66,44 @@ decisions_for_review:
         The plan said to extract first and build the template with the parsed counterpart; it did not say where the conditional check lives.
         I kept the observable behavior identical (same error variant, same precedence) by checking `conditional` before building the template.
         Alternative: add a `parse_authored_command` helper in Darkmatter; avoids duplicating the rule but widens Darkmatter's API. Redo cost: small.
-message_to_agent: |-
-    Phase 3 wired `SequencePreflight::prepare_site` (claudine/lib/src/composition/sequence/preflight/mod.rs) to one `PreparedInterpolation` per site:
-    extraction via `authored_shell_command`, raw view (0..len) for approval diagnostics / target identity / failed-grammar fallback holes / missing-value guard lookup,
-    authored view (command.span) for `parse_authored_prepared`, `project_types_prepared`, `mark_late_holes(template, &view, ..)` and the Deferred->Guarded retime.
-    A conditional `set` is `Err(TemplateGrammarError::Conditional)` without parsing. Exact count is now steps x holes x 6 (6,000 at 100x10), asserted in preflight/tests/scaling.rs.
-    Phase 4 is docs + audit + final gates + A6 evidence. For docs: collection lives on the prepare_site stack and is dropped on return; text entry points
-    (approval_diagnostics, first_target_identity_root, parse_authored, project_types, late_roots_of, placeholder_guard, authored_shell_template) remain.
-    Remaining text parsing is intentional/out of scope: `guard_proves_whole_value` (frontmatter set path), `ShellCandidate::build` (not called by prepare_site), and resolve_approval_time evaluation.
-    Darkmatter was not changed in Phase 3.
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+    - claudine/docs/topics/pre-flight-checks.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/topics/expression-engine.md
+docs_created_during_phase_4:
+    - claudine/features/2026-10-27-shell-site-placeholder-parse-once/implementation.md
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/claudine/SKILL.md
+source_code:
+    - darkmatter/lib/src/markdown/compose/expression/prepared.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/grammar.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+    - darkmatter/lib/src/lifecycle/shell_template.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/tests/l1/type_scope_ownership_guard.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/tests/scaling.rs
+documentation:
+    - claudine/docs/topics/pre-flight-checks.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/docs/topics/expression-engine.md
+    - .claude/skills/darkmatter/expressions.md
+    - .claude/skills/claudine/SKILL.md
+    - claudine/features/2026-10-27-shell-site-placeholder-parse-once/implementation.md
+completed_phase: 4
+implemented: true
 ---
 
 # Implementation Log for 2026-10-27-shell-site-placeholder-parse-once (4 phases)
@@ -110,3 +139,12 @@ message_to_agent: |-
 - Requirement-to-test: parse count -> scaling tests above; precedence/errors/presence/coordinates -> `static_analysis_characterization`; lifecycle positions + no value freezing -> `prepared_site_behavior`; CLI wiring -> existing `sequence_shell_templates` L1.
 - Gates (once, serial, no subagents): `just lint` in `claudine/` clean; `just test` in `claudine/`: 11,789 passed, 15 skipped (one test >5 s on the loaded full run, `sequence_task_providers::empty_hint_setter_list_uses_the_missing_provider_gate`, unrelated, pre-existing slow under full-suite load). Counter tests ran (both recipes enable `work-counters`). Darkmatter untouched this phase, so its gates were not rerun; no dependents of claudine's changed private code. No tier markers added, no OS-specific code, so no cross-OS check.
 - Input Robustness Matrix: not applicable (text grammar). Subagents: none used. Docs and skills are Phase 4 (Wave 5).
+
+## Phase 4
+
+- Wave 5 / Document syntax lifetime: added a "One syntax collection per shell site" section (example, Mermaid flow, wrapper coordinate mapping, drop-at-return lifetime, retained text entry points) to `claudine/docs/topics/pre-flight-checks.md`; a "Parsed-once syntax for a host" section to `darkmatter/docs/inline/preflight-checks.md`; short sections in `darkmatter/docs/topics/expression-engine.md`, `.claude/skills/darkmatter/expressions.md` and `.claude/skills/claudine/SKILL.md`. READMEs and dependencies unchanged (public behavior unchanged). No doc links to this feature.
+- Wave 5 / Audit static reuse: searched `preflight/mod.rs` for text parsers. The only remaining hit is `guard_proves_whole_value` (frontmatter `set` path, scan_plain + placeholder_guard), intentionally out of scope. `PreparedInterpolation` is constructed at one site (`prepare_site`), is passed by reference, and is stored in no template, candidate, approval record, or field. No source defects found; no source files changed in Phase 4.
+- Gate-skip check: `affected_scope.py` returned `packages: ["claudine-cli","darkmatter"]`, `change_class: package` (docs are test inputs), so the gates ran.
+- Wave 6 / Gates (serial, nothing else running): `just test` + `just lint` in `darkmatter/` (12,994 passed, 10 skipped; lint clean) then in `claudine/` (11,789 passed, 1 slow, 15 skipped; lint clean). Counter tests ran (recipes enable `work-counters`).
+- A6 evidence on this host (macOS 27.2, release bench profile) is in `implementation.md`: 100-step allocation row 6,000 parses, 25,588,809 bytes, 195,225 allocs; Criterion median 7.5963 ms.
+- Input Robustness Matrix: not applicable (text grammar). Subagents: none. No cross-OS check (no OS-specific code).
