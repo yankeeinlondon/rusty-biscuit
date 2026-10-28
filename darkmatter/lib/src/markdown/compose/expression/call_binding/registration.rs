@@ -4,6 +4,7 @@
 //! declare, validated once when the registration is built.
 
 use std::borrow::Cow;
+use std::ops::Range;
 
 use super::signature::{CompiledParameter, CompiledSignature};
 use super::translate::{NoNamedTypes, TranslateError, TypeResolver};
@@ -12,7 +13,8 @@ use crate::markdown::schemas::simplified::{
     FunctionType, NarrowsKind, PropertyAtom, PropertyDef, TypeExpr, grammar::parse_type_definition,
     serialize_property_def,
 };
-use crate::markdown::schemas::simplified::types::{narrows_target_problem, returns_exact_boolean};
+use crate::markdown::schemas::simplified::narrowing;
+use crate::markdown::schemas::{GrammarRelated, SchemaError};
 
 /// When a function's arguments are evaluated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -102,8 +104,16 @@ impl NarrowingFact {
 /// Why a registration cannot be served.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum RegistrationError {
+    /// `span` and `related` are byte ranges in the signature text, as
+    /// [`SchemaError::Grammar`](crate::markdown::schemas::SchemaError::Grammar)
+    /// reports them.
     #[error("{function}: the signature does not parse: {message}")]
-    Grammar { function: String, message: String },
+    Grammar {
+        function: String,
+        message: String,
+        span: Range<usize>,
+        related: Vec<GrammarRelated>,
+    },
     #[error("{function}: a registration describes `function(...)` types only; found `{found}`")]
     NotAFunction { function: String, found: String },
     /// An executable function whose parameter or result would be a function
@@ -130,8 +140,11 @@ pub enum RegistrationError {
     InvalidLazy { function: String },
     #[error("{function}: overloads {} and {} have the same binding contract", first + 1, second + 1)]
     DuplicateOverload { function: String, first: usize, second: usize },
+    /// A programmatically built declaration has no source text, so the
+    /// failure names its overloads (zero-based): the one whose clause is
+    /// invalid, or the two that disagree, earlier first.
     #[error("{function}: invalid narrowing fact: {message}")]
-    InvalidFact { function: String, message: String },
+    InvalidFact { function: String, message: String, overloads: Vec<usize> },
     #[error("{function}: invalid malformed-reference rule: {message}")]
     InvalidReferenceRule { function: String, message: String },
 }
@@ -423,129 +436,58 @@ fn reference_rule_index(
 
 /// Compiles the narrowing fact a function's `narrows(...)` clauses declare.
 ///
-/// The one authority for fact validity: registration and catalog loading both
-/// call it, and it re-checks what the grammar checks because a
+/// Validity is decided by the schema-owned
+/// [`declaration_problem`](crate::markdown::schemas::simplified::narrowing::declaration_problem),
+/// the same rules the grammar applies; registration re-checks because a
 /// programmatically built [`FunctionType`] never passed through the grammar.
-/// `Ok(None)` means no overload declares a clause.
+/// This only lowers a valid declaration. `Ok(None)` means no overload
+/// declares a clause.
 ///
 /// ## Errors
 ///
-/// [`RegistrationError::InvalidFact`] when a declaring overload does not
-/// return exactly `boolean`, names a rest or undeclared parameter, or has an
-/// unusable target; when an overload omits the clause or the parameter, or
-/// disagrees with another on parameter, position, kind, or target; or when a
-/// `true-iff` target is not `null` or one bare value family.
+/// [`RegistrationError::InvalidFact`] for any declaration problem.
 pub(crate) fn compile_declared_fact(
     function: &str,
     overloads: &[FunctionType],
 ) -> Result<Option<NarrowingFact>, RegistrationError> {
-    let fail = |message: String| RegistrationError::InvalidFact {
-        function: function.to_string(),
-        message,
-    };
-    let Some(first) = overloads.iter().position(|overload| overload.narrows.is_some()) else {
+    if let Some(problem) = narrowing::declaration_problem(overloads) {
+        let overloads = match problem.scope {
+            narrowing::ProblemScope::Overload(index) => vec![index],
+            narrowing::ProblemScope::Overloads { first, later } => vec![first, later],
+        };
+        return Err(RegistrationError::InvalidFact {
+            function: function.to_string(),
+            message: problem.overload_message(),
+            overloads,
+        });
+    }
+    let Some((overload, clause)) =
+        overloads.iter().find_map(|overload| overload.narrows.as_ref().map(|clause| (overload, clause)))
+    else {
         return Ok(None);
     };
-    let mut compiled: Option<(NarrowingFact, String)> = None;
-    for (index, overload) in overloads.iter().enumerate() {
-        let Some(clause) = &overload.narrows else {
-            return Err(fail(format!(
-                "overload {} declares `narrows` but overload {} does not; every overload must declare the same fact",
-                first + 1,
-                index + 1
-            )));
-        };
-        if !returns_exact_boolean(&overload.returns) {
-            return Err(fail(format!(
-                "overload {}: `narrows` requires `returns(boolean)`",
-                index + 1
-            )));
-        }
-        let Some(position) = overload
-            .parameters
-            .as_slice()
-            .iter()
-            .position(|parameter| parameter.name == clause.parameter)
-        else {
-            return Err(fail(format!(
-                "overload {}: `narrows` names parameter `{}`, which this overload does not declare",
-                index + 1,
-                clause.parameter
-            )));
-        };
-        if overload.parameters.as_slice()[position].rest {
-            return Err(fail(format!(
-                "overload {}: `narrows` names parameter `{}`, which is a rest parameter",
-                index + 1,
-                clause.parameter
-            )));
-        }
-        let (ty, target, key) = match &clause.target {
-            None => (FactType::NonNull, None, String::new()),
-            Some(atom) => {
-                if let Some(problem) = narrows_target_problem(atom) {
-                    return Err(fail(format!("overload {}: {problem}", index + 1)));
-                }
-                if matches!(atom.ty, TypeExpr::Union(_)) {
-                    return Err(fail(format!(
-                        "overload {}: a narrowing target must be a single type, not a union",
-                        index + 1
-                    )));
-                }
-                if clause.kind == NarrowsKind::TrueIff
-                    && !crate::markdown::compose::expression::scope::is_exact_fact_type(atom)
-                {
-                    return Err(fail(format!(
-                        "overload {}: a true-iff fact needs `null` or the bare type of one value family, not `{}`",
-                        index + 1,
-                        canonical_target(atom)
-                    )));
-                }
-                let key = canonical_target(atom);
-                (FactType::Type(Cow::Owned(key.clone())), Some(atom.clone()), key)
-            }
-        };
-        let kind = match clause.kind {
-            NarrowsKind::TrueImplies => FactKind::TrueImplies,
-            NarrowsKind::TrueIff => FactKind::TrueIff,
-            NarrowsKind::FalseImplies => FactKind::FalseImplies,
-        };
-        let fact = NarrowingFact {
-            parameter: clause.parameter.clone(),
-            index: position,
-            kind,
-            ty,
-            target,
-        };
-        match &compiled {
-            None => compiled = Some((fact, key)),
-            Some((earlier, earlier_key)) => {
-                if earlier.parameter != fact.parameter
-                    || earlier.index != fact.index
-                    || earlier.kind != fact.kind
-                    || *earlier_key != key
-                    || earlier.ty != fact.ty
-                {
-                    return Err(fail(format!(
-                        "overloads {} and {} declare different `narrows` facts; every overload must declare the same one",
-                        first + 1,
-                        index + 1
-                    )));
-                }
-            }
-        }
-    }
-    Ok(compiled.map(|(fact, _)| fact))
-}
-
-/// A target's spelling independent of its description, constraint order, and
-/// source location.
-fn canonical_target(atom: &PropertyAtom) -> String {
-    let mut atom = atom.clone();
-    atom.description = None;
-    atom.constraints.sort_by_key(|constraint| format!("{constraint:?}"));
-    atom.array_constraints.sort_by_key(|constraint| format!("{constraint:?}"));
-    serialize_property_def(&PropertyDef::Single(atom))
+    let index = overload
+        .parameters
+        .as_slice()
+        .iter()
+        .position(|parameter| parameter.name == clause.parameter)
+        .expect("a valid declaration names a declared parameter");
+    let (ty, target) = match &clause.target {
+        None => (FactType::NonNull, None),
+        Some(atom) => (FactType::Type(Cow::Owned(narrowing::canonical_target(atom))), Some(atom.clone())),
+    };
+    let kind = match clause.kind {
+        NarrowsKind::TrueImplies => FactKind::TrueImplies,
+        NarrowsKind::TrueIff => FactKind::TrueIff,
+        NarrowsKind::FalseImplies => FactKind::FalseImplies,
+    };
+    Ok(Some(NarrowingFact {
+        parameter: clause.parameter.clone(),
+        index,
+        kind,
+        ty,
+        target,
+    }))
 }
 
 /// Recovery needs a required subject, an optional numeric fallback, and a
@@ -579,9 +521,17 @@ fn recovery_indexes(
 
 /// The `function(...)` options of a grammar definition.
 fn function_types(function: &str, text: &str) -> Result<Vec<FunctionType>, RegistrationError> {
-    let def = parse_type_definition(function, text).map_err(|error| RegistrationError::Grammar {
-        function: function.to_string(),
-        message: error.to_string(),
+    let def = parse_type_definition(function, text).map_err(|error| {
+        let (span, related) = match &error {
+            SchemaError::Grammar { span, related, .. } => (span.clone(), related.clone()),
+            _ => (0..0, Vec::new()),
+        };
+        RegistrationError::Grammar {
+            function: function.to_string(),
+            message: error.to_string(),
+            span,
+            related,
+        }
     })?;
     let atoms: Vec<PropertyAtom> = match def {
         PropertyDef::Single(atom) => match atom.ty {

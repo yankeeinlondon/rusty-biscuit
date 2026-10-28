@@ -445,13 +445,48 @@ pub(crate) fn returns_exact_boolean(returns: &PropertyDef) -> bool {
 }
 
 /// Why `target` cannot be a narrowing target, if it cannot: a named type
-/// (reference) is not self-contained.
-pub(crate) fn narrows_target_problem(target: &PropertyAtom) -> Option<&'static str> {
-    match &target.ty {
-        TypeExpr::Imported { .. } => {
-            Some("a named type cannot be a narrowing target; write a self-contained type")
-        }
-        _ => None,
+/// (reference) anywhere in it, at the top or nested in an object member,
+/// dictionary value, tuple position, union arm, or function signature, is not
+/// self-contained. A fact is applied against the document's definitions, not
+/// the declaring catalog's, so a name inside the target could never be
+/// honored as written.
+pub(crate) fn narrows_target_problem(target: &PropertyAtom) -> Option<String> {
+    let name = named_reference_in(target)?;
+    Some(format!(
+        "a narrowing target cannot use the named type `{name}`, at its top or nested inside it; \
+         write a self-contained type"
+    ))
+}
+
+/// The first named or definition-table reference in `atom`, depth first.
+fn named_reference_in(atom: &PropertyAtom) -> Option<String> {
+    let in_def = |def: &PropertyDef| match def {
+        PropertyDef::Single(atom) => named_reference_in(atom),
+        PropertyDef::Union(arms) => arms.iter().find_map(named_reference_in),
+    };
+    match &atom.ty {
+        TypeExpr::Primitive(_) => None,
+        TypeExpr::Imported { name, reference } if reference == LOCAL_REFERENCE => Some(name.clone()),
+        TypeExpr::Imported { name, reference } => Some(format!("{name}@{reference}")),
+        TypeExpr::Ref(key) => Some(key.name.clone()),
+        TypeExpr::InlineObject(shape) => shape
+            .properties
+            .values()
+            .chain(shape.pattern_keys.iter().map(|pattern| &pattern.def))
+            .find_map(in_def),
+        TypeExpr::Union(arms) => arms.iter().find_map(named_reference_in),
+        TypeExpr::Tuple(tuple) => tuple
+            .elements
+            .iter()
+            .find_map(|element| in_def(&element.def))
+            .or_else(|| tuple.spread.as_deref().and_then(named_reference_in)),
+        TypeExpr::Function(function) => function
+            .parameters
+            .as_slice()
+            .iter()
+            .find_map(|parameter| in_def(&parameter.def))
+            .or_else(|| in_def(&function.returns))
+            .or_else(|| function.narrows.as_ref()?.target.as_ref().and_then(named_reference_in)),
     }
 }
 

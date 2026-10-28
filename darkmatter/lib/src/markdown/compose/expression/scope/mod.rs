@@ -43,7 +43,6 @@ pub use projection::{BindingId, DeclaredType, DeclaredTypes, Member, Subject};
 pub use raw::RawDeclarations;
 pub(crate) use projection::{Declaration, VariableClass};
 pub use shape::{PresenceEvidence, ScopedType, Shape};
-pub(crate) use shape::is_exact_fact_type;
 
 /// Which side of a guard a region is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

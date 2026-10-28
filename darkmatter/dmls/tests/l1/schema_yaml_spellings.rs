@@ -244,6 +244,165 @@ fn an_invalid_narrows_clause_in_a_block_scalar_is_ranged_at_its_token() {
     fixture.shutdown();
 }
 
+/// Standalone authoring applies the declaration rules registration does: a
+/// `file` target is one-way only, so `true-iff` is diagnosed at the target,
+/// and an overload set where only one overload declares the fact is
+/// diagnosed at that clause. The one-way `file` control reports nothing.
+#[test]
+fn a_narrows_fact_registration_rejects_is_diagnosed_while_authoring() {
+    let function = |clause: &str| {
+        format!(
+            "kind: schema\ntypes:\n  pred: |-\n    function(\n      parameters(x: unknown | null);\n      returns(boolean);\n      {clause};\n    )\n"
+        )
+    };
+    let workspace = LspWorkspace::new();
+    let mut fixture = start(&workspace, "utf-8");
+
+    let uri = open(&fixture, &workspace, "file-implies.yaml", &function("narrows(x: file; true-implies)"));
+    assert_eq!(definition_diagnostics(&mut fixture, &uri), Vec::<Value>::new(), "control");
+
+    let iff = function("narrows(x: file; true-iff)");
+    let mixed = "kind: schema\ntypes:\n  pred: |-\n    function(parameters(x: unknown | null); returns(boolean); narrows(x: string; true-iff))\n    | function(parameters(x: unknown | null, y: string); returns(boolean))\n".to_string();
+    for (name, text, token, message) in [
+        ("file-iff.yaml", &iff, "file", "true-iff"),
+        ("mixed.yaml", &mixed, "narrows(x: string; true-iff)", "does not"),
+    ] {
+        let uri = open(&fixture, &workspace, name, text);
+        let diagnostics = definition_diagnostics(&mut fixture, &uri);
+        let [diagnostic] = diagnostics.as_slice() else {
+            panic!("{name}: expected one schema diagnostic: {diagnostics:#?}");
+        };
+        assert_eq!(diagnostic["code"], json!("dm.schema.invalid_type_definition"), "{name}: {diagnostic:#?}");
+        assert!(diagnostic["message"].as_str().is_some_and(|text| text.contains(message)), "{name}: {diagnostic:#?}");
+        let token_start = text.find(token).unwrap();
+        assert_eq!(
+            diagnostic["range"],
+            json!({
+                "start": position(text, token_start, "utf-8"),
+                "end": position(text, token_start + token.len(), "utf-8"),
+            }),
+            "{name}: {diagnostic:#?}"
+        );
+    }
+    fixture.shutdown();
+}
+
+/// A function definition spelled as a single-quoted scalar and as a `|-`
+/// block scalar, each in a standalone schema document.
+fn narrows_spellings(signature: &str) -> [(&'static str, String); 2] {
+    [
+        ("quoted", format!("kind: schema\ntypes:\n  pred: '{signature}'\n")),
+        ("block", format!("kind: schema\ntypes:\n  pred: |-\n    {}\n", signature.replace("; ", ";\n    "))),
+    ]
+}
+
+/// The one schema diagnostic of `text`, asserting its primary range covers
+/// `primary` and its related information is exactly `related`, each a
+/// `(needle, occurrence)` in `text`, in this document.
+fn assert_related_diagnostic(
+    fixture: &mut LspFixture<'_>,
+    uri: &str,
+    text: &str,
+    primary: (&str, usize),
+    related: &[(&str, usize)],
+    case: &str,
+) {
+    let diagnostics = definition_diagnostics(fixture, uri);
+    let [diagnostic] = diagnostics.as_slice() else {
+        panic!("{case}: expected one schema diagnostic: {diagnostics:#?}");
+    };
+    assert_eq!(diagnostic["code"], json!("dm.schema.invalid_type_definition"), "{case}: {diagnostic:#?}");
+    assert!(!diagnostic["message"].as_str().unwrap().contains("byte"), "{case}: {diagnostic:#?}");
+    assert_eq!(diagnostic["range"], range_of(text, primary.0, primary.1, "utf-8"), "{case}: {diagnostic:#?}");
+    let expected: Vec<Value> = related
+        .iter()
+        .map(|(needle, occurrence)| json!({ "uri": uri, "range": range_of(text, needle, *occurrence, "utf-8") }))
+        .collect();
+    let actual: Vec<Value> = diagnostic["relatedInformation"]
+        .as_array()
+        .map(|related| related.iter().map(|entry| entry["location"].clone()).collect())
+        .unwrap_or_default();
+    assert_eq!(actual, expected, "{case}: {diagnostic:#?}");
+}
+
+/// A second `narrows` clause is diagnosed at its keyword with the first
+/// clause as related information, through a quoted scalar and a block
+/// scalar alike.
+#[test]
+fn a_duplicate_narrows_clause_relates_the_first_while_authoring() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = start(&workspace, "utf-8");
+    let first = "narrows(x: string; true-iff)";
+    let signature = format!("function(parameters(x: unknown | null); returns(boolean); {first}; narrows(x; false-implies))");
+    for (spelling, text) in narrows_spellings(&signature) {
+        let block_first = first.replace("; ", ";\n    ");
+        let first = if spelling == "block" { block_first.as_str() } else { first };
+        let uri = open(&fixture, &workspace, &format!("duplicate-{spelling}.yaml"), &text);
+        assert_related_diagnostic(&mut fixture, &uri, &text, ("narrows", 1), &[(first, 0)], spelling);
+    }
+    fixture.shutdown();
+}
+
+/// Overloads that disagree on the fact name both declarations: a different
+/// fact is diagnosed at the later clause relating the earlier one, and a
+/// missing fact at the declaring clause relating the overload without one.
+/// The same holds for an inline frontmatter `$schema` definition and a value
+/// of the `type-definition` meta-type.
+#[test]
+fn disagreeing_narrows_overloads_relate_both_declarations_while_authoring() {
+    let workspace = LspWorkspace::new();
+    let mut fixture = start(&workspace, "utf-8");
+    let declaring = "function(parameters(x: unknown | null); returns(boolean); narrows(x: string; true-iff))";
+    let different = "function(parameters(x: unknown | null, y: string); returns(boolean); narrows(x: number; true-iff))";
+    let absent = "function(parameters(x: unknown | null, y: string); returns(boolean))";
+    for (spelling, text) in narrows_spellings(&format!("{declaring} | {different}")) {
+        let uri = open(&fixture, &workspace, &format!("different-{spelling}.yaml"), &text);
+        let block = spelling == "block";
+        let later = if block { "narrows(x: number;\n    true-iff)" } else { "narrows(x: number; true-iff)" };
+        let earlier = if block { "narrows(x: string;\n    true-iff)" } else { "narrows(x: string; true-iff)" };
+        assert_related_diagnostic(&mut fixture, &uri, &text, (later, 0), &[(earlier, 0)], spelling);
+    }
+    let text = format!("kind: schema\ntypes:\n  pred: '{absent} | {declaring}'\n");
+    let uri = open(&fixture, &workspace, "absent-quoted.yaml", &text);
+    assert_related_diagnostic(&mut fixture, &uri, &text, ("narrows(x: string; true-iff)", 0), &[(absent, 0)], "absent");
+
+    let text = format!("---\n$schema:\n  pred: '{declaring} | {different}'\n---\n\nBody\n");
+    let path = workspace.path().join("inline.md");
+    std::fs::write(&path, &text).unwrap();
+    let uri = url::Url::from_file_path(path).unwrap().to_string();
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({ "textDocument": { "uri": uri, "languageId": "markdown", "version": 1, "text": text } }),
+    );
+    assert_related_diagnostic(
+        &mut fixture,
+        &uri,
+        &text,
+        ("narrows(x: number; true-iff)", 0),
+        &[("narrows(x: string; true-iff)", 0)],
+        "inline",
+    );
+
+    // A frontmatter value typed by the `type-definition` meta-type.
+    let text = format!("---\n$schema:\n  definition: type-definition\ndefinition: '{declaring} | {different}'\n---\n\nBody\n");
+    let path = workspace.path().join("meta.md");
+    std::fs::write(&path, &text).unwrap();
+    let uri = url::Url::from_file_path(path).unwrap().to_string();
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({ "textDocument": { "uri": uri, "languageId": "markdown", "version": 1, "text": text } }),
+    );
+    assert_related_diagnostic(
+        &mut fixture,
+        &uri,
+        &text,
+        ("narrows(x: number; true-iff)", 0),
+        &[("narrows(x: string; true-iff)", 0)],
+        "meta-type",
+    );
+    fixture.shutdown();
+}
+
 /// The specification's literal example: `bogus` on physical line 5, columns
 /// 5–9 when displayed one-based.
 #[test]

@@ -26,7 +26,7 @@ use darkmatter::markdown::schemas::{
 use lsp_types::{Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, Range as LspRange, Uri};
 
 use crate::diagnostics::codes::{code, source};
-use crate::overlay::FrontmatterAst;
+use crate::overlay::{FileFailure, FrontmatterAst};
 use crate::overlay::named_types::{AuthoredDeclaration, NamedReference};
 use crate::providers::DocumentContext;
 use crate::source_map::SourceMap;
@@ -113,10 +113,14 @@ impl<'a> NamedTypeScope<'a> {
     /// referenced schema file the failure was reported through, if any.
     pub(crate) fn diagnostic(&self, error: &SchemaError, referenced: Option<&Path>) -> Diagnostic {
         let mut related = Vec::new();
-        if let Some(path) = referenced
-            && let Some(uri) = file_path_to_uri(path)
-        {
-            related.push(related_at(uri, LspRange::default(), "schema definition is authored in this file"));
+        if let Some(path) = referenced {
+            match referenced_definition_related(self.ctx, path, error) {
+                Some(located) => related.extend(located),
+                None => related.extend(
+                    file_path_to_uri(path)
+                        .map(|uri| related_at(uri, LspRange::default(), REFERENCED_DEFINITION)),
+                ),
+            }
         }
         let span = match error {
             SchemaError::UnknownNamedType { name, namespace, site } => {
@@ -188,7 +192,14 @@ impl<'a> NamedTypeScope<'a> {
                 }
                 .or_else(|| self.fallback.clone())
             }
-            other => self.target_span(other).or_else(|| self.fallback.clone()),
+            other => {
+                if let SchemaError::SchemaDocument { path, .. } = other
+                    && referenced.is_none()
+                {
+                    related.extend(referenced_definition_related(self.ctx, path, other).unwrap_or_default());
+                }
+                self.target_span(other).or_else(|| self.fallback.clone())
+            }
         };
         for (path, file) in self.files.borrow().iter() {
             if let Some(file) = file
@@ -415,6 +426,44 @@ impl<'a> NamedTypeScope<'a> {
             })
             .clone()
     }
+}
+
+/// The related-information label of the file a referenced schema's failure
+/// was authored in.
+pub(crate) const REFERENCED_DEFINITION: &str = "schema definition is authored in this file";
+
+/// Where a definition failure reported through the schema file `path` was
+/// authored there: its rejected token, labelled [`REFERENCED_DEFINITION`],
+/// then each of the failure's own secondary locations. `error` is the
+/// failure as reported: a referenced schema's own error, or the
+/// [`SchemaError::SchemaDocument`] a standalone file's payload failure is
+/// folded into, whose message quotes it. `None` when the overlay located no
+/// failure in that file, or not the one `error` reports, so a caller falls
+/// back to the whole file.
+///
+/// Reads nothing: the file's text and located failure are the overlay's,
+/// captured when the failure was assembled.
+pub(crate) fn referenced_definition_related(
+    ctx: &DocumentContext<'_>,
+    path: &Path,
+    error: &SchemaError,
+) -> Option<Vec<DiagnosticRelatedInformation>> {
+    let FileFailure { text, failure } = ctx.overlay?.file_failures.get(path)?;
+    if !error.to_string().contains(&failure.error.to_string()) {
+        return None;
+    }
+    // The resolver names a referenced file canonically; a standalone
+    // document error carries the path as resolved.
+    let canonical = biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf());
+    let uri: Uri = file_path_to_uri(&canonical)?;
+    let map = SourceMap::new(uri.clone(), 0, ctx.source_map.encoding(), Arc::clone(text));
+    let located = |span: Range<usize>, message: &str| {
+        Some(related_at(uri.clone(), map.byte_range_to_lsp(span)?, message))
+    };
+    let primary = failure.authored_span.clone().or_else(|| failure.value_span.clone())?;
+    let mut related = vec![located(primary, REFERENCED_DEFINITION)?];
+    related.extend(failure.related.iter().filter_map(|entry| located(entry.span.clone(), &entry.message)));
+    Some(related)
 }
 
 fn related_at(uri: Uri, range: LspRange, message: &str) -> DiagnosticRelatedInformation {

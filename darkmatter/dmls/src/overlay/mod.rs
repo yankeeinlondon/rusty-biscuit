@@ -44,7 +44,8 @@ use darkmatter::markdown::schemas::{
     SchemaError, SchemaRootKind, SchemaRootState, SchemaRoots, SchemaSourceId, StandaloneSchemaDocument,
     ValidationStage,
     StandaloneSchemaEnvelope,
-    SuggestionLintProblem, parse_standalone_schema_document,
+    LocatedDefinitionFailure, SuggestionLintProblem, locate_standalone_definition_failure,
+    parse_standalone_schema_document,
 };
 use lsp_types::Uri;
 
@@ -111,6 +112,54 @@ pub enum SuggestionState {
     TriggerWarning(Arc<InvalidTriggerFinding>),
 }
 
+/// A definition failure inside a schema file a failed resolution names,
+/// located in the text that file had when the failure was assembled.
+///
+/// A resolver error names such a file only by path (a referenced schema, or
+/// a standalone document's payload failure folded into its message), and a
+/// request may not read it; this keeps what its diagnostics need to range
+/// into that file.
+pub struct FileFailure {
+    pub text: Arc<str>,
+    pub failure: LocatedDefinitionFailure,
+}
+
+/// Each schema file a failed resolution names whose definition failure
+/// could be located, keyed by the path the error names it by.
+pub type FileFailures = Arc<HashMap<PathBuf, FileFailure>>;
+
+/// The located definition failures of the schema files `error` names. Reads
+/// each such file once; a file that no longer reads or holds no definition
+/// failure is left out.
+fn file_failures(error: &SchemaError) -> FileFailures {
+    fn walk(error: &SchemaError, out: &mut HashMap<PathBuf, FileFailure>) {
+        let path = match error {
+            SchemaError::Aggregate { errors } => {
+                errors.iter().for_each(|error| walk(error, out));
+                return;
+            }
+            SchemaError::ReferencedSchema { path, source } => {
+                walk(source, out);
+                path
+            }
+            SchemaError::SchemaDocument { path, .. } => path,
+            _ => return,
+        };
+        if out.contains_key(path) {
+            return;
+        }
+        let Ok(text) = work_counters::read_to_string(path) else {
+            return;
+        };
+        if let Some(failure) = locate_standalone_definition_failure(&text) {
+            out.insert(path.clone(), FileFailure { text: Arc::from(text), failure });
+        }
+    }
+    let mut out = HashMap::new();
+    walk(error, &mut out);
+    Arc::new(out)
+}
+
 /// The per-request overlay snapshot for one open document.
 pub struct DocumentOverlay {
     /// The frontmatter tree. `None` when the current buffer failed to parse and
@@ -133,6 +182,10 @@ pub struct DocumentOverlay {
     /// Why a standalone schema document's own named-type references do not
     /// resolve (an unknown name, contradictory reuse, or an import cycle).
     pub standalone_resolution: Option<Arc<SchemaError>>,
+    /// The located definition failures of the schema files
+    /// [`schema`](Self::schema)'s or
+    /// [`standalone_resolution`](Self::standalone_resolution)'s failure names.
+    pub file_failures: FileFailures,
     /// The shared analysis of this snapshot, the same `Arc` for every overlay
     /// built while the document's buffer and prepared schema inputs are
     /// unchanged. Its tree is [`ast`](Self::ast).
@@ -230,6 +283,7 @@ struct CachedSchema {
     /// Invalid `suggest(...)` candidates written on the inline `$schema`'s
     /// references, judged against the resolved targets.
     reference_suggestions: Arc<Vec<SuggestionLintProblem>>,
+    file_failures: FileFailures,
 }
 
 /// What [`OverlayCache::schema_for`] assembled for a Markdown document.
@@ -237,6 +291,7 @@ struct FrontmatterSchema {
     outcome: SchemaOutcome,
     named_types: Arc<NamedTypeCatalog>,
     reference_suggestions: Arc<Vec<SuggestionLintProblem>>,
+    file_failures: FileFailures,
     /// The cache key the outcome was assembled under, or `None` when
     /// assembly was skipped.
     key: Option<u64>,
@@ -248,6 +303,7 @@ impl FrontmatterSchema {
             outcome,
             named_types: Arc::default(),
             reference_suggestions: Arc::default(),
+            file_failures: FileFailures::default(),
             key: None,
         }
     }
@@ -266,6 +322,7 @@ struct CachedStandalone {
 struct StandaloneNamedTypes {
     named_types: Arc<NamedTypeCatalog>,
     error: Option<Arc<SchemaError>>,
+    file_failures: FileFailures,
     /// Invalid `suggest(...)` candidates written on references, judged
     /// against the resolved targets.
     suggestions: Vec<SuggestionLintProblem>,
@@ -351,7 +408,7 @@ impl OverlayState {
                 text
             };
             let schema_text = schema_text.to_string();
-            let FrontmatterSchema { outcome: schema, named_types, reference_suggestions, key: schema_key } =
+            let FrontmatterSchema { outcome: schema, named_types, reference_suggestions, file_failures, key: schema_key } =
                 timings.time(Stage::SchemaAssembly, || {
                     cache.schema_for(
                         &uri_key,
@@ -409,6 +466,7 @@ impl OverlayState {
                 schema_authoring,
                 named_types,
                 standalone_resolution: None,
+                file_failures,
                 analysis,
             });
         }
@@ -433,6 +491,7 @@ impl OverlayState {
                         schema_authoring: SchemaAuthoringState::Inactive,
                         named_types: Arc::default(),
                         standalone_resolution: None,
+                        file_failures: FileFailures::default(),
                         analysis: Arc::new(FrontmatterAnalysis::detached()),
                     });
                 }
@@ -456,6 +515,7 @@ impl OverlayState {
                             schema_authoring: SchemaAuthoringState::Inactive,
                             named_types: Arc::default(),
                             standalone_resolution: None,
+                            file_failures: FileFailures::default(),
                             analysis: Arc::new(FrontmatterAnalysis::detached()),
                         });
                     }
@@ -505,6 +565,7 @@ impl OverlayState {
                     },
                     named_types: resolved.named_types,
                     standalone_resolution: resolved.error,
+                    file_failures: resolved.file_failures,
                     analysis: Arc::new(FrontmatterAnalysis::detached()),
                 });
             }
@@ -554,6 +615,7 @@ impl OverlayState {
                     },
                     named_types: Arc::default(),
                     standalone_resolution: None,
+                    file_failures: FileFailures::default(),
                     analysis: Arc::new(FrontmatterAnalysis::detached()),
                 });
             }
@@ -860,6 +922,7 @@ impl OverlayCache {
                 outcome: cached.outcome.clone(),
                 named_types: Arc::clone(&cached.named_types),
                 reference_suggestions: Arc::clone(&cached.reference_suggestions),
+                file_failures: Arc::clone(&cached.file_failures),
                 key: Some(key),
             };
         }
@@ -894,10 +957,15 @@ impl OverlayCache {
         let registry_files: std::collections::HashSet<&Path> =
             registry_files.iter().map(PathBuf::as_path).collect();
         let deps = collect_dep_hashes(&outcome, &named_types, &registry_files);
+        let file_failures = match &outcome {
+            SchemaOutcome::Failed(error) => file_failures(error),
+            SchemaOutcome::Ready(_) => FileFailures::default(),
+        };
         let schema = FrontmatterSchema {
             outcome,
             named_types,
             reference_suggestions,
+            file_failures,
             key: Some(key),
         };
         self.schema.insert(
@@ -908,6 +976,7 @@ impl OverlayCache {
                 outcome: schema.outcome.clone(),
                 named_types: Arc::clone(&schema.named_types),
                 reference_suggestions: Arc::clone(&schema.reference_suggestions),
+                file_failures: Arc::clone(&schema.file_failures),
             },
         );
         schema
@@ -972,7 +1041,8 @@ impl OverlayCache {
             suggestions::reference_lints(schema, base_dir, Some(path), &schema_roots, context)
         });
         let deps = hash_files(imports.iter().chain(named_types.dependencies()));
-        let resolved = StandaloneNamedTypes { named_types, error, suggestions };
+        let file_failures = error.as_deref().map(file_failures).unwrap_or_default();
+        let resolved = StandaloneNamedTypes { named_types, error, file_failures, suggestions };
         self.standalone_resolution.insert(
             uri_key.to_string(),
             CachedStandalone { key, deps, resolved: resolved.clone() },

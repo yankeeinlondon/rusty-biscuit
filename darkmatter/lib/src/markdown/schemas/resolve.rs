@@ -2121,6 +2121,7 @@ impl ImportEngine<'_> {
                 message: "a property definition may contain at most one `suggest` constraint"
                     .into(),
                 span: 0..0,
+                related: Vec::new(),
             });
         }
         Ok(FlatUnion { arms: out, markers })
@@ -2929,6 +2930,7 @@ fn apply_import_postfix(
                     _ => None,
                 })
                 .unwrap_or(0..0),
+            related: Vec::new(),
         });
     }
 
@@ -2954,6 +2956,7 @@ fn apply_import_postfix(
                         _ => None,
                     })
                     .unwrap_or(0..0),
+                related: Vec::new(),
             });
         };
         for constraint in &mut constraints {
@@ -2985,6 +2988,7 @@ fn apply_import_postfix(
             property: name.to_string(),
             message: "a property definition may contain at most one `suggest` constraint".into(),
             span,
+            related: Vec::new(),
         });
     }
 

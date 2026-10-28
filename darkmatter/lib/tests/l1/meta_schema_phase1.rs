@@ -114,6 +114,154 @@ fn type_definition_validates_narrows_clauses_with_the_grammar_messages() {
     assert_invalid_candidate("type-definition", non_boolean);
 }
 
+/// The overload pairs whose `narrows` facts disagree, each beside a control
+/// declaring the same fact on a second binding contract.
+const NARROWS_FIRST_OVERLOAD: &str =
+    "function(parameters(x: unknown | null); returns(boolean); narrows(x: string; true-iff))";
+const NARROWS_AGREEING_OVERLOAD: &str =
+    "function(parameters(x: unknown | null, y: string); returns(boolean); narrows(x: string; true-iff))";
+const NARROWS_DISAGREEING_OVERLOADS: [(&str, &str); 4] = [
+    ("absence", "function(parameters(x: unknown | null, y: string); returns(boolean))"),
+    ("target", "function(parameters(x: unknown | null, y: string); returns(boolean); narrows(x: number; true-iff))"),
+    ("kind", "function(parameters(x: unknown | null, y: string); returns(boolean); narrows(x: string; true-implies))"),
+    ("position", "function(parameters(y: string, x: unknown | null); returns(boolean); narrows(x: string; true-iff))"),
+];
+const NARROWS_NOT_EXACT_FAMILIES: [&str; 3] = ["file", "string(min(3))", "enum(a,b)"];
+
+fn narrows_function(target: &str, kind: &str) -> String {
+    format!("function(parameters(x: unknown | null); returns(boolean); narrows(x: {target}; {kind}))")
+}
+
+/// The public type parser applies the declaration rules registration does:
+/// a refinement or constrained target is one-way only, with the error at
+/// the target.
+#[test]
+fn public_type_parser_rejects_true_iff_narrows_on_a_refinement() {
+    for target in NARROWS_NOT_EXACT_FAMILIES {
+        let text = narrows_function(target, "true-iff");
+        let error = parse_type_expr("candidate", &text).expect_err(target);
+        let darkmatter::markdown::schemas::SchemaError::Grammar { message, span, .. } = &error else {
+            panic!("{target}: a grammar error, found {error:?}");
+        };
+        assert!(message.contains("true-iff"), "{target}: {message}");
+        assert_eq!(&text[span.clone()], target, "{target}: located at the target");
+        parse_type_expr("candidate", &narrows_function(target, "true-implies")).expect(target);
+    }
+    parse_type_expr("candidate", &narrows_function("string", "true-iff")).expect("control");
+    parse_type_expr("candidate", &narrows_function("(string | number)[]", "true-implies"))
+        .expect("a grouped union array is one array type");
+}
+
+/// Targets with a named type nested inside a compound type, each beside the
+/// name the error must report. A fact is applied against the document's
+/// definitions, so no target may depend on one.
+const NARROWS_NESTED_NAME_TARGETS: [&str; 9] = [
+    "{a: Name}",
+    "tuple([Name])",
+    "Name[]",
+    "(Name | string)[]",
+    "{a: string | Name}",
+    "{<string>: Name}",
+    "tuple([string, ...Name[]])",
+    "{f: function(parameters(a: Name); returns(string))}",
+    "{a: {b: Name@./other.yaml}}",
+];
+const NARROWS_SELF_CONTAINED_TARGETS: [&str; 6] =
+    ["{a: string}", "tuple([string])", "string(min(3))", "enum(a,b)", "file", "(string|number)[]"];
+
+/// The public type parser rejects a named type anywhere in a target, located
+/// at the target and naming the type (not the union rule), and keeps every
+/// self-contained target as a one-way fact.
+#[test]
+fn public_type_parser_rejects_named_types_nested_in_narrows_targets() {
+    for target in NARROWS_NESTED_NAME_TARGETS {
+        let text = narrows_function(target, "true-implies");
+        let error = parse_type_expr("candidate", &text).expect_err(target);
+        let darkmatter::markdown::schemas::SchemaError::Grammar { message, span, .. } = &error else {
+            panic!("{target}: a grammar error, found {error:?}");
+        };
+        assert!(message.contains("named type `Name"), "{target}: {message}");
+        assert!(!message.contains("union"), "{target}: {message}");
+        assert_eq!(&text[span.clone()], target, "{target}: located at the target");
+    }
+    for target in NARROWS_SELF_CONTAINED_TARGETS {
+        parse_type_expr("candidate", &narrows_function(target, "true-implies")).expect(target);
+    }
+}
+
+/// Standalone schema documents and both meta-types reject the same nested
+/// names, and the `schema` meta-type also rejects a refinement declared
+/// `true-iff`.
+#[test]
+fn schema_consumers_reject_named_types_nested_in_narrows_targets() {
+    let document = |definition: &str| format!("kind: schema\ntypes:\n  pred: |-\n    {definition}\n");
+    for target in ["{a: Name}", "tuple([Name])", "(Name | string)[]"] {
+        let definition = narrows_function(target, "true-implies");
+        let error = parse_standalone_schema_document(&document(&definition), "narrows.yaml").expect_err(target);
+        assert!(error.to_string().contains("named type `Name`"), "{target}: {error}");
+        let report = validate_candidate("type-definition", &format!("candidate: '{definition}'\n"));
+        assert!(!report.valid, "type-definition, {target}");
+        assert!(format!("{:?}", report.problems).contains("named type `Name`"), "{target}");
+        assert_invalid_candidate("schema", &format!("candidate:\n  pred: '{definition}'\n"));
+    }
+    assert_valid_candidate("schema", &format!("candidate:\n  pred: '{}'\n", narrows_function("{a: string}", "true-implies")));
+    assert_valid_candidate("schema", &format!("candidate:\n  pred: '{}'\n", narrows_function("file", "true-implies")));
+    let report = validate_candidate("schema", &format!("candidate:\n  pred: '{}'\n", narrows_function("file", "true-iff")));
+    assert!(!report.valid, "schema meta-type, file; true-iff");
+    assert!(format!("{:?}", report.problems).contains("true-iff"), "{:?}", report.problems);
+}
+
+/// A standalone schema document rejects the same refinements and every
+/// overload disagreement on the fact, and accepts two binding contracts
+/// declaring the same fact.
+#[test]
+fn standalone_schema_parser_rejects_invalid_narrows_declarations() {
+    let document = |definition: &str| format!("kind: schema\ntypes:\n  pred: |-\n    {definition}\n");
+    let parse = |definition: &str| parse_standalone_schema_document(&document(definition), "narrows.yaml");
+    for target in NARROWS_NOT_EXACT_FAMILIES {
+        let error = parse(&narrows_function(target, "true-iff")).expect_err(target);
+        assert!(error.to_string().contains("true-iff"), "{target}: {error}");
+        assert!(parse(&narrows_function(target, "true-implies")).expect(target).is_some());
+    }
+    let control = parse(&format!("{NARROWS_FIRST_OVERLOAD} | {NARROWS_AGREEING_OVERLOAD}")).expect("control");
+    assert!(control.is_some());
+    for (case, second) in NARROWS_DISAGREEING_OVERLOADS {
+        let error = parse(&format!("{NARROWS_FIRST_OVERLOAD} | {second}")).expect_err(case);
+        assert!(error.to_string().contains("overload"), "{case}: {error}");
+    }
+    // The YAML-list spelling of the same overload set.
+    let listed = |second: &str| {
+        let source = format!("kind: schema\ntypes:\n  pred:\n    - '{NARROWS_FIRST_OVERLOAD}'\n    - '{second}'\n");
+        parse_standalone_schema_document(&source, "narrows.yaml")
+    };
+    assert!(listed(NARROWS_AGREEING_OVERLOAD).expect("control").is_some());
+    for (case, second) in NARROWS_DISAGREEING_OVERLOADS {
+        assert!(listed(second).is_err(), "{case}, listed");
+    }
+}
+
+/// The `type-definition` meta-type accepts what registration accepts and
+/// rejects a refinement declared `true-iff` and disagreeing overloads.
+#[test]
+fn type_definition_rejects_narrows_facts_registration_rejects() {
+    let candidate = |definition: &str| format!("candidate: '{definition}'\n");
+    assert_valid_candidate("type-definition", &candidate(&narrows_function("string", "true-iff")));
+    for target in ["file", "string(min(3))"] {
+        let report = validate_candidate("type-definition", &candidate(&narrows_function(target, "true-iff")));
+        assert!(!report.valid, "{target}");
+        let problems = format!("{:?}", report.problems);
+        assert!(problems.contains("true-iff"), "{target}: {problems}");
+    }
+    assert_valid_candidate(
+        "type-definition",
+        &candidate(&format!("{NARROWS_FIRST_OVERLOAD} | {NARROWS_AGREEING_OVERLOAD}")),
+    );
+    for (case, second) in NARROWS_DISAGREEING_OVERLOADS {
+        let report = validate_candidate("type-definition", &candidate(&format!("{NARROWS_FIRST_OVERLOAD} | {second}")));
+        assert!(!report.valid, "{case}");
+    }
+}
+
 #[test]
 fn schema_validation_is_syntax_only_and_rejects_remote_references() {
     for reference in ["./schemas/does-not-exist.yaml", "does-not-exist.yaml"] {
@@ -326,4 +474,80 @@ fn shipped_base_schema_retypes_schema_and_preserves_resolution_acceptance() {
         .is_err(),
         "full preparation must continue rejecting the same malformed declaration",
     );
+}
+
+/// A duplicate `narrows` clause is located at the second keyword and relates
+/// the whole first clause, as structured spans rather than message text.
+#[test]
+fn public_parser_relates_a_duplicate_narrows_clause_to_the_first() {
+    use darkmatter::markdown::schemas::{SchemaError, simplified::grammar::parse_type_definition};
+    let first = "narrows(x: string; true-iff)";
+    let text = format!("function(parameters(x: unknown | null); returns(boolean); {first}; narrows(x; false-implies))");
+    let error = parse_type_definition("pred", &text).expect_err("two clauses");
+    let SchemaError::Grammar { message, span, related, .. } = &error else {
+        panic!("a grammar error, found {error:?}");
+    };
+    assert!(message.contains("duplicate `narrows`") && !message.contains("byte"), "{message}");
+    assert_eq!(span.start, text.rfind("narrows").unwrap(), "at the second keyword");
+    assert_eq!(&text[span.clone()], "narrows");
+    let [related] = related.as_slice() else { panic!("one related location: {related:?}") };
+    assert_eq!(&text[related.span.clone()], first);
+    assert_eq!(related.arm, None);
+}
+
+/// Overloads that disagree on the fact name both declarations: different
+/// facts are located at the later clause and relate the earlier one; a
+/// missing fact is located at the declaring clause and relates the overload
+/// that declares none. In one type expression both spans are in its text; in
+/// a YAML sequence union each is in its own option, and the source-aware
+/// parser projects both into the authored file.
+#[test]
+fn public_parsers_relate_disagreeing_narrows_overloads_to_both_declarations() {
+    use darkmatter::markdown::schemas::{
+        SchemaError, parse_property_definition_with_source, simplified::grammar::parse_type_definition,
+    };
+    let declaring = "function(parameters(x: unknown | null); returns(boolean); narrows(x: string; true-iff))";
+    let first_clause = "narrows(x: string; true-iff)";
+    let different = "function(parameters(x: unknown | null, y: string); returns(boolean); narrows(x: number; true-iff))";
+    let absent = "function(parameters(x: unknown | null, y: string); returns(boolean))";
+
+    let text = format!("{declaring} | {different}");
+    let Err(SchemaError::Grammar { span, related, .. }) = parse_type_definition("pred", &text) else {
+        panic!("different facts are a grammar error");
+    };
+    assert_eq!(span.start, text.rfind("narrows").unwrap(), "at the later clause");
+    let [related] = related.as_slice() else { panic!("one related location: {related:?}") };
+    assert_eq!(&text[related.span.clone()], first_clause);
+    assert!(related.message.contains("overload 1"), "{}", related.message);
+
+    let text = format!("{absent} | {declaring}");
+    let Err(SchemaError::Grammar { message, span, related, .. }) = parse_type_definition("pred", &text) else {
+        panic!("a missing fact is a grammar error");
+    };
+    assert!(message.contains("overload 2 declares") && message.contains("overload 1 does not"), "{message}");
+    assert_eq!(&text[span.clone()], first_clause, "at the declaring clause");
+    let [related] = related.as_slice() else { panic!("one related location: {related:?}") };
+    assert_eq!(&text[related.span.clone()], absent, "the overload without a clause");
+
+    // A YAML sequence union: the related location is another option.
+    for (later, related_text) in [(different, first_clause), (absent, absent)] {
+        let source = format!("- '{declaring}'\n- '{later}'\n");
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).unwrap();
+        let failure = parse_property_definition_with_source("pred", &value, &source, 0).expect_err(later);
+        let SchemaError::Grammar { related: structured, .. } = &*failure.error else {
+            panic!("a grammar error, found {:?}", failure.error);
+        };
+        let [structured] = structured.as_slice() else { panic!("one related location: {structured:?}") };
+        let primary = failure.authored_span.clone().expect("the primary token is located");
+        let [located] = failure.related.as_slice() else { panic!("one projected location: {:?}", failure.related) };
+        if later == different {
+            assert_eq!(structured.arm, Some(0), "the earlier option");
+            assert_eq!(primary.start, source.rfind("narrows").unwrap(), "at the later option's clause");
+            assert_eq!(&source[located.span.clone()], related_text);
+        } else {
+            assert_eq!(structured.arm, Some(1), "the option without a clause");
+            assert_eq!(&source[primary], first_clause, "at the declaring clause");
+            assert_eq!(&source[located.span.clone()], related_text);
+        }
+    }
 }

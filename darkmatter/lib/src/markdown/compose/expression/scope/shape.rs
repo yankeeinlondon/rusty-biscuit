@@ -6,6 +6,10 @@ use super::GuardOrigin;
 use super::projection::DeclaredType;
 use crate::markdown::compose::expression::equality::values_equal;
 use crate::markdown::schemas::completion::alternative_accepts;
+use crate::markdown::schemas::simplified::narrowing::{
+    ALL_FAMILIES, families, has_ordinary_constraints, is_null_type, type_identity,
+};
+pub(super) use crate::markdown::schemas::simplified::narrowing::{Family, exact_family};
 use crate::markdown::schemas::simplified::query::reachable_definitions;
 use crate::markdown::schemas::{
     Constraint, DefinitionTable, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr, flattened_alternatives,
@@ -20,16 +24,6 @@ pub enum Shape {
     /// A finite union of non-null alternatives, plus `null` when `nullable`.
     /// Array alternatives carry `is_array`.
     Arms { arms: Vec<PropertyAtom>, nullable: bool },
-}
-
-/// One runtime value family, as the type predicates test it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Family {
-    String,
-    Number,
-    Boolean,
-    Array,
-    Object,
 }
 
 /// Why a subject is present at a site.
@@ -500,54 +494,6 @@ impl Shape {
     }
 }
 
-impl Family {
-    fn bare_atom(self) -> PropertyAtom {
-        match self {
-            Self::String => PropertyAtom::bare(SimplifiedType::String),
-            Self::Number => PropertyAtom::bare(SimplifiedType::Number),
-            Self::Boolean => PropertyAtom::bare(SimplifiedType::Boolean),
-            Self::Object => PropertyAtom::bare(SimplifiedType::Object),
-            Self::Array => {
-                let mut atom = PropertyAtom::bare(SimplifiedType::Unknown);
-                atom.is_array = true;
-                atom
-            }
-        }
-    }
-}
-
-const ALL_FAMILIES: &[Family] = &[Family::String, Family::Number, Family::Boolean, Family::Array, Family::Object];
-
-/// The runtime families an alternative's values may belong to. A type whose
-/// accepted values are not pinned to one family here keeps every family.
-fn families(atom: &PropertyAtom) -> &'static [Family] {
-    if atom.is_array {
-        return &[Family::Array];
-    }
-    match &atom.ty {
-        TypeExpr::InlineObject(_) => &[Family::Object],
-        TypeExpr::Primitive(ty) => match ty {
-            SimplifiedType::Literal => match atom.literal_value() {
-                Some(Value::String(_)) => &[Family::String],
-                Some(Value::Number(_)) => &[Family::Number],
-                Some(Value::Bool(_)) => &[Family::Boolean],
-                _ => ALL_FAMILIES,
-            },
-            SimplifiedType::Number => &[Family::Number],
-            SimplifiedType::Boolean => &[Family::Boolean],
-            SimplifiedType::Object => &[Family::Object],
-            _ if crate::markdown::schemas::is_string_like(atom) => &[Family::String],
-            _ => ALL_FAMILIES,
-        },
-        TypeExpr::Tuple(_) => &[Family::Array],
-        // A recursive reference stays a named arm, so narrowing never expands
-        // it; without its definition table a guard keeps it on both sides.
-        TypeExpr::Imported { .. } | TypeExpr::Union(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => {
-            ALL_FAMILIES
-        }
-    }
-}
-
 /// [`families`], with a recursive reference classified by the top level of
 /// its definition body in `definitions`: one level, never expanded, so a
 /// reference inside the body keeps every family. A reference `definitions`
@@ -579,26 +525,6 @@ fn arm_families(atom: &PropertyAtom, definitions: &DefinitionTable) -> Vec<Famil
     found
 }
 
-fn is_null_type(atom: &PropertyAtom) -> bool {
-    !atom.is_array && matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::Null))
-}
-
-/// The family whose bare type `atom` is (`string`, `number`, `boolean`,
-/// `object`, `unknown[]`), with no constraints beyond markers.
-pub(super) fn exact_family(atom: &PropertyAtom) -> Option<Family> {
-    let [family] = families(atom) else {
-        return None;
-    };
-    (type_identity(atom.clone()) == type_identity(family.bare_atom()) && !has_ordinary_constraints(atom)).then_some(*family)
-}
-
-/// Whether `atom` can be a true-iff fact's type: `null` or the bare type of
-/// one family ([`exact_family`]). Only those have a complement narrowing
-/// can represent.
-pub(crate) fn is_exact_fact_type(atom: &PropertyAtom) -> bool {
-    is_null_type(atom) || exact_family(atom).is_some()
-}
-
 /// Whether `atom` is or contains a recursive reference.
 fn reaches_definition(atom: &PropertyAtom) -> bool {
     reachable_definitions(atom, &DefinitionTable::default()).is_none()
@@ -606,46 +532,6 @@ fn reaches_definition(atom: &PropertyAtom) -> bool {
 
 fn is_truthy_literal(value: &Value) -> bool {
     crate::markdown::compose::expression::is_truthy(value)
-}
-
-/// Constraints that restrict values beyond the type identity. Markers and
-/// annotations (`required`, defaults, suggestions, examples) do not.
-fn has_ordinary_constraints(atom: &PropertyAtom) -> bool {
-    atom.constraints.iter().chain(&atom.array_constraints).any(|constraint| {
-        !matches!(
-            constraint,
-            Constraint::Required
-                | Constraint::Default(_)
-                | Constraint::Generated
-                | Constraint::Eager
-                | Constraint::Suggest(_)
-                | Constraint::Example(_)
-                | Constraint::Members(_)
-                | Constraint::LiteralValue(_)
-        )
-    })
-}
-
-/// `atom` as a member of a value type: its presence markers, timing, and
-/// annotations removed, since a shape carries presence in `nullable` and two
-/// arms that differ only there are one type. Nested object members keep
-/// theirs.
-fn type_identity(mut atom: PropertyAtom) -> PropertyAtom {
-    let marker = |constraint: &Constraint| {
-        matches!(
-            constraint,
-            Constraint::Required
-                | Constraint::Default(_)
-                | Constraint::Generated
-                | Constraint::Eager
-                | Constraint::Suggest(_)
-                | Constraint::Example(_)
-        )
-    };
-    atom.constraints.retain(|constraint| !marker(constraint));
-    atom.array_constraints.retain(|constraint| !marker(constraint));
-    atom.description = None;
-    atom
 }
 
 fn enum_members(atom: &PropertyAtom) -> Option<&[String]> {

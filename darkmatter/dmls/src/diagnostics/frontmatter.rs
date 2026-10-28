@@ -18,7 +18,7 @@ use darkmatter::markdown::schemas::{
     ValidationOptions, ValidationProblem, ValidationProblemCode, ValidationReport,
     SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
     SchemaSourcePath, SchemaSourcePathSegment, locate_schema_value,
-    LocatedDefinitionFailure, locate_standalone_definition_failure, parse_property_definition,
+    LocatedDefinitionFailure, LocatedRelated, locate_standalone_definition_failure, parse_property_definition,
     parse_property_definition_with_source, parse_schema_declaration,
     parse_schema_declaration_with_source, parse_yaml_schema,
 };
@@ -244,17 +244,30 @@ fn schema_prepare_diagnostic_with_origin(
         out.push(scope.diagnostic(error, referenced_origin));
         return;
     }
+    let mut related = Vec::new();
     let (code_value, message, span) = match error {
         SchemaError::Grammar { property, .. } | SchemaError::Convert { property, .. }
             if property != "<root>" =>
         {
-            // A referenced file's failure has no range in this buffer.
-            let span = referenced_origin
+            // A referenced file's failure has no range in this buffer; its
+            // locations are related information in that file.
+            let inline = referenced_origin
                 .is_none()
                 .then(|| ast.and_then(|ast| inline_definition_span(ctx, ast, error, property)))
-                .flatten()
-                .or_else(|| fallback_span.clone());
-            (code::SCHEMA_INVALID_TYPE_DEFINITION, error.to_string(), span)
+                .flatten();
+            let span = match inline {
+                Some((span, located)) => {
+                    related.extend(located_related(ctx, &located));
+                    span
+                }
+                None => None,
+            };
+            if let Some(path) = referenced_origin
+                && let Some(located) = named_types::referenced_definition_related(ctx, path, error)
+            {
+                related.extend(located);
+            }
+            (code::SCHEMA_INVALID_TYPE_DEFINITION, error.to_string(), span.or_else(|| fallback_span.clone()))
         }
         SchemaError::FrontmatterShape { message } => {
             (code::SCHEMA_INVALID_SHAPE, message.clone(), fallback_span.clone())
@@ -265,7 +278,14 @@ fn schema_prepare_diagnostic_with_origin(
         SchemaError::Grammar { .. } | SchemaError::Convert { .. } => {
             (code::SCHEMA_INVALID_SHAPE, error.to_string(), fallback_span.clone())
         }
-        other => (code::SCHEMA_PREPARE, other.to_string(), fallback_span.clone()),
+        other => {
+            // A standalone schema file folds its payload failure into this
+            // error; its locations are related information in that file.
+            if let SchemaError::SchemaDocument { path, .. } = other {
+                related.extend(named_types::referenced_definition_related(ctx, path, other).unwrap_or_default());
+            }
+            (code::SCHEMA_PREPARE, other.to_string(), fallback_span.clone())
+        }
     };
     let range = span
         .and_then(|span| ctx.source_map.byte_range_to_lsp(span))
@@ -277,48 +297,71 @@ fn schema_prepare_diagnostic_with_origin(
         code_value,
         message,
     );
-    if let Some(path) = referenced_origin
+    if related.is_empty()
+        && let Some(path) = referenced_origin
         && let Some(uri) = file_path_to_uri(path)
     {
-        diagnostic.related_information = Some(vec![DiagnosticRelatedInformation {
+        related.push(DiagnosticRelatedInformation {
             location: Location::new(uri, zero_range()),
-            message: "schema definition is authored in this file".to_string(),
-        }]);
+            message: named_types::REFERENCED_DEFINITION.to_string(),
+        });
+    }
+    if !related.is_empty() {
+        diagnostic.related_information = Some(related);
     }
     out.push(diagnostic);
 }
 
-/// The authored range of an inline `$schema` definition failure.
+/// A located failure's secondary ranges in this document, as related
+/// information.
+fn located_related(ctx: &DocumentContext, related: &[LocatedRelated]) -> Vec<DiagnosticRelatedInformation> {
+    related
+        .iter()
+        .filter_map(|entry| {
+            Some(DiagnosticRelatedInformation {
+                location: Location::new(ctx.uri.clone(), ctx.source_map.byte_range_to_lsp(entry.span.clone())?),
+                message: entry.message.clone(),
+            })
+        })
+        .collect()
+}
+
+/// The authored range of an inline `$schema` definition failure, with its
+/// located secondary ranges.
 ///
 /// When the source-aware declaration parser reports this same error, its
 /// located token wins, then the rejected value, then the deepest entry along
-/// its structural path. An error that parser does not report (a conversion
-/// failure) keeps the entry its property label names.
+/// its structural path, and its related locations come with it. An error that
+/// parser does not report (a conversion failure) keeps the entry its property
+/// label names, with none.
 fn inline_definition_span(
     ctx: &DocumentContext,
     ast: &FrontmatterAst,
     error: &SchemaError,
     property: &str,
-) -> Option<std::ops::Range<usize>> {
+) -> Option<(Option<std::ops::Range<usize>>, Vec<LocatedRelated>)> {
     let fresh = ctx.overlay.is_some_and(|overlay| !overlay.stale);
     if let Some(failure) = fresh
         .then(|| AuthoredDeclaration::frontmatter_failure(ctx.text, ast))
         .flatten()
         .filter(|failure| failure.error.to_string() == error.to_string())
     {
-        return failure
+        let span = failure
             .authored_span
             .clone()
             .or_else(|| failure.value_span.clone())
             .or_else(|| enclosing_entry_span(ctx.text, ast, &["$schema"], &failure.path));
+        return Some((span, failure.related));
     }
-    ast.entry_by_key_path(&["$schema", property])
+    let span = ast
+        .entry_by_key_path(&["$schema", property])
         .or_else(|| {
             let mut path = vec!["$schema"];
             path.extend(property.split('.'));
             ast.entry_by_key_path(&path)
         })
-        .map(|entry| entry.value_span.clone())
+        .map(|entry| entry.value_span.clone());
+    Some((span, Vec::new()))
 }
 
 /// Instance-validation problems mapped onto concrete ranges.
@@ -514,7 +557,7 @@ fn semantic_authored_diagnostics(
         // source-aware parser only locates the failure they reported.
         // A declaration failure on no property is the declaration's own shape,
         // which keeps the whole value, as a standalone envelope's does.
-        let span = locate_meta_type_failure(ctx.text, value_span.clone(), kind, &entry.key)
+        let located = locate_meta_type_failure(ctx.text, value_span.clone(), kind, &entry.key)
             .filter(|failure| failure.error.to_string() == error.to_string())
             .filter(|failure| {
                 kind == MetaSchemaKind::TypeDefinition
@@ -523,7 +566,9 @@ fn semantic_authored_diagnostics(
                         .segments()
                         .iter()
                         .any(|segment| matches!(segment, SchemaSourcePathSegment::Property(_)))
-            })
+            });
+        let related = located.as_ref().map(|failure| located_related(ctx, &failure.related)).unwrap_or_default();
+        let span = located
             .and_then(|failure| failure.authored_span.or(failure.value_span))
             .unwrap_or_else(|| value_span.clone());
         let Some(range) = ctx.source_map.byte_range_to_lsp(span) else {
@@ -542,6 +587,9 @@ fn semantic_authored_diagnostics(
         if let Some(problem) = report.problems.iter().find(|problem| problem.path == value.pointer) {
             specialized.related_information = schema_origin_related(ctx, bundle, problem);
             specialized.data = Some(schema_problem_data(problem));
+        }
+        if !related.is_empty() {
+            specialized.related_information.get_or_insert_with(Vec::new).extend(related);
         }
         out.push(specialized);
         diagnosed.insert(value.pointer.clone());
@@ -1305,13 +1353,16 @@ fn standalone_type_definition_diagnostic(ctx: &DocumentContext) -> Option<Diagno
         })
         .unwrap_or(0..ctx.text.len());
     let range = ctx.source_map.byte_range_to_lsp(span).unwrap_or_else(zero_range);
-    Some(diagnostic(
+    let mut diagnostic = diagnostic(
         range,
         DiagnosticSeverity::ERROR,
         source::SCHEMA,
         code::SCHEMA_INVALID_TYPE_DEFINITION,
         failure.error.to_string(),
-    ))
+    );
+    let related = located_related(ctx, &failure.related);
+    diagnostic.related_information = (!related.is_empty()).then_some(related);
+    Some(diagnostic)
 }
 
 /// The value span of the deepest entry `ast` holds along `path`'s leading

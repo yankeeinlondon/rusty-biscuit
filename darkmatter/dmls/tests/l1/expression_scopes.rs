@@ -399,6 +399,40 @@ fn undeclared_property_findings_match_the_library_branch_facts() {
     session.shutdown();
 }
 
+/// DMLS takes its branch types from `TypeScope` alone, so a guard call the
+/// passive call check rejects narrows nothing in the editor either: the
+/// conjunction's later `foo` keeps `unknown` (no "Type here" line) after
+/// `probe_pred(foo, {})`, and reads `file` after the valid call. The probe is
+/// a thread-local test function, so this calls `local_type` directly.
+#[cfg(feature = "effects-instrumentation")]
+#[test]
+fn local_type_takes_no_fact_from_a_rejected_guard_call() {
+    use std::sync::Arc;
+
+    use darkmatter::markdown::compose::expression::SpannedExprKind;
+    use darkmatter::markdown::compose::expression::call_binding::FunctionRegistration;
+    use darkmatter::markdown::compose::expression::function_test_hooks as hooks;
+    use dmls::overlay::expressions::local_type;
+
+    let signature = "function(parameters(value: unknown, count: number); returns(boolean); narrows(value: file; true-implies))";
+    let registration = FunctionRegistration::builder("probe_pred", signature).build().expect("registers");
+    let _probe = hooks::register(registration, Arc::new(|_| Ok(json!(true))));
+    let schema = parse_yaml_schema(&serde_yaml_ng::from_str("foo: unknown").unwrap()).unwrap();
+    let declared = DeclaredTypes::new(Some(&schema));
+    let site = TypeScope::unguarded(&declared);
+    let later_foo = |source: &str| {
+        let expr = parse_spanned(source).unwrap();
+        let SpannedExprKind::FunctionCall { args, .. } = &expr.kind else {
+            panic!("`&&` lowers to `and(...)`");
+        };
+        local_type(&expr, &args[1], &site).map(|ty| type_text(&ty))
+    };
+    assert_eq!(later_foo("probe_pred(foo, 1) && foo").as_deref(), Some("file"));
+    assert_eq!(later_foo("probe_pred(foo, {}) && foo"), None);
+    assert_eq!(later_foo("probe_pred(foo) && foo"), None);
+    assert_eq!(hooks::handler_entries("probe_pred"), 0);
+}
+
 /// Acceptance 13: a `file_exists` guard narrows statically. A target that is
 /// a remote URL or a path that does not exist is still a present string
 /// inside the guard (nothing asked whether it exists), and analysis attempts

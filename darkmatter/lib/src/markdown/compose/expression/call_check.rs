@@ -37,7 +37,7 @@ use std::fmt;
 use serde_json::Value;
 
 use super::absence::branch_scope;
-use super::ast::{SpannedExpr, SpannedExprKind};
+use super::ast::{Expr, SpannedExpr, SpannedExprKind};
 use super::call_binding::{
     CallBindingError, CompiledParameter, CompiledSignature, FunctionRegistration, NoNamedTypes, SignatureProblem,
     shape_from_property_def_with_definitions,
@@ -1059,6 +1059,81 @@ pub fn check_expression_calls(expr: &SpannedExpr, site: &TypeScope<'_>) -> Vec<C
         }
     });
     checks
+}
+
+/// Whether the passive check proves that calling `name` with `args`, at the
+/// site `scope` describes, cannot bind: the call is category 5 (an arity
+/// problem, an overload no argument set fits, or an argument no value of its
+/// type can bind). An argument whose type is unknown, uncertain, or maybe
+/// null does not prove a rejection. `false` for a name nothing dispatches.
+///
+/// [`TypeScope::assume`] reads this so a rejected call grants no fact: the
+/// spec's "facts apply only after a call is accepted by the normal call
+/// checker". Each argument is typed in `scope` itself, which already holds
+/// the facts of the guards enclosing the call, as
+/// [`check_expression_calls`]'s `branch_scope` would give it.
+pub(crate) fn call_is_rejected(name: &str, args: &[&Expr], scope: &TypeScope<'_>) -> bool {
+    let types: Vec<ArgumentType> = args.iter().map(|arg| ArgumentType::of(&unlocated(arg), scope)).collect();
+    check_call_with_definitions(name, &types, 0..0, Vec::new(), scope.declared().definitions())
+        .is_some_and(|check| check.is_rejected())
+}
+
+/// `expr` as a [`SpannedExpr`] whose spans are all empty: the typing rules
+/// read only the node kinds, never a span.
+fn unlocated(expr: &Expr) -> SpannedExpr {
+    let boxed = |inner: &Expr| Box::new(unlocated(inner));
+    let kind = match expr {
+        Expr::Variable(name) => SpannedExprKind::Variable(name.clone()),
+        Expr::StringLiteral(text) => SpannedExprKind::StringLiteral(text.clone()),
+        Expr::NumberLiteral(number) => SpannedExprKind::NumberLiteral(*number),
+        Expr::BoolLiteral(flag) => SpannedExprKind::BoolLiteral(*flag),
+        Expr::ArrayLiteral(items) => SpannedExprKind::ArrayLiteral(items.iter().map(unlocated).collect()),
+        Expr::ObjectLiteral(entries) => SpannedExprKind::ObjectLiteral(
+            entries
+                .iter()
+                .map(|(key, value)| (crate::markdown::span::Spanned::new(key.clone(), 0..0), unlocated(value)))
+                .collect(),
+        ),
+        Expr::UnaryNot(inner) => SpannedExprKind::UnaryNot(boxed(inner)),
+        Expr::UnaryMinus(inner) => SpannedExprKind::UnaryMinus(boxed(inner)),
+        Expr::Paren(inner) => SpannedExprKind::Paren(boxed(inner)),
+        Expr::Binary { op, left, right } => SpannedExprKind::Binary {
+            op: *op,
+            left: boxed(left),
+            right: boxed(right),
+        },
+        Expr::Index { base, index } => SpannedExprKind::Index {
+            base: boxed(base),
+            index: boxed(index),
+        },
+        Expr::MemberAccess { base, name } => SpannedExprKind::MemberAccess {
+            base: boxed(base),
+            name: name.clone(),
+        },
+        Expr::Fallback { primary, fallback } => SpannedExprKind::Fallback {
+            primary: boxed(primary),
+            fallback: boxed(fallback),
+        },
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => SpannedExprKind::Ternary {
+            condition: boxed(condition),
+            then_branch: boxed(then_branch),
+            else_branch: boxed(else_branch),
+        },
+        Expr::Comparison { left, op, right } => SpannedExprKind::Comparison {
+            left: boxed(left),
+            op: *op,
+            right: boxed(right),
+        },
+        Expr::FunctionCall { name, args } => SpannedExprKind::FunctionCall {
+            name: name.clone(),
+            args: args.iter().map(unlocated).collect(),
+        },
+    };
+    SpannedExpr::new(kind, 0..0)
 }
 
 /// A [`CallCheck`] in a prepared value, located in its string leaf.

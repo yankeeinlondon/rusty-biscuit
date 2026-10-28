@@ -6,7 +6,8 @@
 //! filesystem or network. What a predicate proves is the [`NarrowingFact`]
 //! its registration declares, read through the registry the way dispatch
 //! resolves the name, so a built-in, a test function, and a host function
-//! narrow alike.
+//! narrow alike, and only for a call the passive call check does not reject
+//! ([`call_is_rejected`]).
 
 use serde_json::Value;
 
@@ -14,6 +15,7 @@ use super::shape::{Family, Shape, exact_family};
 use super::{GuardOrigin, Polarity, TypeScope};
 use crate::markdown::compose::expression::binding::NULL_ROOT;
 use crate::markdown::compose::expression::call_binding::{FactKind, NarrowingFact};
+use crate::markdown::compose::expression::call_check::call_is_rejected;
 use crate::markdown::compose::expression::functions::{
     ShortCircuit, accepts_call_arity, canonical_function_name, inspect_registration, lazy_function,
 };
@@ -39,6 +41,8 @@ pub(super) fn assume<'d>(scope: &TypeScope<'d>, guard: &Expr, polarity: Polarity
         Expr::Comparison { left, op, right } => comparison(scope, left, *op, right, polarity, origin),
         Expr::FunctionCall { name, args } => {
             let args: Vec<&Expr> = args.iter().collect();
+            // `and`/`or` take `...values: unknown | null`, which binds any
+            // value, so the arity check is their whole acceptance check.
             if let Some((_, side)) = lazy_function(name)
                 && canonical_function_name(name).is_some_and(|canonical| accepts_call_arity(canonical, args.len()))
             {
@@ -48,7 +52,12 @@ pub(super) fn assume<'d>(scope: &TypeScope<'d>, guard: &Expr, polarity: Polarity
                 };
             }
             match inspect_registration(name, |registration| registration.narrowing_fact_for(args.len()).cloned()) {
-                Some(Some(fact)) => predicate_fact(scope, &fact, &args, polarity, origin),
+                // A call the passive check rejects never returns, so it
+                // proves neither side; an argument of unknown type does not
+                // count as a rejection.
+                Some(Some(fact)) if !call_is_rejected(name, &args, scope) => {
+                    predicate_fact(scope, &fact, &args, polarity, origin)
+                }
                 _ => scope.clone(),
             }
         }

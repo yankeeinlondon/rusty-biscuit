@@ -18,6 +18,7 @@ use tracing::{debug, instrument};
 /// Shared render logic for both implicit (no subcommand) and explicit `render` subcommand.
 ///
 /// `features` is every `--feature` given, top-level and on `render`.
+#[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, fields(command = "render"))]
 pub fn run_render(
     input: Option<&PathBuf>,

@@ -136,6 +136,16 @@ fn registration_rejects_collisions_parity_gaps_and_invalid_facts_before_evaluati
         "function(\n            parameters(name: string);\n            narrows(name; true-implies);",
     ));
     assert!(not_boolean.to_string().contains("returns(boolean)"), "a narrowing fact on a function returning string: {not_boolean}");
+    for target in ["file", "string(min(3))", "enum(a,b)"] {
+        let refinement =
+            load_error(catalog.replace("narrows(value: file; true-implies)", &format!("narrows(value: {target}; true-iff)")));
+        assert!(refinement.to_string().contains("true-iff"), "{target}: {refinement}");
+    }
+    let disagreeing = load_error(catalog.replace(
+        "        ) -> Returns true when the value is text naming a Markdown file of the project.",
+        "        ) | function(parameters(value: unknown | null, strict: boolean); returns(boolean); category(Project))",
+    ));
+    assert!(disagreeing.to_string().contains("does not"), "an overload without the fact: {disagreeing}");
     let lazy = HostFunctions::builder(load(&catalog))
         .function("is_project_file", &[], |r| r.evaluation(EvaluationMode::Lazy), handler.clone())
         .function("project_label", &[], |r| r, label.clone())
@@ -146,6 +156,65 @@ fn registration_rejects_collisions_parity_gaps_and_invalid_facts_before_evaluati
     let again = install_host_functions(test_host(&catalog)).expect_err("names already installed");
     assert!(matches!(again, HostFunctionError::InstalledCollision { .. }), "{again:?}");
     assert_eq!(entries(), (0, 0), "no handler ran");
+}
+
+/// A catalog fact whose target names a type anywhere inside it, top-level or
+/// nested in an object, tuple, grouped array, union arm, or dictionary value,
+/// fails the load at that declaration; self-contained compound targets load
+/// as one-way facts.
+#[test]
+fn a_host_catalog_rejects_named_types_nested_in_a_fact_target() {
+    let catalog = std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join("tests/fixtures/host_functions/project.yaml"))
+        .expect("the test catalog");
+    let with_target = |target: &str| catalog.replace("narrows(value: file; true-implies)", &format!("narrows(value: {target}; true-implies)"));
+    for target in ["{a: Name}", "tuple([Name])", "Name[]", "(Name | string)[]", "{a: string | Name}", "{<string>: Name}"] {
+        let error = HostFunctionCatalog::load(&with_target(target), "tests/fixtures/host_functions/project.yaml")
+            .expect_err(target)
+            .to_string();
+        assert!(error.contains("named type `Name`") && !error.contains("union"), "{target}: {error}");
+        assert!(error.contains("is_project_file"), "{target}: located at the declaring function: {error}");
+    }
+    for target in ["{a: string}", "tuple([string])", "string(min(3))", "enum(a,b)", "file", "(string|number)[]"] {
+        HostFunctionCatalog::load(&with_target(target), "tests/fixtures/host_functions/project.yaml").expect(target);
+    }
+}
+
+/// A rejected catalog fact is located in the catalog source itself, through
+/// the block scalar it is written in: a refinement declared `true-iff` at its
+/// target, a second clause at its keyword with the first related, and an
+/// overload that disagrees at its clause with the earlier one related.
+#[test]
+fn a_host_catalog_locates_a_rejected_fact_in_its_source() {
+    let path = "tests/fixtures/host_functions/project.yaml";
+    let catalog = std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join(path)).expect("the test catalog");
+    let clause = "narrows(value: file; true-implies)";
+    let at = |source: &str, needle: &str, occurrence: usize| {
+        let start = source.match_indices(needle).nth(occurrence).unwrap_or_else(|| panic!("{needle}")).0;
+        start..start + needle.len()
+    };
+
+    let iff = catalog.replace(clause, "narrows(value: file; true-iff)");
+    let error = HostFunctionCatalog::load(&iff, path).expect_err("a one-way target declared true-iff");
+    assert!(error.to_string().contains("true-iff"), "{error}");
+    let target = at(&iff, "file; true-iff", 0).start;
+    assert_eq!(error.span(), Some(&(target..target + "file".len())), "at the target: {error:?}");
+    assert!(error.related().is_empty(), "{error:?}");
+
+    let duplicate = catalog.replace(clause, &format!("{clause};\n            narrows(value; false-implies)"));
+    let error = HostFunctionCatalog::load(&duplicate, path).expect_err("two clauses");
+    assert_eq!(error.span(), Some(&at(&duplicate, "narrows", 1)), "{error:?}");
+    let [related] = error.related() else { panic!("one related location: {error:?}") };
+    assert_eq!(related.span, at(&duplicate, clause, 0));
+
+    let later = "narrows(value: string; true-iff)";
+    let disagreeing = catalog.replace(
+        "        ) -> Returns true when the value is text naming a Markdown file of the project.",
+        &format!("        ) | function(parameters(value: unknown | null, strict: boolean); returns(boolean); {later}; category(Project))"),
+    );
+    let error = HostFunctionCatalog::load(&disagreeing, path).expect_err("different facts");
+    assert_eq!(error.span(), Some(&at(&disagreeing, later, 0)), "{error:?}");
+    let [related] = error.related() else { panic!("one related location: {error:?}") };
+    assert_eq!(related.span, at(&disagreeing, clause, 0));
 }
 
 /// A loaded catalog owns what it read: after the source text and path

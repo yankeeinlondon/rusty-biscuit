@@ -112,7 +112,7 @@ pub use detect::{
     detect_schema_with_contexts, schema_to_yaml,
 };
 pub use discriminant::select_literal_discriminant_arm;
-pub use errors::{CycleReference, SchemaError};
+pub use errors::{CycleReference, GrammarRelated, SchemaError};
 pub use json_shape::shape_from_json_schema;
 pub use frontmatter_shape::{
     FrontmatterExpressionValue, effective_property_shape, expression_atom,
@@ -126,7 +126,7 @@ pub use simplified::{
     AlphanumericOption, AlphanumericOptions, AsciiCharSet, Constraint, DRAFT_2020_12, DecodedScalar, DefKey,
     DefNamespace, Definition, DefinitionOuter, DefinitionTable, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef,
     SchemaArm,
-    LocatedDefinitionFailure, SchemaConstraintConflictKind, SchemaConstraintOrigin,
+    LocatedDefinitionFailure, LocatedRelated, SchemaConstraintConflictKind, SchemaConstraintOrigin,
     SchemaConstraintParticipant, SchemaCursor, SchemaCursorRole,
     SchemaDeclaration, SchemaReferenceSite, SchemaShape, SchemaSourceId, SchemaSourceMap,
     SchemaSourcePath, SchemaSourcePathSegment,

@@ -65,7 +65,8 @@ pub use artifact::{FACTS_ARTIFACT_FORMAT_VERSION, FactsArtifact, NON_NULL_FACT_T
 
 use super::ast::{SpannedExpr, SpannedExprKind};
 use super::call_binding::{BoundCall, EvaluationMode, FunctionRegistration, RegistrationBuilder, RegistrationError};
-use super::catalog::{FunctionCatalog, load_catalog};
+use super::catalog::{CatalogError, FunctionCatalog, load_catalog};
+use crate::markdown::schemas::{LocatedRelated, locate_standalone_definition_failure};
 use crate::markdown::span::SourceSpan;
 
 /// The diagnostic code for a call to a host function whose analysis
@@ -102,10 +103,30 @@ impl fmt::Debug for HostFunctionCatalog {
 }
 
 /// Why a host function catalog does not load.
+///
+/// A signature the schema grammar rejects is located in the catalog source,
+/// through the same projection editors use: [`Self::span`] is the rejected
+/// token and [`Self::related`] the earlier declarations it conflicts with,
+/// all byte ranges in the loaded `source`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{message}")]
 pub struct HostCatalogError {
     message: String,
+    span: Option<SourceSpan>,
+    related: Vec<LocatedRelated>,
+}
+
+impl HostCatalogError {
+    /// The rejected token's byte range in the catalog source, when the
+    /// failure is a located signature failure.
+    pub fn span(&self) -> Option<&SourceSpan> {
+        self.span.as_ref()
+    }
+
+    /// The failure's secondary locations in the catalog source.
+    pub fn related(&self) -> &[LocatedRelated] {
+        &self.related
+    }
 }
 
 impl HostFunctionCatalog {
@@ -125,8 +146,19 @@ impl HostFunctionCatalog {
     pub fn load(source: &str, path: impl AsRef<Path>) -> Result<Self, HostCatalogError> {
         let path = path.as_ref().to_path_buf();
         let display = path.display().to_string();
-        let catalog = load_catalog(source, &display, &[]).map_err(|error| HostCatalogError {
-            message: error.to_string(),
+        let catalog = load_catalog(source, &display, &[]).map_err(|error| {
+            // The loader parses the whole document first, so its schema
+            // error reports (wrapped in the document's) the failure the
+            // locator finds.
+            let located = match &error {
+                CatalogError::Schema(schema) => locate_standalone_definition_failure(source)
+                    .filter(|failure| schema.to_string().contains(&failure.error.to_string())),
+                CatalogError::Invalid { .. } => None,
+            };
+            let (span, related) = located
+                .map(|failure| (failure.authored_span.or(failure.value_span), failure.related))
+                .unwrap_or_default();
+            HostCatalogError { message: error.to_string(), span, related }
         })?;
         Ok(Self {
             inner: Arc::new(CatalogData {

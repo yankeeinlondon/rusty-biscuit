@@ -636,7 +636,8 @@ fn with_narrows(first: &str, second: Option<&str>) -> String {
 }
 
 /// Overloads share one declared fact: the control loads and every
-/// disagreement fails the whole file naming `types.is_string`.
+/// disagreement fails the whole file as a schema error naming `is_string`,
+/// since the schema grammar applies the declaration rules.
 #[test]
 fn overloads_must_agree_on_the_declared_fact() {
     let load = |source: &str| load_catalog(source, "fixture.yaml", EXAMPLE_FILES);
@@ -648,8 +649,8 @@ fn overloads_must_agree_on_the_declared_fact() {
         ("presence versus type", with_narrows("narrows(x; false-implies)", Some("narrows(x: string; false-implies)"))),
     ] {
         let error = load(&source).expect_err(cell);
-        assert!(matches!(error, CatalogError::Invalid { .. }), "{cell}: {error:?}");
-        assert!(error.to_string().contains("`types.is_string`"), "{cell}: {error}");
+        assert!(matches!(error, CatalogError::Schema(_)), "{cell}: {error:?}");
+        assert!(error.to_string().contains("`is_string`"), "{cell}: {error}");
     }
 }
 
@@ -677,7 +678,7 @@ fn a_clause_naming_a_parameter_the_overload_omits_fails_the_load() {
         1,
     );
     let error = load_catalog(&only_later, "fixture.yaml", EXAMPLE_FILES).expect_err("only the later overload declares");
-    assert!(error.to_string().contains("`types.is_string`"), "{error}");
+    assert!(error.to_string().contains("`is_string`"), "{error}");
 }
 
 /// Overloads with one binding contract stay duplicates whatever their clauses say.
