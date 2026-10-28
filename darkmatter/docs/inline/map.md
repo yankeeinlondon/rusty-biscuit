@@ -2,11 +2,16 @@
 
 **Planned:** `::map` and `::end-map` are not implemented yet. The examples and options below describe the intended behavior.
 
+Use `::map` when the body should receive a transformed item. The companion
+[filter directive](./filter.md) selects items and exposes their original
+values instead. Both share options, iterable types, local scopes, ordering,
+composition, and authorization rules.
+
 The planned map directive has this structure:
 
 ```md
 <!-- start map block -->
-::map <variable> "{expression}" <opt: filter>
+::map <source> "<pattern> => <expression>" <optional filters> <optional sort>
 <!-- mapped content block with local variable -->
 - and don't forget: "{{i}}"
 ::end-map
@@ -16,15 +21,22 @@ The planned map directive has this structure:
 - The central idea of this directive is to allow a Markdown author to iterate over [_iterables_](../iterables.md) and render them into the composed document with high precision.
 - Just like all other block directives, the interior section can include any combination of other directives (e.g., conditional blocks, transclusion, etc.)
 
+The quoted mapping function is optional and positional; there is no `fn=` option.
+Both `->` and `=>` are accepted and have identical semantics in mapping,
+filtering, sorting, and stopping functions. Sources are written directly, such as `data`,
+`ctx.packages`, or `team.members`, without `{{ }}` interpolation delimiters.
+
 ## Expressions
 
-The simplest expression is no expression at all and the map directive allows for that. So this example is perfectly valid:
+The simplest expression is _no expression at all_ and the map directive allows for that. So this example is perfectly valid:
 
 ```md
 ---
+$schema:
+    data: string[](required)
 data: ["foo","bar","baz"]
 ---
-::map
+::map data
 - {{i}}
 ::end-map
 ```
@@ -39,28 +51,101 @@ This example renders an unordered list of:
 
 And it does that with the help of the variable `i`. What is the variable `i`? Well it's the default name for the _local variable_ that will represent the value of each item in the iterable.
 
+While simple is great, we often want to work with the iterable value before dropping into the render block:
+
+```md
+---
+$schema:
+    data: "{ name: string(required) }[](required)"
+data:
+    - { name: "foo" }
+    - { name: "bar" }
+    - { name: "baz" }
+---
+::map data "p => p.name"
+- {{p}}
+::end-map
+```
+
+In this example the underlying data we wanted to render was all nested inside the `name` property so we used an expression that offset the name property and gave us the value directly.
+
+- you'll also notice that the expression named the variable `p` in this case which is entirely fine (so long as the variable is a valid variable name).
+- this expression could just as easily used `i` as a variable and it would have made no difference.
+- furthermore the example below would produce identical results:
+
+    ```md
+    ::map data "p => p"
+    - {{p.name}}
+    ::end-map
+    ```
+
+    In this example we don't offset in the block expression but instead do it in the render block's interpolation.
+
 ## Iterables
 
-Any tuple, array, or key/value object is considered iterable. In the case of the key/value object, the iterable value on each iteration will be placed into a:
+Any tuple, array, or key/value object is considered iterable. Arrays and tuples
+yield their elements. Objects yield entries with the general shape
+`{key: string, value: any}`:
 
 ```yaml
-{ key: string(required), value: unknown(required) }
+{ key: string(required), value: any }
+```
+
+Both fields are present on every entry, including when `value` is null. This is
+the general shape, not a rule that erases the declared value type: a dictionary
+of `Person` values yields entries whose `value` has type `Person`. For objects
+with differently typed properties, the value type is the union of those
+property types.
+
+Without destructuring, use `i.key` and `i.value`:
+
+```md
+::map data
+- {{i.key}} likes {{i.value}}
+::end-map
 ```
 
 So that means in the following Markdown:
 
 ```md
 ---
+$schema:
+    data: "{ foo: string(required), bar: string(required) }(required)"
 data: { foo: "bar", bar: "baz"}
 ---
-::map
-
+::map data "{key,value} => {key,value}"
+- {{key}} likes {{value}}
+::end-map
 ```
 
+will produce the following results:
 
-## Variable Scoping
+```md
+- foo likes bar
+- bar likes baz
+```
 
-A map _variable_ must always be a reference to a Frontmatter property -- _and to ensure better type safety_ -- we also require that any variable used in a map block be defined in the schema.
+## Iterable Variables
+
+A map source must have a statically known iterable type at the iteration site.
+That type can come from the effective schema, a namespace's type declaration,
+or an enclosing local binding. Sources are not restricted to frontmatter.
+
+For example, a namespace property declared as an array can be used directly:
+
+```md
+::map ctx.packages
+- {{i}}
+::end-map
+```
+
+The namespace's declaration determines the element type; the map does not
+infer it from the property's name or rendered contents.
+
+Frontmatter values alone do not establish a declared type for this requirement.
+A literal list still needs a collection declaration in the effective schema.
+The requirement applies to the source's type, not to whether every variable
+referenced inside the body has a separate frontmatter schema entry.
 
 That means in the following example Darkmatter would produce a `UntypedMapVariable` error:
 
@@ -71,68 +156,452 @@ data:
     - bar
     - baz
 ---
-::map data fn="i => i"
-- {i}!
+::map data "i => i"
+- {{i}}!
 ::end-map
 ```
 
 If you want to manually override this requirement you can use the `--allow untyped-map-variables` when calling compose from the CLI (or provide DarkmatterException::untyped_map_variables to the options of a library call).
+
+This planned recovery bypasses the static typing requirement only. A missing
+or null source renders nothing, as does an empty iterable. A non-null scalar
+is an error. Map behavior does not waive ordinary schema validation: a missing
+required frontmatter property still fails that validation.
 
 Below is an example of how you could make the first example pass without needing to overriding this requirement:
 
 ```md
 ---
 $schema:
-    data: string[]
+    data: string[](required)
 data:
     - foo
     - bar
     - baz
 ---
-::map data fn="i -> i"
-- {i}!
+::map data "i -> i"
+- {{i}}!
 ::end-map
 ```
 
-> **Note:** all _functions_ (both map functions as well as filtering functions) should express themselves as an unknown/inline function but can use either the `->` or `=>` operator to separate the parameter passed in and the functional expression
+### Collection types and guards
+
+- `any[]` is a known iterable type even though its elements are unknown.
+- `any` alone does not establish iterability.
+- A union whose alternatives are all iterable is accepted; its item type
+  combines the possible element or object-entry types.
+- Optional and nullable iterables are accepted without a guard. Missing and
+  null sources render nothing.
+- A union containing a non-null, non-iterable alternative, such as
+  `string[] | string`, needs a guard that establishes iterability at the map site.
+- An undeclared source remains a static typing problem; a declared source's
+  permitted absence is not an undeclared binding.
+
+For example, this nullable array renders nothing without needing a guard:
+
+```md
+---
+$schema:
+    names: string[] | null
+names: null
+---
+::map names
+- {{i}}
+::end-map
+```
+
+### Nested sources
+
+Local bindings retain their types, so a nested map can iterate over a property
+of the enclosing item:
+
+```md
+---
+$schema:
+    teams: "{ name: string(required), members: { name: string(required) }[](required) }[](required)"
+teams:
+    - name: Platform
+      members:
+          - name: Ada
+          - name: Grace
+---
+::map teams "team => team"
+## {{team.name}}
+::map team.members "member => member"
+- {{member.name}}
+::end-map
+::end-map
+```
+
+Here, `team.members` inherits its iterable type from the element declaration of
+`teams`; it needs no separate frontmatter declaration. Bindings are local to
+their iteration's body and nested regions and do not modify frontmatter or
+leak into subsequent siblings.
+
+### The local namespace
+
+Map bindings belong to the reserved `local` namespace. Bare names prefer the
+nearest local binding over a frontmatter property of the same name:
+
+| Reference | Resolution inside a map body |
+| --- | --- |
+| `foo` | Nearest local `foo`, otherwise normal lookup |
+| `local.foo` | Nearest local `foo` only |
+| `fm.foo` | Frontmatter `foo` only |
+
+For example, a body can render `{{foo}}` or `{{local.foo}}` for its mapped value
+and `{{fm.foo}}` for the document's value. A local binding holding null still
+shadows frontmatter; lookup tests binding presence, not truthiness.
+
+Inner maps or filters may shadow outer locals. Leaving the inner scope restores the outer
+meaning, and unshadowed outer locals remain accessible. Reserved namespaces
+and registered host globals cannot be shadowed.
+
+The source and block-level `when` resolve in the enclosing scope before the
+new iteration binding exists. Each anonymous function introduces its own
+parameter binding locally; a parameter in `filter=` does not create a binding
+in the body. The mapping result supplies the body's bindings.
+
+Implementation uses immutable lexical scope frames shared by expression
+evaluation and static type checking, rather than writing locals into
+frontmatter.
+
+### Transclusion boundary
+
+A transclusion directive inside the map can read locals in its target,
+condition, and explicit child parameters. The included document receives
+iteration values through those explicit parameters; it does not automatically
+inherit the map's `local` bindings. Existing frontmatter inheritance retains
+its established behavior. Use the existing `set` options described in
+[block transclusion](../transclusion/block-transclusion.md) to pass values.
 
 ## Map Function
 
-You are required to provide a _mapping function_ who's responsibility is two fold:
+An optional mapping function has two responsibilities:
 
-- identifies the _local variable_ to be assigned during each iteration
-- allows each value to be mutated into a different shape or type
+- identifies the local binding pattern for each iteration
+- transforms each input into the value used to render the body
 
-The most basic function, and the one you'll likely use the most often, is something like `i -> i` which is an _identity_ function that doesn't change the incoming shape/type of the values coming in at all but establishes that `i` is the local variable that will be made available inside the map block.
+Omitting the function is equivalent to `"i => i"` (or `"i -> i"`): the identity
+mapping preserves the input's shape and type and exposes it as `i` in the body.
 
-However, as the next example illustrates, you can apply any of Darkmatter's expression syntax to modify the input items coming from the iterable list:
+The parameter pattern binds the input while evaluating the expression, then
+binds the expression's result for rendering the body. Thus, in `p => p.name`,
+`p` is the input object inside the expression and the resulting name inside
+the body. The body's binding has the result's type, not the input's type.
+
+```mermaid
+flowchart LR
+    A[Iterable item] --> B[Bind input to parameter pattern]
+    B --> C[Evaluate mapping expression]
+    C --> D[Bind result to the same pattern]
+    D --> E[Render body with result bindings]
+```
+
+A nested map over a transformed value or one of its properties is valid only
+when the resulting type is known to be iterable, subject to the same guard and
+recovery rules as any other source.
+
+### Destructuring
+
+The initial design supports shallow object destructuring, such as
+`{key,value}`. Nested patterns, defaults, and rest bindings are outside the
+initial scope. Object expressions support the shorthand `{key,value}` for
+`{key: key, value: value}`.
+
+For the string-valued `data` object above, this mapping exposes the transformed
+fields to the body:
 
 ```md
-TODO
+::map data "{key,value} => {key, value: upper(value)}"
+- {{key}} likes {{value}}
+::end-map
 ```
+
+The body's `value` is uppercase; it is not the original input field. In
+contrast, `"{key,value} => value"` is invalid for that object because the
+result is a string and cannot satisfy the `{key,value}` pattern. Both input
+and result must supply the fields the pattern binds. Provably incompatible
+shapes are rejected statically; uncertain shapes must be checked at runtime.
 
 ## Sorting
 
-TODO
+Without explicit sorting, arrays and tuples preserve element order, and
+objects preserve insertion order. For authored YAML, object insertion order
+is the order of keys in the document. Loading and composition must preserve
+this order across platforms; underlying map storage must not silently replace
+it with a different ordering. Filtering preserves relative order.
 
-## Map Filtering
+The optional `sort` function selects a key from each original item after
+filtering:
 
-We provide three primitives to use as _filtering_ constructs for the [iterable](../iterables.md) being iterated over:
+```md
+::map people "person => person.name" sort="person => person.age"
+- {{person}}
+::end-map
+```
 
-- `when` - runs each list item through the logical expression and renders when `true`
-- `until` - renders each list item through the logical expression _until_ one of the expressions returns a `true` value
-- `while` - renders each list item through the logical expression _while_ the expressions have all evaluated to `true` but stopping once the first `false` evaluation is encountered
+This example assumes `people` has a declared iterable type whose elements have
+string `name` and numeric `age` properties.
 
-All three primitives, when used, must be assigned to a logical function like:
+| Situation | Behavior |
+| --- | --- |
+| Default direction | Ascending |
+| Descending | `sort-order="desc"` |
+| Equal keys | Stable: preserve their previous relative order |
+| Numeric keys | Numeric comparison |
+| String keys | Case-sensitive, locale-independent comparison |
+| Missing or null key | Error; provide an explicit fallback if needed |
+| Mixed numeric and string keys | Error; no implicit comparison-type conversion |
+| Object or array key | Error in the initial implementation |
 
-- `i => is_even(i)`
-- `i => starts_with(i, '_')`
-- etc.
+For case-insensitive sorting, select a normalized key explicitly:
 
-> Note: in the examples we used `i` to be the parameter we're evaluating but you can use any valid variable name; `i` is just used as a popular convention.
+```md
+::map people "person => person.name" sort="person -> lower(person.name)"
+- {{person}}
+::end-map
+```
 
-Filtering is **not** a requirement for mapping but provides a mechanism to filter down the results to only those which you are interested in.
+Compute each retained item's key once, validate the keys, and perform a stable
+sort. The comparator never evaluates expressions. Sorting examines all
+filtered items even if a stopping predicate later renders only a short prefix.
+
+## Conditions, Filtering, and Stopping
+
+### Block condition: `when`
+
+`when` is a block-level condition, consistent with other directives. It is an
+ordinary condition expression, not an anonymous function. Evaluate it once in
+the enclosing scope, before resolving the source. If falsey, render nothing
+and perform no runtime source evaluation, item selection, sorting,
+transformation, or body processing. Omitting `when` enables the block.
+
+```md
+::map tasks "task => task.title" when="show_tasks" filter="task => !task.completed"
+- {{task}}
+::end-map
+```
+
+Here, `show_tasks` gates the whole block. The example assumes declared task
+elements with `title` and `completed` properties. Passive validation and shell
+authorization still apply to authored content in a skipped block.
+
+### Item selection: `filter`
+
+`filter` evaluates an anonymous function against each original item and retains
+truthy results. It accepts both `filter="task => !task.completed"` and
+`filter="task -> !task.completed"`. Omission retains all items.
+
+Filtered-out items never reach sorting, stopping predicates, mapping, or body
+rendering. All predicates use Darkmatter's existing truthiness rules.
+
+### Prefix selection: `while` and `until`
+
+Stopping predicates inspect original items after filtering and sorting, before
+mapping or rendering the current item:
+
+- `while`: continue while the predicate is truthy; exclude the first falsey
+  item and stop.
+- `until`: continue while the predicate is falsey; exclude the first truthy
+  item and stop.
+
+Both take anonymous functions with either arrow. They are mutually exclusive;
+either may be combined with `filter`. For the source `[1, 2, 3, 4]`:
+
+| Option | Items rendered |
+| --- | --- |
+| `while="i => i < 3"` | `1, 2` |
+| `until="i -> i == 3"` | `1, 2` |
+
+Evaluate the stopping predicate once per reached item. The stopping item's
+mapping expression and body are not evaluated, and no later stopping
+predicates are evaluated. An item removed by `filter` cannot stop the map.
 
 ## Pipeline Sequencing
 
-Because we allow nesting of both _inline_ and _transclusion_ operations inside the map block we need to be careful to design the composition pipeline's sequencing strategically so that the runtime behavior is both inline with author's expectations and provides as much "safe" functionality that we can provide to authors.
+The logical order is:
+
+```mermaid
+flowchart TD
+    W{Block when is truthy?} -->|No| X[Render nothing]
+    W -->|Yes| S[Resolve source once]
+    S --> F[Filter original items]
+    F --> O[Optional stable sort]
+    O --> P[Take prefix with while or until]
+    P --> M[Transform each retained item]
+    M --> R[Bind result and render body]
+```
+
+Filters, sort selectors, and stopping predicates receive original items. Only
+the body's bindings receive mapped results. Preserve original source indices
+or object keys alongside items through filtering and sorting.
+
+Without sorting, process items lazily so the stopping boundary prevents
+evaluation of later items, including later filters. Sorting requires examining
+the filtered collection first. Transform and render retained items in order.
+Parse expressions once and resolve the source once per map invocation; a
+nested map is invoked separately for each reached enclosing iteration.
+
+### Structural traversal
+
+Conditional, map, and filter regions share one structural traversal. An outer false
+condition suppresses a nested map, while an inner condition sees its enclosing
+iteration's bindings:
+
+```md
+::block when="show_teams"
+::map teams "team => team"
+## {{team.name}}
+::block when="team.active"
+::map team.members "member => member"
+- {{member.name}}
+::end-map
+::end-block
+::end-map
+::end-block
+```
+
+Parse authored regions into a nested tree, finish the document's frontmatter
+preparation, then traverse body regions in source order with their lexical
+scopes. Evaluate a region's gate before entering it. For each retained map
+item, traverse the authored body with that iteration's result bindings.
+
+Preserve the scope and source provenance for later interpolation, shell, and
+transclusion stages. Reuse the existing expression evaluator, condition
+semantics, and composition request. An iteration does not restart the full
+document pipeline or rerun frontmatter preparation. This defines logical
+evaluation order without requiring every composition stage to execute during
+the structural walk.
+
+### Authored syntax and inserted data
+
+Repeated bodies remain authored templates. Values supplied by iteration
+bindings retain their data provenance and do not become new executable syntax
+merely because the body interpolates them. This extends the existing
+[Inserted Text Is Data](./interpolation.md#inserted-text-is-data) contract.
+
+For example, a data value containing `::shell echo unexpected` is inserted as
+text by `{{i}}`; it does not become a command. A directive authored in the body
+can still receive a local value:
+
+```md
+::map documents "doc => doc"
+::file {{doc.path}}
+::end-map
+```
+
+The authored `::file` directive executes through normal transclusion rules;
+interpolation supplies only its target. Reuse the parsed authored template for
+each iteration, retain source spans and data-origin markers, and never feed
+concatenated expanded output back through directive discovery.
+
+Authored frontmatter expressions still execute during frontmatter preparation,
+and authored text replacements retain their existing behavior. Explicit
+`as_markdown()` remains the way to deliberately compose supplied text under
+the request's existing permissions and recursion budget. Ordinary Markdown
+rendering of inserted content follows the existing rendering rules.
+
+## Validation and Shell Approval
+
+Map validation is passive. It checks the source's iterable type, derives
+parameter types for each anonymous function, checks mapping-result
+destructuring, and validates the body with the resulting local types. It does
+not execute map computations. Composition and DMLS share this type scope and
+diagnostic logic. Existing static call checks still reject provably invalid
+calls in skipped regions.
+
+Shell authorization remains owned by the existing
+[preflight approval system](./preflight-checks.md). All authored shell commands
+require explicit whitelist permission regardless of `when`, `filter`, `while`,
+or `until`. Conditions govern execution, never authorization. No map-specific
+permission system is introduced.
+
+For a local `pkg` declared as a string:
+
+```md
+::map packages "pkg => pkg"
+::shell just test {{pkg}}
+::end-map
+```
+
+The approval request describes the typed template `just test {string}`. It
+does not require enumerating package names or separately approving every
+iteration. The type comes from the local binding's declaration; that type is
+not itself permission to execute the command.
+
+Integrate local type scopes with existing template approval and argument
+validation. Each reached execution supplies its actual value through those
+checks. A placeholder fills an argument and cannot introduce shell operators,
+redirection, or additional commands. Approval covers the template across
+iterations; runtime conditions determine which approved executions occur.
+
+## Failures, Limits, and Diagnostics
+
+| Situation | Behavior |
+| --- | --- |
+| Missing or null source, empty iterable, or no selected items | Render nothing |
+| Non-null, non-iterable source | Error unless an enclosing gate prevents runtime evaluation; static checks still apply |
+| Invalid mapping result or failed destructuring | Fail composition |
+| Filter, sort, or stopping expression fails | Fail composition |
+| Body processing fails | Follow the existing directive's failure policy |
+
+There is no automatic skip-on-error behavior. Existing explicit recovery
+options retain their meaning. A failed map does not report earlier rendered
+iterations as a successful composition. Effects already performed, such as
+commands in earlier iterations, are not rolled back.
+
+Two request-wide budgets are shared across nested maps, filters, and transcluded
+documents:
+
+- **Iteration budget:** counts source items visited, including items rejected
+  by filtering. Subsequent processing stages do not count the same item again.
+- **Generated-output budget:** bounds expansion even when a small collection
+  produces large bodies.
+
+Nested maps and filters do not receive fresh allowances. Budget exhaustion fails
+composition; existing transclusion depth limits continue to apply separately.
+Exact defaults and public configuration controls remain to be selected before
+implementation, using representative workloads.
+
+Diagnostics identify the authored file, line, and expression, plus the original
+source index or object key and any enclosing iteration path. For example,
+`teams[2] → members[4]` identifies the input locations even after sorting.
+Static authoring errors are reported once; runtime failures identify the
+iteration that exposed them.
+
+## Markdown Boundaries
+
+Preserve the authored body's whitespace without inserting implicit separators:
+
+```md
+::map names
+- {{i}}
+::end-map
+```
+
+Each repeated body includes its authored newline, so this produces consecutive
+list items. A blank line inside the body repeats too. An empty map removes its
+directive region without adding a placeholder or blank line. Existing cleanup
+rules apply afterward.
+
+- Opening and closing directives occupy their own lines.
+- `::end-map` accepts only trailing whitespace.
+- Directive-looking text in fenced or indented code blocks remains literal.
+- Maps, filters, and conditional blocks must nest correctly; their boundaries cannot cross.
+- Body indentation is preserved so repeated content can participate in lists
+  and blockquotes.
+
+For example, the following has a mismatched closing directive:
+
+```md
+::map items
+::block when="enabled"
+::end-map
+::end-block
+```
+
+Report the unexpected closer and identify the still-open inner block. Use the
+same Markdown-aware structural scanner for maps and conditional regions,
+retaining source spans and container context rather than discovering map
+boundaries with a separate regular-expression pass.
