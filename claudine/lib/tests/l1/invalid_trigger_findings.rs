@@ -348,50 +348,59 @@ fn a_malformed_authored_schema_is_a_parse_error_beside_recorded_findings() {
 fn the_first_reason_for_a_trigger_survives_later_changes_to_its_file() {
     let fixture = Fixture::new();
     let document = fixture.document("reason.md", "title: Reason");
+    let context = build_resolution_context(&fixture.snapshot()).expect("fixture context");
+    let source = fixture.source(&document);
     let findings = TriggerFindings::default();
-    fixture.verdict(&document, &findings).expect("passes");
+    #[allow(clippy::result_large_err, reason = "the public verdict's own result, returned unchanged")]
+    let verdict = || pre_validate_schema(&source, None, None, &context, &findings);
+    verdict().expect("passes");
     let first = findings.warnings()[0].message.clone();
 
     fixture.write_trigger("memory.yaml", "kind: schema-trigger\nmatch: 42\n");
-    fixture.verdict(&document, &findings).expect("passes");
+    verdict().expect("passes");
 
     let [warning] = &findings.warnings()[..] else {
         panic!("one finding expected");
     };
     assert_eq!(warning.message, first);
     assert_eq!(findings.take_undelivered().len(), 1);
-    fixture.verdict(&document, &findings).expect("passes");
+    verdict().expect("passes");
     assert!(findings.take_undelivered().is_empty());
 }
 
 /// Each call discovers afresh: creation, replacement, removal, and repair of
-/// a trigger between synchronous calls are all seen.
+/// a trigger between synchronous calls sharing one source and context are all
+/// seen.
 #[test]
 fn separate_calls_see_trigger_creation_replacement_removal_and_repair() {
     let fixture = Fixture::new();
     let document = fixture.document("fresh.md", "title: Fresh\ngate: yes");
+    let context = build_resolution_context(&fixture.snapshot()).expect("fixture context");
+    let source = fixture.source(&document);
     let findings = TriggerFindings::default();
+    #[allow(clippy::result_large_err, reason = "the public verdict's own result, returned unchanged")]
+    let verdict = || pre_validate_schema(&source, None, None, &context, &findings);
     let trigger = "need-ticket.yaml";
 
-    fixture.verdict(&document, &findings).expect("no trigger applies");
+    verdict().expect("no trigger applies");
 
     fixture.write_trigger(trigger, "kind: schema-trigger\nmatch:\n  gate: string(required)\n$schema:\n  ticket: string(required)\n");
-    let error = fixture.verdict(&document, &findings).expect_err("`ticket` is required");
+    let error = verdict().expect_err("`ticket` is required");
     assert!(matches!(error, CompositionError::MissingProperties { .. }), "{error:?}");
 
     fixture.write_trigger(trigger, "kind: schema-trigger\nmatch:\n  gate: string(required)\n$schema:\n  title: string(required)\n");
-    fixture.verdict(&document, &findings).expect("the replaced trigger is satisfied");
+    verdict().expect("the replaced trigger is satisfied");
 
     std::fs::remove_file(fixture.root.join("home/schemas").join(trigger)).expect("remove");
-    fixture.verdict(&document, &findings).expect("the removed trigger no longer applies");
+    verdict().expect("the removed trigger no longer applies");
 
     fixture.write_trigger(trigger, "kind: schema-trigger\nmatch:\n");
-    fixture.verdict(&document, &findings).expect("a malformed trigger is skipped");
+    verdict().expect("a malformed trigger is skipped");
     assert_eq!(sources(&findings), [fixture.trigger("memory.yaml"), fixture.trigger(trigger)]);
     assert_eq!(findings.take_undelivered().len(), 2);
 
     fixture.write_trigger(trigger, "kind: schema-trigger\nmatch:\n  gate: string(required)\n$schema:\n  ticket: string(required)\n");
-    let error = fixture.verdict(&document, &findings).expect_err("the repaired trigger applies");
+    let error = verdict().expect_err("the repaired trigger applies");
     assert!(matches!(error, CompositionError::MissingProperties { .. }), "{error:?}");
     assert!(findings.take_undelivered().is_empty(), "the earlier warning is not repeated");
 }
@@ -406,20 +415,22 @@ fn a_scan_that_cannot_read_a_root_file_fails_once_and_recovers() {
     std::fs::write(&broken, [0xff]).expect("write invalid UTF-8");
     let document = fixture.document("scan.md", "title: Scan\ngate: yes\ncount: 3");
     let context = build_resolution_context(&fixture.snapshot()).expect("fixture context");
+    let source = fixture.source(&document);
     let findings = TriggerFindings::default();
+    #[allow(clippy::result_large_err, reason = "the public verdict's own result, returned unchanged")]
+    let verdict = || pre_validate_schema(&source, None, None, &context, &findings);
 
     #[cfg(feature = "work-counters")]
-    let (verdict, discoveries, preparations) = counted(|| fixture.verdict(&document, &findings));
+    let (failed, discoveries, preparations) = counted(verdict);
     #[cfg(not(feature = "work-counters"))]
-    let verdict = fixture.verdict(&document, &findings);
-    let error = verdict.expect_err("the scan fails");
+    let failed = verdict();
+    let error = failed.expect_err("the scan fails");
     assert!(matches!(error, CompositionError::SchemaLoad { .. }), "{error:?}");
     assert!(error.to_string().contains("z-broken.yaml"), "{error}");
     #[cfg(feature = "work-counters")]
     assert_eq!((discoveries, preparations), (1, 0));
     assert!(findings.warnings().is_empty(), "a failed scan publishes nothing");
 
-    let source = fixture.source(&document);
     let overrides = serde_json::json!({ "count": "many" });
     let (cleaned, cleaned_overrides, dropped) =
         drop_invalid_optionals(source.clone(), Some(overrides.clone()), None, &context, &findings);
@@ -428,7 +439,12 @@ fn a_scan_that_cannot_read_a_root_file_fails_once_and_recovers() {
     assert!(dropped.is_empty());
 
     fixture.write_trigger("z-broken.yaml", GATE_TRIGGER);
-    let error = fixture.verdict(&document, &findings).expect("recovers");
-    let _ = error;
+    #[cfg(feature = "work-counters")]
+    let (recovered, discoveries, preparations) = counted(verdict);
+    #[cfg(not(feature = "work-counters"))]
+    let recovered = verdict();
+    recovered.expect("the repaired trigger's `count` is satisfied");
+    #[cfg(feature = "work-counters")]
+    assert_eq!((discoveries, preparations), (1, 2));
     assert_eq!(sources(&findings), [fixture.trigger("memory.yaml")]);
 }

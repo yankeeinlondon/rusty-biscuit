@@ -84,6 +84,12 @@ decisions_for_review:
     malformed, repair) on one source/context with one ledger
   - invalid UTF-8 root file: `SchemaLoad` naming the file, no findings, standalone cleanup
     returns input unchanged, next call recovers
+  - **correction (review 1, R1-F1):** as first written, the freshness, first-reason, and
+    failed-scan tests built a new source and context for every verdict, so the
+    "one source/context" claim above was untrue when recorded. Review iteration 1 changed
+    all three to build one source and context before the first call and reuse them for
+    every verdict (and, in the failed-scan test, for standalone cleanup); the claim holds
+    from that change on
 - Docs: `docs/topics/schemas.md` (call-lifetime subsection with Mermaid), `schema/findings.rs`
   module doc, `.claude/skills/claudine/SKILL.md` discovery paragraph, D3 bench comment.
 - Debugging note: a temporary `eprintln!` in `drop_invalid_optionals_with_schemas` was added
