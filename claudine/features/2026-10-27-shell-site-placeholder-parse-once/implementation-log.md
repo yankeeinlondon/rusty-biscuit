@@ -10,6 +10,31 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/grammar.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+    - darkmatter/lib/src/lifecycle/shell_template.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/tests/l1/type_scope_ownership_guard.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/tests/scaling.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
     - darkmatter
     - claudine
@@ -26,15 +51,30 @@ decisions_for_review:
         The plan fixed only view(range) and said iteration translates coordinates; it did not name the item type or the helper methods.
         Alternative: return translated copies of PreparedPlaceholder; that would clone failures and the erased-tree cache.
         Redo cost if reversed: Phase 2 consumers only use these three methods.
+    - |-
+        Presence-lookup and unguarded-scope guard tests were adjusted rather than the new code reshaped.
+        The type-scope ownership guards keyed their allowlists on function names that Phase 2 split: `Parser::take_hole` became a shared `SchemaFree::scope`, and `placeholder_guard` now delegates to `placeholder_guard_expr`.
+        I updated Darkmatter's allowlist entry and made Claudine's guard accept `placeholder_guard_expr` wherever it requires `placeholder_guard`, so Phase 3 can call the parsed form.
+        Alternative: have Phase 3 keep calling the text form (defeats the parse-once goal). Redo cost if reversed: two small edits in the guard tests.
+    - |-
+        Distinct-hole and malformed static-analysis count tests mirror the analysis calls in a test helper instead of calling `prepare_site` directly.
+        The plan asked for a helper that builds the collection and runs the same static helpers without evaluation; `prepare_site` also evaluates, so its count cannot isolate the static passes.
+        The helper (`static_parses` in preflight/tests/scaling.rs) repeats the call sequence, so it can drift from `prepare_site`; the exact 6,000 full-preflight count is the guard against that.
+        Alternative: expose a pub(crate) analysis function used by both; cleaner but changes production structure beyond the plan. Redo cost if reversed: moderate, confined to prepare_site and the helper.
+    - |-
+        A conditional `set` value is rejected inside prepare_site (`Err(TemplateGrammarError::Conditional)`) rather than by the old `authored_shell_template` wrapper.
+        The plan said to extract first and build the template with the parsed counterpart; it did not say where the conditional check lives.
+        I kept the observable behavior identical (same error variant, same precedence) by checking `conditional` before building the template.
+        Alternative: add a `parse_authored_command` helper in Darkmatter; avoids duplicating the rule but widens Darkmatter's API. Redo cost: small.
 message_to_agent: |-
-    Phase 1 added, in darkmatter expression/prepared.rs (re-exported from expression/mod.rs): PreparedInterpolation::new(text),
-    .text(), .placeholders(), .view(range); PreparedPlaceholder {span(), text(), offset(), parsed() -> Result<&PreparedExpression,&PreparationError>, expr() -> Option<&Expr> (OnceLock-cached erase)};
-    PreparedInterpolationView {text(), range(), parent(), placeholders() -> PlaceholderView items with translated span()/offset()/text()/expr(), placeholder_at(&span), has_literal_syntax()};
-    and validate_interpolation(&PreparedInterpolation, &BindingView) -> Result<Vec<ValidationDiagnostic>, PreparationError> (diagnostic spans stay in source coordinates).
-    Views assert (panic) on non-char-boundary ranges. Match template holes to occurrences with view.placeholder_at(&hole.span), never by text.
-    Characterization tests for the old route are in preflight/tests.rs `static_analysis_characterization` (15 tests, all passing on the unchanged route);
-    they must keep passing unchanged after Phase 3 wiring. Observed contract worth keeping: malformed + `err` -> resolution error for the first failing occurrence in order;
-    malformed + ctx.agent either order -> SequenceShellTargetIdentity; the late-namespace append pass (`current`) reports binding span None while normal diagnostics carry raw-wrapper spans.
+    Phase 3 wired `SequencePreflight::prepare_site` (claudine/lib/src/composition/sequence/preflight/mod.rs) to one `PreparedInterpolation` per site:
+    extraction via `authored_shell_command`, raw view (0..len) for approval diagnostics / target identity / failed-grammar fallback holes / missing-value guard lookup,
+    authored view (command.span) for `parse_authored_prepared`, `project_types_prepared`, `mark_late_holes(template, &view, ..)` and the Deferred->Guarded retime.
+    A conditional `set` is `Err(TemplateGrammarError::Conditional)` without parsing. Exact count is now steps x holes x 6 (6,000 at 100x10), asserted in preflight/tests/scaling.rs.
+    Phase 4 is docs + audit + final gates + A6 evidence. For docs: collection lives on the prepare_site stack and is dropped on return; text entry points
+    (approval_diagnostics, first_target_identity_root, parse_authored, project_types, late_roots_of, placeholder_guard, authored_shell_template) remain.
+    Remaining text parsing is intentional/out of scope: `guard_proves_whole_value` (frontmatter set path), `ShellCandidate::build` (not called by prepare_site), and resolve_approval_time evaluation.
+    Darkmatter was not changed in Phase 3.
 ---
 
 # Implementation Log for 2026-10-27-shell-site-placeholder-parse-once (4 phases)
@@ -50,3 +90,23 @@ message_to_agent: |-
 - Dependent packages: the Darkmatter change is additive (new types and one new function; `prepare_value` behavior unchanged and covered by the first-error test), and Claudine, its only consumer in this feature, passed in full. No other dependent was run.
 - No cross-OS check run: no OS-specific code or paths added.
 - Skills/docs: none changed in Phase 1; documentation is Wave 5.
+
+## Phase 2
+
+- Wave 2 / Add parsed consumers (darkmatter): `grammar.rs` now has one shared `build` body driven by a typing callback; `parse_authored` (lazy text typing, unchanged parse behavior) and new `parse_authored_prepared(view)` (typing from retained syntax, fallback `NotBareProperty` for failed occurrences, `InterpolationLiteral` from `view.has_literal_syntax()`). `typing.rs::project_hole` delegates to new `project_hole_expr`. `CommandTemplate::project_types_prepared` matches holes by span. `DeferredShellRoots::late_roots_of` delegates to `late_roots_of_expr` (same traversal order, adjacent dedup). `placeholder_guard` delegates to `placeholder_guard_expr`. `authored_shell_command` extracted in `frontmatter_shell_expansion.rs` (span computed from slice pointer offsets into the original value; no suffix validation); `authored_shell_template` delegates; both exported from `compose/mod.rs`.
+- Wave 2 / Adapt host policy (claudine): `approval_diagnostics_prepared` (normal diagnostics via `validate_interpolation`, then the unchanged late-namespace append pass, span None); `approval_diagnostics` constructs the collection and delegates. `first_target_identity_root_prepared` skips failed occurrences, never suppressed by them; text entry delegates.
+- Tests: `template/tests.rs::prepared_parity` (8 tests: grammar results for templates and every rejection incl. Unicode/literal tokens/empty, fallback typing for failed occurrence, schema validators + guard refinements via project_types parity, repeated text by span, padded/Unicode `set` extraction with span in original bytes, extraction vs template API for conditional/suffix/non-shell, late-root order, presence guard parity guarded/unguarded); `bindings/tests.rs` (diagnostic parity incl. dead branches, unknown function, malformed suppression; first-error parity); `preflight/tests.rs::prepared_target_identity_scan_matches_the_text_scan` (malformed beside valid read before/after, dotted vs static bracket, computed index, unrelated ctx/env).
+- Guard fallout: both `type_scope_ownership_guard` tests keyed on the split functions; updated (see decisions_for_review). Introduced private `SchemaFree` in grammar.rs as the single schema-free `TypeScope::unguarded` site.
+- Gates (once, serial, no subagents): `just lint` and `just test` in `darkmatter/` (12,994 passed, 10 skipped) and `claudine/` (11,785 passed, 15 skipped); lint shows only the pre-existing linker `__eh_frame` warning. No tier markers added, so `check-tier-coverage` not rerun. The affected-scope command was not used to skip anything: source files changed, gates run.
+- Input Robustness Matrix: not applicable (text grammar). No cross-OS check: no OS-specific code or paths.
+- Subagents: none used.
+
+## Phase 3
+
+- Wave 3 / Wire site preparation: `prepare_site` now extracts the authored command with `authored_shell_command`, keeps the `!raw.contains("{{")` early path, then builds one `PreparedInterpolation::new(raw)` and two views (raw `0..len`, authored `command.span`). `refuse_unapprovable_reads` takes the collection and calls `approval_diagnostics_prepared` and `first_target_identity_root_prepared`. The template is `parse_authored_prepared(authored_view)` + `project_types_prepared`; `mark_late_holes` takes the authored view and correlates holes by span via `late_roots_of_expr`; the Deferred->Guarded retime and missing-value guard lookup use `placeholder_guard_expr` (missing values use the first raw occurrence with the same trimmed text); the failed-grammar fallback holes iterate the raw view. Order of mode selection and error branches unchanged. Collection is dropped on every return and never stored. Doc comment of `mark_late_holes` had a stray merged docblock (the `overlay_derived` summary sat above it); fixed while rewriting that function.
+- Source search: no `parse`, `prepare_value`, `project_hole`, `late_roots_of` (text), or `placeholder_guard` (text) call remains in `prepare_site` or its helpers. `placeholder_guard` text remains only in `guard_proves_whole_value` (frontmatter set path, out of scope).
+- Wave 4 / Prove work counts (`preflight/tests/scaling.rs`, work-counters): `shell_preflight_parses_exactly_steps_times_holes_times_six_at_10_and_100_steps` (60 and 6,000, with `assert_ten_hole_graph`), `the_parse_count_follows_the_hole_count` (4 steps x 3 holes = 72), `static_analysis_parses_each_occurrence_once` (8 cases: repeated text 3, deferred 2, failed grammar beside late read 1, malformed beside valid 2, malformed beside late 2, plain/triple-brace/data-token 0). Snapshot deltas of existing counters.
+- Wave 4 / Preserve observable behavior: Phase 1 characterization tests (15) and the existing preflight, executor and CLI cases pass unchanged against the new route. Added `prepared_site_behavior` in `preflight/tests.rs`: placeholder commands in setup, teardown, `on_error:` and a padded `set` value resolve; a template prepared once re-reads `fixture.md` (`draft` then `ready`) on each fill through `LookupEvaluator` and a document resolution context (retained syntax does not freeze values). Existing executor tests `a_shape_approved_shell_fills_from_the_state_current_when_it_runs` / `an_exact_approval_runs_the_stamped_bytes_and_never_rereads_the_value` and CLI `a_later_task_is_approved_only_by_its_shape` retained as the resolved-byte and CLI proofs.
+- Requirement-to-test: parse count -> scaling tests above; precedence/errors/presence/coordinates -> `static_analysis_characterization`; lifecycle positions + no value freezing -> `prepared_site_behavior`; CLI wiring -> existing `sequence_shell_templates` L1.
+- Gates (once, serial, no subagents): `just lint` in `claudine/` clean; `just test` in `claudine/`: 11,789 passed, 15 skipped (one test >5 s on the loaded full run, `sequence_task_providers::empty_hint_setter_list_uses_the_missing_provider_gate`, unrelated, pre-existing slow under full-suite load). Counter tests ran (both recipes enable `work-counters`). Darkmatter untouched this phase, so its gates were not rerun; no dependents of claudine's changed private code. No tier markers added, no OS-specific code, so no cross-OS check.
+- Input Robustness Matrix: not applicable (text grammar). Subagents: none used. Docs and skills are Phase 4 (Wave 5).

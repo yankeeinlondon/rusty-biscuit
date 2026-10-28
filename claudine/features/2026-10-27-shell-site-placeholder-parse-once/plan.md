@@ -2,7 +2,7 @@
 kind: plan
 total_phases: 4
 created: 2026-10-27
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 source_files_during_phase_1:
 - darkmatter/lib/src/markdown/compose/expression/prepared.rs
@@ -11,6 +11,31 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/grammar.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/mod.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/tests.rs
+- darkmatter/lib/src/lifecycle/shell_template.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/tests/l1/type_scope_ownership_guard.rs
+- claudine/lib/src/composition/lifecycle/bindings.rs
+- claudine/lib/src/composition/lifecycle/bindings/tests.rs
+- claudine/lib/src/composition/sequence/preflight/shape.rs
+- claudine/lib/src/composition/sequence/preflight/tests.rs
+- claudine/lib/tests/l1/type_scope_ownership_guard.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/preflight/tests.rs
+- claudine/lib/src/composition/sequence/preflight/tests/scaling.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
 - darkmatter
 - claudine
@@ -84,13 +109,13 @@ Checkpoint: characterization tests pass on the old Claudine route, and Darkmatte
 
 ### Wave 2
 
-- [ ] **Add parsed consumers**
+- [x] **Add parsed consumers**
   - Own Darkmatter `template/{mod,grammar,typing,candidate}.rs`, `lifecycle/shell_template.rs`, `frontmatter_shell_expansion.rs`, and `compose/mod.rs`.
   - Implement Rules 5–7. Factor grammar into a shared scanner-span-driven body; the prepared path obtains initial hole types from retained syntax. Keep the existing text grammar path's parse behavior stable for callers outside sequence preparation.
   - Make projection, late roots, and presence guards share their AST-based analysis bodies with text wrappers. Project both valid and failed occurrences without parsing again. Derive occurrence identity from template spans, including quoted/mixed arguments.
   - Extend `template/tests.rs` and inline shell-template/extraction tests with text/prepared result parity for grammar errors, initial fallback typing, schema validators, refinements, root order, literal syntax, and wrapper extraction ranges.
 
-- [ ] **Adapt host policy**
+- [x] **Adapt host policy**
   - Own Claudine `composition/lifecycle/bindings.rs` and `sequence/preflight/shape.rs`.
   - Add the prepared approval and target helpers specified in Rules 8–9. Keep text wrappers usable by existing callers and tests; migrate no unrelated call sites.
   - Add direct parity assertions for dead-branch unavailable reads/unknown functions, malformed suppression, valid target reads beside malformed occurrences, dotted/static-bracket equivalence, numeric/computed indexes, and unrelated `ctx`/`env` properties.
@@ -102,7 +127,7 @@ Checkpoint: targeted nextest tests through area `just test` filters pass for bot
 
 ### Wave 3
 
-- [ ] **Wire site preparation**
+- [x] **Wire site preparation**
   - Own `claudine/lib/src/composition/sequence/preflight/mod.rs`. Require all Wave 2 APIs. Extract the authored command first, create one raw collection, form its authored view, and build the template with `parse_authored_prepared`; retain the existing early plain-command path and extraction errors.
   - Pass the collection into refusal checks. Replace `project_types`, `mark_late_holes`, deferred guard lookup, failed-template fallback scanning/parsing, and missing guard lookup with retained-syntax consumers according to Rule 10.
   - Change `mark_late_holes` to accept the authored view; correlate every hole by span. Keep site schema/guard construction and all mode-selection/error branches in their existing order. Keep fallback valid late reads visible beside malformed expressions.
@@ -111,12 +136,12 @@ Checkpoint: targeted nextest tests through area `just test` filters pass for bot
 
 ### Wave 4
 
-- [ ] **Prove work counts**
+- [x] **Prove work counts**
   - Own `claudine/lib/src/composition/sequence/preflight/tests/scaling.rs`. Strengthen `shell_preflight_parses_the_same_expressions_per_step_at_10_and_100_steps` to require exactly `steps × 10 × 6`, retaining `assert_ten_hole_graph`. Add a small distinct-placeholder fixture with a different H to prove the formula is occurrence-based.
   - Add a private test helper in the preflight module's tests that constructs the collection and executes the same static-analysis helpers, excluding evaluation. Assert H parses for repeated text, deferred/guarded holes, failed grammar containing a valid late read, and a mixed malformed command; assert zero for plain/literal-only scanner cases. Do not assert the six-parse formula for malformed or guarded full preflight.
   - Use snapshot deltas from existing process-wide work counters, not replacement counters. Nextest process isolation prevents unrelated test increments.
 
-- [ ] **Preserve observable behavior**
+- [x] **Preserve observable behavior**
   - Own `claudine/lib/src/composition/sequence/preflight/tests.rs`, `claudine/lib/src/composition/lifecycle/executor/tests/shell_templates.rs`, and `claudine/cli/tests/l1/sequence_shell_templates.rs`. Wave 3 must be complete; this task runs alongside the work-count task in separate files.
   - Retain and extend existing cases `the_first_task_is_resolved_and_a_later_task_is_a_template`, `forbidden_roots_stay_refused_even_beside_a_late_root`, `a_value_derived_from_a_late_root_is_late_not_missing`, `stack_set_shell_values_are_collected_and_approved`, target-identity matrices, and guard/presence matrices. Assert `HoleTiming`, roots, validators, and refinements through returned graph templates.
   - Add uncovered cases for empty string/zero/false presence, unavailable reads and unknown functions inside dead branches, setup/teardown/on_error collection, and padded/suffixed whole-value `set` coordinates. Reuse existing fixtures and avoid duplicating cases already establishing the contract.
