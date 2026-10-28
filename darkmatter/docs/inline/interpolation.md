@@ -138,7 +138,9 @@ approval rather than disappearing and later revealing unapproved content.
 
 ## Missing Variables
 
-A bare name that is not a reserved namespace is a document property. When
+A bare name that is not a reserved namespace, or a local binding of an
+enclosing [`::map`](./map.md) or [`::filter`](./filter.md) scope, is a
+document property. When
 nothing supplies it, it is absent: `null` as a whole value, an empty string in
 mixed text, and falsy in a condition. Composition continues. It never falls back
 to the runtime context: `{{ branch }}` is a document property, `{{ ctx.branch }}`
@@ -149,7 +151,8 @@ whether anything **declares** the name:
 | --- | --- |
 | present in frontmatter, `--set`, inherited state, or another caller input — even as `null` or `""` | silent |
 | declared by the effective schema (the document's `$schema`, the configured baseline, or a matched trigger) | silent; a `required` property left unset already failed schema validation |
-| a reserved namespace (`fm`, `ctx`, `env`, `current`) | silent |
+| a reserved namespace (`fm`, `ctx`, `env`, `current`, `local`) | silent |
+| bound by an enclosing `::map` or `::filter` scope, even to `null` | silent |
 | none of the above, including a runtime-context name such as `branch` | advisory `dm.expression.undeclared_property`, once per name per source document |
 
 ```text

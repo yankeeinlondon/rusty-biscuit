@@ -5,7 +5,7 @@ related: "darkmatter/docs/inline/map.md"
 
 # Iterables
 
-In Darkmatter, arrays, tuples, and key/value objects are _iterable_ types. The planned [map directive](./inline/map.md) will iterate over these types. `::map` and `::end-map` are not implemented yet; the examples below describe the intended behavior. A source must have a known iterable type from its effective schema, namespace declaration, or enclosing local binding.
+In Darkmatter, arrays, tuples, and key/value objects are _iterable_ types. The [map](./inline/map.md) and [filter](./inline/filter.md) directives iterate over these types. A source must have a known iterable type from its effective schema, namespace declaration, or enclosing local binding.
 
 Optional and nullable collections are accepted: missing or null sources render
 nothing, as do empty collections. Non-null scalar sources are errors. Arrays

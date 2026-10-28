@@ -78,6 +78,7 @@ host OS input and take focus.
 - to get details on the **Rendering Pipeline** in Darkmatter read: [Darkmatter Render Pipeline](./docs/darkmatter-rendering-pipeline.md)
 - for the **experimental, internal** Markdown-to-render-tree fold (does not affect `as_html` / `for_terminal`) read: [Render-Tree Fold](./docs/render-tree-fold.md)
 - for more information on how to use CLI read: [Darkmatter CLI](./docs/cli/index.md)
+- to repeat or select content from arrays and objects read: [Map Directive](./docs/inline/map.md), [Filter Directive](./docs/inline/filter.md), and [Iterables](./docs/iterables.md)
 - for shell expansion details read: [Body Shell Expansion](./docs/inline/shell-expansion.md), [Shell Blocks](./docs/inline/shell-blocks.md), and [Frontmatter Shell Expansion](./docs/inline/fm-shell-expansion.md)
 - Other topics you may be interested in:
     - [What is Composition?](./docs/topics/what-is-composition.md)

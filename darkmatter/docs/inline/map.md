@@ -1,13 +1,15 @@
-# Map Directive
+---
+kind: canonical-documentation
+---
 
-**Planned:** `::map` and `::end-map` are not implemented yet. The examples and options below describe the intended behavior.
+# Map Directive
 
 Use `::map` when the body should receive a transformed item. The companion
 [filter directive](./filter.md) selects items and exposes their original
 values instead. Both share options, iterable types, local scopes, ordering,
 composition, and authorization rules.
 
-The planned map directive has this structure:
+The map directive has this structure:
 
 ```md
 <!-- start map block -->
@@ -168,12 +170,18 @@ data:
 ::end-map
 ```
 
-If you want to manually override this requirement you can use the `--allow untyped-map-variables` when calling compose from the CLI (or provide DarkmatterException::untyped_map_variables to the options of a library call).
+If you want to manually override this requirement you can use the `--allow untyped-map-variables` when calling compose from the CLI (or call `ComposeOptions::with_allow_untyped_map_variables(true)` in a library request).
 
-This planned recovery bypasses the static typing requirement only. A missing
+This recovery bypasses the static typing requirement only. A missing
 or null source renders nothing, as does an empty iterable. A non-null scalar
 is an error. Map behavior does not waive ordinary schema validation: a missing
 required frontmatter property still fails that validation.
+
+The recovery's warning (`dm.collection.untyped_map_source`) is reported once,
+at the source. When a later `::map` or `::filter` has a static defect, such as
+a scalar source, composition fails before anything runs and the failure report
+keeps the earlier warning ahead of the defect. A recovered source written after
+the defect is not reported: the check stops at the first defect.
 
 Below is an example of how you could make the first example pass without needing to overriding this requirement:
 
@@ -443,7 +451,10 @@ flowchart TD
 ```
 
 Filters, sort selectors, and stopping predicates receive original items. Only
-the body's bindings receive mapped results. Preserve original source indices
+the body's bindings receive mapped results. A type those predicates prove about
+an original item, through an object parameter or a destructured field, holds
+for the mapping expression; the mapped result is a new binding that keeps a
+proven type only where the mapping expression carries it. Preserve original source indices
 or object keys alongside items through filtering and sorting.
 
 Without sorting, process items lazily so the stopping boundary prevents
@@ -563,7 +574,7 @@ must launch a fresh process. Authorization and argument checks precede reuse.
 
 ## Discovering Child Documents
 
-This behavior is planned. Composition preflight can enumerate a typed
+Composition preflight can enumerate a typed
 collection and evaluate supported read-side expressions to discover child
 files. For example, declare `chapters` as `file[](required)` and populate it
 with `chapters: "{{ find_files('./chapters/*.md') }}"`:
@@ -621,7 +632,7 @@ Expression result arrays consume visits but are values, not rendered bytes.
 These limits do not bound arbitrary allocations inside expression handlers or
 subprocesses before their output reaches the document.
 
-Library options and the planned CLI controls accept positive limits:
+Library options (`ComposeOptions::with_max_iteration_visits` and `with_max_expansion_bytes`, both taking `NonZeroU64`) and the CLI controls accept positive limits:
 
 ```sh
 md compose report.md --max-iteration-visits 200000 --max-expansion-bytes 33554432
@@ -635,11 +646,15 @@ Preflight does not spend the execution allowance. Existing transclusion depth
 limits remain separate. Standalone expression sessions share the same default
 visit limit across nested calls.
 
-Diagnostics identify the authored file, line, and expression, plus the original
-source index or object key and any enclosing iteration path. For example,
-`teams[2] → members[4]` identifies the input locations even after sorting.
-Static authoring errors are reported once; runtime failures identify the
-iteration that exposed them.
+Diagnostics identify the authored file, line, and expression span, plus the
+original source index or object key and any enclosing iteration path. For
+example, `teams[2] → members[4]` identifies the input locations even after
+sorting. Static authoring errors are reported once; runtime failures identify
+the iteration that exposed them, whichever stage failed: a callback, a `when=`
+gate, a `{{ }}` expression, a shell argument or its output, a `::file` target,
+condition, or child, or an allowance. The library's typed error and
+`md compose --output report-json` carry the same fields; see
+[the report](../cli/report-json.md#failures-inside-map-and-filter-bodies).
 
 ## Markdown Boundaries
 

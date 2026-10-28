@@ -99,7 +99,8 @@ The principles worth carrying around:
 - **Failure is fatal.** An expression that cannot be parsed or evaluated aborts
   composition with an error naming the source line, on every surface.
 - **An absent property is `null`, not a failure.** A bare name that is not a
-  reserved namespace or a host global is a document property; when nothing
+  reserved namespace, a host global, or a local binding of an enclosing
+  `::map`/`::filter` scope is a document property; when nothing
   supplies it, it evaluates to `null` and renders empty. When no frontmatter
   key, caller input, or schema property declares its root, composition adds
   the advisory `dm.expression.undeclared_property` once, unless the expression
@@ -119,14 +120,18 @@ Expressions evaluate against Darkmatter's effective state, which can include:
 - inherited state passed from parent documents during recursive composition
 - runtime context values under `ctx.*`
 - environment variables under `env.*`
+- local bindings under `local.*`, inside a [`::map`](../inline/map.md) or
+  [`::filter`](../inline/filter.md) body or one of their callbacks
 
-An unprefixed name is a document property and nothing else: when frontmatter
-and inherited state do not hold it, it is absent (`null`). It never falls back
-to `ctx`, so `repo` and `ctx.repo` are different names. The reserved namespaces
-(`fm`, `ctx`, `env`, `current`) are resolved first, exact roots included, so
+An unprefixed name reads the nearest local binding of that name when one is in
+scope, and is otherwise a document property: when frontmatter and inherited
+state do not hold it, it is absent (`null`). It never falls back to `ctx`, so
+`repo` and `ctx.repo` are different names. The reserved namespaces (`fm`,
+`ctx`, `env`, `current`, `local`) are resolved first, exact roots included, so
 bare `env` is the environment even when the frontmatter has an `env` key; that
-key is reachable as `fm.env`. `doc` and `current_env` are not reserved: each is
-an ordinary property name like any other.
+key is reachable as `fm.env`, and a frontmatter key named `local` is reachable
+as `fm.local`. `doc` and `current_env` are not reserved: each is an ordinary
+property name like any other.
 
 ```markdown
 ---
@@ -140,17 +145,21 @@ Every root is classified the same way, in this order. A host such as Claudine
 can register extra globals (see [Host Bindings](#host-bindings)); the
 document host supplies those declarations for the current evaluation scope.
 Lifecycle events also declare `err` and `timing`; Claudine adds `seq`,
-`loop`, and `group` in their applicable scopes. An undeclared, unreserved root
-is a document property.
+`loop`, and `group` in their applicable scopes. Inside a `::map` or `::filter`
+body, or a callback such as `sort="i => i.name"`, the directive's bindings are
+locals (see [The `local` namespace](#the-local-namespace)). An undeclared,
+unreserved root that no enclosing scope binds is a document property.
 
 ```mermaid
 flowchart TD
-    R["root name, e.g. err in err.message"] --> N{"reserved namespace?<br/>fm ctx env current"}
+    R["root name, e.g. err in err.message"] --> N{"reserved namespace?<br/>fm ctx env current local"}
     N -- yes --> NS["read the namespace"]
     N -- no --> G{"global registered<br/>by the host?"}
     G -- "yes, available" --> GV["the global's value<br/>(possibly null)"]
     G -- "yes, unavailable" --> GE["typed error naming the root<br/>and the host's reason"]
-    G -- no --> D{"document property<br/>present?"}
+    G -- no --> L{"bound by an enclosing<br/>map, filter, or callback?"}
+    L -- yes --> LV["the nearest binding's value<br/>(possibly null)"]
+    L -- no --> D{"document property<br/>present?"}
     D -- yes --> DV["the property's value"]
     D -- no --> DN["null<br/>(advisory dm.expression.undeclared_property)"]
 ```
@@ -328,8 +337,7 @@ false side (an `else`, a ternary's second branch, or `!` around it):
 | `is_string(x)`, `is_number(x)`, `is_array(x)`, `is_object(x)` | `x` has that type; a recursive named type (`node`) counts by the top level of its definition and keeps its name | `x` does not have that type |
 | `is_null(x)` | `x` is missing | `x` is present |
 | `is_empty(x)` | nothing | `x` is present |
-| `file_exists(x)` | `x` is a present string | nothing |
-| `is_file_type(x)` | `x` is suitable for a `file` parameter | nothing |
+| `file_exists(x)`, `is_file_type(x)` | `x` is suitable for a `file` parameter | nothing |
 | `x == null` | `x` is missing | `x` is present |
 | `x != null` | `x` is present | `x` is missing |
 | `x == 'debug'`, `x == 5`, `x == true` | `x` is present and equals that literal; an enum narrows to that member, and alternatives of another type are dropped | `x` is not that value (it may still be missing) |
@@ -339,7 +347,10 @@ false side (an `else`, a ternary's second branch, or `!` around it):
 | `<`, `>`, `<=`, `>=`, `!=` against `[]` or `{}`, any other function | nothing | nothing |
 
 Predicate aliases (`isString`, `fileExists`) and case resolve to the same
-function and prove the same facts. A guard that can never hold
+function and prove the same facts. `file_exists(x)` is true only for text a
+file parameter can take, so its true side proves what `is_file_type(x)`
+proves; its false side proves nothing, because a well-formed reference can
+name a file that is absent. A guard that can never hold
 (`is_number(flag)` with `flag: boolean(required)`) narrows nothing: the
 region is checked with the incoming type, so a call that is wrong there is
 still reported. Reversed operands (`'' != x`) prove the
@@ -353,7 +364,11 @@ A fact is about one **stable subject**: a variable, or a path with constant
 members and indices (`x`, `fm.x`, `x.a`, `items[0]`). `x` and `fm.x` share a
 fact when they name the same document property. A guard on a computed value
 proves nothing about its inputs: `is_number(length(x))` says nothing about
-`x`, and `items[i]` is not a stable subject. A guard on `x.a` proves nothing
+`x`, and `items[i]` is not a stable subject. A call result is not a stable
+subject either, so checking a freshly evaluated read proves nothing about a
+separate later read: in `file_exists(frontmatter('t.md', 'include')) &&
+link(frontmatter('t.md', 'include'))` the second `frontmatter(...)` call is a new
+value with no fact attached. A guard on `x.a` proves nothing
 about `x` or about a sibling `x.b`. A guard that contradicts itself
 (`mode == 'a' && mode == 'b'`) is not treated as dead code: every check still
 applies to the region.
@@ -369,7 +384,7 @@ There are three kinds:
 | Kind | True side | False side | Example |
 | --- | --- | --- | --- |
 | true-iff a type | the argument has that type | that type is removed | `is_string(x)`, `is_null(x)` |
-| true-implies a type | the argument is suitable for that type | nothing | `file_exists(x)` (a string), `is_file_type(x)` (a `file`) |
+| true-implies a type | the argument is suitable for that type | nothing | `file_exists(x)`, `is_file_type(x)` (a `file`) |
 | false-implies a type | nothing | the argument is suitable for that type | `is_empty(x)` (present) |
 
 "Suitable for a type" keeps an alternative that already fits it, turns an
@@ -491,10 +506,10 @@ access returns `null` and never errors.
 
 ## Namespaces
 
-Four reserved prefixes select a distinct value source. They are intercepted
-before ordinary key lookup, so neither a frontmatter property nor a
-caller-injected global that happens to share a namespace name can shadow the
-namespace.
+Five reserved prefixes select a distinct value source. They are intercepted
+before ordinary key lookup, so neither a frontmatter property, a
+caller-injected global, nor a local binding that happens to share a namespace
+name can shadow the namespace.
 
 | Namespace | Resolves to | Observed |
 | --- | --- | --- |
@@ -502,6 +517,7 @@ namespace.
 | `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](state-management/context-variables.md) | eager, captured once per request |
 | `env.*` | the document's captured environment (the same map `{{VAR}}` file references read) | eager |
 | `current.*` | the same keys as `ctx.*`, each observed when the reference is evaluated | lazy |
+| `local.*` | the nearest binding of an enclosing `::map`/`::filter` body or callback; absent (`null`) outside any such scope | bound per scope |
 
 Each document captures `env` once. Loop iterations, retries, resumes, and
 transcluded content reuse that map; a new document captures its own. A host
@@ -571,10 +587,12 @@ reported as the advisory `dm.expression.undeclared_property`.
   `$( … )` is returned as data.
 - A property literally named `fm` is reached as **`fm.fm`**.
 
-A bare name is the same property as its `fm.` form (`{{ title }}` and
-`{{ fm.title }}` agree), with one exception: a bare name that is a reserved
-root resolves to that root. A frontmatter key named after a reserved root is
-read through `fm.`, and `doc` is an ordinary property name:
+Outside a local scope, a bare name is the same property as its `fm.` form
+(`{{ title }}` and `{{ fm.title }}` agree), with one exception: a bare name
+that is a reserved root resolves to that root. Inside a `::map` or `::filter`
+scope, a bare name that a local binds reads the local instead (see
+[The `local` namespace](#the-local-namespace)). A frontmatter key named after
+a reserved root is read through `fm.`, and `doc` is an ordinary property name:
 
 ```md
 ---
@@ -635,6 +653,48 @@ value. Nothing rewrites documents automatically, because a property named
 Rewrite `doc.` to `fm.` where it meant the frontmatter, and `doc.doc` to `doc`
 (or `fm.doc`). An old `doc.x` with no `doc` property renders empty and is
 reported as the advisory `dm.expression.undeclared_property`.
+
+### The `local` namespace
+
+`local` holds the bindings of the enclosing [`::map`](../inline/map.md) and
+[`::filter`](../inline/filter.md) scopes: the item binding of a body and the
+parameters of a callback such as `filter="p => p.active"` or
+`sort="i => i.name"`. Frontmatter never populates it.
+
+| Reference | Inside a local scope | Outside any local scope |
+| --- | --- | --- |
+| `foo` | the nearest local `foo`; otherwise the document property `foo` | the document property `foo` |
+| `local.foo` | the nearest local `foo` only; absent (`null`) when no local has that name | absent (`null`) |
+| `fm.foo` | the frontmatter `foo`, even when a local shadows it | the frontmatter `foo` |
+
+```md
+---
+name: Release notes
+---
+::map ctx.packages "name => name"
+- {{ name }} ({{ fm.name }})   <!-- each package name, then "Release notes" -->
+::end-map
+{{ name }}                     <!-- "Release notes": no local is in scope -->
+{{ local.name }}               <!-- absent outside the map: renders empty -->
+```
+
+- **Presence, not truthiness, decides shadowing.** A local holding `null`
+  still shadows the frontmatter property of the same name, and a missing
+  member of a present local is `null` rather than a document fallback.
+- **The nearest binding wins.** An inner scope may shadow an outer local or a
+  frontmatter property silently; leaving the scope restores the outer
+  meaning. There is no way to reach a shadowed outer local, so use distinct
+  names when both are needed.
+- **Protected names cannot be bound.** A pattern that binds a reserved root
+  (`fm`, `ctx`, `env`, `current`, `local`), `null`, or a registered host
+  global is rejected before anything runs.
+- **A frontmatter key named `local` is read as `fm.local`.** Bare `local` and
+  `local.*` never read it. A host cannot register a global named `local`;
+  registration rejects it as a reserved name.
+
+Bindings are local to the scope that introduces them: they never modify
+frontmatter, never leak into a sibling, and are not inherited by a transcluded
+child, which receives values only through its explicit parameters.
 
 ## Interpolation vs. Condition Mode
 
@@ -1593,7 +1653,9 @@ This shortcut resolves variables in the same order as the compose pipeline:
 3. `env.*` against the context's environment, never the process's.
 4. `ctx.*` via lazy runtime context capture.
 
-A missing unprefixed key is absent (`null`); it never reads `ctx.*`.
+A missing unprefixed key is absent (`null`); it never reads `ctx.*`. The
+shortcut evaluates outside any `::map` or `::filter` scope, so it has no
+local bindings and `local.*` is absent.
 
 The `context` argument is a built
 [`FileResolutionContext`](../../../biscuit-file/lib/src/file_reference/context.rs):
@@ -1638,9 +1700,10 @@ assert_eq!(evaluate(&expr, &lookup).unwrap(), json!("Alice"));
 ```
 
 `evaluate` reads variables through `EvaluationLookup::resolve`, which returns a
-`ResolvedBinding`: a document property, a reserved-namespace path, or a host
-global. Its default wraps `get` as a document property and never fails, so a
-custom lookup needs only `get`. Interpolation renders the resolved value with
+`ResolvedBinding`: a document property, a reserved-namespace path, a host
+global, or a local binding of an enclosing `::map`/`::filter` scope. Its
+default wraps `get` as a document property and never fails, so a custom lookup
+needs only `get`. Interpolation renders the resolved value with
 `EvaluationLookup::format_resolved` and never looks the path up a second time.
 Darkmatter's own lookups override `resolve`, so composition never evaluates a
 cataloged `ctx.*` variable to a silent `null`:
@@ -1669,9 +1732,10 @@ condition, `$()` ternary, and interpolation errors.
 A host that adds its own globals to expressions (for example an `err` value
 that exists only while handling a failure) declares them in a `BindingView` and
 evaluates through an `EvaluationSession`. A root then resolves in this order:
-reserved namespace (`fm`, `ctx`, `env`, `current`), registered
-global, document property. A registered global shadows a document property of
-the same name, and `fm.<name>` still reads the document.
+reserved namespace (`fm`, `ctx`, `env`, `current`, `local`), registered
+global, nearest local binding (inside a `::map` or `::filter` scope), document
+property. A registered global shadows a document property of the same name and
+cannot be shadowed by a local, and `fm.<name>` still reads the document.
 
 ```rust
 use std::sync::Arc;
@@ -1709,9 +1773,9 @@ let failure = evaluate_prepared(&prepared, &session);     // fails only if that 
   entry.
 
 `EvaluationSession::associate` checks the whole registration before anything
-runs. It rejects a reserved name, a dotted root, a duplicate, an undeclared
-global, a declared global with no entry, and an entry that contradicts its
-declaration. A lazy global (`RuntimeBinding::lazy`) runs at most once per
+runs. It rejects a reserved name (including `local`), a dotted root, a
+duplicate, an undeclared global, a declared global with no entry, and an entry
+that contradicts its declaration. A lazy global (`RuntimeBinding::lazy`) runs at most once per
 session, on first read, and caches a `null` result too.
 
 `prepare_value` parses every expression in a value without evaluating it.
@@ -1772,8 +1836,8 @@ ordinary authored properties. The default remains complete-root shadowing.
 Configured name coercion applies in string presentation to host globals too;
 whole-value expression results retain their original types.
 
-Without host globals nothing changes: every non-reserved root is a document
-property.
+Without host globals nothing changes: every non-reserved root that no local
+binds is a document property.
 
 ```rust
 use darkmatter::markdown::compose::ComposeOptions;

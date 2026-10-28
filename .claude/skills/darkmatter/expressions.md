@@ -60,7 +60,8 @@ and DMLS both read it.
   passive validator); Darkmatter's `is_well_formed_reference` only adds the
   `file://` adapter (`normalize_path_arg`, which strips the prefix and never
   collapses separators). `is_file_type` (pure, true-implies `file`) and
-  `file_exists` (malformed text is `false` before any lookup) both use it;
+  `file_exists` (true-implies `file` too; malformed text is `false` before
+  any lookup) both use it;
   never add a second reference grammar.
 - Build the site over `DeclaredTypes::for_schema(Some(&effective))` (every
   layer: document, triggers, the merged JSON's `RawDeclarations`, layered
@@ -266,7 +267,8 @@ admitted number with `numeric::json_number` and render it with
 Hosts add globals (Claudine's `err`, `timing`, `group`) through the binding
 model in `expression/binding.rs`, never through a lookup override. A root
 resolves as reserved namespace → registered global (available, possibly
-`null`, or unavailable with a namespaced reason) → document property. Declare
+`null`, or unavailable with a namespaced reason) → nearest local binding
+(inside a `::map`/`::filter` scope or callback) → document property. Declare
 globals in an immutable `BindingView`, pair them with runtime entries through
 `EvaluationSession::associate` (rejects reserved names, omissions, and
 contradictions before any provider runs), check authored text passively with
@@ -297,3 +299,17 @@ vector shrinks, but an element replaced in place is not seen.
 is reported once. A new coded family, such as
 `dm.expression.undeclared_property`, adds a `WarningSubject` constructor
 rather than a message-based check.
+
+## Callbacks and the `local` namespace
+
+`parse_callback` / `parse_callback_spanned` parse `pattern => body` and
+`pattern -> body`; a pattern is an identifier or a nonempty shallow
+`{ a, b }` field list (no alias, rest, or default). Callbacks are not values:
+the ordinary `parse` rejects an arrow. Quoted callback text is decoded once with
+a decoded-to-authored offset map so errors and DMLS ranges point at authored
+bytes. Locals resolve before document lookup, shadow even at null, and never
+fall through for a missing member; `local.x` and bare `x` are the same subject,
+`fm.x` stays the document. A pattern name may not collide with a reserved
+root, `null`, or a registered global, and a host may not register `local`.
+Expression-level `map()`/`filter()` functions are not shipped; only the
+shared substrate is.

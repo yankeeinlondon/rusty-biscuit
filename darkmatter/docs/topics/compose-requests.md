@@ -127,6 +127,26 @@ not the repository, bounds nothing. Its schema `file` values resolve the
 same way. A document opened through `~` (`::file ~/notes/doc.md`) instead
 keeps `HOME` as its tree root, so the same `../../outside.md` is refused.
 
+## Limits for `::map` and `::filter`
+
+Two positive limits bound a request's collection work across nested regions,
+child compositions, and cache reuse. Both take `NonZeroU64`, so zero cannot be
+expressed:
+
+```rust
+# use darkmatter::markdown::compose::ComposeOptions;
+# use std::num::NonZeroU64;
+let options = ComposeOptions::default()
+    .with_max_iteration_visits(NonZeroU64::new(200_000).unwrap())
+    .with_max_expansion_bytes(NonZeroU64::new(33_554_432).unwrap());
+assert_eq!(options.iteration_limits().max_visits().get(), 200_000);
+```
+
+Defaults are 100,000 visits and 16,777,216 bytes. Exhaustion fails the request.
+`with_allow_untyped_map_variables(true)` and
+`with_allow_untyped_filter_variables(true)` turn a missing iterable
+declaration into a warning. See [map](../inline/map.md#failures-limits-and-diagnostics).
+
 ## Reading a failure's class
 
 Every failed file reference keeps biscuit-file's `ResolutionFailure` class
