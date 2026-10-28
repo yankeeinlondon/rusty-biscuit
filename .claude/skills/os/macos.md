@@ -339,7 +339,11 @@ no longer watches files, so its user docs no longer describe fseventsd.
   list` stalls too, and `sample <gui-pid> 5` shows the GUI main thread in
   `GetPaneRenderChangesResponse`, you have hit the WezTerm client-turn limit.
   Ownership, throttling, and cleanup are covered in the `biscuit-test-harness`
-  skill's `sharing-and-parallel-runs.md`.
+  skill's `sharing-and-parallel-runs.md`. To reduce this host's load, use
+  `BISCUIT_L2_THREADS=2`: it retains independent panes. A value of `1` selects
+  shared-pane mode and changes test isolation; it is not just a concurrency
+  limit. Claudine CLI's complete 289-case L2 suite passed with two workers
+  and both tmux and WezTerm required after shared-pane runs timed out.
 - **A serial tmux editor test hangs after a dry-run test.** With
   `BISCUIT_L2_THREADS=1`, the broker reuses a pane. The sequence
   `level2_dry_run_yaml_heading_structure_in_tmux` followed by
