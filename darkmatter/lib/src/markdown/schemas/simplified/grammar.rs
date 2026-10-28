@@ -22,8 +22,10 @@
 //!                     ( "[]" ( "(" arr_constraints ")" )? )?
 //! fn_constraint    := "parameters" "(" ( "void" | parameter ( "," parameter )* ) ")"
 //!                   | "returns" "(" union ")" | "category" "(" name ")"
+//!                   | "narrows" "(" identifier ( ":" type_expr )? ";" implication ")"
 //!                   | "fallible" | "example" "(" ( arglist | call "=>" result
 //!                     ( ";" "display-only" ":" reason )? ) ")"
+//! implication      := "true-implies" | "true-iff" | "false-implies"
 //! parameter        := "..."? identifier "?"? ":" union
 //! simple_type      := type_name ( "(" item_constraints ")" )?
 //!                                ( "[]" ( "(" arr_constraints ")" )? )?
@@ -107,8 +109,8 @@ use super::alphanumeric::AlphanumericOption;
 use super::signature::duplicate_overload;
 use super::types::{
     CallExample, Constraint, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
-    PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType,
-    SuggestionCandidate, TupleElement, TupleType, TypeExpr,
+    NarrowsClause, NarrowsKind, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType,
+    SuggestionCandidate, TupleElement, TupleType, TypeExpr, narrows_target_problem, returns_exact_boolean,
 };
 
 /// Hard maximum number of nested inline object levels the parser will accept.
@@ -1069,6 +1071,7 @@ impl<'a> Parser<'a> {
         let mut returns = None;
         let mut fallible = false;
         let mut examples = Vec::new();
+        let mut narrows: Option<NarrowsClause> = None;
         let mut constraints = Vec::new();
         loop {
             self.lex.skip_ws();
@@ -1087,10 +1090,19 @@ impl<'a> Parser<'a> {
                 "returns" => returns.is_some(),
                 "fallible" => fallible,
                 "category" => constraints.iter().any(|c| matches!(c, Constraint::Category(_))),
+                "narrows" => narrows.is_some(),
                 _ => false,
             };
             if duplicate {
-                return self.err(format!("duplicate `{keyword}` constraint on `function`"), keyword_span);
+                let first = narrows
+                    .as_ref()
+                    .filter(|_| keyword == "narrows")
+                    .map(|clause| format!(" (first at byte {})", clause.clause_span.start))
+                    .unwrap_or_default();
+                return self.err(
+                    format!("duplicate `{keyword}` constraint on `function`{first}"),
+                    keyword_span,
+                );
             }
             match (keyword.as_str(), has_args) {
                 ("parameters", true) => {
@@ -1109,20 +1121,21 @@ impl<'a> Parser<'a> {
                 ("category", true) => {
                     constraints.push(Constraint::Category(self.read_category_name(keyword_span)?));
                 }
+                ("narrows", true) => narrows = Some(self.parse_narrows(keyword_span)?),
                 ("fallible", false) => fallible = true,
                 ("example", true) => match self.parse_example(true, keyword_span)? {
                     ExampleForm::Inline(example) => examples.push(example),
                     ExampleForm::Files(files) => constraints.push(Constraint::Example(files)),
                 },
                 ("fallible", true) => return self.err("`fallible` does not take arguments", keyword_span),
-                ("parameters" | "returns" | "category" | "example", false) => {
+                ("parameters" | "returns" | "category" | "narrows" | "example", false) => {
                     return self.err(format!("`{keyword}` requires arguments"), keyword_span);
                 }
                 (other, _) => {
                     return self.err(
                         format!(
                             "unknown constraint `{other}` on `function`; a function takes `parameters`, \
-                             `returns`, `category`, `fallible`, and `example`"
+                             `returns`, `narrows`, `category`, `fallible`, and `example`"
                         ),
                         keyword_span,
                     );
@@ -1153,6 +1166,40 @@ impl<'a> Parser<'a> {
         let Some(returns) = returns else {
             return self.err("a `function` requires `returns(...)`", name_span);
         };
+        if let Some(clause) = &narrows {
+            if !returns_exact_boolean(&returns) {
+                return self.err(
+                    "`narrows` requires `returns(boolean)`; `boolean | null`, `unknown`, `boolish`, \
+                     unions, and arrays do not qualify",
+                    clause.clause_span.clone(),
+                );
+            }
+            let declared = parameters
+                .as_slice()
+                .iter()
+                .find(|parameter| parameter.name == clause.parameter);
+            match declared {
+                None => {
+                    return self.err(
+                        format!(
+                            "`narrows` names parameter `{}`, which this function does not declare",
+                            clause.parameter
+                        ),
+                        clause.parameter_span.clone(),
+                    );
+                }
+                Some(parameter) if parameter.rest => {
+                    return self.err(
+                        format!(
+                            "`narrows` names parameter `{}`, which is a rest parameter",
+                            clause.parameter
+                        ),
+                        clause.parameter_span.clone(),
+                    );
+                }
+                Some(_) => {}
+            }
+        }
         self.lex.skip_ws();
         let mut is_array = false;
         let mut array_constraints = Vec::new();
@@ -1166,11 +1213,78 @@ impl<'a> Parser<'a> {
                 returns,
                 fallible,
                 examples,
+                narrows,
             })),
             is_array,
             constraints,
             array_constraints,
             description: None,
+        })
+    }
+
+    /// Reads `( name (: type)? ; kind )` after `narrows`. The parameter's
+    /// declaration and the function's return type are checked by the caller,
+    /// once the whole signature is known.
+    fn parse_narrows(&mut self, keyword_span: Range<usize>) -> Result<NarrowsClause, SchemaError> {
+        self.lex.pos += 1;
+        self.lex.skip_ws();
+        let (parameter, parameter_span) = self.lex.read_ident();
+        if parameter.is_empty() {
+            return self.err("`narrows` requires a parameter name", self.lex.pos..self.lex.pos + 1);
+        }
+        self.lex.skip_ws();
+        let mut target = None;
+        let mut target_span = parameter_span.clone();
+        if self.lex.peek_byte() == Some(b':') {
+            self.lex.pos += 1;
+            self.lex.skip_ws();
+            let start = self.lex.pos;
+            let mut arms = self.parse_union_arms()?;
+            target_span = start..self.lex.pos;
+            if arms.len() != 1 {
+                return self.err("a narrowing target must be a single type, not a union", target_span);
+            }
+            let atom = arms.pop().expect("one arm");
+            if let Some(problem) = narrows_target_problem(&atom) {
+                return self.err(problem, target_span);
+            }
+            target = Some(atom);
+            self.lex.skip_ws();
+        }
+        if self.lex.peek_byte() != Some(b';') {
+            return self.err(
+                "expected `;` and an implication after the `narrows` parameter, as in `narrows(x: string; true-iff)`",
+                self.lex.pos..self.lex.pos + 1,
+            );
+        }
+        self.lex.pos += 1;
+        self.lex.skip_ws();
+        let (word, kind_span) = self.lex.read_ident();
+        let Some(kind) = NarrowsKind::from_keyword(&word) else {
+            let span = if word.is_empty() { self.lex.pos..self.lex.pos + 1 } else { kind_span };
+            return self.err(
+                format!(
+                    "`narrows` requires an implication of `true-implies`, `true-iff`, or `false-implies`, found `{word}`"
+                ),
+                span,
+            );
+        };
+        self.lex.skip_ws();
+        if self.lex.peek_byte() != Some(b')') {
+            return self.err(
+                "expected `)` after the `narrows` implication; it takes one parameter, an optional type, and one implication",
+                self.lex.pos..self.lex.pos + 1,
+            );
+        }
+        self.lex.pos += 1;
+        Ok(NarrowsClause {
+            parameter,
+            parameter_span,
+            target,
+            target_span,
+            kind,
+            kind_span,
+            clause_span: keyword_span.start..self.lex.pos,
         })
     }
 
@@ -4279,5 +4393,150 @@ mod schema_plus_phase1 {
     fn parses_json_type_keyword() {
         let atom = parse_type_expr("config", "json").expect("`json` should parse as a type");
         assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Json));
+    }
+}
+
+#[cfg(test)]
+mod narrows_clause_tests {
+    use super::*;
+
+    const CONTROL: &str =
+        "function(parameters(x: unknown | null); returns(boolean); narrows(x: string; true-iff))";
+
+    fn function_of(text: &str) -> FunctionType {
+        match parse_type_definition("f", text).unwrap_or_else(|error| panic!("{text}: {error}")) {
+            PropertyDef::Single(PropertyAtom { ty: TypeExpr::Function(function), .. }) => *function,
+            other => panic!("{text}: not a function: {other:?}"),
+        }
+    }
+
+    /// The rejection's message and the source text its span covers.
+    #[track_caller]
+    fn rejected(text: &str) -> (String, String) {
+        match parse_type_definition("f", text) {
+            Err(SchemaError::Grammar { message, span, .. }) => {
+                let covered = text.get(span.clone()).unwrap_or_default().to_string();
+                (message, covered)
+            }
+            other => panic!("{text}: expected a grammar error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_control_parses_with_located_spans() {
+        let clause = function_of(CONTROL).narrows.expect("the clause parses");
+        assert_eq!(clause.parameter, "x");
+        assert_eq!(clause.kind, NarrowsKind::TrueIff);
+        assert!(clause.target.is_some());
+        assert_eq!(&CONTROL[clause.parameter_span.clone()], "x");
+        assert_eq!(&CONTROL[clause.target_span.clone()], "string");
+        assert_eq!(&CONTROL[clause.kind_span.clone()], "true-iff");
+        assert_eq!(&CONTROL[clause.clause_span.clone()], "narrows(x: string; true-iff)");
+    }
+
+    #[test]
+    fn absence_is_none_and_every_implication_parses() {
+        assert_eq!(function_of("function(parameters(x: unknown); returns(boolean))").narrows, None);
+        for (text, kind) in [
+            ("true-implies", NarrowsKind::TrueImplies),
+            ("true-iff", NarrowsKind::TrueIff),
+            ("false-implies", NarrowsKind::FalseImplies),
+        ] {
+            let source = format!("function(parameters(x: unknown); returns(boolean); narrows(x: string; {text}))");
+            assert_eq!(function_of(&source).narrows.expect("parses").kind, kind);
+        }
+        let presence = function_of("function(parameters(x: unknown); returns(boolean); narrows(x; false-implies))");
+        assert_eq!(presence.narrows.expect("parses").target, None);
+    }
+
+    #[test]
+    fn the_clause_is_order_free_and_admits_a_trailing_semicolon() {
+        let before = function_of(
+            "function(narrows(x: file; true-implies); returns(boolean); parameters(x: unknown); fallible;)",
+        );
+        let after = function_of(
+            "function(parameters(x: unknown); returns(boolean); fallible; narrows(x: file; true-implies);)",
+        );
+        assert_eq!(before.narrows, after.narrows);
+        assert!(before.narrows.is_some());
+    }
+
+    #[test]
+    fn a_duplicate_clause_is_located_at_the_second_and_names_the_first() {
+        let text = "function(parameters(x: unknown); returns(boolean); narrows(x; false-implies); \
+                    narrows(x: string; true-iff))";
+        let (message, covered) = rejected(text);
+        assert!(message.contains("duplicate `narrows`"), "{message}");
+        let first = text.find("narrows(x;").expect("first");
+        assert!(message.contains(&format!("byte {first}")), "{message}");
+        assert_eq!(covered, "narrows");
+        assert!(text.rfind("narrows").is_some_and(|second| second > first));
+    }
+
+    #[test]
+    fn clause_shape_errors_are_located() {
+        for (edit, token) in [
+            ("narrows(x: string; sometimes)", "sometimes"),
+            ("narrows(x: string; )", ")"),
+            ("narrows(x: string)", ")"),
+            ("narrows(y: string; true-iff)", "y"),
+            ("narrows(x: string | number; true-iff)", "string | number"),
+            ("narrows(x: Name; true-iff)", "Name"),
+            ("narrows(x: Name@this; true-iff)", "Name@this"),
+            ("narrows(x: string(; true-iff)", ""),
+            ("narrows(x, z; true-iff)", ","),
+            ("narrows(x: string; true-iff, true-implies)", ","),
+            ("narrows(x: string; true-iff true-implies)", "t"),
+            ("narrows(; true-iff)", ";"),
+            ("narrows", "narrows"),
+        ] {
+            let text = format!("function(parameters(x: unknown | null); returns(boolean); {edit})");
+            let (message, covered) = rejected(&text);
+            if !token.is_empty() {
+                assert!(covered.starts_with(token), "{edit}: `{covered}` ({message})");
+            }
+        }
+        let (message, _) = rejected(
+            "function(parameters(x: unknown); returns(boolean); narrows(x: Name; true-iff))",
+        );
+        assert!(message.contains("named type"), "{message}");
+        let (message, _) = rejected(
+            "function(parameters(x: unknown); returns(boolean); narrows(x: string | number; true-iff))",
+        );
+        assert!(message.contains("single type"), "{message}");
+    }
+
+    #[test]
+    fn the_named_parameter_must_be_declared_and_not_rest() {
+        let (message, covered) = rejected(
+            "function(parameters(x: unknown); returns(boolean); narrows(y; false-implies))",
+        );
+        assert_eq!(covered, "y");
+        assert!(message.contains("does not declare"), "{message}");
+        let (message, covered) = rejected(
+            "function(parameters(...x: unknown); returns(boolean); narrows(x; false-implies))",
+        );
+        assert_eq!(covered, "x");
+        assert!(message.contains("rest parameter"), "{message}");
+        let (message, _) = rejected("function(parameters(void); returns(boolean); narrows(x; false-implies))");
+        assert!(message.contains("does not declare"), "{message}");
+    }
+
+    #[test]
+    fn the_clause_requires_exactly_boolean_returns() {
+        for returns in ["boolean | null", "any", "unknown", "boolish", "boolean | string", "boolean[]", "string"] {
+            let text = format!(
+                "function(parameters(x: unknown); returns({returns}); narrows(x; false-implies))"
+            );
+            let (message, covered) = rejected(&text);
+            assert!(message.contains("returns(boolean)"), "{returns}: {message}");
+            assert_eq!(covered, "narrows(x; false-implies)", "{returns}");
+        }
+    }
+
+    #[test]
+    fn the_unknown_constraint_message_names_narrows() {
+        let (message, _) = rejected("function(parameters(void); returns(boolean); bogus)");
+        assert!(message.contains("`narrows`"), "{message}");
     }
 }

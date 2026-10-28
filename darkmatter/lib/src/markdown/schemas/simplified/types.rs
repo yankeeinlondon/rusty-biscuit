@@ -365,6 +365,94 @@ pub struct FunctionType {
     pub fallible: bool,
     /// Inline `example(call => result)` constraints, in authored order.
     pub examples: Vec<CallExample>,
+    /// `narrows(...)`: what a `true` (or `false`) result proves about one
+    /// argument. `None` is meaningful: the function declares no fact.
+    pub narrows: Option<NarrowsClause>,
+}
+
+/// What a predicate's boolean result proves about its original argument.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NarrowsKind {
+    /// `true-implies`: a `true` result proves the argument is the target.
+    TrueImplies,
+    /// `true-iff`: `true` proves the target and `false` proves its absence.
+    TrueIff,
+    /// `false-implies`: a `false` result proves the argument is the target.
+    FalseImplies,
+}
+
+impl NarrowsKind {
+    /// The authored keyword.
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Self::TrueImplies => "true-implies",
+            Self::TrueIff => "true-iff",
+            Self::FalseImplies => "false-implies",
+        }
+    }
+
+    /// The kind spelled by `keyword`, if it is one of the three.
+    pub fn from_keyword(keyword: &str) -> Option<Self> {
+        match keyword {
+            "true-implies" => Some(Self::TrueImplies),
+            "true-iff" => Some(Self::TrueIff),
+            "false-implies" => Some(Self::FalseImplies),
+            _ => None,
+        }
+    }
+}
+
+/// A `narrows(name: T; kind)` or presence-only `narrows(name; kind)` clause.
+///
+/// Equality ignores the spans: they record where the clause was authored,
+/// not what it says.
+#[derive(Debug, Clone)]
+pub struct NarrowsClause {
+    /// The narrowed parameter's name.
+    pub parameter: String,
+    /// Byte span of [`NarrowsClause::parameter`] in the type-expression string.
+    pub parameter_span: SourceSpan,
+    /// The target type; `None` for a presence-only clause (non-null).
+    pub target: Option<PropertyAtom>,
+    /// Byte span of the target, or of the parameter when there is none.
+    pub target_span: SourceSpan,
+    /// The implication.
+    pub kind: NarrowsKind,
+    /// Byte span of the implication keyword.
+    pub kind_span: SourceSpan,
+    /// Byte span of the whole clause, keyword through closing `)`.
+    pub clause_span: SourceSpan,
+}
+
+impl PartialEq for NarrowsClause {
+    fn eq(&self, other: &Self) -> bool {
+        self.parameter == other.parameter && self.target == other.target && self.kind == other.kind
+    }
+}
+
+/// Whether `returns` is exactly the single primitive `boolean`: the only
+/// return type a `narrows` clause may accompany. `boolean | null`, `unknown`,
+/// `boolish`, unions, and arrays do not qualify.
+pub(crate) fn returns_exact_boolean(returns: &PropertyDef) -> bool {
+    matches!(
+        returns,
+        PropertyDef::Single(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::Boolean),
+            is_array: false,
+            ..
+        })
+    )
+}
+
+/// Why `target` cannot be a narrowing target, if it cannot: a named type
+/// (reference) is not self-contained.
+pub(crate) fn narrows_target_problem(target: &PropertyAtom) -> Option<&'static str> {
+    match &target.ty {
+        TypeExpr::Imported { .. } => {
+            Some("a named type cannot be a narrowing target; write a self-contained type")
+        }
+        _ => None,
+    }
 }
 
 /// The `parameters(...)` of a [`FunctionType`].

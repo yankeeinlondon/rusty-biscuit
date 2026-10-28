@@ -59,7 +59,7 @@ pub use standalone::{
 };
 pub use types::{
     CallExample, Constraint, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
-    LOCAL_REFERENCE, OperandForm, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
+    LOCAL_REFERENCE, NarrowsClause, NarrowsKind, OperandForm, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
     SimplifiedSchema, SimplifiedType, SuggestionCandidate, TupleElement, TupleType, TypeExpr, operands_verb,
 };
 #[cfg(feature = "work-counters")]

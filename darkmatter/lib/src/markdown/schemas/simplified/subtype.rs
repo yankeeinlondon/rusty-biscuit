@@ -572,6 +572,8 @@ impl<'t> Identities<'t> {
             (TypeExpr::Function(left), TypeExpr::Function(right)) => {
                 let left_parameters = left.parameters.as_slice();
                 let right_parameters = right.parameters.as_slice();
+                // `narrows` is analysis metadata, like examples and categories:
+                // subtyping compares accepted inputs and outputs only.
                 left.fallible == right.fallible
                     && self.same_definition(&left.returns, &right.returns)
                     && left_parameters.len() == right_parameters.len()
@@ -871,5 +873,23 @@ mod tests {
         assert_subtype("number", "numberlike", false);
         assert_subtype("slug", "slug", false);
         assert_subtype("slug", "string", false);
+    }
+}
+
+#[cfg(test)]
+mod narrows_subtype_tests {
+    use super::*;
+    use crate::markdown::schemas::simplified::grammar::parse_type_expr;
+
+    #[test]
+    fn functions_differing_only_in_narrows_are_mutual_subtypes() {
+        let plain = parse_type_expr("p", "function(parameters(x: unknown); returns(boolean))").expect("plain");
+        let narrowing = parse_type_expr(
+            "p",
+            "function(parameters(x: unknown); returns(boolean); narrows(x: string; true-iff))",
+        )
+        .expect("narrowing");
+        assert!(is_subtype(&plain, &narrowing));
+        assert!(is_subtype(&narrowing, &plain));
     }
 }
