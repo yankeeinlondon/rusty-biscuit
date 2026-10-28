@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-10-27
-phase: 2
+phase: 4
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: true
 source_files_during_phase_1:
@@ -14,6 +14,32 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+- darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+- darkmatter/lib/src/markdown/compose/expression/host/artifact.rs
+- darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+- darkmatter/schemas/partials/functions.yaml
+- darkmatter/lib/tests/fixtures/host_functions/project.yaml
+- darkmatter/lib/tests/fixtures/host_functions/project.facts.json
+- darkmatter/lib/tests/l1/flow_sensitive_narrowing.rs
+- darkmatter/lib/tests/l1/host_functions.rs
+- darkmatter/lib/tests/l1/scope_site_conformance.rs
+- darkmatter/lib/tests/l1/expression_type_scope.rs
+docs_updated_during_phase_2:
+- darkmatter/docs/topics/host-functions.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+- darkmatter/dmls/tests/l1/host_function_diagnostics.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
 - darkmatter
 ---
@@ -292,7 +318,7 @@ compile between this phase's waves; it must at the phase checkpoint.
 
 Wave 3 — compiler and authority (interlocking; land together):
 
-- [ ] **Shared fact compiler**
+- [x] **Shared fact compiler**
     - In `call_binding/registration.rs`, replace `compile_fact` (which takes
       a builder-supplied `(parameter, kind, ty)` and re-parses type text) with
       `compile_declared_fact(function: &str, overloads: &[FunctionType]) ->
@@ -315,7 +341,7 @@ Wave 3 — compiler and authority (interlocking; land together):
       the canonical serialized target.
     - Lower `NarrowsKind` → `FactKind` here; delete nothing else from the
       public `NarrowingFact`/`FactKind`/`FactType` surface.
-- [ ] **Registration reads declarations**
+- [x] **Registration reads declarations**
     - `build_with` calls `compile_declared_fact` on its `FunctionType`
       overloads (both `Source::Grammar` and `Source::Types`) and stores the
       result; delete `RegistrationBuilder::narrows`, the builder's `fact`
@@ -328,7 +354,7 @@ Wave 3 — compiler and authority (interlocking; land together):
       accordingly, plus every doc comment that links the removed setter
       (`host/mod.rs::HostFunctionsBuilder::function`'s configure list names
       `RegistrationBuilder::narrows` today).
-- [ ] **Catalog loading validates**
+- [x] **Catalog loading validates**
     - In `compose/expression/catalog/mod.rs::load_catalog`, after projecting
       a function's overload atoms, run `compile_declared_fact` and fail the
       load with `CatalogError::Invalid` naming `` `types.{name}` `` on error
@@ -341,7 +367,7 @@ Wave 3 — compiler and authority (interlocking; land together):
       no path initializes the runtime registry (rule 7's cycle constraint).
     - Note: `build_with` re-validates the same declarations through the same
       function — that is deliberate reuse, not a second implementation.
-- [ ] **Built-in catalog migration** (text-only, parallel-safe)
+- [x] **Built-in catalog migration** (text-only, parallel-safe)
     - `darkmatter/schemas/partials/functions.yaml`: add the clause to the
       eight predicates — `is_null`: `narrows(x: null; true-iff)`; `is_string`:
       `narrows(x: string; true-iff)`; `is_number`: `narrows(x: number;
@@ -363,7 +389,7 @@ Wave 3 — compiler and authority (interlocking; land together):
 Wave 4 — migrate callers and remove the Rust-side declarations (parallel,
 file-disjoint; must merge with Wave 3 before the checkpoint):
 
-- [ ] **Remove binding facts**
+- [x] **Remove binding facts**
     - `functions/predicates.rs`: drop all seven `.narrowing(...)` calls;
       `functions/paths.rs`: drop `file_exists`'s `.narrowing("value",
       TrueImplies, Some("string"))`, keeping `.false_for_malformed_reference`
@@ -372,7 +398,7 @@ file-disjoint; must merge with Wave 3 before the checkpoint):
       `FunctionBinding::fact` and the `narrowing` const fn, and remove the
       fact plumbing from `compile_binding` (facts now arrive inside the
       catalog overloads it already passes through `builder_from_types`).
-- [ ] **Migrate test functions and host tests**
+- [x] **Migrate test functions and host tests**
     - `lib/tests/l1/flow_sensitive_narrowing.rs`: the `predicate` helper and
       `registration_rejects_invalid_facts` move from
       `builder.narrows(...)` to signature text carrying the clause (e.g.
@@ -389,7 +415,7 @@ file-disjoint; must merge with Wave 3 before the checkpoint):
     - `lib/tests/l1/host_functions.rs::a_host_catalog_outlives_the_strings_it_was_loaded_from`:
       the runtime-builder half drops its `.narrows` call; the artifact
       assertion is unchanged (Phase 3 blesses the bytes).
-- [ ] **Catalog and registration tests**
+- [x] **Catalog and registration tests**
     - `compose/expression/catalog/tests.rs`: a catalog whose overloads
       disagree on facts (mixed presence, different kinds, different targets)
       fails `load_catalog`; two overloads with identical parameters and
@@ -421,7 +447,7 @@ derived output; the reader's authority flips from "supply the fact" to
 
 Wave 5 — reader semantics:
 
-- [ ] **Compare, never supply**
+- [x] **Compare, never supply**
     - In `host/artifact.rs::rebuild`: delete the `builder.narrows(...)` call
       (line 371); build the registration from the catalog (facts come from
       the declarations via `build_with`); then compare the **entire** decoded
@@ -443,7 +469,7 @@ Wave 5 — reader semantics:
     - Evidence: spec Ownership step 5 ("The artifact must never call a
       setter to supply or override catalog narrowing", "compare the entire
       decoded fact with the catalog's compiled fact, including absence").
-- [ ] **Reader matrix extension**
+- [x] **Reader matrix extension**
     - In `lib/tests/l1/host_functions.rs::
       the_facts_artifact_reader_walks_the_input_robustness_matrix`, add
       fact-comparison cells edited from the committed artifact one field per
@@ -457,7 +483,7 @@ Wave 5 — reader semantics:
       narrowing. Per the matrix rules: one edit per cell, control case
       retained, asserted through the public `analysis_only` result, and no
       handler entries (the counters stay at zero).
-- [ ] **DMLS wiring cases**
+- [x] **DMLS wiring cases**
     - `dmls/tests/l1/host_function_diagnostics.rs`: add rows for a fact
       mismatch artifact (edited `facts: []` / wrong kind) — calls to that
       function report `dm.expression.incomplete_analysis`, the guarded
@@ -468,7 +494,7 @@ Wave 5 — reader semantics:
 Wave 6 — regenerate the companion (depends on Wave 5 + Phase 2's catalog
 edit):
 
-- [ ] **Bless and prove freshness**
+- [x] **Bless and prove freshness**
     - Run the freshness test with `DARKMATTER_BLESS_HOST_FACTS=1` to rewrite
       `lib/tests/fixtures/host_functions/project.facts.json` from the
       migrated fixture (the `catalog_hash` changes because `project.yaml`
