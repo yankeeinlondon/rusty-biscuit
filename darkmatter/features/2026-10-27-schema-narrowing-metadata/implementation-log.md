@@ -65,12 +65,66 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
-message_to_agent: |-
-  Phase 3 is complete. The artifact reader compares (never supplies) the fact,
-  the reader matrix has the fact-comparison cells, the fixture is blessed, and
-  DMLS has a row for a mismatched fact artifact. The only Phase 3 source edit
-  was the DMLS test. `just lint` still fails only on the pre-existing
-  darkmatter-cli `render.rs:22` too_many_arguments. Phase 4 can start directly.
+source_files_during_phase_4:
+  - darkmatter/lib/tests/l1/flow_sensitive_narrowing.rs
+  - darkmatter/lib/tests/l1/context_function_contracts.rs
+  - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+  - darkmatter/lib/tests/l1/host_functions.rs
+  - darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+  - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+  - darkmatter/dmls/tests/l1/schema_yaml_spellings.rs
+  - darkmatter/cli/tests/l1/compose_file_predicates.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+docs_updated_during_phase_5:
+  - darkmatter/docs/topics/schemas/definition.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/docs/topics/host-functions.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/darkmatter/expressions.md
+  - .claude/skills/darkmatter/schema.md
+  - .claude/skills/darkmatter/library-surfaces.md
+source_code:
+  - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/signature.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+  - darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+  - darkmatter/lib/src/markdown/compose/expression/host/artifact.rs
+  - darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+  - darkmatter/schemas/partials/functions.yaml
+  - darkmatter/lib/tests/fixtures/host_functions/project.yaml
+  - darkmatter/lib/tests/fixtures/host_functions/project.facts.json
+  - darkmatter/lib/tests/l1/flow_sensitive_narrowing.rs
+  - darkmatter/lib/tests/l1/host_functions.rs
+  - darkmatter/lib/tests/l1/scope_site_conformance.rs
+  - darkmatter/lib/tests/l1/expression_type_scope.rs
+  - darkmatter/dmls/tests/l1/host_function_diagnostics.rs
+  - darkmatter/lib/tests/l1/context_function_contracts.rs
+  - darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+  - darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+  - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+  - darkmatter/dmls/tests/l1/schema_yaml_spellings.rs
+  - darkmatter/cli/tests/l1/compose_file_predicates.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+documentation:
+  - darkmatter/docs/topics/host-functions.md
+  - darkmatter/docs/topics/schemas/definition.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-10-27-schema-narrowing-metadata (5 phases)
@@ -152,3 +206,76 @@ message_to_agent: |-
 - Gates: `just test` 12927 passed, 10 skipped. `just lint`: only the
   pre-existing `darkmatter-cli` `render.rs:22` too_many_arguments fails
   (untouched by this feature). Tier: all L1; nothing spawned.
+
+## Phase 4
+
+Only test files changed; no source, docs, or skill edits.
+
+Requirement → test mapping (all L1, in-process unless noted):
+
+- `file_exists`/`is_file_type` true side → `file`; `file_exists` false side adds
+  no exclusion; migrated primitives' branch shapes; `is_empty` false side;
+  aliases; omitted optional fact argument →
+  `flow_sensitive_narrowing::declared_builtin_facts::*` (4 tests, handler
+  counters stay zero).
+- Original-value implication (`is_number("4")`, `is_file_type(42)`,
+  `is_empty(0|false|"0")`, `is_null`, `is_array("[]")`, `is_object("{}")`) →
+  `context_function_contracts::migrated_predicates_answer_about_the_original_value`.
+- Passivity: `host_functions::declaring_and_using_a_catalog_fact_enters_no_handler`
+  (load, build, artifact write, install, guarded analysis; entries `(0, 0)`);
+  `shipped_schema_corpus::shipped_catalog_narrows_clauses_compile_facts_passively`
+  (eight shipped entries compile through `FunctionRegistration::builder_from_types`
+  to the expected kind/type; effect counters and file fingerprint unchanged).
+- JSON Schema boundary →
+  `schema_grammar_descriptors::a_document_schema_that_reaches_a_narrowing_function_fails_naming_the_path`
+  (three shapes plus a clause-free control).
+- `type-definition` meta-type →
+  `meta_schema_phase1::type_definition_validates_narrows_clauses_with_the_grammar_messages`.
+- DMLS authoring (block scalar, located range, valid control) →
+  `schema_yaml_spellings::an_invalid_narrows_clause_in_a_block_scalar_is_ranged_at_its_token`.
+- CLI end-to-end → `compose_file_predicates` gained the
+  `file_exists(source) ? frontmatter(source, 'title') : 'none'` line (renders
+  `Target`; the always-false warning count stays one, now at `doc.md:12`).
+
+Notes:
+
+- Aliases are lowercase-squashed names (`fileexists`, `isstring`) plus the
+  registry's case-insensitive lookup; `is_file_type` has no alias, so the alias
+  test covers `file_exists` and `is_string` only.
+- Robustness matrix: no new reader or validator code this phase, so no new
+  matrix cells; the artifact-reader and clause-grammar matrices were walked in
+  Phases 1–3.
+- Gates: `just test` 12937 passed, 10 skipped. `just lint` fails only on the
+  pre-existing `darkmatter-cli` `render.rs:22` too_many_arguments (untouched);
+  `cargo clippy -p darkmatter -p dmls --all-targets -D warnings` is clean.
+  `just check-tier-coverage` does not exist in this area; no tier-marked test
+  names were added. Cross-OS check not run: no path or OS-specific code touched.
+
+## Phase 5
+
+Documentation and skills only, plus one drifted doc comment.
+
+- `docs/topics/schemas/definition.md`: new constraint-table row and a
+  "Narrowing facts" subsection (forms, presence-only, ordering, boolean
+  returns, target rules, overload agreement, original-argument semantics,
+  description-only).
+- `docs/topics/darkmatter-expressions.md`: `file_exists(x)` rows now say
+  suitable for `file`; explains `true-implies` (not `true-iff`) and links the
+  schema-side authority; "where facts come from" says declared in the signature.
+- `docs/topics/host-functions.md`: narrowing moved to the catalog column of the
+  parts table; artifact described as derived and compared (mismatch →
+  incomplete, `format_version` 1); new problem-table row. The registration
+  example was already migrated in Phase 2.
+- Skill (`.claude/skills/darkmatter`, `.opencode/skill` is a symlink to it):
+  `expressions.md`, `schema.md`, `library-surfaces.md` updated. `compose.md`
+  made no string-narrowing claim, so it is unchanged.
+- Drift fixed: `functions/fs.rs` `file_exists` doc comment said the guard
+  proves "a present string"; code is authoritative (fact is `file`), comment
+  corrected.
+- Cross-check: no remaining `.narrows(` calls or "present string" claims outside
+  historical specs/logs. No `dependencies.md` or `CLAUDE.md` change.
+- Gates: `just doctest` ok; `just test` 12937 passed, 10 skipped; `just lint`
+  fails only on pre-existing `darkmatter-cli` `render.rs:22`
+  too_many_arguments. Dependent packages not re-tested: the only source change
+  is a doc comment. No cross-OS risk; cross-check not run.
+- No new decisions for review.

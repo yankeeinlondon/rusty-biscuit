@@ -3,7 +3,8 @@ kind: feature
 created: 2026-10-27
 status: draft-spec
 area: darkmatter
-implemented: false
+implemented: true
+implemented_by: "claude/sonnet"
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-27

@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-10-27
-phase: 4
+phase: 6
 agent: opencode/zai-coding-plan/glm-5.3
 yolo: true
 source_files_during_phase_1:
@@ -42,6 +42,66 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
 packages:
 - darkmatter
+source_files_during_phase_4:
+- darkmatter/lib/tests/l1/flow_sensitive_narrowing.rs
+- darkmatter/lib/tests/l1/context_function_contracts.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/host_functions.rs
+- darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+- darkmatter/lib/tests/l1/meta_schema_phase1.rs
+- darkmatter/dmls/tests/l1/schema_yaml_spellings.rs
+- darkmatter/cli/tests/l1/compose_file_predicates.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+docs_updated_during_phase_5:
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/host-functions.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/schema.md
+- .claude/skills/darkmatter/library-surfaces.md
+source_code:
+- darkmatter/lib/src/markdown/schemas/simplified/types.rs
+- darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+- darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+- darkmatter/lib/src/markdown/schemas/simplified/signature.rs
+- darkmatter/lib/src/markdown/schemas/simplified/subtype.rs
+- darkmatter/lib/src/markdown/schemas/simplified/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+- darkmatter/lib/src/markdown/compose/expression/host/artifact.rs
+- darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+- darkmatter/schemas/partials/functions.yaml
+- darkmatter/lib/tests/fixtures/host_functions/project.yaml
+- darkmatter/lib/tests/fixtures/host_functions/project.facts.json
+- darkmatter/lib/tests/l1/flow_sensitive_narrowing.rs
+- darkmatter/lib/tests/l1/host_functions.rs
+- darkmatter/lib/tests/l1/scope_site_conformance.rs
+- darkmatter/lib/tests/l1/expression_type_scope.rs
+- darkmatter/dmls/tests/l1/host_function_diagnostics.rs
+- darkmatter/lib/tests/l1/context_function_contracts.rs
+- darkmatter/lib/tests/l1/shipped_schema_corpus.rs
+- darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+- darkmatter/lib/tests/l1/meta_schema_phase1.rs
+- darkmatter/dmls/tests/l1/schema_yaml_spellings.rs
+- darkmatter/cli/tests/l1/compose_file_predicates.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+documentation:
+- darkmatter/docs/topics/host-functions.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+completed_phase: 5
+implemented: true
 ---
 
 # Plan: Declarative Narrowing Metadata in SimplifiedSchema
@@ -519,7 +579,7 @@ file-disjoint and run in one wave.
 
 Wave 7 — acceptance battery (parallel):
 
-- [ ] **Narrowing behavior tests**
+- [x] **Narrowing behavior tests**
     - `lib/tests/l1/flow_sensitive_narrowing.rs`: with `source: unknown`
       declared, `is_file_type(source)` and `file_exists(source)` true sides
       read `file` (the latter newly so), and `file_exists`'s false side adds
@@ -535,7 +595,7 @@ Wave 7 — acceptance battery (parallel):
       explicit and implicit local reads share facts, a `frontmatter(...)`
       evaluation is a separate subject from a like-named local, and repeated
       matching call text creates no identity.
-- [ ] **Original-value implication tests**
+- [x] **Original-value implication tests**
     - `lib/tests/l1/context_function_contracts.rs`: for each migrated
       predicate, representative inputs prove the declared branch is about the
       original value, including convertible ones — `is_number("4")` is
@@ -544,7 +604,7 @@ Wave 7 — acceptance battery (parallel):
       never honors the clause by converting first. These are behavior tests
       of the handlers that the declarations describe, not inference from
       samples.
-- [ ] **Passivity proofs**
+- [x] **Passivity proofs**
     - Handler-entry counters (`IS_PROJECT_FILE_ENTRIES`, …) stay zero through
       `HostFunctionCatalog::load`, `HostFunctionsBuilder::build`,
       `analysis_only`, and `check_expression_calls` on guarded expressions
@@ -556,7 +616,7 @@ Wave 7 — acceptance battery (parallel):
       public registry (eight entries, `file_exists`/`is_file_type` →
       `TrueImplies`/`file`), proving the shipped catalog corpus is valid
       under the new syntax without executing anything.
-- [ ] **Boundary tests**
+- [x] **Boundary tests**
     - JSON Schema: a document schema whose property reaches a
       `narrows`-carrying `function(...)` still fails conversion at that
       property path with the existing message (convert.rs:1088) — one test
@@ -571,7 +631,7 @@ Wave 7 — acceptance battery (parallel):
       suite already ranges definition-grammar errors inside YAML scalars
       through the editor), proving the provenance path through YAML block
       scalars into DMLS.
-- [ ] **CLI end-to-end**
+- [x] **CLI end-to-end**
     - `cli/tests/l1/compose_file_predicates.rs`: extend `DOCUMENT` with a
       fourth body line `{{ file_exists(source) ? frontmatter(source,
       'title') : 'none' }}` — an `unknown`-typed `source` accepted at
@@ -599,7 +659,7 @@ All tasks are file-disjoint and run in one wave.
 
 Wave 8 — documentation (parallel):
 
-- [ ] **Function-signature topic**
+- [x] **Function-signature topic**
     - `darkmatter/docs/topics/schemas/definition.md` (Function Signatures):
       add `narrows(name: T; kind)` / `narrows(name; kind)` to the constraint
       table with a compact example, the ordering rule, the
@@ -608,26 +668,26 @@ Wave 8 — documentation (parallel):
       bare families), the overload-agreement rule, and the
       original-argument implication with the limits of negative narrowing.
       State that the clause is description-only and changes no binding.
-- [ ] **Expressions guard reference**
+- [x] **Expressions guard reference**
     - `darkmatter/docs/topics/darkmatter-expressions.md`: replace the
       `file_exists(x)` "present string" row (~line 331) and the "a string"
       annotation (~line 372) with the `file` suitability fact; explain that
       `file_exists` is `true-implies` (existence is not `true-iff` — a valid
       path to a missing file remains a possible file value), and link the
       schema-side declaration as the authority.
-- [ ] **Host-functions topic**
+- [x] **Host-functions topic**
     - `darkmatter/docs/topics/host-functions.md`: the registration example
       (~line 65) drops `registration.narrows(...)` for a catalog declaring
       the clause; the behavior-facts table row for narrowing moves to the
       catalog column; the artifact section states `facts` is derived and
       compared (mismatch → incomplete), keeping `format_version: 1`.
-- [ ] **Skill topics**
+- [x] **Skill topics**
     - `.opencode/skill/darkmatter/expressions.md` (the
       `RegistrationBuilder` fact mentions), `schema.md` (the
       `function(...)` grammar surfaces), `library-surfaces.md` (the removed
       public setter), and `compose.md` where `file_exists` narrowing is
       described: same corrections as the docs topics.
-- [ ] **Cross-checks**
+- [x] **Cross-checks**
     - Grep the repo for `\.narrows\(` and `narrows(` in docs/skills to catch
       stragglers; no `docs/dependencies.md` change (no crates added or
       removed); no AGENTS.md change (no workspace layout or convention
