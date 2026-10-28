@@ -340,6 +340,14 @@ no longer watches files, so its user docs no longer describe fseventsd.
   `GetPaneRenderChangesResponse`, you have hit the WezTerm client-turn limit.
   Ownership, throttling, and cleanup are covered in the `biscuit-test-harness`
   skill's `sharing-and-parallel-runs.md`.
+- **A serial tmux editor test hangs after a dry-run test.** With
+  `BISCUIT_L2_THREADS=1`, the broker reuses a pane. The sequence
+  `level2_dry_run_yaml_heading_structure_in_tmux` followed by
+  `level2_tmux_edit_interactive_delivers_a_bullet_prompt_after_end_of_options`
+  left the editor launcher echoed without its exit marker. The editor fixture
+  now uses `TmuxHarness::new()` and `spawn_shell()` so its editor and provider
+  inherit an independent TTY. The same two-test sequence then passes; do not
+  increase its timeout to accommodate shared terminal state.
 - **Terminal detection runs `defaults`.** On an iTerm2 host,
   `biscuit_terminal::Terminal::default()` runs `defaults read
   com.googlecode.iterm2 …` for font settings. It checks only `TERM_PROGRAM`,
