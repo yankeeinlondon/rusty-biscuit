@@ -3666,3 +3666,98 @@ mod prepared_site_behavior {
         assert_eq!(args(template), ["ready"]);
     }
 }
+
+/// The owning document's schema and the task's `when:` reach the template
+/// sequence preflight returns: each hole keeps its declared validator, and a
+/// guard that narrows a declared type keeps that refinement, so filling the
+/// template accepts and rejects exactly what the schema and guard allow.
+mod schema_typed_holes {
+    use super::*;
+    use darkmatter::markdown::compose::expression::ExpressionError;
+    use darkmatter::markdown::compose::shell_expansion::template::{
+        CommandTemplate, HoleError, RejectReason, fill_template,
+    };
+
+    const COMMAND: &str = "tool {{ count }} {{ mode }}";
+
+    /// A sequence with `count: number(min(1))` and `mode: enum(release, debug)`
+    /// whose later task runs `COMMAND` under `when` (if any), and whose root
+    /// `finalize` captures `count` through a whole-value `set`.
+    fn graph(when: Option<&str>) -> PreflightGraph {
+        let dir = TempDir::new().unwrap();
+        let mut typed = json!({ "name": "typed", "shell": COMMAND });
+        if let Some(when) = when {
+            typed["when"] = json!(when);
+        }
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[
+                ("$schema", json!({ "count": "number(min(1))", "mode": "enum(release, debug)" })),
+                ("count", json!(2)),
+                ("mode", json!("release")),
+                ("finalize", json!([{ "set": { "stamp": "$(stamp {{ count }})" } }])),
+                ("sequence", json!([{ "name": "first", "shell": "echo first" }, typed])),
+            ],
+            "Body.\n",
+        );
+        graph_for(&source).unwrap()
+    }
+
+    fn template<'g>(graph: &'g PreflightGraph, authored: &str) -> &'g CommandTemplate {
+        let candidate = graph
+            .template_candidates
+            .iter()
+            .find(|candidate| candidate.authored() == Some(authored))
+            .unwrap_or_else(|| panic!("no candidate for `{authored}`: {:?}", graph.template_candidates));
+        candidate.template.as_ref().expect("the command parses as a template")
+    }
+
+    /// Fill `template` with `count` and `mode`, returning the arguments or the
+    /// rejected expression and its reason.
+    fn fill(template: &CommandTemplate, count: Value, mode: &str) -> Result<Vec<String>, (String, RejectReason)> {
+        let values = json!({ "count": count, "mode": mode });
+        let evaluate = |expression: &str| -> Result<Value, ExpressionError> {
+            Ok(values.get(expression).cloned().unwrap_or(Value::Null))
+        };
+        fill_template(template, &evaluate, None)
+            .map(|chain| chain.segments[0].args.clone())
+            .map_err(|error| match error {
+                HoleError::Rejected { expression, reason, .. } => (expression, reason),
+                other => panic!("expected a rejected value, got {other:?}"),
+            })
+    }
+
+    #[test]
+    fn a_later_task_keeps_its_schema_validator_and_guard_refinement() {
+        let graph = graph(Some("mode == 'release'"));
+        let template = template(&graph, COMMAND);
+
+        assert_eq!(fill(template, json!(2), "release"), Ok(vec!["2".into(), "release".into()]));
+        assert_eq!(fill(template, json!(0), "release"), Err(("count".into(), RejectReason::DeclaredType)));
+        assert_eq!(fill(template, json!("2"), "release"), Err(("count".into(), RejectReason::DeclaredType)));
+        assert_eq!(fill(template, json!(2), "debug"), Err(("mode".into(), RejectReason::GuardRefinement)));
+    }
+
+    /// Control: without the guard, `debug` satisfies the declared enum, so the
+    /// refinement above came from the task's `when:`.
+    #[test]
+    fn without_a_guard_the_declared_enum_accepts_every_member() {
+        let graph = graph(None);
+        let template = template(&graph, COMMAND);
+
+        assert_eq!(fill(template, json!(2), "debug"), Ok(vec!["2".into(), "debug".into()]));
+        assert_eq!(fill(template, json!(2), "nightly"), Err(("mode".into(), RejectReason::DeclaredType)));
+    }
+
+    /// A container `set` command shares the projection: the schema's validator
+    /// applies, and no task guard reaches it.
+    #[test]
+    fn a_container_set_command_keeps_the_schema_validator() {
+        let graph = graph(Some("mode == 'release'"));
+        let template = template(&graph, "stamp {{ count }}");
+
+        assert_eq!(fill(template, json!(2), "debug"), Ok(vec!["2".into()]));
+        assert_eq!(fill(template, json!(0), "debug"), Err(("count".into(), RejectReason::DeclaredType)));
+    }
+}

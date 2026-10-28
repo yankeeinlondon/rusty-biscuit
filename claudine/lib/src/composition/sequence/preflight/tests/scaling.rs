@@ -105,58 +105,112 @@ mod counted {
         assert_eq!(darkmatter.get(darkmatter::work_counters::Work::ExpressionParse), 4 * 3 * 6);
     }
 
-    /// Run the static analyses `prepare_site` runs over one command — every
-    /// reader of the retained syntax, no evaluation — and report the parses
-    /// they cost.
-    fn static_parses(raw: &str, derived: &HashSet<String>) -> u64 {
+    /// What [`static_parses`] found in one command.
+    struct StaticAnalysis {
+        parses: u64,
+        /// Each occurrence's text, the late roots it reads, and whether the
+        /// site's scope proves it present.
+        occurrences: Vec<(String, Vec<String>, bool)>,
+        /// Each hole's timing, as `prepare_site` leaves it before approval;
+        /// `None` when the command fails template grammar.
+        timings: Option<Vec<String>>,
+    }
+
+    fn timing_label(timing: &HoleTiming) -> String {
+        match timing {
+            HoleTiming::ApprovalTime => "approval".to_string(),
+            HoleTiming::Deferred { roots } => format!("deferred:{}", roots.join(",")),
+            HoleTiming::Guarded { roots, .. } => format!("guarded:{}", roots.join(",")),
+        }
+    }
+
+    /// Run the static analyses `prepare_site` runs over one command under a
+    /// task guard `when` — every reader of the retained syntax, no
+    /// evaluation — and report the parses they cost with what they found.
+    /// The guard is parsed and its scope built before counting starts.
+    fn static_parses(raw: &str, when: Option<&str>, derived: &HashSet<String>) -> StaticAnalysis {
+        let guard = when.map(|when| TaskGuard::parse(when, "tasks[0].when".to_string()).expect("a parsable guard"));
+        let declared = DeclaredTypes::for_schema(None)
+            .with_host_globals(&SEQUENCE_HOST_GLOBALS)
+            .with_global_catalog(claudine_globals());
+        let types = site_types(&declared, guard.as_ref());
+        let roots = sequence_deferred_roots();
+
         let before = darkmatter::work_counters::snapshot();
         let prepared = PreparedInterpolation::new(raw);
         let view = prepared.view(0..raw.len());
         let _ = approval_diagnostics_prepared(&prepared, LifecycleScope::SequenceShellApproval);
         let _ = shape::first_target_identity_root_prepared(&prepared);
-        let declared = DeclaredTypes::for_schema(None)
-            .with_host_globals(&SEQUENCE_HOST_GLOBALS)
-            .with_global_catalog(claudine_globals());
-        let types = TypeScope::unguarded(&declared);
-        let roots = sequence_deferred_roots();
-        match parse_authored_prepared(view.clone()) {
-            Ok(mut template) => {
-                template.project_types_prepared(view.clone(), &types);
-                mark_late_holes(&mut template, &view, &roots, derived);
-                for hole in template.placeholders() {
-                    let expr = view.placeholder_at(&hole.span).and_then(|occurrence| occurrence.expr());
-                    let _ = expr.and_then(|expr| placeholder_guard_expr(expr, &types));
+        let timings = parse_authored_prepared(view.clone()).ok().map(|mut template| {
+            template.project_types_prepared(view.clone(), &types);
+            mark_late_holes(&mut template, &view, &roots, derived);
+            for hole in template.placeholders_mut() {
+                if let HoleTiming::Deferred { roots } = &hole.timing
+                    && let Some(guard) = view
+                        .placeholder_at(&hole.span)
+                        .and_then(|occurrence| occurrence.expr())
+                        .and_then(|expr| placeholder_guard_expr(expr, &types))
+                {
+                    hole.timing = HoleTiming::Guarded { guard, roots: roots.clone() };
                 }
             }
-            Err(_) => {
-                for occurrence in view.placeholders() {
-                    let _ = occurrence.expr().is_some_and(|expr| roots.late_roots_of_expr(expr, derived).is_some());
-                }
-            }
-        }
-        for occurrence in view.placeholders() {
-            let _ = occurrence.expr().and_then(|expr| placeholder_guard_expr(expr, &types));
-        }
-        darkmatter::work_counters::snapshot()
+            template.placeholders().map(|hole| timing_label(&hole.timing)).collect()
+        });
+        // The grammar-failure fallback's late reads, and the missing-value
+        // guard lookup, over every occurrence.
+        let occurrences = view
+            .placeholders()
+            .map(|occurrence| {
+                let expr = occurrence.expr();
+                let late = expr.and_then(|expr| roots.late_roots_of_expr(expr, derived)).unwrap_or_default();
+                let proven = expr.and_then(|expr| placeholder_guard_expr(expr, &types)).is_some();
+                (occurrence.text().to_string(), late, proven)
+            })
+            .collect();
+        let parses = darkmatter::work_counters::snapshot()
             .since(&before)
-            .get(darkmatter::work_counters::Work::ExpressionParse)
+            .get(darkmatter::work_counters::Work::ExpressionParse);
+        StaticAnalysis { parses, occurrences, timings }
     }
 
     #[test]
     fn static_analysis_parses_each_occurrence_once() {
         let derived = HashSet::new();
-        let cases: [(&str, &str, u64); 8] = [
-            ("repeated text", "echo {{ a }} {{ a }} {{ a }}", 3),
-            ("deferred and guarded holes", "echo {{ outputs.x }} {{ a }}", 2),
-            ("failed grammar beside a late read", "echo {{ outputs.x }} > out", 1),
-            ("malformed beside valid", "echo {{ a + }} {{ b }}", 2),
-            ("mixed malformed and late", "echo {{ outputs.x }} {{ b + }}", 2),
-            ("no placeholder", "echo plain", 0),
-            ("triple-brace literal only", "echo {{{ lit }}}", 0),
-            ("data token only", "echo {{!data:x}}", 0),
+        let late = |text: &str, proven: bool| (text.to_string(), vec!["seq".to_string()], proven);
+        let early = |text: &str| (text.to_string(), Vec::new(), false);
+        let labels = |labels: &[&str]| Some(labels.iter().map(ToString::to_string).collect::<Vec<_>>());
+        let guard = Some("seq.outputs[0]");
+        type Case<'c> = (&'c str, &'c str, Option<&'c str>, u64, Vec<(String, Vec<String>, bool)>, Option<Vec<String>>);
+        let cases: Vec<Case<'_>> = vec![
+            ("repeated text", "echo {{ a }} {{ a }} {{ a }}", None, 3, vec![early("a"), early("a"), early("a")], labels(&["approval"; 3])),
+            (
+                "deferred and guarded holes",
+                "echo {{ seq.outputs[0] }} {{ seq.outputs[1] }} {{ a }}",
+                guard,
+                3,
+                vec![late("seq.outputs[0]", true), late("seq.outputs[1]", false), early("a")],
+                labels(&["guarded:seq", "deferred:seq", "approval"]),
+            ),
+            (
+                "the same holes without the guard",
+                "echo {{ seq.outputs[0] }} {{ seq.outputs[1] }} {{ a }}",
+                None,
+                3,
+                vec![late("seq.outputs[0]", false), late("seq.outputs[1]", false), early("a")],
+                labels(&["deferred:seq", "deferred:seq", "approval"]),
+            ),
+            ("failed grammar beside a late read", "echo {{ seq.outputs[0] }} > out", guard, 1, vec![late("seq.outputs[0]", true)], None),
+            ("malformed beside valid", "echo {{ a + }} {{ b }}", None, 2, vec![early("a +"), early("b")], labels(&["approval", "approval"])),
+            ("mixed malformed and late", "echo {{ seq.outputs[0] }} {{ b + }}", None, 2, vec![late("seq.outputs[0]", false), early("b +")], labels(&["deferred:seq", "approval"])),
+            ("no placeholder", "echo plain", None, 0, vec![], labels(&[])),
+            ("triple-brace literal only", "echo {{{ lit }}}", None, 0, vec![], None),
+            ("data token only", "echo {{!data:x}}", None, 0, vec![], None),
         ];
-        for (name, raw, parses) in cases {
-            assert_eq!(static_parses(raw, &derived), parses, "{name}: {raw}");
+        for (name, raw, when, parses, occurrences, timings) in cases {
+            let analysis = static_parses(raw, when, &derived);
+            assert_eq!(analysis.parses, parses, "{name}: {raw}");
+            assert_eq!(analysis.occurrences, occurrences, "{name}: {raw}");
+            assert_eq!(analysis.timings, timings, "{name}: {raw}");
         }
     }
 
