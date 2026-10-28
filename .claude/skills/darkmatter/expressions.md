@@ -303,3 +303,14 @@ vector shrinks, but an element replaced in place is not seen.
 is reported once. A new coded family, such as
 `dm.expression.undeclared_property`, adds a `WarningSubject` constructor
 rather than a message-based check.
+
+`expression::PreparedInterpolation::new(text)` scans and parses every `{{ }}`
+occurrence once, retaining each as a `PreparedPlaceholder` (range, trimmed
+text, spanned syntax or located `PreparationError`, cached `expr()`); never key
+it by text. `view(range)` translates coordinates to a sub-range (a `set`
+wrapper's inner command from `authored_shell_command`). Parsed counterparts
+share the text functions' analysis bodies: `validate_interpolation`,
+`parse_authored_prepared`, `CommandTemplate::project_types_prepared`,
+`project_hole_expr`, `DeferredShellRoots::late_roots_of_expr`,
+`lifecycle::shell_template::placeholder_guard_expr`. It holds syntax only;
+a host keeps it on the stack for one analysis and never stores it.

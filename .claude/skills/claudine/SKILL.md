@@ -548,6 +548,14 @@ the first spawn. Shared redirection targets identify original destinations:
 stderr's own capture channel. Native `native_task_` and `native_lifecycle_`
 CLI regressions prove routing and downstream output on every OS. See [Pre-flight Checks](topics/pre-flight-checks.md).
 
+Sequence shell-site static analysis (`SequencePreflight::prepare_site`) parses each
+placeholder occurrence once into Darkmatter's `PreparedInterpolation` (raw view for
+approval diagnostics, target identity, fallback holes and presence; command view
+for grammar, typing and late roots), drops it on return, and stores it nowhere.
+Exact count is steps x holes x 6 (`preflight/tests/scaling.rs`). The text entry
+points remain for paths that bypass `prepare_site`; do not add a text reparse
+inside it.
+
 Static presence decisions read Darkmatter's shared `TypeScope`.
 `lib/tests/l1/type_scope_ownership_guard.rs` fails when a
 `TypeScope::unguarded`, `DeclaredTypes::new`, `assume_at`, or presence lookup
