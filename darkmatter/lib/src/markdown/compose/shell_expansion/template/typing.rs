@@ -300,8 +300,13 @@ pub fn project_hole(expression: &str, scope: &TypeScope<'_>) -> HoleType {
     let Ok(expr) = parse(expression) else {
         return HoleType::fallback(TypeProvenance::NotBareProperty);
     };
-    let mut hole = declared_hole(&expr, scope);
-    if let Some(narrowed) = scope.type_of_expr(&expr).filter(|ty| ty.is_refined())
+    project_hole_expr(&expr, scope)
+}
+
+/// [`project_hole`] for an expression already parsed.
+pub fn project_hole_expr(expr: &Expr, scope: &TypeScope<'_>) -> HoleType {
+    let mut hole = declared_hole(expr, scope);
+    if let Some(narrowed) = scope.type_of_expr(expr).filter(|ty| ty.is_refined())
         && let Some(definition) = narrowed.narrowed_definition()
     {
         hole.approval = ApprovalType::for_declaration(&definition);

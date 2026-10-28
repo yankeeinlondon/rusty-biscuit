@@ -37,7 +37,7 @@ use std::sync::Arc;
 use darkmatter::markdown::Markdown;
 
 use super::super::lifecycle::bindings::{
-    LifecycleScope, approval_diagnostics, unavailable_root,
+    LifecycleScope, approval_diagnostics_prepared, unavailable_root,
 };
 use darkmatter::markdown::compose::{ComposeContext, EffectiveState, SharedFrontmatter};
 use serde_json::{Map, Value};
@@ -66,11 +66,14 @@ pub use shape::{
 
 use darkmatter::markdown::compose::shell_expansion::template::{
     CommandSite, CommandTemplate, DeferredShellRoots, HoleError, HoleEvaluator, HoleTiming,
-    LateValues, ModeRequirement, ShellCandidate, derived_deferred_keys, parse_authored,
+    LateValues, ModeRequirement, ShellCandidate, TemplateGrammarError, derived_deferred_keys,
+    parse_authored_prepared,
 };
-use darkmatter::markdown::compose::expression::{DeclaredTypes, GuardOrigin, Polarity, TypeScope};
+use darkmatter::markdown::compose::expression::{
+    DeclaredTypes, GuardOrigin, Polarity, PreparedInterpolation, PreparedInterpolationView, TypeScope,
+};
 use super::super::schema::globals::claudine_globals;
-use super::super::lifecycle::shell_template::{placeholder_guard, retime_guarded};
+use super::super::lifecycle::shell_template::{placeholder_guard, placeholder_guard_expr, retime_guarded};
 use darkmatter::markdown::compose::{ShellCommandOrigin, ShellExpansionError};
 use std::collections::HashSet;
 
@@ -1847,16 +1850,17 @@ impl<'a> Loader<'a> {
             label: label.to_string(),
         };
 
-        // The command a set value runs is the one inside `$( … )`.
-        let (authored, parsed) = match &kind {
-            ShellSiteKind::Command => (raw.to_string(), parse_authored(raw)),
+        // The command a set value runs is the one inside `$( … )`; `span`
+        // places it in `raw`, and a conditional is never a template.
+        let (authored, span, conditional) = match &kind {
+            ShellSiteKind::Command => (raw.to_string(), 0..raw.len(), false),
             ShellSiteKind::SetValue { key } => {
                 let ctx = biscuit_terminal::errors::SourceContext::new(
                     origin.to_path_buf(),
                     origin.to_path_buf(),
                     raw.to_string(),
                 );
-                darkmatter::markdown::compose::authored_shell_template(raw, key, &ctx).ok_or_else(
+                let command = darkmatter::markdown::compose::authored_shell_command(raw, key, &ctx).ok_or_else(
                     || CompositionError::SequenceShellResolution {
                         command: raw.to_string(),
                         task: label.to_string(),
@@ -1865,7 +1869,8 @@ impl<'a> Loader<'a> {
                             .to_string(),
                         source: None,
                     },
-                )?
+                )?;
+                (command.command.to_string(), command.span, command.conditional)
             }
         };
 
@@ -1879,7 +1884,13 @@ impl<'a> Loader<'a> {
             });
         }
 
-        self.refuse_unapprovable_reads(raw, scope)?;
+        // Every occurrence is parsed here, once; each static analysis below
+        // reads this collection and the whole of it is dropped on return.
+        let prepared = PreparedInterpolation::new(raw);
+        let raw_view = prepared.view(0..raw.len());
+        let authored_view = prepared.view(span);
+
+        self.refuse_unapprovable_reads(raw, &prepared, scope)?;
 
         // Type each placeholder against the authoring document's schema and
         // mark the ones that read a late value.
@@ -1891,14 +1902,22 @@ impl<'a> Loader<'a> {
             .with_host_globals(&SEQUENCE_HOST_GLOBALS)
             .with_global_catalog(claudine_globals());
         let types = site_types(&declared, scope.guard);
+        let parsed = if conditional {
+            Err(TemplateGrammarError::Conditional)
+        } else {
+            parse_authored_prepared(authored_view.clone())
+        };
         let parsed = parsed.map(|mut template| {
-            template.project_types(&types);
-            mark_late_holes(&mut template, &roots, &self.step_derived);
+            template.project_types_prepared(authored_view.clone(), &types);
+            mark_late_holes(&mut template, &authored_view, &roots, &self.step_derived);
             // A late value the guard proves present is read by the command
             // once the guard selects the task, never by the step barrier.
             for placeholder in template.placeholders_mut() {
                 if let HoleTiming::Deferred { roots } = &placeholder.timing
-                    && let Some(guard) = placeholder_guard(&placeholder.expression, &types)
+                    && let Some(guard) = authored_view
+                        .placeholder_at(&placeholder.span)
+                        .and_then(|occurrence| occurrence.expr())
+                        .and_then(|expr| placeholder_guard_expr(expr, &types))
                 {
                     placeholder.timing = HoleTiming::Guarded { guard, roots: roots.clone() };
                 }
@@ -1910,12 +1929,13 @@ impl<'a> Loader<'a> {
                 .placeholders()
                 .map(|hole| (hole.expression.clone(), hole.timing.is_late()))
                 .collect(),
-            Err(_) => darkmatter::markdown::compose::expression::ExpressionFinder::scan_plain(raw)
-                .expressions
-                .into_iter()
-                .map(|location| {
-                    let late = roots.late_roots_of(&location.expression, &self.step_derived).is_some();
-                    (location.expression, late)
+            Err(_) => raw_view
+                .placeholders()
+                .map(|occurrence| {
+                    let late = occurrence
+                        .expr()
+                        .is_some_and(|expr| roots.late_roots_of_expr(expr, &self.step_derived).is_some());
+                    (occurrence.text().to_string(), late)
                 })
                 .collect(),
         };
@@ -1942,7 +1962,14 @@ impl<'a> Loader<'a> {
         // very placeholder present; then the command reads it when it runs.
         let mut guarded = Vec::new();
         for expression in &resolved.missing {
-            let Some(guard) = placeholder_guard(expression, &types) else {
+            // The first raw occurrence with this text; equal text has equal
+            // syntax, so its retained expression stands for them all.
+            let guard = raw_view
+                .placeholders()
+                .find(|occurrence| occurrence.text() == *expression)
+                .and_then(|occurrence| occurrence.expr())
+                .and_then(|expr| placeholder_guard_expr(expr, &types));
+            let Some(guard) = guard else {
                 return Err(self.site_failure(
                     raw,
                     scope,
@@ -2016,7 +2043,12 @@ impl<'a> Loader<'a> {
     /// Refuse a shell command that reads a value no approval can cover: `err`,
     /// `timing`, or `current` (even beside a late root), `group` outside a
     /// group, a target-identity root, or an unknown function.
-    fn refuse_unapprovable_reads(&self, raw: &str, scope: &SiteScope<'_>) -> Result<(), CompositionError> {
+    fn refuse_unapprovable_reads(
+        &self,
+        raw: &str,
+        prepared: &PreparedInterpolation,
+        scope: &SiteScope<'_>,
+    ) -> Result<(), CompositionError> {
         let label = scope.label;
         // The sequence approval scope declares every value that does not exist
         // yet unavailable, and `current` is refused with them, in any branch.
@@ -2024,7 +2056,7 @@ impl<'a> Loader<'a> {
         // stands. A parse failure is left to the resolution below, which
         // reports it typed.
         let scope_id = LifecycleScope::SequenceShellApproval;
-        if let Ok(diagnostics) = approval_diagnostics(raw, scope_id) {
+        if let Ok(diagnostics) = approval_diagnostics_prepared(prepared, scope_id) {
             for diagnostic in diagnostics {
                 let root = unavailable_root(&diagnostic.error).map(str::to_string);
                 let late = match root.as_deref() {
@@ -2054,7 +2086,7 @@ impl<'a> Loader<'a> {
                 });
             }
         }
-        if let Some(root) = shape::first_target_identity_root(raw) {
+        if let Some(root) = shape::first_target_identity_root_prepared(prepared) {
             return Err(CompositionError::SequenceShellTargetIdentity {
                 command: raw.to_string(),
                 root,
@@ -2653,8 +2685,6 @@ fn guard_proves_whole_value(value: &Value, types: &TypeScope<'_>) -> bool {
     found.expressions.first().is_some_and(|location| placeholder_guard(&location.expression, types).is_some())
 }
 
-/// Mark each placeholder of `template` that reads a late root, directly or
-/// through a step value derived from one.
 /// The late keys of a step view: `seed`'s, which `seed_derived` holds, under
 /// `overlay`.
 ///
@@ -2678,17 +2708,23 @@ fn overlay_derived(
     derived_deferred_keys(view.iter(), &sequence_deferred_roots(), &HashSet::new())
 }
 
-fn mark_late_holes(template: &mut CommandTemplate, roots: &DeferredShellRoots, derived: &HashSet<String>) {
-    use darkmatter::markdown::compose::shell_expansion::template::ArgPart;
-    for segment in &mut template.segments {
-        for arg in &mut segment.args {
-            for part in &mut arg.parts {
-                if let ArgPart::Hole(hole) = part
-                    && let Some(late) = roots.late_roots_of(&hole.expression, derived)
-                {
-                    hole.timing = HoleTiming::Deferred { roots: late };
-                }
-            }
+/// Mark each placeholder of `template` that reads a late root, directly or
+/// through a step value derived from one. Each hole's syntax is the retained
+/// occurrence at its span in `view`; a hole whose expression did not parse
+/// reads nothing.
+fn mark_late_holes(
+    template: &mut CommandTemplate,
+    view: &PreparedInterpolationView<'_>,
+    roots: &DeferredShellRoots,
+    derived: &HashSet<String>,
+) {
+    for hole in template.placeholders_mut() {
+        if let Some(late) = view
+            .placeholder_at(&hole.span)
+            .and_then(|occurrence| occurrence.expr())
+            .and_then(|expr| roots.late_roots_of_expr(expr, derived))
+        {
+            hole.timing = HoleTiming::Deferred { roots: late };
         }
     }
 }

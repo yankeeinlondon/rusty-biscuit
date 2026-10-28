@@ -85,8 +85,17 @@ impl DeferredShellRoots {
             return None;
         }
         let expr = parse(expression).ok()?;
+        self.late_roots_of_expr(&expr, derived)
+    }
+
+    /// [`late_roots_of`](Self::late_roots_of) for an expression already
+    /// parsed; roots keep traversal order and only adjacent repeats collapse.
+    pub fn late_roots_of_expr(&self, expr: &Expr, derived: &HashSet<String>) -> Option<Vec<String>> {
+        if self.is_empty() && derived.is_empty() {
+            return None;
+        }
         let mut roots = Vec::new();
-        read_roots(&expr, &mut roots);
+        read_roots(expr, &mut roots);
         let mut late: Vec<String> = roots
             .into_iter()
             .filter(|read| read.is_late(self, derived))

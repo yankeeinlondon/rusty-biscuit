@@ -1486,6 +1486,35 @@ mod shell {
         }
     }
 
+    /// The retained-syntax scan is the text scan: a malformed occurrence never
+    /// hides a valid read beside it, and static-bracket and dotted spellings
+    /// of one path agree.
+    #[test]
+    fn prepared_target_identity_scan_matches_the_text_scan() {
+        use darkmatter::markdown::compose::expression::PreparedInterpolation;
+        for raw in [
+            "{{ 1 + }} {{ ctx.agent }}",
+            "{{ ctx.agent }} {{ 1 + }}",
+            "{{ 1 + }} {{ ctx.cwd }}",
+            "{{ ctx['agent'] }} {{ ctx.agent }}",
+            "{{ ctx.agent[0] }}",
+            "{{ env[key] }}",
+            "{{ ctx.cwd }} {{ env.HOME }} {{ fm.ctx.agent }}",
+            "no placeholders",
+        ] {
+            assert_eq!(
+                shape::first_target_identity_root_prepared(&PreparedInterpolation::new(raw)),
+                shape::first_target_identity_root(raw),
+                "{raw}"
+            );
+        }
+        assert_eq!(
+            shape::first_target_identity_root_prepared(&PreparedInterpolation::new("{{ 1 + }} {{ ctx.agent }}"))
+                .as_deref(),
+            Some("ctx.agent"),
+        );
+    }
+
     /// A task's `teardown:` stack resolves through the same graph phase, so a
     /// target-identity reference there is rejected identically — the bytes it
     /// would bake in are the bytes execution runs.
@@ -3531,5 +3560,109 @@ mod static_analysis_characterization {
             let error = set_graph("$(git é {{ 1 + }})", later).unwrap_err();
             assert_parse_failure(&error, "$(git é {{ 1 + }})", "1 +");
         }
+    }
+}
+
+/// Behavior the retained-syntax route must keep: every lifecycle position is
+/// collected, and a retained template reads current values, never frozen ones.
+mod prepared_site_behavior {
+    use super::*;
+    use darkmatter::markdown::compose::expression::{EvaluationLookup, ResolutionContext};
+    use darkmatter::markdown::compose::shell_expansion::template::{LookupEvaluator, fill_template};
+
+    fn sorted_commands(graph: &PreflightGraph) -> Vec<&str> {
+        let mut commands: Vec<&str> = graph.shell_commands.iter().map(|c| c.command.as_str()).collect();
+        commands.sort_unstable();
+        commands
+    }
+
+    /// Placeholder-bearing commands in setup, teardown, an `on_error:`
+    /// companion and a `set` value of the first task are each resolved from the
+    /// same retained-syntax route as a body step.
+    #[test]
+    fn placeholder_commands_in_setup_teardown_on_error_and_set_resolve_once_each() {
+        let dir = TempDir::new().unwrap();
+        let source = write_legacy_source(
+            dir.path(),
+            "seq.md",
+            &[
+                ("word", json!("w")),
+                (
+                    "sequence",
+                    json!([{
+                        "name": "one",
+                        "shell": "echo body {{ word }}",
+                        "setup": [{ "shell": { "command": "echo setup {{ word }}", "on_error": "echo recover {{ word }}" } }],
+                        "teardown": [
+                            { "shell": "echo teardown {{ word }}" },
+                            { "set": { "v": "$(  echo set {{ word }}  )" } },
+                        ],
+                    }]),
+                ),
+            ],
+            "Body.\n",
+        );
+        let graph = legacy_graph_for(&source).unwrap();
+        assert_eq!(
+            sorted_commands(&graph),
+            vec![
+                "echo body w",
+                "echo recover w",
+                "echo set w",
+                "echo setup w",
+                "echo teardown w",
+            ],
+        );
+        assert_eq!(graph.template_candidates.len(), 5);
+    }
+
+    struct DocumentLookup(ResolutionContext);
+
+    impl EvaluationLookup for DocumentLookup {
+        fn get(&self, _: &str) -> Option<Value> {
+            None
+        }
+
+        fn resolution_context(&self) -> Option<ResolutionContext> {
+            Some(self.0.clone())
+        }
+    }
+
+    /// Retained syntax is not a retained value: the template prepared once
+    /// reads `fixture.md` again on each fill.
+    #[test]
+    fn a_template_prepared_once_rereads_a_document_value_on_every_fill() {
+        let dir = TempDir::new().unwrap();
+        let fixture = dir.path().join("fixture.md");
+        fs::write(&fixture, "---\nstatus: draft\n---\nBody\n").unwrap();
+        let source = write_legacy_source(
+            dir.path(),
+            "seq.md",
+            &[(
+                "sequence",
+                json!([
+                    { "name": "zero", "shell": "echo zero" },
+                    { "name": "one", "shell": "tool {{ frontmatter('fixture.md', 'status') }}" },
+                ]),
+            )],
+            "Body.\n",
+        );
+        let graph = legacy_graph_for(&source).unwrap();
+        let site = &graph.steps[1].task.as_ref().unwrap().shell_sites[0];
+        assert_eq!(site.mode, SiteMode::Template);
+        let template = site.template.as_ref().expect("a later task keeps its template");
+
+        let context = ResolutionContext::new(biscuit_file::FileResolutionContext::from_snapshot(
+            dir.path(),
+            Some(dir.path().to_path_buf()),
+            HashMap::new(),
+        ));
+        let lookup = DocumentLookup(context);
+        let evaluator = LookupEvaluator::new(&lookup);
+        let args = |template| fill_template(template, &evaluator, None).unwrap().segments[0].args.clone();
+
+        assert_eq!(args(template), ["draft"]);
+        fs::write(&fixture, "---\nstatus: ready\n---\nBody\n").unwrap();
+        assert_eq!(args(template), ["ready"]);
     }
 }

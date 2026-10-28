@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use darkmatter::markdown::compose::ResolvedShellValue;
 use darkmatter::markdown::compose::expression::{
-    AccessStep, ExpressionFinder, StaticAccessRead, parse, static_access_reads,
+    AccessStep, PreparedInterpolation, PreparedPlaceholder, StaticAccessRead, static_access_reads,
 };
 use darkmatter::markdown::compose::shell_expansion::template::{CommandTemplate, HoleTiming};
 use serde_json::{Map, Value};
@@ -522,15 +522,17 @@ pub(crate) const TARGET_IDENTITY_ROOTS: &[&str] =
 /// fails closed, named by the access up to its last such index as Darkmatter
 /// displays it.
 pub(crate) fn first_target_identity_root(raw: &str) -> Option<String> {
-    for location in ExpressionFinder::find_all_plain(raw) {
-        let Ok(expr) = parse(&location.expression) else {
-            continue;
-        };
-        if let Some(path) = static_access_reads(&expr).iter().find_map(target_identity_path) {
-            return Some(path);
-        }
-    }
-    None
+    first_target_identity_root_prepared(&PreparedInterpolation::new(raw))
+}
+
+/// [`first_target_identity_root`] over retained syntax. An occurrence that
+/// did not parse is skipped; it never hides a valid read beside it.
+pub(crate) fn first_target_identity_root_prepared(prepared: &PreparedInterpolation) -> Option<String> {
+    prepared
+        .placeholders()
+        .iter()
+        .filter_map(PreparedPlaceholder::expr)
+        .find_map(|expr| static_access_reads(expr).iter().find_map(target_identity_path))
 }
 
 fn target_identity_path(read: &StaticAccessRead<'_>) -> Option<String> {

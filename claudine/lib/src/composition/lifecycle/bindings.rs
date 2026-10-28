@@ -34,11 +34,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use darkmatter::markdown::compose::expression::{
-    Availability, AuthoredMode, BindingView, Expr, ExpressionError, ExpressionFinder,
+    Availability, BindingView, Expr, ExpressionError, ExpressionFinder,
     ExpressionLocation, HostGlobals, PreparationError, RuntimeBinding, ScopeId,
     UnavailabilityReason,
-    ValidationDiagnostic, parse, parse_condition, prepare_value, static_access_reads, static_variable_reads,
-    validate_prepared,
+    PreparedInterpolation, ValidationDiagnostic, parse, parse_condition, static_access_reads, static_variable_reads,
+    validate_interpolation,
 };
 use serde_json::{Map, Value};
 
@@ -470,11 +470,26 @@ pub fn approval_diagnostics(
     raw: &str,
     scope: LifecycleScope,
 ) -> Result<Vec<ValidationDiagnostic>, PreparationError> {
+    approval_diagnostics_prepared(&PreparedInterpolation::new(raw), scope)
+}
+
+/// [`approval_diagnostics`] over syntax already prepared: nothing is parsed
+/// again, and the first retained failure is returned with no diagnostics.
+///
+/// ## Errors
+///
+/// The first retained occurrence that did not parse.
+pub fn approval_diagnostics_prepared(
+    prepared: &PreparedInterpolation,
+    scope: LifecycleScope,
+) -> Result<Vec<ValidationDiagnostic>, PreparationError> {
     debug_assert!(scope.is_approval(), "{scope:?} is not an approval scope");
     let view = binding_view(scope, GroupMembership::Outside);
-    let prepared = prepare_value(&Value::String(raw.to_string()), AuthoredMode::InterpolatedValue)?;
-    let mut diagnostics = validate_prepared(&prepared, &view);
-    for expression in prepared.expressions() {
+    let mut diagnostics = validate_interpolation(prepared, &view)?;
+    for placeholder in prepared.placeholders() {
+        let Ok(expression) = placeholder.parsed() else {
+            continue;
+        };
         for read in static_variable_reads(expression.expr()) {
             if LATE_NAMESPACES.contains(&read.root()) {
                 diagnostics.push(ValidationDiagnostic {

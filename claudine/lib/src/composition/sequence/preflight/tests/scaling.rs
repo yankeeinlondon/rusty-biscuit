@@ -77,20 +77,87 @@ mod counted {
         (graph, snapshot().since(&claudine), darkmatter::work_counters::snapshot().since(&darkmatter))
     }
 
-    /// The spec's shell criterion: the same `ExpressionParse` count per step
-    /// at 10 and 100 steps with ten holes each.
+    /// The spec's shell criterion: `steps × holes × 6` expression parses —
+    /// one static parse per occurrence plus the evaluations that stay
+    /// independent — at 10 and 100 steps with ten holes each.
     #[test]
-    fn shell_preflight_parses_the_same_expressions_per_step_at_10_and_100_steps() {
-        let mut per_step = Vec::new();
-        for steps in [10, 100] {
+    fn shell_preflight_parses_exactly_steps_times_holes_times_six_at_10_and_100_steps() {
+        for steps in [10_u64, 100] {
             let dir = TempDir::new().unwrap();
-            let (graph, _, darkmatter) = work(&ten_hole_steps(dir.path(), steps));
-            assert_ten_hole_graph(&graph, steps);
+            let (graph, _, darkmatter) = work(&ten_hole_steps(dir.path(), steps as usize));
+            assert_ten_hole_graph(&graph, steps as usize);
             let parses = darkmatter.get(darkmatter::work_counters::Work::ExpressionParse);
-            assert_eq!(parses % steps as u64, 0, "{parses} parses for {steps} steps");
-            per_step.push(parses / steps as u64);
+            assert_eq!(parses, steps * 10 * 6, "parses for {steps} steps of ten holes");
         }
-        assert_eq!(per_step[0], per_step[1], "parses per step at 10 and 100 steps");
+    }
+
+    /// The formula is per occurrence, not per step: a step of three distinct
+    /// holes costs `steps × 3 × 6`.
+    #[test]
+    fn the_parse_count_follows_the_hole_count() {
+        let dir = TempDir::new().unwrap();
+        let steps: Vec<Value> = (0..4)
+            .map(|index| json!({ "name": format!("s{index}"), "shell": format!("echo s{index} {{{{ a }}}} {{{{ b }}}} {{{{ c }}}}") }))
+            .collect();
+        let path = sequence_document(dir.path(), "$schema:\n    a: string\n    b: string\n    c: string\na: x\nb: y\nc: z\n", &steps);
+        let (graph, _, darkmatter) = work(&path);
+        assert_eq!(graph.template_candidates.len(), 4);
+        assert_eq!(darkmatter.get(darkmatter::work_counters::Work::ExpressionParse), 4 * 3 * 6);
+    }
+
+    /// Run the static analyses `prepare_site` runs over one command — every
+    /// reader of the retained syntax, no evaluation — and report the parses
+    /// they cost.
+    fn static_parses(raw: &str, derived: &HashSet<String>) -> u64 {
+        let before = darkmatter::work_counters::snapshot();
+        let prepared = PreparedInterpolation::new(raw);
+        let view = prepared.view(0..raw.len());
+        let _ = approval_diagnostics_prepared(&prepared, LifecycleScope::SequenceShellApproval);
+        let _ = shape::first_target_identity_root_prepared(&prepared);
+        let declared = DeclaredTypes::for_schema(None)
+            .with_host_globals(&SEQUENCE_HOST_GLOBALS)
+            .with_global_catalog(claudine_globals());
+        let types = TypeScope::unguarded(&declared);
+        let roots = sequence_deferred_roots();
+        match parse_authored_prepared(view.clone()) {
+            Ok(mut template) => {
+                template.project_types_prepared(view.clone(), &types);
+                mark_late_holes(&mut template, &view, &roots, derived);
+                for hole in template.placeholders() {
+                    let expr = view.placeholder_at(&hole.span).and_then(|occurrence| occurrence.expr());
+                    let _ = expr.and_then(|expr| placeholder_guard_expr(expr, &types));
+                }
+            }
+            Err(_) => {
+                for occurrence in view.placeholders() {
+                    let _ = occurrence.expr().is_some_and(|expr| roots.late_roots_of_expr(expr, derived).is_some());
+                }
+            }
+        }
+        for occurrence in view.placeholders() {
+            let _ = occurrence.expr().and_then(|expr| placeholder_guard_expr(expr, &types));
+        }
+        darkmatter::work_counters::snapshot()
+            .since(&before)
+            .get(darkmatter::work_counters::Work::ExpressionParse)
+    }
+
+    #[test]
+    fn static_analysis_parses_each_occurrence_once() {
+        let derived = HashSet::new();
+        let cases: [(&str, &str, u64); 8] = [
+            ("repeated text", "echo {{ a }} {{ a }} {{ a }}", 3),
+            ("deferred and guarded holes", "echo {{ outputs.x }} {{ a }}", 2),
+            ("failed grammar beside a late read", "echo {{ outputs.x }} > out", 1),
+            ("malformed beside valid", "echo {{ a + }} {{ b }}", 2),
+            ("mixed malformed and late", "echo {{ outputs.x }} {{ b + }}", 2),
+            ("no placeholder", "echo plain", 0),
+            ("triple-brace literal only", "echo {{{ lit }}}", 0),
+            ("data token only", "echo {{!data:x}}", 0),
+        ];
+        for (name, raw, parses) in cases {
+            assert_eq!(static_parses(raw, &derived), parses, "{name}: {raw}");
+        }
     }
 
     /// Per-step copies and scans of the step frontmatter: a count linear in
