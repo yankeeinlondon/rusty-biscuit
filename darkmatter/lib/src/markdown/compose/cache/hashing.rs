@@ -30,6 +30,59 @@ pub(crate) fn source_id_hash(canonical_source: &str) -> u64 {
 
 // ── Structured data hashing ──────────────────────────────────────
 
+/// The key order of every object in `value`, as text: each object's keys in
+/// sequence under the structural path that reaches it, array positions
+/// included.
+///
+/// `canonical_json` sorts keys, so two values that differ only in insertion
+/// order hash alike. That is wrong for anything an iteration can walk, whose
+/// visit order and output follow insertion order; this text is hashed
+/// beside the canonical form so the order is part of the identity.
+pub(crate) fn key_order_text(value: &Value) -> String {
+    fn walk(value: &Value, path: &mut String, out: &mut String) {
+        match value {
+            Value::Object(map) => {
+                out.push_str(path);
+                out.push('{');
+                for key in map.keys() {
+                    out.push_str(&key.len().to_string());
+                    out.push(':');
+                    out.push_str(key);
+                    out.push(',');
+                }
+                out.push_str("}\n");
+                for (key, member) in map {
+                    let restore = path.len();
+                    path.push('/');
+                    path.push_str(key);
+                    walk(member, path, out);
+                    path.truncate(restore);
+                }
+            }
+            Value::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    let restore = path.len();
+                    path.push('[');
+                    path.push_str(&index.to_string());
+                    path.push(']');
+                    walk(item, path, out);
+                    path.truncate(restore);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = String::new();
+    walk(value, &mut String::new(), &mut out);
+    out
+}
+
+/// [`canonical_json`] of `value` followed by its [`key_order_text`], so equal
+/// values in a different insertion order are different identities.
+pub(crate) fn ordered_canonical(value: &Value) -> String {
+    format!("{}\0order\0{}", canonical_json(value), key_order_text(value))
+}
+
 /// Hash of the effective state (merged frontmatter + external state).
 ///
 /// Hashes the data map using canonical JSON, excluding the `ctx`
@@ -41,8 +94,7 @@ pub(crate) fn effective_state_hash(state: &EffectiveState) -> u64 {
         .filter(|(k, _)| k.as_str() != "ctx")
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    let canonical = canonical_json(&Value::Object(as_map));
-    xx_hash(&canonical)
+    xx_hash(&ordered_canonical(&Value::Object(as_map)))
 }
 
 /// Hash of the runtime context (all stable output-affecting fields + env vars).
@@ -56,7 +108,7 @@ pub(crate) fn context_hash(ctx: &ComposeContext) -> u64 {
         values.remove(*key);
     }
 
-    let canonical = canonical_json(&Value::Object(values));
+    let canonical = ordered_canonical(&Value::Object(values));
     let mut parts = vec![canonical];
 
     // Sort env vars for determinism (kept separate for clarity)
@@ -141,8 +193,8 @@ pub(crate) fn combine_options_overlay_hash(base: u64, overlay: u64) -> u64 {
 
 /// Hash of the per-directive set overlay applied during markdown transclusion.
 ///
-/// The returned hash is stable across ordering variations inside the object
-/// overlay (keys are canonicalized) and across equivalent values, but
+/// The returned hash distinguishes the key order of the object overlay and of
+/// every nested object, because an iteration walks insertion order, and
 /// preserves the ordering of the property list because the spec treats
 /// property-form ordering as semantically significant under permissive
 /// duplicate-handling. Returns `0` when both inputs are empty so the
@@ -159,15 +211,13 @@ pub(crate) fn set_overlay_hash(
     let mut parts = Vec::with_capacity(1 + set_properties.len());
 
     if let Some(map) = set_object {
-        let canonical = canonical_json(&Value::Object(map.clone()));
-        parts.push(format!("obj={}", canonical));
+        parts.push(format!("obj={}", ordered_canonical(&Value::Object(map.clone()))));
     } else {
         parts.push("obj=".to_string());
     }
 
     for (index, (name, value)) in set_properties.iter().enumerate() {
-        let canonical = canonical_json(value);
-        parts.push(format!("p{}:{}={}", index, name, canonical));
+        parts.push(format!("p{}:{}={}", index, name, ordered_canonical(value)));
     }
 
     xx_hash(&parts.join("\0"))
@@ -293,19 +343,29 @@ mod tests {
     }
 
     #[test]
-    fn set_overlay_hash_stable_for_equivalent_object_key_order() {
-        let mut m1 = Map::new();
-        m1.insert("a".to_string(), Value::from(1));
-        m1.insert("b".to_string(), Value::from(2));
+    fn set_overlay_hash_distinguishes_object_key_order() {
+        let ordered = |keys: &[&str]| {
+            let mut map = Map::new();
+            for (index, key) in keys.iter().enumerate() {
+                map.insert((*key).to_string(), Value::from(index));
+            }
+            map
+        };
+        let (ab, ba) = (ordered(&["a", "b"]), ordered(&["b", "a"]));
+        assert_eq!(set_overlay_hash(Some(&ab), &[]), set_overlay_hash(Some(&ab.clone()), &[]));
+        // Insertion order is what an iteration walks, so it is identity.
+        assert_ne!(set_overlay_hash(Some(&ab), &[]), set_overlay_hash(Some(&ba), &[]));
+    }
 
-        let mut m2 = Map::new();
-        m2.insert("b".to_string(), Value::from(2));
-        m2.insert("a".to_string(), Value::from(1));
-
-        assert_eq!(
-            set_overlay_hash(Some(&m1), &[]),
-            set_overlay_hash(Some(&m2), &[])
-        );
+    #[test]
+    fn key_order_is_identity_at_every_depth_and_array_position() {
+        use serde_json::json;
+        let fingerprint = |text: &str| ordered_canonical(&serde_json::from_str::<Value>(text).unwrap());
+        assert_ne!(fingerprint(r#"{"a":{"x":1,"y":2}}"#), fingerprint(r#"{"a":{"y":2,"x":1}}"#));
+        assert_ne!(fingerprint(r#"[{"x":1,"y":2}]"#), fingerprint(r#"[{"y":2,"x":1}]"#));
+        assert_eq!(fingerprint(r#"{"a":{"x":1,"y":2}}"#), fingerprint(r#"{"a":{"x":1,"y":2}}"#));
+        // Array element order is part of the value itself, not of the key order.
+        assert_ne!(ordered_canonical(&json!([1, 2])), ordered_canonical(&json!([2, 1])));
     }
 
     #[test]

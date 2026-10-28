@@ -168,6 +168,9 @@ fn failure_diagnostics(error: &Report) -> Vec<Diagnostic> {
         if let Some(classified) = cause.downcast_ref::<ClassifiedFailure>() {
             return classified.diagnostics.clone();
         }
+        if let Some(collection) = cause.downcast_ref::<crate::collection_failure::CollectionFailure>() {
+            return collection.diagnostics().to_vec();
+        }
         if cause.downcast_ref::<crate::io::DocumentArgumentError>().is_some() {
             return vec![Diagnostic {
                 code: INPUT_READ_CODE.to_string(),

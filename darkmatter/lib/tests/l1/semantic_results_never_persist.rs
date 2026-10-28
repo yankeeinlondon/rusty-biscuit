@@ -201,3 +201,24 @@ fn the_guard_catches_planted_violations_and_honors_the_scope_rule() {
     let problems = check_run_local_cache(&production_sources(root.path()));
     assert_eq!(problems, [format!("expected one `struct {RUN_LOCAL_CACHE}` in {RUN_LOCAL_CACHE_FILE}, found 0")]);
 }
+
+/// The collection sites hold no path to disk: no collection file is on the
+/// `FileStore` allowlist, none names it or a removed persistence symbol, and
+/// none reaches into the run-local cache's remote store. A collection result
+/// is rebuilt per request, never persisted.
+#[test]
+fn collection_sources_have_no_path_to_disk() {
+    let src = biscuit_test_harness::manifest_dir!().join("src");
+    let collection: BTreeMap<String, String> = production_sources(&src)
+        .into_iter()
+        .filter(|(path, _)| path.contains("collection_blocks"))
+        .collect();
+    assert!(collection.len() >= 8, "the scan read only {:?}", collection.keys().collect::<Vec<_>>());
+    assert!(
+        FILE_STORE_ALLOWLIST.iter().all(|(path, _)| !path.contains("collection_blocks")),
+        "a collection file was allowed to reach the file store"
+    );
+    let mut problems = check_file_store_reach(&collection, &[]);
+    problems.extend(check_removed_surface(&collection));
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}

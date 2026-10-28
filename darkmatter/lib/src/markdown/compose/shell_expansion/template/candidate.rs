@@ -10,7 +10,9 @@ use super::{
     ApprovalKey, CommandTemplate, HoleTiming, OfferedChoices, ShellPreApprovals, TemplateApprovalView,
     TemplateGrammarError, TemplateShape,
 };
-use crate::markdown::compose::expression::{Expr, ExpressionFinder, GuardOrigin, TypeScope, fm_namespace, parse};
+use crate::markdown::compose::expression::{
+    Expr, ExpressionFinder, GuardOrigin, TypeScope, fm_namespace, parse, static_access_reads,
+};
 use crate::markdown::compose::shell_expansion::types::{ShellCommandOrigin, ShellExpansionError};
 use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
@@ -318,6 +320,8 @@ impl CandidateScope<'_> {
                         Some(guard) => HoleTiming::Guarded { guard, roots },
                         None => HoleTiming::Deferred { roots },
                     };
+                } else if reads_local(&placeholder.expression, types) {
+                    placeholder.timing = HoleTiming::Local;
                 }
             }
             template
@@ -334,7 +338,8 @@ impl CandidateScope<'_> {
                 .expressions
                 .into_iter()
                 .map(|location| {
-                    let late = self.deferred_roots(&location.expression).is_some();
+                    let late = self.deferred_roots(&location.expression).is_some()
+                        || reads_local(&location.expression, types);
                     (location.expression, late)
                 })
                 .collect(),
@@ -404,6 +409,18 @@ impl CandidateScope<'_> {
             requirement,
         })
     }
+}
+
+/// Whether `expression` reads a lexical local at a site typed by `types`,
+/// explicitly (`local.x`) or by name, anywhere inside a larger expression.
+/// Static: nothing is evaluated.
+fn reads_local(expression: &str, types: &TypeScope<'_>) -> bool {
+    let Ok(expr) = parse(expression) else {
+        return false;
+    };
+    static_access_reads(&expr)
+        .iter()
+        .any(|read| types.resolves_to_local(read.variable))
 }
 
 /// The frontmatter keys of `frontmatter` that read a late root, directly or

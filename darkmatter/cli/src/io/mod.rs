@@ -264,6 +264,10 @@ pub fn as_block_error<'a>(
             err.downcast_ref::<DocumentOutsideRepository>()
                 .map(|error| error as &(dyn BlockError + 'static))
         })
+        .or_else(|| {
+            err.downcast_ref::<crate::collection_failure::CollectionFailure>()
+                .map(|error| error as &(dyn BlockError + 'static))
+        })
 }
 
 /// Reads markdown content from stdin.

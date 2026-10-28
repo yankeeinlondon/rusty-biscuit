@@ -1859,7 +1859,7 @@ fn template_site<'e>(
     };
     // A standalone `$( … )` value is unguarded: a body block that later
     // reads the key grants it nothing.
-    scope.site(&authored, template, origin, templates.ctx.clone(), evaluator, frame, &[])
+    scope.site(&authored, template, origin, templates.ctx.clone(), evaluator, frame, &|types| types)
 }
 
 /// The directive one frontmatter pipeline runs as.

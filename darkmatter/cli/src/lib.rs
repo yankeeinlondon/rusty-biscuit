@@ -8,6 +8,7 @@
 pub mod approval;
 pub mod args;
 pub mod artifact;
+pub mod collection_failure;
 pub mod commands;
 pub mod io;
 pub mod render;

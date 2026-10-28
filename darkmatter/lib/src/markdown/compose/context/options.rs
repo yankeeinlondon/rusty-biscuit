@@ -2533,10 +2533,9 @@ const PATH_ENCODING_LOSSY_FALLBACK: u8 = 3;
 /// captured once and cloned into every `ComposeOptions::clone`, so it is also
 /// clone-stable.
 fn graph_context_fingerprint(ctx: &ComposeContext) -> u64 {
-    use biscuit_hash::canonical_json;
     use serde_json::Value;
 
-    let values_canonical = canonical_json(&Value::Object(ctx.values().clone()));
+    let values_canonical = crate::markdown::compose::cache::hashing::ordered_canonical(&Value::Object(ctx.values().clone()));
     let mut parts = vec![GRAPH_CONTEXT_DOMAIN.to_string(), values_canonical];
 
     let mut env_pairs: Vec<_> = ctx.env().iter().collect();
@@ -2982,7 +2981,6 @@ impl ComposeOptions {
             file_ref_fallback_dir,
         } = self;
 
-        use biscuit_hash::canonical_json;
         use serde_json::Value;
 
         // Both identity domains below encode the baseline schema, and the
@@ -3036,7 +3034,7 @@ impl ComposeOptions {
         match external_state {
             Some(v) => {
                 enc.tag(1);
-                enc.str(&canonical_json(v));
+                enc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(v));
             }
             None => enc.tag(0),
         }
@@ -3044,7 +3042,7 @@ impl ComposeOptions {
         match set_overrides {
             Some(v) => {
                 enc.tag(1);
-                enc.str(&canonical_json(v));
+                enc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(v));
             }
             None => enc.tag(0),
         }
@@ -3052,7 +3050,7 @@ impl ComposeOptions {
         match data_overrides {
             Some(v) => {
                 enc.tag(1);
-                enc.str(&canonical_json(v));
+                enc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(v));
             }
             None => enc.tag(0),
         }
@@ -3062,7 +3060,7 @@ impl ComposeOptions {
         enc.count(caller_input_records.len());
         for (property, record) in caller_input_records {
             enc.str(property);
-            enc.str(&canonical_json(record.raw()));
+            enc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(record.raw()));
             encode_file_resolution_context(&mut enc, record.origin());
         }
         enc.field("caller_file_provenance");
@@ -3273,7 +3271,7 @@ impl ComposeOptions {
         match one_off_replace {
             Some(m) => {
                 enc.tag(1);
-                enc.str(&canonical_json(&Value::Object(m.clone())));
+                enc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(&Value::Object(m.clone())));
             }
             None => enc.tag(0),
         }
@@ -3512,7 +3510,7 @@ impl ComposeOptions {
         match one_off_replace {
             Some(m) => {
                 cenc.tag(1);
-                cenc.str(&canonical_json(&Value::Object(m.clone())));
+                cenc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(&Value::Object(m.clone())));
             }
             None => cenc.tag(0),
         }
@@ -3520,7 +3518,7 @@ impl ComposeOptions {
         match external_state {
             Some(v) => {
                 cenc.tag(1);
-                cenc.str(&canonical_json(v));
+                cenc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(v));
             }
             None => cenc.tag(0),
         }
@@ -3528,7 +3526,7 @@ impl ComposeOptions {
         match set_overrides {
             Some(v) => {
                 cenc.tag(1);
-                cenc.str(&canonical_json(v));
+                cenc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(v));
             }
             None => cenc.tag(0),
         }
@@ -3536,7 +3534,7 @@ impl ComposeOptions {
         match data_overrides {
             Some(v) => {
                 cenc.tag(1);
-                cenc.str(&canonical_json(v));
+                cenc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(v));
             }
             None => cenc.tag(0),
         }
@@ -3546,7 +3544,7 @@ impl ComposeOptions {
         cenc.count(caller_input_records.len());
         for (property, record) in caller_input_records {
             cenc.str(property);
-            cenc.str(&canonical_json(record.raw()));
+            cenc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(record.raw()));
             encode_file_resolution_context(&mut cenc, record.origin());
         }
         cenc.field("baseline_schema");

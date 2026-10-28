@@ -34,7 +34,7 @@ and repeating the same selection is harmless.
 
 | Command | `--allow` | `--deny` | `--disable` |
 |---|---|---|---|
-| `md compose` | every recovery, `host=HOST`, `all` | every recovery, `style`, a diagnostic code, `all` | `baseline-schema`, `schema-triggers` |
+| `md compose` | every recovery, `host=HOST`, `all` | every recovery, `style`, a diagnostic code, `all` | `baseline-schema`, `schema-triggers`, `collection-blocks` |
 | `md render`, `md FILE` | — | `style`, `all` | — |
 | `md clean` | — | — | `baseline-schema`, `schema-triggers` |
 | `md schema validate` | — | — | `baseline-schema`, `schema-triggers` |
@@ -55,6 +55,8 @@ them.
 | `invalid-frontmatter-assignment` | skip an invalid `set=` assignment on a `::file` directive; valid siblings still apply | `dm.transclusion.invalid_frontmatter_assignment` |
 | `reassigned-frontmatter-property` | when a `::file` directive assigns one property twice, the rightmost wins | `dm.transclusion.reassigned_frontmatter_property` |
 | `shell-timeout` | a shell command that times out becomes an empty string | `dm.shell.timeout_recovered` |
+| `untyped-map-variables` | a `::map` source with no iterable declaration is accepted with a warning | `dm.collection.untyped_map_source` |
+| `untyped-filter-variables` | a `::filter` source with no iterable declaration is accepted with a warning | `dm.collection.untyped_filter_source` |
 
 A recovered problem is still reported on stderr as a warning carrying its
 code. Without the allowance the problem fails the command.
@@ -75,6 +77,7 @@ usage errors, and `--deny all` does not take a named host away.
 |---|---|
 | `baseline-schema` | the built-in Darkmatter baseline frontmatter schema (and `BASELINE_SCHEMA`) |
 | `schema-triggers` | schema-trigger discovery and bare-name schema-root lookup |
+| `collection-blocks` | the `::map` and `::filter` directive stage (`md compose` only) |
 
 A disabled feature produces no diagnostics, and `--deny` does not turn it back
 on. `md schema validate --disable baseline-schema` reports a document with no

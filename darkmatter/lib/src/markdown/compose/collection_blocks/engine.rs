@@ -209,6 +209,9 @@ pub(crate) struct Execution<'a, L: EvaluationLookup> {
     /// Plans by region start, so a region invoked once per enclosing
     /// iteration parses its callbacks once.
     plans: HashMap<usize, Rc<Plan>>,
+    /// Whether this traversal only discovers the copies a body could have
+    /// (see [`Self::new`]).
+    discover: bool,
 }
 
 /// The expansion of a body.
@@ -219,6 +222,16 @@ pub(crate) struct Expansion {
 }
 
 impl<'a, L: EvaluationLookup> Execution<'a, L> {
+    /// A traversal of `content`.
+    ///
+    /// With a [discovery](IterationBudget::discovery) budget the traversal
+    /// is condition-blind and selection-blind, for pre-flight: every gate is
+    /// taken, every source item gets a copy of the body in registration
+    /// order, and no filter, sort, or prefix callback runs. Only the map
+    /// expression runs, because a body's targets may read what it produces;
+    /// a source, map, or pattern that cannot be read there leaves its names
+    /// `null` instead of failing, since execution reports the failure if it
+    /// reaches the item.
     pub(crate) fn new(
         content: &'a str,
         lookup: &'a L,
@@ -227,7 +240,7 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
         report: &'a mut ComposeReport,
         stop: &'a mut dyn FnMut(&ComposeReport) -> bool,
     ) -> Self {
-        Self { content, lookup, budget, context, report, stop, plans: HashMap::new() }
+        Self { content, lookup, budget, context, report, stop, plans: HashMap::new(), discover: !budget.is_charging() }
     }
 
     /// Expands the whole body: `nodes` are its top-level regions.
@@ -274,6 +287,7 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
         path: &IterationPath,
     ) -> Result<(), Halt> {
         let enabled = match &region.options.when_expr {
+            Some(_) if self.discover => true,
             Some(expression) => self.condition(expression, region.start_line, scope)?,
             None => true,
         };
@@ -376,24 +390,31 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
         let plan = self.plan(region)?;
         self.check_names(&plan, path)?;
 
-        if let Some(when) = &header.when
+        if !self.discover
+            && let Some(when) = &header.when
             && !self.condition(&when.text, region.start_line, scope)?
         {
             return Ok(());
         }
 
         let reference = header.source.value.as_str();
-        let value = self
-            .evaluate(scope, &Expr::Variable(reference.to_string()))
-            .map_err(|cause| self.callback_failure(header.source.span.clone(), path, cause))?;
-        let source = IterableSource::capture(value).map_err(|error| {
-            failed(CollectionError::InvalidSource {
-                site: self.site(header.source.span.clone(), path),
-                kind: region.kind,
-                reference: reference.to_string(),
-                message: format!("`{reference}`: {error}"),
-            })
-        })?;
+        let value = match self.evaluate(scope, &Expr::Variable(reference.to_string())) {
+            Ok(value) => value,
+            Err(_) if self.discover => return Ok(()),
+            Err(cause) => return Err(self.callback_failure(header.source.span.clone(), path, cause)),
+        };
+        let source = match IterableSource::capture(value) {
+            Ok(source) => source,
+            Err(_) if self.discover => return Ok(()),
+            Err(error) => {
+                return Err(failed(CollectionError::InvalidSource {
+                    site: self.site(header.source.span.clone(), path),
+                    kind: region.kind,
+                    reference: reference.to_string(),
+                    message: format!("`{reference}`: {error}"),
+                }));
+            }
+        };
 
         writer.open_expansion();
         let outcome = self.iterate(writer, region, node, &plan, &source, scope, path);
@@ -585,6 +606,14 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
             })
         };
 
+        if self.discover {
+            for entry in source.entries() {
+                let item = item_path(&entry);
+                self.emit(writer, region, node, plan, scope, &entry, &item)?;
+            }
+            return Ok(());
+        }
+
         match &plan.sort {
             None => {
                 for entry in source.entries() {
@@ -661,12 +690,18 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
             Some(located) => (located.span.clone(), Some(located)),
             None => (region.header_span.clone(), None),
         };
-        let body = match (region.kind, positional) {
-            (CollectionKind::Map, Some(mapper)) => {
-                let mapped = self.call(mapper, scope, entry, item)?;
-                self.bind_value(scope, &plan.body_pattern, mapped, &pattern_span, item)?
+        let bound = match (region.kind, positional) {
+            (CollectionKind::Map, Some(mapper)) => self
+                .call(mapper, scope, entry, item)
+                .and_then(|mapped| self.bind_value(scope, &plan.body_pattern, mapped, &pattern_span, item)),
+            _ => self.bind_entry(scope, &plan.body_pattern, entry, &pattern_span, item),
+        };
+        let body = match bound {
+            Ok(body) => body,
+            Err(Halt::Failed(_)) if self.discover => {
+                frame(scope, plan.body_pattern.names().map(|name| (name.to_string(), Value::Null, OverrideOrigin::Data)).collect())
             }
-            _ => self.bind_entry(scope, &plan.body_pattern, entry, &pattern_span, item)?,
+            Err(halt) => return Err(halt),
         };
         writer.open_iteration(Arc::clone(&body), item.clone());
         let rendered = self.render(writer, region.body_span.clone(), &node.children, Some(&body), item);

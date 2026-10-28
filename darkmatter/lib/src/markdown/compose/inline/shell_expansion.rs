@@ -7,7 +7,7 @@ use super::super::perf;
 use super::super::body_origin::{BodyProvenance, EditOrigin, apply_replacements_with_edits};
 use super::super::context::effective_state::ResolvingLookup;
 use super::super::expression::ExpressionFinder;
-use super::super::page_blocks::BodyGuards;
+use super::super::collection_blocks::BodyScopes;
 use super::super::schema_validation::PreparedSchemas;
 use super::super::site_scope::{SiteHook, SiteLookup};
 use super::super::shell_expansion::site::{SiteFrame, SiteScope, TemplateSite, authored_context, prepare_site};
@@ -71,11 +71,11 @@ pub(crate) fn run_stage(
     // The page-block stage already removed every false block, so a site's
     // enclosing `::block when=` guards held; they are read from the authored
     // body, as discovery read them.
-    let body_guards = body
+    let body_scopes = body
         .authored
         .as_ref()
         .filter(|_| authored.iter().any(Option::is_some))
-        .map(|authored| BodyGuards::scan_body(authored.text(), line_offset))
+        .map(|authored| BodyScopes::scan_body(authored.text(), line_offset, &options.enabled_operations))
         .unwrap_or_default();
     let document = ResolvingLookup::new(state, options.expression_resolution_context(&runtime.remote_fetch));
     // A repeated body's placeholders read the frame of the copy they lie in.
@@ -121,7 +121,7 @@ pub(crate) fn run_stage(
                         authored_ctx.clone(),
                         &evaluator,
                         frame,
-                        &body_guards.enclosing(authored_offset),
+                        &|types| body_scopes.scope_at(types, authored_offset),
                     )?,
                     None => None,
                 }
@@ -148,6 +148,9 @@ pub(crate) fn run_stage(
 
     for (parsed, site, span, extent, line_indent) in directives {
         let span_start = perf.is_enabled().then(std::time::Instant::now);
+        // A template reads its holes now, so the copy it lies in is entered
+        // again: every directive was read before any ran.
+        lookup.enter(span.start);
         let prepared = prepare_site(parsed, site.as_ref(), options, &policy_paths, &mut runtime.shell)?;
         let execution = execute_prepared_directive(&prepared, options, &runtime.shell)?;
         if let Some(start) = span_start {

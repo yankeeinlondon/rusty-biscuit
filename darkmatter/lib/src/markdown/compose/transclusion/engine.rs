@@ -48,6 +48,21 @@ pub(crate) fn build_resolution_cache(
         .collect()
 }
 
+/// The leading whitespace of the line a directive at `span` occupies, when a
+/// collection body repeated it; empty otherwise.
+///
+/// A directive written inside a list item loses that indentation when its
+/// line is replaced, which would end the item at the first line of a
+/// multiline child. Directives outside a collection keep their historical
+/// behavior.
+fn repeated_indent(content: &str, span: &std::ops::Range<usize>, repeated: bool) -> String {
+    if !repeated {
+        return String::new();
+    }
+    let line = &content[span.clone()];
+    line[..line.len() - line.trim_start().len()].to_string()
+}
+
 #[derive(Debug, Clone)]
 struct HeadingInfo {
     level: HeadingLevel,
@@ -257,6 +272,13 @@ pub(crate) enum PreparedTransclusion {
         opening: Option<SourceOpening>,
         directive_options: transclusion::BlockOptions,
         insertion_context: Option<(usize, usize)>,
+        /// The authored site and original items of a directive a collection
+        /// body repeated, which select the child's discovered subgraph.
+        site: Option<crate::markdown::compose::preflight::ScopedSite>,
+        /// The leading whitespace of a repeated directive's line, applied to
+        /// every line of the child's output so it stays inside the list
+        /// item the directive was written in. Empty outside a collection.
+        indent: String,
     },
     Code {
         order: usize,
@@ -271,6 +293,8 @@ pub(crate) enum PreparedTransclusion {
         url: url::Url,
         directive_options: transclusion::BlockOptions,
         insertion_context: Option<(usize, usize)>,
+        site: Option<crate::markdown::compose::preflight::ScopedSite>,
+        indent: String,
     },
     RemoteCode {
         order: usize,
@@ -441,6 +465,67 @@ impl<'a> TransclusionEngine<'a> {
         (idx > 0).then(|| table[idx - 1].1)
     }
 
+    /// The target pre-flight discovered for the repeated `directive` at
+    /// `site`, after checking it is what this copy resolves to.
+    ///
+    /// ## Errors
+    ///
+    /// [`ShellExpansionError::NotPreApproved`] when discovery found no such
+    /// site, found one with other explicit values, or the copy now resolves
+    /// to another target. Nothing is approved late.
+    fn scoped_resolution(
+        &self,
+        directive: &transclusion::BlockDirective,
+        site: &crate::markdown::compose::preflight::ScopedSite,
+        graph: &crate::markdown::compose::preflight::PreflightGraphNode,
+        options: &crate::markdown::compose::ComposeRequest,
+        transclusion_opts: &crate::markdown::compose::context::options::TransclusionOptions,
+    ) -> MarkdownResult<crate::markdown::compose::preflight::PreflightResolvedTarget> {
+        use crate::markdown::compose::preflight::{PreflightResolvedTarget, parameters_identity};
+        let refuse = |why: &str| -> crate::markdown::types::MarkdownError {
+            crate::markdown::compose::shell_expansion::types::ShellExpansionError::NotPreApproved {
+                ctx: Box::new(self.markdown.source_context_for_errors()),
+                command: format!("::{} {}", directive.kind.as_str(), directive.raw_target),
+                origin: crate::markdown::compose::shell_expansion::types::ShellCommandOrigin::Body {
+                    line: directive.line,
+                },
+                source_desc: format!(" ({why}; {})", site.iteration),
+            }
+            .into()
+        };
+        let (discovered, parameters) = if directive.kind == transclusion::DirectiveKind::Code {
+            let target = graph
+                .scoped_target(site)
+                .ok_or_else(|| refuse("this repeated target was not found by pre-flight"))?;
+            (target.resolved_target.clone(), 0)
+        } else {
+            let edge = graph
+                .scoped_edge(site)
+                .ok_or_else(|| refuse("this repeated target was not found by pre-flight"))?;
+            (edge.resolved_target.clone(), edge.parameters)
+        };
+        if directive.kind != transclusion::DirectiveKind::Code && parameters != parameters_identity(&directive.options) {
+            return Err(refuse("this repeated target's explicit values differ from the ones pre-flight walked"));
+        }
+        let now = transclusion::resolve_target(
+            directive.kind,
+            &directive.raw_target,
+            transclusion_opts,
+            &options.source,
+            directive.line,
+            self.markdown.source_context_for_errors(),
+        )?;
+        let same = match (&discovered, &now) {
+            (PreflightResolvedTarget::File { path, .. }, transclusion::ResolvedTarget::File { path: now, .. }) => path == now,
+            (PreflightResolvedTarget::Url(url), transclusion::ResolvedTarget::Url { url: now, .. }) => url == now,
+            _ => false,
+        };
+        if !same {
+            return Err(refuse("this repeated target resolves differently than pre-flight found it"));
+        }
+        Ok(discovered)
+    }
+
     /// Prepares `::file` / `::url` / `::code` transclusions from directives
     /// **parsed against the current content**.
     ///
@@ -469,10 +554,11 @@ impl<'a> TransclusionEngine<'a> {
         >,
         mut watch: Option<&mut crate::markdown::compose::pipeline::ReportWatch<'_>>,
         scopes: &crate::markdown::compose::body_origin::ScopeRanges,
+        sites: &[Option<crate::markdown::compose::preflight::ScopedSite>],
     ) -> MarkdownResult<()> {
         let ignore_invalid = self.resolve_ignore_invalid(options);
         let transclusion_opts = options.transclusion_options();
-        for directive in directives.iter().filter(|directive| match kind {
+        for (directive, site) in directives.iter().zip(sites).filter(|(directive, _)| match kind {
             transclusion::DirectiveKind::Code => {
                 directive.kind == transclusion::DirectiveKind::Code
             }
@@ -607,7 +693,21 @@ impl<'a> TransclusionEngine<'a> {
             }
 
             let target = &directive.raw_target;
-            let cached = resolved_cache.and_then(|cache| cache.get(target));
+            // A directive a collection body repeated is matched by its
+            // authored site and original item, never by target text: copies
+            // of one authored line share a target when they differ in
+            // parameters, and a target no copy was discovered for was never
+            // approved.
+            let scoped = match (site, options.preflight_graph()) {
+                (Some(site), Some(graph)) if !graph.is_empty() => Some(self.scoped_resolution(
+                    directive, site, graph, options, &transclusion_opts,
+                )?),
+                _ => None,
+            };
+            let cached = match &scoped {
+                Some(resolved) => Some(resolved),
+                None => resolved_cache.and_then(|cache| cache.get(target)),
+            };
             let resolved = if let Some(cached) = cached {
                 // Reuse the preflight-resolved target, skipping a second
                 // `resolve_target` pass. The span still rides on `directive`
@@ -678,6 +778,8 @@ impl<'a> TransclusionEngine<'a> {
                             opening: transclusion::source_opening(target, &resolved),
                             directive_options: directive.options.clone(),
                             insertion_context: Some((directive.span.start, directive.line)),
+                            site: site.clone(),
+                            indent: repeated_indent(self.markdown.content(), &directive.span, site.is_some()),
                         }
                     };
                     prepared.push(item);
@@ -711,6 +813,8 @@ impl<'a> TransclusionEngine<'a> {
                             url,
                             directive_options: directive.options.clone(),
                             insertion_context: Some((directive.span.start, directive.line)),
+                            site: site.clone(),
+                            indent: repeated_indent(self.markdown.content(), &directive.span, site.is_some()),
                         });
                     }
                     *next_order += 1;
@@ -847,6 +951,8 @@ impl<'a> TransclusionEngine<'a> {
                     opening: Some(SourceOpening { reference: file_ref, resolved }),
                     directive_options: transclusion::BlockOptions::default(),
                     insertion_context: None,
+                    site: None,
+                    indent: String::new(),
                 });
                 *next_order += 1;
             }
@@ -866,6 +972,8 @@ impl<'a> TransclusionEngine<'a> {
                     url,
                     directive_options: transclusion::BlockOptions::default(),
                     insertion_context: None,
+                    site: None,
+                    indent: String::new(),
                 });
                 *next_order += 1;
             }
@@ -975,6 +1083,8 @@ impl<'a> TransclusionEngine<'a> {
                 opening,
                 directive_options,
                 insertion_context,
+                site,
+                indent,
             } => {
                 let mut child_runtime = {
                     let runtime = runtime_mutex.lock().unwrap();
@@ -985,6 +1095,7 @@ impl<'a> TransclusionEngine<'a> {
                     &path,
                     opening.as_ref(),
                     insertion_context,
+                    site.as_ref(),
                     &directive_options,
                     state,
                     state_identity,
@@ -992,6 +1103,7 @@ impl<'a> TransclusionEngine<'a> {
                     &mut child_runtime,
                     &mut child_report,
                 )?;
+                let content = crate::markdown::compose::indent::indent_text(&content, &indent, None);
                 child_report.transclusions_applied += 1;
                 {
                     let mut runtime = runtime_mutex.lock().unwrap();
@@ -1039,6 +1151,8 @@ impl<'a> TransclusionEngine<'a> {
                 url,
                 directive_options,
                 insertion_context,
+                site,
+                indent,
             } => {
                 let remote_fetch = {
                     let runtime = runtime_mutex.lock().unwrap();
@@ -1122,9 +1236,12 @@ impl<'a> TransclusionEngine<'a> {
                 // OWN preflight sub-node (whose edges point at grandchildren) so
                 // its transclusion stage reuses grandchild URL/path resolution
                 // too. Mirrors the local-file path; a miss falls back to None.
-                child_options.preflight_graph = options
-                    .preflight_graph()
-                    .and_then(|graph| graph.child_for_url(&url).cloned());
+                child_options.preflight_graph = options.preflight_graph().and_then(|graph| {
+                    site.as_ref()
+                        .and_then(|site| graph.scoped_edge(site))
+                        .map(|edge| std::sync::Arc::clone(&edge.child))
+                        .or_else(|| graph.child_for_url(&url).cloned())
+                });
 
                 let child_report = child
                     .run_compose_pipeline_internal(child_options, &mut child_runtime)?;
@@ -1152,6 +1269,7 @@ impl<'a> TransclusionEngine<'a> {
                 }
 
                 let result = self.apply_wrappers(content, &directive_options);
+                let result = crate::markdown::compose::indent::indent_text(&result, &indent, None);
                 Ok(ResolvedTransclusion {
                     order,
                     target,
@@ -1422,6 +1540,7 @@ impl<'a> TransclusionEngine<'a> {
         path: &Path,
         opening: Option<&SourceOpening>,
         insertion_context: Option<(usize, usize)>,
+        site: Option<&crate::markdown::compose::preflight::ScopedSite>,
         directive_options: &transclusion::BlockOptions,
         state: &EffectiveState,
         state_identity: cache::hashing::PhaseStateIdentity,
@@ -1491,7 +1610,7 @@ impl<'a> TransclusionEngine<'a> {
 
         let path_buf = path.to_path_buf();
 
-        let cached = cache_handle.get_or_compute_compose(
+        let outcome = cache_handle.get_or_compute_compose_outcome(
             &cache_key,
             || {
                 let mut child_options =
@@ -1504,11 +1623,16 @@ impl<'a> TransclusionEngine<'a> {
                 // so its resolution cache would be keyed by the wrong
                 // (parent-level) targets. A miss (no graph attached, or this
                 // child was not in the preflight walk) falls back to None.
-                child_options.preflight_graph = options
-                    .preflight_graph()
-                    .and_then(|graph| graph.child_for_source(&path_buf).cloned());
+                child_options.preflight_graph = options.preflight_graph().and_then(|graph| {
+                    site.and_then(|site| graph.scoped_edge(site))
+                        .map(|edge| std::sync::Arc::clone(&edge.child))
+                        .or_else(|| graph.child_for_source(&path_buf).cloned())
+                });
 
                 let mut compose_runtime = runtime.clone_for_child();
+                // A ledger of its own records what this subtree consumes, so a
+                // later reuse can reserve the same amount.
+                compose_runtime.iteration = runtime.iteration.with_ledger();
                 let child_report =
                     child.run_compose_pipeline_internal(child_options, &mut compose_runtime)?;
                 runtime.merge_child(&compose_runtime);
@@ -1519,9 +1643,17 @@ impl<'a> TransclusionEngine<'a> {
                     context_groups: compose_runtime
                         .context_groups()
                         .union(child_context.capture_requirements()),
+                    usage: compose_runtime.iteration.ledger_usage(),
                 })
             },
         )?;
+        if outcome.reused {
+            runtime
+                .iteration
+                .reserve_usage(outcome.result.usage, &crate::markdown::compose::expression::iteration::IterationPath::empty())
+                .map_err(crate::markdown::compose::inline::shell_expansion::collection_budget)?;
+        }
+        let cached = outcome.result;
         runtime.record_context_groups(&cached.context_groups);
 
         report.merge(cached.report.clone());

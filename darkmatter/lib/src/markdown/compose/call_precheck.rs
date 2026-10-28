@@ -481,6 +481,7 @@ fn check_body(
         }
         for expression_site in guards.expression_sites(site) {
             let (checks, rejected) = checked(&expression_site.expression, &expression_site.scope);
+            let recorded = advisories.found.len();
             advisories.record(
                 &checks,
                 &incomplete_host_calls(&expression_site.expression),
@@ -489,8 +490,14 @@ fn check_body(
                 None,
                 None,
             );
+            // The findings' spans index the decoded callback; place them on
+            // the authored bytes, across escaped quotes and multibyte text.
+            for advisory in &mut advisories.found[recorded..] {
+                advisory.origin = expression_site.authored_range(advisory.finding.span.clone());
+                advisory.order = (BODY_RANK, advisory.origin.start);
+            }
             if let Some((check, at)) = rejected {
-                let start = expression_site.origin + at;
+                let start = expression_site.authored_range(at..at + 1).start;
                 let error = rejection(None, &expression_site.text, check);
                 rejections.push((start, anchor_body(markdown, error, start..start + 1)));
             }

@@ -20,7 +20,7 @@ pub use enums::{
 };
 pub use parsers::{
     parse_bool_str, parse_cli_fill, parse_cli_length, parse_fixed_width, parse_indent_size,
-    parse_max_width, parse_theme_name, reject_width_flag,
+    parse_max_width, parse_positive_limit, parse_theme_name, reject_width_flag,
 };
 pub use target::{SchemaTarget, ValidateTarget};
 pub use wrappers::{CliFill, CodeBlockArg, PageAlignmentArg, PageBackgroundArg};

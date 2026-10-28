@@ -225,6 +225,27 @@ completion restriction: a bare `{{ today }}` must not receive `ctx.today` *hover
 metadata even when `today` is a known context-variable tail. See
 [Hover](./hover.md) for that classification.
 
+## Collection regions
+
+Inside a `::map` / `::filter` body, `{{ … }}` completion also offers the
+locals visible at the cursor, bare and as `local.<name>`, typed by the
+library's scope: the body binding, destructured fields, the mapped result, and
+outer captures. It never offers a sibling callback's parameter, a local of a
+closed or later region, or a frontmatter key a local shadows (`fm.<key>` still
+reaches it).
+
+On an opener line:
+
+- **Source** — reserved roots plus frontmatter keys, locals, and `ctx` / host
+  globals whose declared type is iterable.
+- **Options** — `when`, `filter`, `sort`, `sort-order`, `while`, `until`,
+  without those already written; `while` and `until` exclude each other and
+  `sort-order` is offered once `sort` is written. `sort-order=` completes
+  `asc` / `desc`.
+- **Callbacks and `when`** — the expression after `=>` / `->` completes with
+  the callback's own parameters (a `when` sees the enclosing scope). Member
+  names of a local (`person.na`) are not completed.
+
 ## Completion item metadata
 
 Items populate the LSP fields intended for type and documentation so editors can

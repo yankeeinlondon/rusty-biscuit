@@ -1060,6 +1060,7 @@ fn expr_completion_item(
         expressions::ExprCompletionKind::ContextVariable => CompletionItemKind::VARIABLE,
         expressions::ExprCompletionKind::ReservedRoot => CompletionItemKind::MODULE,
         expressions::ExprCompletionKind::Function => CompletionItemKind::FUNCTION,
+        expressions::ExprCompletionKind::LocalBinding => CompletionItemKind::VARIABLE,
     };
     Some(CompletionItem {
         label: candidate.label,

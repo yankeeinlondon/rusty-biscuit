@@ -341,8 +341,8 @@ fn interpolation_tokens(text: &str, body_base: usize) -> Vec<RawToken> {
     out
 }
 
-/// F2: directive keywords (`macro.directive`, plus `closer` on the three
-/// structural closers), structured targets (`string.directive`), and option
+/// F2: directive keywords (`macro.directive`, plus `closer` on the structural
+/// closers), structured targets (`string.directive`), and option
 /// keys/values (`property.directive` / `string.directive`).
 ///
 /// Free-form payloads are excluded: `::shell` command text is deferred to F6
@@ -373,6 +373,17 @@ fn directive_tokens(text: &str, body_base: usize) -> Vec<RawToken> {
                 TokenType::Str,
                 modifier::DIRECTIVE,
                 "f2.target",
+            ));
+        }
+
+        // The quoted positional callback of `::map` / `::filter`; its span is
+        // the authored value, quotes and escapes included.
+        if let Some(callback) = directive.callback {
+            out.push(directive_raw(
+                shift(callback.span, body_base),
+                TokenType::Str,
+                modifier::DIRECTIVE,
+                "f2.callback",
             ));
         }
 
@@ -473,15 +484,21 @@ fn has_structured_target(kind: DirectiveKind) -> bool {
             | DirectiveKind::Url
             | DirectiveKind::FileLinks
             | DirectiveKind::TocLinking
+            | DirectiveKind::Map
+            | DirectiveKind::Filter
     )
 }
 
-/// Whether a directive is one of the three structural closers that additionally
-/// carry the `closer` modifier.
+/// Whether a directive is one of the structural closers (including the
+/// `::details` divider) that additionally carry the `closer` modifier.
 fn is_closer(kind: DirectiveKind) -> bool {
     matches!(
         kind,
-        DirectiveKind::EndBlock | DirectiveKind::Details | DirectiveKind::EndDisclosure
+        DirectiveKind::EndBlock
+            | DirectiveKind::Details
+            | DirectiveKind::EndDisclosure
+            | DirectiveKind::EndMap
+            | DirectiveKind::EndFilter
     )
 }
 

@@ -77,15 +77,28 @@ pub struct ExpressionSite<'d> {
     pub region: Range<usize>,
     /// The decoded text the expression was parsed from.
     pub text: String,
-    /// Authored byte offset of `text[0]` in the scanned text. A decoded
-    /// offset maps to an authored one exactly unless the value contains an
-    /// escape.
+    /// Authored byte offset of `text[0]` in the scanned text. Adding a decoded
+    /// offset to it is exact only when the value contains no escape; use
+    /// [`ExpressionSite::authored_range`] to project a span.
     pub origin: usize,
+    /// The quoted value `text` was decoded from, which maps decoded offsets
+    /// back across its escapes.
+    pub(crate) quoted: QuotedExpression,
     /// The condition, or the callback's body. Its spans index `text`.
     pub expression: SpannedExpr,
     /// The scope the expression is evaluated in. For a callback it holds the
     /// callback's own parameters.
     pub scope: TypeScope<'d>,
+}
+
+impl ExpressionSite<'_> {
+    /// The authored span of a decoded span of [`text`](Self::text), accurate
+    /// across escaped quotes and multibyte text.
+    pub fn authored_range(&self, decoded: Range<usize>) -> Range<usize> {
+        self.quoted
+            .authored_range(decoded.clone())
+            .unwrap_or(self.origin + decoded.start..self.origin + decoded.end)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -397,6 +410,9 @@ enum Step<'a> {
 pub struct BodyScopes {
     guards: BodyGuards,
     plans: Vec<RegionPlan>,
+    /// Byte offset of the start of each line of the scanned body; index 0 is
+    /// line 1. Empty for an inventory built from an analysis.
+    line_starts: Vec<usize>,
 }
 
 impl BodyScopes {
@@ -428,13 +444,17 @@ impl BodyScopes {
         } else {
             Vec::new()
         };
-        Self::from_parts(guards, &regions)
+        let mut scopes = Self::from_parts(guards, &regions);
+        scopes.line_starts = std::iter::once(0)
+            .chain(body.match_indices('\n').map(|(index, _)| index + 1))
+            .collect();
+        scopes
     }
 
     pub(super) fn from_parts(guards: BodyGuards, regions: &[CollectionRegion]) -> Self {
         let mut plans = Vec::new();
         flatten(regions, &mut plans);
-        Self { guards, plans }
+        Self { guards, plans, line_starts: Vec::new() }
     }
 
     /// Whether the body has neither a guarded nor a collection region.
@@ -477,6 +497,15 @@ impl BodyScopes {
         })
     }
 
+    /// [`Self::scope_at`] for the start of the 1-based `line` of the scanned
+    /// body, or `site` unchanged when the inventory has no such line.
+    pub fn scope_at_line<'d>(&self, site: TypeScope<'d>, line: usize) -> TypeScope<'d> {
+        match line.checked_sub(1).and_then(|index| self.line_starts.get(index)) {
+            Some(&offset) => self.scope_at(site, offset),
+            None => site,
+        }
+    }
+
     /// Every authored expression of every region in header order, outermost
     /// region first, each with the scope it is evaluated in under `site`.
     ///
@@ -492,6 +521,7 @@ impl BodyScopes {
                     region: plan.span.clone(),
                     text: gate.quoted.text.clone(),
                     origin: authored_origin(&gate.quoted),
+                    quoted: gate.quoted.clone(),
                     expression: gate.spanned.clone(),
                     scope: outer.clone(),
                 });
@@ -508,6 +538,7 @@ impl BodyScopes {
                     region: plan.span.clone(),
                     text: callback.quoted.text.clone(),
                     origin: authored_origin(&callback.quoted),
+                    quoted: callback.quoted.clone(),
                     expression: callback.spanned.body.clone(),
                     scope: scope.clone(),
                 });

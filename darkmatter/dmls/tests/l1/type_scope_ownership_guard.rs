@@ -16,13 +16,19 @@ const UNGUARDED: &[Unguarded] = &[
         path: "providers/dsl.rs",
         item: "with_site_scope",
         count: 1,
-        reason: "the one editor site scope: a body offset narrows it by its enclosing `BodyGuards`, a frontmatter site has no guard",
+        reason: "the one editor site scope: a body offset narrows it by its enclosing guards and collection regions (`BodyScopes`), a frontmatter site has none",
     },
     Unguarded {
         path: "providers/dsl.rs",
         item: "expression_diagnostics",
         count: 1,
-        reason: "the body call check's base scope: each call narrows it by its enclosing `BodyGuards` before checking",
+        reason: "the body call check's base scope: each call narrows it by its enclosing guards and collection regions (`BodyScopes`) before checking",
+    },
+    Unguarded {
+        path: "providers/collections.rs",
+        item: "diagnostics",
+        count: 1,
+        reason: "the collection analysis's base scope: the library's `analyze_collection_blocks` and `BodyScopes::expression_sites` derive every region and callback scope from it",
     },
     Unguarded {
         path: "diagnostics/frontmatter.rs",
@@ -36,14 +42,14 @@ const DECISION_SITES: &[DecisionSite] = &[
     DecisionSite {
         path: "providers/dsl.rs",
         item: "with_site_scope",
-        requires: &["BodyGuards::scan", "scope_at("],
+        requires: &["collections::scopes", "scope_at("],
         forbids: &[],
         null_read: None,
     },
     DecisionSite {
         path: "providers/dsl.rs",
         item: "expression_diagnostics",
-        requires: &["BodyGuards::scan", "scope_at("],
+        requires: &["collections::scopes", "scope_at("],
         forbids: &[],
         null_read: None,
     },
@@ -57,6 +63,13 @@ const DECISION_SITES: &[DecisionSite] = &[
     DecisionSite {
         path: "overlay/expressions.rs",
         item: "local_type",
+        requires: &["scoped_type("],
+        forbids: &[],
+        null_read: None,
+    },
+    DecisionSite {
+        path: "overlay/expressions.rs",
+        item: "scoped_type",
         requires: &["branch_scope("],
         forbids: &[],
         null_read: None,
@@ -111,11 +124,12 @@ fn a_dmls_guard_algebra_or_unreviewed_scope_is_rejected() {
     let baseline = [
         (
             "providers/dsl.rs",
-            "fn with_site_scope() { let u = TypeScope::unguarded(&d); BodyGuards::scan(t).scope_at(u, 0) }
-             fn expression_diagnostics() { let u = TypeScope::unguarded(&d); BodyGuards::scan(t).scope_at(u, 0) }
+            "fn with_site_scope() { let u = TypeScope::unguarded(&d); collections::scopes(t).scope_at(u, 0) }
+             fn expression_diagnostics() { let u = TypeScope::unguarded(&d); collections::scopes(t).scope_at(u, 0) }
              fn transclusion_diagnostics() { analyze_directive_targets(t); a.is_narrowed(); }",
         ),
-        ("overlay/expressions.rs", "pub fn local_type() { branch_scope(e, s, site) }"),
+        ("overlay/expressions.rs", "pub fn local_type() { scoped_type(e, n, site) }\n             fn scoped_type() { branch_scope(e, s, site) }"),
+        ("providers/collections.rs", "fn diagnostics() { TypeScope::unguarded(d) }"),
         (
             "diagnostics/frontmatter.rs",
             "impl FrontmatterCalls { fn new() -> Self { Self { site: TypeScope::unguarded(d) } } }",

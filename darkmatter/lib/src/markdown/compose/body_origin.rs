@@ -458,6 +458,59 @@ pub(crate) struct ScopeRange {
     parent: Option<usize>,
 }
 
+/// The maps pre-flight discovery reads to attribute a directive of an expanded
+/// body to the authored site and original item it was repeated for.
+///
+/// Advisory, like the maps it holds, so a report's equality ignores it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BodySites {
+    pub(crate) scopes: ScopeRanges,
+    pub(crate) authored: Option<AuthoredBody>,
+}
+
+impl PartialEq for BodySites {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl BodySites {
+    /// See [`scoped_site`].
+    pub(crate) fn site_at(
+        &self,
+        current: &str,
+        span: &Range<usize>,
+        line_offset: usize,
+    ) -> Option<super::preflight::ScopedSite> {
+        scoped_site(&self.scopes, self.authored.as_ref(), current, span, line_offset)
+    }
+}
+
+/// The authored site and original items of the directive occupying `span`
+/// of `current`, when a `::map` / `::filter` copy repeated it.
+///
+/// The site is the file line of the directive's authored opener (the `::`
+/// that begins it, which no stage writes), so every copy of one authored
+/// directive shares a line and differs by its item path. `None` for a
+/// directive no copy holds, and when the maps no longer describe `current`.
+pub(crate) fn scoped_site(
+    scopes: &ScopeRanges,
+    authored: Option<&AuthoredBody>,
+    current: &str,
+    span: &Range<usize>,
+    line_offset: usize,
+) -> Option<super::preflight::ScopedSite> {
+    let iteration = scopes.get(scopes.index_at(span.start)?)?.iteration.clone();
+    if iteration.is_empty() {
+        return None;
+    }
+    let authored = authored?;
+    let opener = span.start..(span.start + 2).min(current.len());
+    let from = authored.project(current, &opener)?.start;
+    let line = authored.text()[..from].matches('\n').count() + 1;
+    Some(super::preflight::ScopedSite { line: line + line_offset, iteration })
+}
+
 /// The [`ScopeRange`]s of a body, in body order.
 ///
 /// Ranges are listed by start with each enclosing range before the ranges
@@ -680,6 +733,16 @@ impl BodyProvenance {
             authored: Some(AuthoredBody::capture(markdown.content())),
             scopes: ScopeRanges::default(),
         }
+    }
+
+    /// See [`scoped_site`].
+    pub(crate) fn site_at(
+        &self,
+        current: &str,
+        span: &Range<usize>,
+        line_offset: usize,
+    ) -> Option<super::preflight::ScopedSite> {
+        scoped_site(&self.scopes, self.authored.as_ref(), current, span, line_offset)
     }
 
     /// Carries every map past a stage that rewrote `before` into `after` by

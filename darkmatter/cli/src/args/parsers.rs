@@ -14,6 +14,16 @@ pub fn parse_indent_size(s: &str) -> Result<usize, String> {
     }
 }
 
+/// Parses a compose collection limit: a positive integer that fits in 64 bits.
+///
+/// There is no unlimited spelling; zero, signs, and overflow are usage errors.
+pub fn parse_positive_limit(s: &str) -> Result<std::num::NonZeroU64, String> {
+    let value = s
+        .parse::<u64>()
+        .map_err(|_| format!("'{s}' is not a positive integer that fits in 64 bits"))?;
+    std::num::NonZeroU64::new(value).ok_or_else(|| "the limit must be at least 1".to_string())
+}
+
 /// Parses `--fixed-width`, accepting practical Markdown wrap columns from 1 to 1000.
 ///
 /// The upper bound rejects accidental huge values while still allowing any

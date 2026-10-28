@@ -77,6 +77,11 @@ impl Markdown {
             remote_fetch,
         )
         .with_iteration_limits(options.iteration_limits());
+        // Discovery reads collections to find children; it consumes none of
+        // the execution allowances.
+        if options.nested_compose.is_discovery() {
+            runtime.iteration = super::expression::iteration::IterationBudget::discovery(options.iteration_limits());
+        }
         runtime.context_epoch.seed(options.context());
         runtime.root_source = Some((
             options.source.clone(),
@@ -314,7 +319,10 @@ impl Markdown {
                 }
             }
 
-            report.body_data = body.map(|body| body.data);
+            if let Some(body) = body {
+                report.body_data = Some(body.data);
+                report.body_sites = super::body_origin::BodySites { scopes: body.scopes, authored: body.authored };
+            }
 
             super::unknown_identifiers::reconcile(
                 &mut report,

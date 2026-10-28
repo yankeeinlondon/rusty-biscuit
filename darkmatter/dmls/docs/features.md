@@ -140,11 +140,17 @@ through Darkmatter's library and does not execute Claudine or its actions.
 
 Intelligence for Darkmatter's composition DSL — all **read-only**:
 
-- **Directives** (`::file`, `::code`, `::shell`, `::block`, disclosures, …) —
-  `::`-prefix name completion, per-family option-key/enum completion, semantics
-  and resolved-target hover, block/disclosure folding, and `dm.directive.*`
-  diagnostics (unknown directive, malformed option, unclosed block, malformed
-  disclosure).
+- **Directives** (`::file`, `::code`, `::shell`, `::block`, `::map`, `::filter`,
+  disclosures, …) — `::`-prefix name completion, per-family option-key/enum
+  completion, semantics and resolved-target hover, block/region/disclosure
+  folding, and `dm.directive.*` diagnostics (unknown directive, malformed
+  option, unclosed block, malformed disclosure).
+- **Collections** (`::map` / `::filter`) — source, option, and callback
+  completion; hover on the source, callbacks, and the locals they bind; and
+  the `dm.collection.*` diagnostics `md compose` reports, all read from
+  Darkmatter's shared region analysis (see [Autocomplete](./autocomplete.md#collection-regions),
+  [Hover](./hover.md#collection-locals), and
+  [Diagnostics](./diagnostics.md#collection-regions)).
 - **Transclusion** (`::file` / `::code` / `prologue` / `epilogue`) — document
   links, go-to-definition, "who transcludes this file" references,
   broken-path diagnostics, and **cycle detection** (with the cycle ancestry
@@ -191,9 +197,10 @@ styling recipe.
 
 - **Interpolations** — the whole `{{ … }}` span is `macro.interpolation`;
   `{{{ literal }}}` adds `inert`.
-- **Directives** — the twelve `::` keywords are `macro.directive`; the three
-  structural closers (`::end-block`, `::details`, `::end-disclosure`) add
-  `closer`. Structured targets are `string.directive`, option keys/values
+- **Directives** — the sixteen `::` keywords are `macro.directive`; the structural
+  closers (`::end-block`, `::details`, `::end-disclosure`, `::end-map`,
+  `::end-filter`) add `closer`. Structured targets (including a collection's
+  source and quoted positional callback) are `string.directive`, option keys/values
   `property.directive` / `string.directive`. Unknown directives, `::shell`
   payloads, and disclosure summary prose get no token.
 - **Wiki links** — brackets and `#`/`|` separators are `macro.wiki`; the

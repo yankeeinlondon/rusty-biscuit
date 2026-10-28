@@ -185,6 +185,8 @@ classified by what failed:
 | `dm.expression.evaluation_failure` | an expression fails to evaluate; located when the expression is authored in the file |
 | `dm.expression.unknown_function` | an expression calls a function that does not exist |
 | `dm.directive.parse_failure` | a `::` directive does not parse |
+| `dm.collection.*` | a `::map` or `::filter` fails (`malformed`, `untyped_map_source`, `untyped_filter_source`, `invalid_source`, `pattern_mismatch`, `invalid_sort_key`, `callback_failed`), located at the directive opener; the `message` ends with `at <path>` naming the original item positions (such as `data[2]`) when the failure happened while processing an item |
+| `dm.iteration.visit_limit`, `dm.iteration.expansion_limit` | a request ran past `--max-iteration-visits` or `--max-expansion-bytes`; `source` is `null` and the `message` names the iteration path |
 | `dm.shell.failure` | a shell command fails, times out, or is refused |
 | `dm.transclusion.failure` | a transclusion fails for another reason |
 | `dm.reference.failure` | a file reference does not resolve |

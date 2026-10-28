@@ -115,7 +115,11 @@ impl Markdown {
             .filter(|authored| authored.text().contains("::shell-block"))
             .map(|authored| shell_blocks::BlockTemplates {
                 authored,
-                guards: crate::markdown::compose::page_blocks::BodyGuards::scan_body(authored.text(), line_offset),
+                scopes: crate::markdown::compose::collection_blocks::BodyScopes::scan_body(
+                    authored.text(),
+                    line_offset,
+                    &options.enabled_operations,
+                ),
                 scope: shell_expansion::site::SiteScope::new(
                     options,
                     schemas.effective_for(self),
@@ -290,6 +294,15 @@ impl Markdown {
 
         let mut prepared = Vec::new();
         let mut next_order = 0usize;
+        // The authored site and original items of each directive a
+        // collection body repeated.
+        let content_now = self.content.clone();
+        let line_offset = self.frontmatter_line_count();
+        let sites: Vec<Option<super::super::preflight::ScopedSite>> = parsed_directives
+            .iter()
+            .flatten()
+            .map(|directive| body.site_at(&content_now, &directive.span, line_offset))
+            .collect();
 
         // Borrow the document into a transclusion engine for the prepare and
         // resolve stages. The borrow ends before the apply stage mutates
@@ -323,6 +336,7 @@ impl Markdown {
                             resolved_cache.as_ref(),
                             watch.as_mut(),
                             &body.scopes,
+                            &sites,
                         )?;
                     }
                 }
@@ -356,6 +370,7 @@ impl Markdown {
                             None,
                             watch.as_mut(),
                             &body.scopes,
+                            &sites,
                         )?;
                     }
                 }

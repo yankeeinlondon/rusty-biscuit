@@ -28,9 +28,10 @@ use types::{ShellBlockCommandResult, SourceExcerpt};
 /// are read from.
 pub(crate) struct BlockTemplates<'a> {
     pub authored: &'a AuthoredBody,
-    /// The authored body's `::block when=` guards; a command is typed on the
-    /// true side of those around it, as discovery typed it.
-    pub guards: super::page_blocks::BodyGuards,
+    /// The authored body's `::block when=` guards and `::map` / `::filter`
+    /// bodies; a command is typed inside those around it, as discovery typed
+    /// it.
+    pub scopes: super::collection_blocks::BodyScopes,
     pub scope: SiteScope<'a>,
     pub evaluator: &'a dyn HoleEvaluator,
     /// Told which block is read, so a repeated body's placeholders read the
@@ -363,7 +364,7 @@ fn block_site<'a>(
             templates.ctx.clone(),
             templates.evaluator,
             frame,
-            &templates.guards.enclosing_line(raw.start_line),
+            &|types| templates.scopes.scope_at_line(types, raw.start_line),
         )
         .map_err(|error| ShellBlockError::Command {
             block_start_line: opener_line + line_offset,

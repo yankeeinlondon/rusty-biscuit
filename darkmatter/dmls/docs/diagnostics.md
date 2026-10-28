@@ -233,6 +233,12 @@ list alone. See [DMLS Indexing](../../docs/lsp/indexing.md).
 | `dm.expression.unknown_function` | **Error.** A call to a function outside Darkmatter's closed catalog, ranged on the function name, in every branch. Compose fails on the call. Also checked in every `{{ … }}` span and `when` condition inside a lifecycle stack of the document's host. |
 | `dm.expression.unavailable_global` | **Error.** A read, inside a lifecycle stack of the document's host, of a global the event's binding view declares unavailable: `err` in md's `initialize` or `composed` (Claudine's `initialize`, `start`, `success`, or `loop`), which handle no failure. The message names the event and the view's reason. Checked in `{{ … }}` spans at any depth of the stack, `when` conditions, and expression-typed values. It never falls back to a frontmatter key of the same name, so an `err:` key does not silence it. A host-catalog global is never reported, because the editor cannot know whether the stack runs inside a loop or a group. |
 | `dm.expression.incompatible_call` | **Error.** A function call Darkmatter's design-time check proves wrong, so `md compose` rejects the document: an argument that can never bind (`min(flag, 5)` with `flag: boolean(required)`), a wrong argument count, or an ambiguous overload. Ranged on the argument, or on the whole call for a count or overload problem. Checked in every branch, including ones that never run. Emitted on Expression-typed values, every frontmatter `{{ … }}` span, and `when` conditions inside lifecycle stacks. Inside a lifecycle stack each call is typed at its site exactly as the document's host types it before launch (`md compose`, or a host such as Claudine through its [lifecycle artifact](../../docs/topics/lifecycle/host-artifact.md)): narrowed by the enclosing `when:` items, until a `set` writes the guarded property, and never across events. Under a host, its own events (Claudine's `start`, `success`, `blocked`, `failure`, and `loop` gate) and its verbs' operands (`say`, `speak`, `effect`, `notify`, `retry`/`proxy`/`prep` `with:` values, `resume`, `break`, `defer`) are such sites; a Darkmatter spelling the host renamed (`composed` under Claudine) is not a stack, and the host refuses the document before launch. |
+| `dm.collection.malformed` | A malformed `::map` / `::filter` region or opener: an unpaired or crossed wrapper, a bad source, an unknown or duplicate option, a bare flag, an unquoted or empty value, `while` with `until`, or `sort-order` without `sort`. Ranged on the offending token. |
+| `dm.collection.untyped_map_source` / `dm.collection.untyped_filter_source` | A source with no iterable declaration in the effective schema. An error unless the untyped-source recovery is allowed, which the editor does not assume. |
+| `dm.collection.invalid_source` | A source known not to be iterable. |
+| `dm.expression.invalid_callback` | A callback that does not parse or binds a protected name (`ctx`, `null`, a host global). |
+| `dm.collection.pattern_mismatch` | A pattern that cannot bind its entry, or a mapped result the body pattern cannot bind. |
+| `dm.collection.invalid_sort_key` | A `sort=` key that is provably not a number or a string. |
 | `dm.expression.uncertain_call` | **Warning.** A call argument that might not bind, such as typed text passed to a number (`min(count, 5)` with `count: string`). With `expressions.strict`, also an argument that may be `null` where the parameter rejects it, or whose type is unknown. |
 | `dm.expression.always_false_call` | **Warning**, matching `md compose`, which reports the same warning and still composes. A `file_exists` (or `fileexists`) call whose argument is literal text that is not a well-formed file reference (`file_exists("https://")`, `file_exists("")`), so the call can only return `false`; ranged at the literal. A variable argument, even one of type `string`, never warns, and nothing is read to decide it. Shown under both `expressions.strict` settings. |
 | `dm.expression.incomplete_analysis` | **Warning**, under both `expressions.strict` settings. A call to a host function whose facts DMLS cannot trust: the facts artifact (`<catalog stem>.facts.json` beside the host's function catalog in the document's schema roots) is absent, unreadable, invalid, generated from another version of the catalog, or lacks a valid entry for the function. The call is still a known function, but it gets no argument-type category and its guard narrows nothing, because only the host's runtime knows its facts. The message names the function and the reason. Ranged on the whole call, on every surface that gets call diagnostics. Regenerating the artifact clears it. See [Host Expression Functions](../../docs/topics/host-functions.md). |
@@ -680,3 +686,21 @@ for what else a reload recomputes.
   never-executed account of shell and remote content).
 - [Autocomplete](./autocomplete.md) — completion behavior and fields.
 - [Features](./features.md) — the full capability overview and per-editor matrix.
+
+### Collection regions
+
+`::map` and `::filter` regions are judged by Darkmatter's own analysis, so the
+code and authored span match the first error `md compose` reports for the
+document (one error per defect; header problems that the lenient scan
+recovers are listed too, each once). Spans are projected through the offset map
+of the quoted value, so an escaped quote (`\"`) or a multibyte character in a
+callback does not shift a range, in UTF-16 or UTF-8 columns and under CRLF.
+
+Calls are checked in every gate, callback, and body under the scope each is
+evaluated in (the body's locals, the callback's own parameters, the enclosing
+guards), including regions whose gate is false: `dm.expression.incompatible_call`
+and `dm.expression.unknown_function` apply there as in a body `{{ … }}`. A name
+bound by an enclosing region is never a `dm.expression.undeclared_property`.
+No callback is evaluated; the analysis runs no handler, shell command, or
+transclusion.
+

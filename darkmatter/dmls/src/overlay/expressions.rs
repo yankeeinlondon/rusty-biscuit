@@ -768,6 +768,8 @@ pub enum ExprCompletionKind {
     ReservedRoot,
     /// An expression function.
     Function,
+    /// A lexical local of an enclosing `::map` / `::filter` callback or body.
+    LocalBinding,
 }
 
 /// One completion candidate for an expression context — either a body `{{ }}`
@@ -878,6 +880,73 @@ pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<
     }
 
     items
+}
+
+/// [`completion_candidates`] and the host's `extra` candidates as seen from
+/// `site`: the lexical locals visible there (`name` and `local.name`) are
+/// offered, and a frontmatter key a local shadows is not (`fm.<key>` still
+/// reaches it).
+///
+/// Locals come from the library's scope inventory and are typed by it; this
+/// reads names and declared types, and resolves nothing.
+pub fn scoped_completion_candidates(
+    partial: &str,
+    frontmatter_keys: &[String],
+    extra: impl IntoIterator<Item = ExprCompletion>,
+    site: &TypeScope<'_>,
+) -> Vec<ExprCompletion> {
+    let locals: Vec<String> = site
+        .lexical()
+        .map(|layer| layer.names().into_iter().map(str::to_string).collect())
+        .unwrap_or_default();
+    let mut items: Vec<ExprCompletion> = completion_candidates(partial, frontmatter_keys)
+        .into_iter()
+        .chain(extra)
+        .filter(|item| !(item.kind == ExprCompletionKind::FrontmatterKey && locals.contains(&item.label)))
+        .collect();
+    if locals.is_empty() {
+        return items;
+    }
+    let root = local_root_name();
+    if root.starts_with(partial) {
+        items.push(ExprCompletion {
+            label: root.to_string(),
+            insert_text: root.to_string(),
+            kind: ExprCompletionKind::ReservedRoot,
+            detail: Some("reserved root".to_string()),
+            documentation: Some("The bindings of the enclosing `::map` / `::filter` callbacks and bodies.".to_string()),
+        });
+    }
+    for name in &locals {
+        let detail = local_detail(site, name);
+        for label in [name.clone(), format!("{root}.{name}")] {
+            if label.starts_with(partial) {
+                items.push(ExprCompletion {
+                    insert_text: label.clone(),
+                    label,
+                    kind: ExprCompletionKind::LocalBinding,
+                    detail: Some(detail.clone()),
+                    documentation: None,
+                });
+            }
+        }
+    }
+    items
+}
+
+/// The reserved root that always names a lexical local, from the library's
+/// root catalog.
+fn local_root_name() -> &'static str {
+    darkmatter::markdown::compose::expression::LOCAL_ROOT
+}
+
+/// `local: <type>` for the binding `name` at `site`.
+fn local_detail(site: &TypeScope<'_>, name: &str) -> String {
+    let ty = site.type_of_expr(&darkmatter::markdown::compose::expression::Expr::Variable(name.to_string()));
+    match ty {
+        Some(ty) => format!("local: {}", type_text(&ty)),
+        None => local_root_name().to_string(),
+    }
 }
 
 /// The hover block for a host global or one of its members (`seq`,
@@ -1079,6 +1148,20 @@ pub fn hover_markdown_condition(
     )
 }
 
+/// [`hover_markdown`] for an expression already parsed out of a larger
+/// authored value, such as a `::map` callback's body: `expression` is the
+/// text its spans index and `expr_offset` the cursor's offset into it.
+pub fn hover_markdown_parsed(
+    parsed: SpannedExpr,
+    expression: &str,
+    expr_offset: usize,
+    site: &TypeScope<'_>,
+    frontmatter_scalar: impl Fn(&str) -> Option<String>,
+    schema_property: impl Fn(&str) -> Option<String>,
+) -> String {
+    hover_markdown_from(Ok(parsed), expression, expr_offset, site, frontmatter_scalar, schema_property, None)
+}
+
 /// The expression hover for an expression inside `event`'s lifecycle stack,
 /// parsed with `parser`: identical to [`hover_markdown`] and
 /// [`hover_markdown_condition`], except that a root the event's view declares
@@ -1157,6 +1240,15 @@ fn hover_markdown_from(
     let frontmatter_member = name
         .strip_prefix(document_root().name)
         .and_then(|rest| rest.strip_prefix('.'));
+    // A lexical local shadows every document property of the same name, so
+    // its scoped type is the whole answer (frontmatter and schema lookups
+    // would describe a different binding).
+    if site.resolves_to_local(&name) {
+        if let Some(ty) = scoped_type(&expr, sub_expr, site) {
+            value.push_str(&format!("\n\n{}", local_binding_line(&name, &ty)));
+        }
+        return value;
+    }
     if let Some(tail) = name
         .strip_prefix(context_root().name)
         .and_then(|rest| rest.strip_prefix('.'))
@@ -1202,9 +1294,32 @@ fn hover_markdown_from(
 /// [`branch_scope`]; DMLS decides none itself. Static: both branches of a
 /// ternary get their own side's type, whichever would run.
 pub fn local_type(expr: &SpannedExpr, node: &SpannedExpr, site: &TypeScope<'_>) -> Option<ScopedType> {
-    let scope = branch_scope(expr, &node.span, site.clone());
-    let ty = scope.type_of_expr(&node.erase())?;
+    let ty = scoped_type(expr, node, site)?;
     (ty.is_refined() || ty.guard_presence().is_some()).then_some(ty)
+}
+
+/// The type of `node` at its own branch of `expr` under `site`, refined or
+/// not; the one read [`local_type`] and the local-binding hover share.
+fn scoped_type(expr: &SpannedExpr, node: &SpannedExpr, site: &TypeScope<'_>) -> Option<ScopedType> {
+    branch_scope(expr, &node.span, site.clone()).type_of_expr(&node.erase())
+}
+
+/// The hover line for a read of the lexical local `path`: its declared or
+/// result type, with the guards that narrowed it when any did.
+fn local_binding_line(path: &str, ty: &ScopedType) -> String {
+    let mut guards: Vec<String> = Vec::new();
+    for origin in ty.refinements().iter().chain(ty.guard_presence()) {
+        let label = format!("`{}`", origin.label());
+        if !guards.contains(&label) {
+            guards.push(label);
+        }
+    }
+    let text = type_text(ty);
+    if guards.is_empty() {
+        format!("Local `{path}`: `{text}`")
+    } else {
+        format!("Local `{path}`: `{text}` (narrowed by {})", guards.join(", "))
+    }
 }
 
 /// The hover line giving [`local_type`] and the guards that narrowed it, or
@@ -1225,7 +1340,12 @@ pub fn local_type_line(expr: &SpannedExpr, node: &SpannedExpr, site: &TypeScope<
 /// A scoped type as type text: its non-null alternatives in the schema
 /// grammar, then `null` when it is still admitted.
 pub fn type_text(ty: &ScopedType) -> String {
-    match ty.shape() {
+    shape_text(ty.shape())
+}
+
+/// [`type_text`] for a bare [`Shape`], such as one entry type of a source.
+pub fn shape_text(shape: &Shape) -> String {
+    match shape {
         Shape::Unknown { non_null: true } => "unknown (not null)".to_string(),
         Shape::Unknown { non_null: false } => "unknown".to_string(),
         Shape::Arms { arms, nullable } => {

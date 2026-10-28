@@ -257,6 +257,8 @@ mod trigger_spelling_guard;
 mod type_scope_ownership_guard;
 mod unknown_identifier_warning;
 mod collection_analysis;
+mod collection_blocks;
+mod collection_discovery;
 mod collection_execution;
 #[cfg(feature = "effects-instrumentation")]
 mod collection_effects;

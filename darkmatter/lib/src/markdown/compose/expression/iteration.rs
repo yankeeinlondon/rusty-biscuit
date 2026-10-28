@@ -223,6 +223,35 @@ pub struct IterationError {
 #[derive(Debug, Clone)]
 pub struct IterationBudget {
     shared: std::sync::Arc<BudgetState>,
+    ledger: Option<std::sync::Arc<Ledger>>,
+}
+
+/// What one subtree consumed, kept per node.
+///
+/// A global counter's before/after difference would include concurrent
+/// siblings' work, so each subtree that must report its own consumption
+/// (a cached child composition) holds a ledger. A reservation is recorded in
+/// the ledger of the handle that made it and in every ancestor's.
+#[derive(Debug)]
+struct Ledger {
+    visits: std::sync::atomic::AtomicU64,
+    bytes: std::sync::atomic::AtomicU64,
+    parent: Option<std::sync::Arc<Ledger>>,
+}
+
+impl Ledger {
+    fn record(&self, kind: IterationLimitKind, amount: u64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let mut node = Some(self);
+        while let Some(ledger) = node {
+            let counter = match kind {
+                IterationLimitKind::Visits => &ledger.visits,
+                IterationLimitKind::ExpansionBytes => &ledger.bytes,
+            };
+            counter.fetch_add(amount, Relaxed);
+            node = ledger.parent.as_deref();
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -255,7 +284,32 @@ impl IterationBudget {
                 bytes: std::sync::atomic::AtomicU64::new(0),
                 exhausted: std::sync::Mutex::new(None),
             }),
+            ledger: None,
         }
+    }
+
+    /// A handle on the same allowance that also records what it reserves,
+    /// and passes each reservation on to the ledger of the handle it came
+    /// from. [`Self::ledger_usage`] is then the consumption of exactly the
+    /// work done through this handle and its clones.
+    #[must_use]
+    pub fn with_ledger(&self) -> Self {
+        let ledger = std::sync::Arc::new(Ledger {
+            visits: std::sync::atomic::AtomicU64::new(0),
+            bytes: std::sync::atomic::AtomicU64::new(0),
+            parent: self.ledger.clone(),
+        });
+        Self { shared: std::sync::Arc::clone(&self.shared), ledger: Some(ledger) }
+    }
+
+    /// What the work done through this handle consumed, or nothing for a
+    /// handle without a ledger.
+    pub fn ledger_usage(&self) -> ExpansionUsage {
+        use std::sync::atomic::Ordering::Acquire;
+        self.ledger
+            .as_ref()
+            .map(|ledger| ExpansionUsage { visits: ledger.visits.load(Acquire), bytes: ledger.bytes.load(Acquire) })
+            .unwrap_or_default()
     }
 
     /// The configured allowances.
@@ -326,6 +380,9 @@ impl IterationBudget {
         match used.checked_add(amount).filter(|total| *total <= limit) {
             Some(total) => {
                 counter.store(total, Release);
+                if let Some(ledger) = &self.ledger {
+                    ledger.record(kind, amount);
+                }
                 Ok(())
             }
             None => {
