@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-10-27
 total_phases: 6
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1:
@@ -31,9 +31,97 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+- darkmatter/dmls/src/diagnostics/codes.rs
+- darkmatter/dmls/tests/l1/expression_scopes.rs
+- claudine/lib/src/composition/lifecycle/prewarm/classify/tests.rs
+- darkmatter/lib/src/markdown/cleanup/protect.rs
+- darkmatter/lib/src/markdown/compose/block_pairs.rs
+- darkmatter/lib/src/markdown/compose/call_precheck.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/analysis.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/error.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/mod.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/parser.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/scopes.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/types.rs
+- darkmatter/lib/src/markdown/compose/conditions.rs
+- darkmatter/lib/src/markdown/compose/context/capture/groups.rs
+- darkmatter/lib/src/markdown/compose/context/effective_state.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/directive_targets.rs
+- darkmatter/lib/src/markdown/compose/directives_api.rs
+- darkmatter/lib/src/markdown/compose/expression/absence.rs
+- darkmatter/lib/src/markdown/compose/expression/binding.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/roots.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/fs.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/paths.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/predicates.rs
+- darkmatter/lib/src/markdown/compose/expression/iterable.rs
+- darkmatter/lib/src/markdown/compose/expression/lexer.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/parser.rs
+- darkmatter/lib/src/markdown/compose/expression/prepared.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/facts.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/lexical.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/shape.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/tests.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+- darkmatter/lib/src/markdown/compose/page_blocks/guards.rs
+- darkmatter/lib/src/markdown/compose/page_blocks/parser.rs
+- darkmatter/lib/src/markdown/compose/parse_utils.rs
+- darkmatter/lib/src/markdown/compose/policy.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+- darkmatter/lib/src/markdown/compose/shell_blocks/parser.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/typing.rs
+- darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+- darkmatter/lib/tests/l1/binding_contract.rs
+- darkmatter/lib/tests/l1/collection_analysis.rs
+- darkmatter/lib/tests/l1/expression_type_scope.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/scope_site_conformance.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+- darkmatter/lib/src/markdown/compose/expression/iteration.rs
+- darkmatter/lib/src/markdown/compose/expression/binding.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+- darkmatter/lib/src/markdown/compose/body_origin.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/engine.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/mod.rs
+- darkmatter/lib/src/markdown/compose/inline/collection_blocks.rs
+- darkmatter/lib/src/markdown/compose/inline/mod.rs
+- darkmatter/lib/src/markdown/compose/inline/page_blocks.rs
+- darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+- darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+- darkmatter/lib/src/markdown/compose/directive_targets.rs
+- darkmatter/lib/src/markdown/compose/site_scope.rs
+- darkmatter/lib/src/markdown/compose/mod.rs
+- darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+- darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+- darkmatter/lib/src/markdown/compose/nested.rs
+- darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+- darkmatter/lib/tests/l1/collection_execution.rs
+- darkmatter/lib/tests/l1/collection_effects.rs
+- darkmatter/lib/tests/l1/main.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
 - darkmatter
 - darkmatter-cli
+- dmls
+- claudine
 ---
 
 # Map and Filter Directive Implementation Plan
@@ -530,7 +618,7 @@ Depends on Phase 1. Three owners can work concurrently: expression syntax,
 binding/type scope, and Markdown container scanning. The coordinator owns common
 module exports; workers edit only their listed implementation files.
 
-- [ ] **Parse callback syntax**
+- [x] **Parse callback syntax**
   - Implement both arrows, `parse_callback[_spanned]`, shallow patterns, mapped
     quote offsets, and object shorthand in `expression/{lexer,parser,ast}.rs`
     and `parse_utils.rs::Cursor`. The scanner owner handles the other
@@ -540,7 +628,7 @@ module exports; workers edit only their listed implementation files.
     positions, malformed fields, aliases/rest/defaults, empty patterns,
     duplicate fields, missing arrows, surplus text, and multibyte escaped spans.
     Keep existing subtraction and condition parsing intact.
-- [ ] **Implement lexical frames**
+- [x] **Implement lexical frames**
   - Implement immutable frames, `ScopedLookup`, reserved `local`, local root
     classification, passive declarations, and identity-aware fact lookup in
     `expression/{binding,mod,absence}.rs`, `expression/scope/`, and
@@ -554,7 +642,7 @@ module exports; workers edit only their listed implementation files.
     shadowing, nested restoration, sibling isolation, retained-frame lifetime,
     `fm.local`, every protected root, an attempted host `local`, and existing
     host-global registration/availability behavior.
-- [ ] **Track Markdown containers**
+- [x] **Track Markdown containers**
   - Extend `parse_utils`' CommonMark offset scan with code regions plus complete
     container ancestry; upgrade `block_pairs` to typed matched regions.
     Preserve existing page/shell parsing through adapters over the shared pairs.
@@ -568,7 +656,7 @@ module exports; workers edit only their listed implementation files.
 Depends on Wave 2. The two tasks run concurrently in separate collection parser
 and expression type-projection files; integrate their public boundary together.
 
-- [ ] **Parse collection regions**
+- [x] **Parse collection regions**
   - Implement `collection_blocks/{parser,types}.rs` over shared block pairs and
     the mapped directive cursor. Add Map/EndMap/Filter/EndFilter to
     `directives_api.rs::{DirectiveKind, KEYWORDS}` and expose the optional
@@ -578,7 +666,7 @@ and expression type-projection files; integrate their public boundary together.
     while composition returns strict located structural/header errors.
   - Update public block scans, shell-block command scans, and existing parser
     adapters together so no consumer retains a competing region stack.
-- [ ] **Project collection types**
+- [x] **Project collection types**
   - Implement typed `IterableSource` entries with original index/key, captured
     source ownership, per-item borrowed views, and declared entry types. Capture
     a source once; retain per-item values only when later body frames need them.
@@ -596,7 +684,7 @@ and expression type-projection files; integrate their public boundary together.
 
 Depends on Wave 3; serial because the scope inventory is a shared authority.
 
-- [ ] **Unify site analysis**
+- [x] **Unify site analysis**
   - Implement `BodyScopes`/`analyze_collection_blocks` and make `BodyGuards` its
     conditional view. Extend `call_precheck.rs::check_body`,
     `directive_targets.rs`, expression absence/lint/prepared validation, and
@@ -623,7 +711,7 @@ accepts shipped artifacts. Callback/static typing is ready before runtime work.
 Depends on Phase 2. Budget and provenance owners run concurrently in their
 respective modules; the coordinator integrates pipeline/context handoffs.
 
-- [ ] **Enforce request budgets**
+- [x] **Enforce request budgets**
   - Implement `IterationLimits`, shared `IterationBudget`, discovery mode,
     checked visit/byte reservations, sticky typed exhaustion, and per-node
     `ExpansionUsage` ledgers. Add positive options/builders/getters and standalone
@@ -637,7 +725,7 @@ respective modules; the coordinator integrates pipeline/context handoffs.
     append, shared children, nested calls, empty bodies consuming visits, and
     preflight remaining uncharged. Use small configured limits for boundary
     tests; retain one defaults parity assertion.
-- [ ] **Retain body scopes**
+- [x] **Retain body scopes**
   - Extend `BodyProvenance` with copy/splice projection and scope/iteration/
     expansion-owner ranges. Implement `ExpansionWriter`, preserving exact
     authored substrings and inserted data when ranges repeat or are rewritten.
@@ -650,7 +738,7 @@ respective modules; the coordinator integrates pipeline/context handoffs.
 
 Depends on Wave 5; tasks are sequential because they share the pipeline driver.
 
-- [ ] **Execute collection regions**
+- [x] **Execute collection regions**
   - Implement `collection_blocks/engine.rs` as one executor parameterized by
     Map/Filter, using the iterator and scope model already built. Integrate
     page conditions in the same recursive structural traversal; preserve shell
@@ -664,7 +752,7 @@ Depends on Wave 5; tasks are sequential because they share the pipeline driver.
     exact schedule, including callbacks before ordinary body effects, failure
     before the first shell stage, one key evaluation, and no callback after
     the unsorted stopping item. Do not parallelize callbacks.
-- [ ] **Wire staged composition**
+- [x] **Wire staged composition**
   - Add grouped structural dispatch to `pipeline/{operations,mod,phases}.rs`
     and perf/report metadata. Replace the page-only inline execution handoff
     with the shared traversal while retaining public page-block adapters.
