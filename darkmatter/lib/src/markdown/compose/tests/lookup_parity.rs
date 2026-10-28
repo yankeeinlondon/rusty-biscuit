@@ -16,8 +16,8 @@ use serde_json::{Value, json};
 use crate::markdown::compose::conditions::ShortcutLookup;
 use crate::markdown::compose::context::effective_state::ResolvingLookup;
 use crate::markdown::compose::expression::{
-    BindingView, CtxLookup, EvaluationLookup, EvaluationSession, ResolutionContext,
-    ResolvedBinding, ScopeId,
+    BindingView, CtxLookup, EvaluationLookup, EvaluationSession, LexicalScope, ResolutionContext,
+    ResolvedBinding, ScopeId, ScopedLookup,
 };
 use crate::markdown::compose::frontmatter_interpolation::FrontmatterSeedState;
 use crate::markdown::compose::inline::interpolation::deferrable_lookup_for_tests;
@@ -41,6 +41,8 @@ const INVENTORY: &[(&str, &str, Coverage)] = &[
     ("CtxLookup", "markdown/compose/expression/ctx.rs", Coverage::Probed),
     ("EvaluationSession", "markdown/compose/expression/binding.rs", Coverage::Probed),
     ("DeferrableLookup", "markdown/compose/inline/interpolation.rs", Coverage::Probed),
+    ("ScopedLookup", "markdown/compose/expression/binding.rs", Coverage::Probed),
+    ("Doc", "markdown/compose/expression/binding.rs", Coverage::Fixture),
     ("TestLookup", "markdown/compose/expression/mod.rs", Coverage::Fixture),
     ("Nothing", "markdown/compose/expression/absence.rs", Coverage::Fixture),
     ("FixtureLookup", "markdown/compose/expression/semantics.rs", Coverage::Fixture),
@@ -173,6 +175,13 @@ fn every_production_lookup_keeps_bare_names_out_of_ctx() {
                 let session = EvaluationSession::associate(view.clone(), &state, []).unwrap();
                 assert_bare_name_is_a_document_property(name, &session);
                 assert_reserved_roots_win(name, &session);
+            }
+            "ScopedLookup" => {
+                // A local named like a reserved root must not shadow it.
+                let scope = LexicalScope::new(vec![("env".to_string(), json!("local-env"))]);
+                let lookup = ScopedLookup::new(&state, scope);
+                assert_bare_name_is_a_document_property(name, &lookup);
+                assert_reserved_roots_win(name, &lookup);
             }
             "FrontmatterSeedState" => {
                 let seed = FrontmatterSeedState::new(

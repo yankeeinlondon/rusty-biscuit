@@ -50,6 +50,17 @@ pub enum ResolvedBinding {
         /// The selected value; `null` for a `null` global or a missing member.
         value: Value,
     },
+    /// A path under a lexical local (a callback or iteration parameter).
+    ///
+    /// Like a `Global`, a present local always has a value: a `null` local, or
+    /// a missing member of a present local, stays a `Local` holding `null`
+    /// and never falls through to the document.
+    Local {
+        /// The selected value.
+        value: Value,
+        /// The binding the read resolved to, never just its spelling.
+        id: LocalId,
+    },
 }
 
 impl ResolvedBinding {
@@ -67,7 +78,7 @@ impl ResolvedBinding {
     pub fn value(&self) -> Option<&Value> {
         match self {
             Self::Document { value } | Self::Namespace { value } => value.as_ref(),
-            Self::Global { value } => Some(value),
+            Self::Global { value } | Self::Local { value, .. } => Some(value),
         }
     }
 
@@ -75,7 +86,7 @@ impl ResolvedBinding {
     pub fn into_value(self) -> Option<Value> {
         match self {
             Self::Document { value } | Self::Namespace { value } => value,
-            Self::Global { value } => Some(value),
+            Self::Global { value } | Self::Local { value, .. } => Some(value),
         }
     }
 }
@@ -903,5 +914,225 @@ impl EvaluationLookup for EvaluationSession<'_> {
 
     fn begin_expression_scope(&self) {
         self.document.begin_expression_scope();
+    }
+}
+
+/// Identity of one local binding: the frame that owns it and its slot there.
+///
+/// Two reads of the same spelling in different frames, or of different
+/// spellings of one slot (`x` and `local.x`), are told apart by this id, not
+/// by their text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LocalId {
+    frame: u64,
+    slot: usize,
+}
+
+impl LocalId {
+    /// The owning frame's process-unique identity.
+    pub const fn frame(&self) -> u64 {
+        self.frame
+    }
+
+    /// The binding's position within its frame.
+    pub const fn slot(&self) -> usize {
+        self.slot
+    }
+}
+
+/// One immutable frame of lexical locals, retaining its parent.
+///
+/// Frames are shared through [`Arc`], so a body copy can keep the frame of
+/// its iteration alive after the callback that created it has returned.
+/// A frame never changes after construction; a nested scope is a new frame
+/// whose bindings shadow its parents'.
+#[derive(Debug)]
+pub struct LexicalScope {
+    id: u64,
+    bindings: Vec<(String, Value)>,
+    parent: Option<Arc<LexicalScope>>,
+}
+
+impl LexicalScope {
+    fn next_id() -> u64 {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// An outermost frame holding `bindings` in order.
+    pub fn new(bindings: Vec<(String, Value)>) -> Arc<Self> {
+        Arc::new(Self {
+            id: Self::next_id(),
+            bindings,
+            parent: None,
+        })
+    }
+
+    /// A nested frame holding `bindings`, shadowing this frame's.
+    pub fn child(self: &Arc<Self>, bindings: Vec<(String, Value)>) -> Arc<Self> {
+        Arc::new(Self {
+            id: Self::next_id(),
+            bindings,
+            parent: Some(Arc::clone(self)),
+        })
+    }
+
+    /// The nearest binding named `name`, searching this frame then its
+    /// parents. A binding whose value is `null` is still found.
+    pub fn lookup(&self, name: &str) -> Option<(LocalId, &Value)> {
+        let mut frame = self;
+        loop {
+            if let Some((slot, (_, value))) = frame.bindings.iter().enumerate().find(|(_, (n, _))| n == name) {
+                return Some((LocalId { frame: frame.id, slot }, value));
+            }
+            frame = frame.parent.as_deref()?;
+        }
+    }
+}
+
+/// An [`EvaluationLookup`] that reads locals from a [`LexicalScope`] and
+/// delegates everything else to an inner lookup.
+///
+/// A read resolves in this order: a reserved namespace or declared global (so
+/// a local can never shadow one), then the nearest local named by the bare
+/// root or by `local.<name>`, then the inner lookup.
+pub struct ScopedLookup<'a> {
+    inner: &'a dyn EvaluationLookup,
+    scope: Arc<LexicalScope>,
+}
+
+impl<'a> ScopedLookup<'a> {
+    /// Layers `scope` over `inner`.
+    pub fn new(inner: &'a dyn EvaluationLookup, scope: Arc<LexicalScope>) -> Self {
+        Self { inner, scope }
+    }
+
+    fn protected(&self, root: &str) -> bool {
+        is_reserved_namespace(root)
+            || self
+                .inner
+                .binding_view()
+                .is_some_and(|view| matches!(view.classify_root(root), RootClass::Global(_) | RootClass::Namespace))
+    }
+
+    fn local(&self, path: &str) -> Option<ResolvedBinding> {
+        let root = root_of(path);
+        let (name, rest) = if root == LOCAL_ROOT {
+            let tail = path[root.len()..].strip_prefix('.')?;
+            let name = root_of(tail);
+            (name, &tail[name.len()..])
+        } else if self.protected(root) {
+            return None;
+        } else {
+            (root, &path[root.len()..])
+        };
+        let (id, value) = self.scope.lookup(name)?;
+        Some(ResolvedBinding::Local {
+            value: project(value, rest),
+            id,
+        })
+    }
+}
+
+/// The reserved root that names the innermost locals explicitly.
+pub(crate) const LOCAL_ROOT: &str = "local";
+
+impl EvaluationLookup for ScopedLookup<'_> {
+    fn get(&self, path: &str) -> Option<Value> {
+        self.resolve(path).ok().and_then(ResolvedBinding::into_value)
+    }
+
+    fn resolve(&self, path: &str) -> Result<ResolvedBinding, ExpressionError> {
+        match self.local(path) {
+            Some(binding) => Ok(binding),
+            None => self.inner.resolve(path),
+        }
+    }
+
+    fn binding_view(&self) -> Option<&BindingView> {
+        self.inner.binding_view()
+    }
+
+    fn format_resolved(&self, path: &str, value: &Value) -> String {
+        self.inner.format_resolved(path, value)
+    }
+
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        self.inner.resolution_context()
+    }
+
+    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
+        self.inner.resolution_context_ref()
+    }
+
+    fn is_valid_context_variable(&self, name: &str) -> bool {
+        self.inner.is_valid_context_variable(name)
+    }
+
+    fn context_variable_names(&self) -> &[&'static str] {
+        self.inner.context_variable_names()
+    }
+
+    fn begin_expression_scope(&self) {
+        self.inner.begin_expression_scope();
+    }
+
+    fn lexical_scope(&self) -> Option<&Arc<LexicalScope>> {
+        Some(&self.scope)
+    }
+}
+
+#[cfg(test)]
+mod lexical_tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    struct Doc(HashMap<String, Value>);
+
+    impl EvaluationLookup for Doc {
+        fn get(&self, path: &str) -> Option<Value> {
+            self.0.get(path).cloned()
+        }
+    }
+
+    fn doc() -> Doc {
+        Doc([("x".to_string(), json!("document")), ("y".to_string(), json!(1))].into())
+    }
+
+    #[test]
+    fn implicit_and_explicit_reads_share_one_identity() {
+        let doc = doc();
+        let scope = LexicalScope::new(vec![("x".into(), json!({ "a": 1 }))]);
+        let lookup = ScopedLookup::new(&doc, scope);
+        let implicit = lookup.resolve("x.a").unwrap();
+        let explicit = lookup.resolve("local.x.a").unwrap();
+        assert_eq!(implicit, explicit);
+        assert!(matches!(implicit, ResolvedBinding::Local { ref value, .. } if *value == json!(1)));
+    }
+
+    #[test]
+    fn a_null_local_shadows_the_document_and_missing_members_do_not_fall_through() {
+        let doc = doc();
+        let scope = LexicalScope::new(vec![("x".into(), Value::Null)]);
+        let lookup = ScopedLookup::new(&doc, scope);
+        assert_eq!(lookup.get("x"), Some(Value::Null));
+        assert_eq!(lookup.get("x.missing"), Some(Value::Null));
+        assert_eq!(lookup.get("y"), Some(json!(1)));
+        assert_eq!(lookup.resolve("fm.x").unwrap().into_value(), None);
+    }
+
+    #[test]
+    fn nested_frames_shadow_and_siblings_stay_isolated() {
+        let doc = doc();
+        let outer = LexicalScope::new(vec![("x".into(), json!("outer"))]);
+        let inner = outer.child(vec![("x".into(), json!("inner"))]);
+        let sibling = outer.child(vec![("z".into(), json!(true))]);
+        let inner_lookup = ScopedLookup::new(&doc, Arc::clone(&inner));
+        assert_eq!(inner_lookup.get("x"), Some(json!("inner")));
+        let sibling_lookup = ScopedLookup::new(&doc, sibling);
+        assert_eq!(sibling_lookup.get("x"), Some(json!("outer")));
+        assert_eq!(sibling_lookup.get("z"), Some(json!(true)));
+        assert_ne!(inner.lookup("x").unwrap().0, outer.lookup("x").unwrap().0);
     }
 }

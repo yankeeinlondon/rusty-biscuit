@@ -404,6 +404,79 @@ impl SpannedExpr {
     }
 }
 
+/// The parameter side of a [`Callback`]: one identifier, or a nonempty ordered
+/// list of shallow object fields.
+///
+/// Callbacks are not values: they never appear in an [`Expr`] position and
+/// never convert to `serde_json::Value`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BindingPattern {
+    /// `item => …`: the whole item under one name.
+    Identifier(String),
+    /// `{ name, role } => …`: the named top-level fields, in authored order.
+    Fields(Vec<String>),
+}
+
+impl BindingPattern {
+    /// The names this pattern binds, in authored order.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        let (single, many): (Option<&str>, &[String]) = match self {
+            Self::Identifier(name) => (Some(name), &[]),
+            Self::Fields(fields) => (None, fields),
+        };
+        single.into_iter().chain(many.iter().map(String::as_str))
+    }
+}
+
+/// A [`BindingPattern`] with the byte span of each authored name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpannedBindingPattern {
+    /// See [`BindingPattern::Identifier`].
+    Identifier(Spanned<String>),
+    /// See [`BindingPattern::Fields`].
+    Fields(Vec<Spanned<String>>),
+}
+
+impl SpannedBindingPattern {
+    /// Drops spans.
+    pub fn erase(&self) -> BindingPattern {
+        match self {
+            Self::Identifier(name) => BindingPattern::Identifier(name.value.clone()),
+            Self::Fields(fields) => BindingPattern::Fields(fields.iter().map(|f| f.value.clone()).collect()),
+        }
+    }
+}
+
+/// A parsed callback: `pattern => body`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Callback {
+    /// The parameter pattern.
+    pub pattern: BindingPattern,
+    /// The one complete expression the callback evaluates.
+    pub body: Expr,
+}
+
+/// A [`Callback`] retaining the spans of its pattern, arrow, and body.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpannedCallback {
+    /// The parameter pattern.
+    pub pattern: SpannedBindingPattern,
+    /// Byte span of the arrow token (`=>` or `->`).
+    pub arrow: SourceSpan,
+    /// The body expression with its spans.
+    pub body: SpannedExpr,
+}
+
+impl SpannedCallback {
+    /// Drops spans; the result is what the compose pipeline evaluates.
+    pub fn erase(&self) -> Callback {
+        Callback {
+            pattern: self.pattern.erase(),
+            body: self.body.erase(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

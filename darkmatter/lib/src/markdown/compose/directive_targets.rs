@@ -183,6 +183,7 @@ fn subject_path(subject: &Subject) -> Option<ExpressionPath> {
     let mut path = match subject.binding() {
         BindingId::Document(key) => key.clone(),
         BindingId::Namespace(root) | BindingId::Global(root) => root.clone(),
+        BindingId::Local(_) => return None,
     };
     for member in subject.path() {
         let Member::Field(name) = member else {

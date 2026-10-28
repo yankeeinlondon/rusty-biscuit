@@ -106,6 +106,7 @@ use super::pipeline::operations::COMPOSE_OPERATION_DESCRIPTORS;
                 ComposeOperation::FrontmatterShellExpansion,
                 ComposeOperation::TextReplacement,
                 ComposeOperation::PageBlocks,
+                ComposeOperation::CollectionBlocks,
                 ComposeOperation::Interpolation,
                 ComposeOperation::ShellExpansion,
                 ComposeOperation::ShellBlocks,
@@ -135,6 +136,7 @@ use super::pipeline::operations::COMPOSE_OPERATION_DESCRIPTORS;
             ),
             (ComposeOperation::TextReplacement, ComposePhase::InlinePre),
             (ComposeOperation::PageBlocks, ComposePhase::InlinePre),
+            (ComposeOperation::CollectionBlocks, ComposePhase::InlinePre),
             (ComposeOperation::Interpolation, ComposePhase::InlinePre),
             (ComposeOperation::ShellExpansion, ComposePhase::InlinePre),
             (ComposeOperation::ShellBlocks, ComposePhase::InlinePre),
@@ -605,8 +607,8 @@ use super::pipeline::operations::COMPOSE_OPERATION_DESCRIPTORS;
     }
 
     #[test]
-    fn default_order_has_sixteen_operations() {
-        assert_eq!(ComposeOperation::default_order().len(), 16);
+    fn default_order_has_seventeen_operations() {
+        assert_eq!(ComposeOperation::default_order().len(), 17);
     }
 
     #[test]

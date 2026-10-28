@@ -235,6 +235,10 @@ pub enum MarkdownError {
     #[error("Page block error: {0}")]
     PageBlock(#[from] Box<crate::markdown::compose::page_blocks::PageBlockError>),
 
+    /// Collection (`::map` / `::filter`) error.
+    #[error("Collection error: {0}")]
+    Collection(#[from] Box<crate::markdown::compose::collection_blocks::CollectionError>),
+
     /// Shell block pipeline error.
     #[error("Shell block error: {0}")]
     ShellBlock(#[from] Box<crate::markdown::compose::ShellBlockError>),
@@ -344,6 +348,12 @@ impl From<crate::markdown::compose::ShellExpansionError> for MarkdownError {
 impl From<crate::markdown::compose::page_blocks::PageBlockError> for MarkdownError {
     fn from(err: crate::markdown::compose::page_blocks::PageBlockError) -> Self {
         MarkdownError::PageBlock(Box::new(err))
+    }
+}
+
+impl From<crate::markdown::compose::collection_blocks::CollectionError> for MarkdownError {
+    fn from(err: crate::markdown::compose::collection_blocks::CollectionError) -> Self {
+        MarkdownError::Collection(Box::new(err))
     }
 }
 
@@ -733,6 +743,7 @@ impl BlockError for MarkdownError {
             MarkdownError::Transclusion(inner) => inner.status_block(term),
             MarkdownError::ShellExpansion(inner) => inner.status_block(term),
             MarkdownError::PageBlock(inner) => inner.status_block(term),
+            MarkdownError::Collection(inner) => inner.status_block(term),
             MarkdownError::ShellBlock(inner) => inner.status_block(term),
             MarkdownError::TocLinking(inner) => inner.status_block(term),
             MarkdownError::FileLinks(inner) => inner.status_block(term),

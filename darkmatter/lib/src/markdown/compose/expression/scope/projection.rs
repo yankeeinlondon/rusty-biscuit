@@ -9,7 +9,7 @@ use serde_json::{Map, Value};
 use super::Shape;
 use super::raw::RawDeclarations;
 use crate::markdown::compose::context::context_variable_descriptors;
-use crate::markdown::compose::expression::binding::{Availability, BindingView, NULL_ROOT};
+use crate::markdown::compose::expression::binding::{Availability, BindingView, LocalId, NULL_ROOT};
 use crate::markdown::compose::expression::fm_namespace::literal_index_key;
 use crate::markdown::compose::expression::{Expr, FmPath, fm_namespace_path, reserved_root_descriptors};
 use crate::markdown::schemas::catalog::GlobalCatalog;
@@ -65,6 +65,9 @@ pub enum BindingId {
     Namespace(String),
     /// A host-declared global (`seq`, `loop`, `err`, …).
     Global(String),
+    /// A lexical local, by frame and slot rather than spelling, so `x` and
+    /// `local.x` are one binding and equal spellings in two frames are not.
+    Local(LocalId),
 }
 
 /// One constant step below a [`BindingId`].
@@ -496,6 +499,8 @@ impl<'s> DeclaredTypes<'s> {
                     path => (DeclaredType::Namespace, typed(path)),
                 }
             }
+            // Declared lexical types are not projected yet.
+            BindingId::Local(_) => (DeclaredType::NoProjection, unknown),
             BindingId::Global(root) => {
                 let availability = self.host_availability(root).cloned().unwrap_or(Availability::Available);
                 let declaration = self

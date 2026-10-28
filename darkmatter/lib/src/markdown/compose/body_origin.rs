@@ -356,12 +356,61 @@ impl AuthoredBody {
     }
 }
 
+/// Identity of one collection expansion that wrote a run of the body.
+///
+/// A nested expansion's bytes are charged to every enclosing owner exactly
+/// once, so a run records its owner chain outermost first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ExpansionOwner(pub(crate) u64);
+
+/// A run of the current body with the lexical scope and iteration it was
+/// copied for.
+///
+/// Repeating a body range copies the same authored span once per item, so
+/// ordinary [`TextEdit`]s (which advance through source runs only once)
+/// cannot describe it; each copy carries its own `ScopeRange`.
+#[derive(Debug, Clone)]
+#[allow(dead_code, reason = "recorded and read by the structural traversal that follows this contract")]
+pub(crate) struct ScopeRange {
+    /// The run of the current body.
+    pub(crate) range: Range<usize>,
+    /// The authored byte range this run was copied from.
+    pub(crate) authored: Range<usize>,
+    /// The frame sites in this run read locals from.
+    pub(crate) scope: std::sync::Arc<super::expression::LexicalScope>,
+    /// The original item positions that produced this run.
+    pub(crate) iteration: super::expression::iteration::IterationPath,
+    /// The enclosing expansions that own this run's bytes, outermost first.
+    pub(crate) owners: Vec<ExpansionOwner>,
+}
+
+/// The [`ScopeRange`]s of a body, in body order.
+///
+/// Empty until the structural traversal records copies; a stage that rewrites
+/// a body holding ranges must carry them, which `advance` does not yet do.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ScopeRanges(Vec<ScopeRange>);
+
+impl ScopeRanges {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The innermost range containing `offset`, which names the scope a site
+    /// at `offset` executes in.
+    #[allow(dead_code, reason = "read by the structural traversal that follows this contract")]
+    pub(crate) fn at(&self, offset: usize) -> Option<&ScopeRange> {
+        self.0.iter().rev().find(|run| run.range.contains(&offset))
+    }
+}
+
 /// The provenance maps of a body between the stages that scan it.
 #[derive(Debug, Clone)]
 pub(crate) struct BodyProvenance {
     pub(crate) origin: Option<BodyOrigin>,
     pub(crate) data: DataRanges,
     pub(crate) authored: Option<AuthoredBody>,
+    pub(crate) scopes: ScopeRanges,
 }
 
 impl BodyProvenance {
@@ -372,6 +421,7 @@ impl BodyProvenance {
             origin: BodyOrigin::capture(markdown),
             data: DataRanges::none_for(markdown.content()),
             authored: Some(AuthoredBody::capture(markdown.content())),
+            scopes: ScopeRanges::default(),
         }
     }
 
@@ -383,6 +433,7 @@ impl BodyProvenance {
     /// Fails when the data map does not describe `before`.
     pub(crate) fn advance(&mut self, before: &str, edits: &[TextEdit], after: &str) -> MarkdownResult<()> {
         self.data.ensure_describes(before)?;
+        debug_assert!(self.scopes.is_empty(), "scope ranges must be carried past an edit before any are recorded");
         self.data = self.data.after_edits(edits, after);
         advance(&mut self.origin, before, edits, after);
         self.authored = self.authored.take().and_then(|authored| authored.advanced(before, edits, after));

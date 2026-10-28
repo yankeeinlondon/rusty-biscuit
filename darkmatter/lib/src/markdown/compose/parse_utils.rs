@@ -7,6 +7,50 @@ use super::body_origin::DataRanges;
 use std::borrow::Cow;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
+/// A decoded quoted value with the map from decoded byte boundaries back to
+/// the authored bytes they came from.
+///
+/// A callback or condition is parsed from the decoded text, but errors and
+/// editor ranges must point at what the author typed; an escape such as `\"`
+/// is two authored bytes and one decoded byte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code, reason = "produced by the mapped quoted read that follows this contract")]
+pub(crate) struct MappedQuotedValue {
+    pub(crate) decoded: String,
+    /// `authored[i]` is the authored byte offset of decoded byte `i`; one
+    /// trailing entry maps the decoded end. A byte inside a multibyte
+    /// character maps to the character's first authored byte.
+    authored: Vec<usize>,
+}
+
+#[allow(dead_code, reason = "produced by the mapped quoted read that follows this contract")]
+impl MappedQuotedValue {
+    /// Builds the map from `(decoded text, authored start)` pieces, in order,
+    /// and the authored offset just past the value.
+    pub(crate) fn from_pieces(pieces: &[(String, usize)], authored_end: usize) -> Self {
+        let mut decoded = String::new();
+        let mut authored = Vec::new();
+        for (text, start) in pieces {
+            for _ in 0..text.len() {
+                authored.push(*start);
+            }
+            decoded.push_str(text);
+        }
+        authored.push(authored_end);
+        Self { decoded, authored }
+    }
+
+    /// The authored offset of decoded byte `boundary`, or `None` past the end.
+    pub(crate) fn authored_boundary(&self, boundary: usize) -> Option<usize> {
+        self.authored.get(boundary).copied()
+    }
+
+    /// The authored range covering decoded `range`, or `None` out of bounds.
+    pub(crate) fn authored_range(&self, range: std::ops::Range<usize>) -> Option<std::ops::Range<usize>> {
+        Some(self.authored_boundary(range.start)?..self.authored_boundary(range.end)?)
+    }
+}
+
 /// A lightweight cursor for parsing directive lines character by character.
 pub(crate) struct Cursor<'a> {
     input: &'a str,
@@ -493,6 +537,20 @@ pub(crate) fn is_in_code_region(position: usize, regions: &[(usize, usize)]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mapped_quoted_value_projects_escaped_and_multibyte_ranges() {
+        // authored: "é\"x" -> decoded: é"x ; é is 2 bytes, the escape is 2 authored bytes.
+        let mapped = MappedQuotedValue::from_pieces(
+            &[("é".to_string(), 1), ("\"".to_string(), 3), ("x".to_string(), 5)],
+            6,
+        );
+        assert_eq!(mapped.decoded, "é\"x");
+        assert_eq!(mapped.authored_range(0..2), Some(1..3));
+        assert_eq!(mapped.authored_range(2..3), Some(3..5));
+        assert_eq!(mapped.authored_range(0..4), Some(1..6));
+        assert_eq!(mapped.authored_range(0..5), None);
+    }
 
     #[test]
     fn directive_prefix_len_column_one_is_zero() {

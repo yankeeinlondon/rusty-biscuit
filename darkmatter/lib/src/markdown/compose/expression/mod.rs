@@ -79,6 +79,7 @@ pub mod error;
 pub mod file_suggestions;
 pub mod functions;
 pub mod host;
+pub mod iteration;
 pub mod lexer;
 pub mod lint;
 pub(crate) mod path_projection;
@@ -89,11 +90,13 @@ pub mod scope;
 pub mod semantics;
 
 pub use absence::{AccessStep, StaticAccessRead, StaticVariableRead, branch_scope, static_access_reads, static_variable_reads};
-pub use ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
+pub use ast::{
+    BinaryOp, BindingPattern, Callback, Expr, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind,
+};
 pub use binding::{
     Availability, BindingError, BindingView, BindingViewBuilder, EvaluationSession,
-    GlobalDeclaration, HostGlobals, LazyProvider, ResolvedBinding, RootClass, RuntimeBinding, ScopeId,
-    UnavailabilityReason, UnavailableBinding, is_reserved_namespace,
+    GlobalDeclaration, HostGlobals, LazyProvider, LexicalScope, LocalId, ResolvedBinding, RootClass, RuntimeBinding,
+    ScopeId, ScopedLookup, UnavailabilityReason, UnavailableBinding, is_reserved_namespace,
 };
 pub use call_binding::{
     BoundArgs, BoundCall, CallBindingError, CallErrorKind, CompiledSignature, EvaluationMode, FunctionRegistration,
@@ -145,7 +148,8 @@ pub use lexer::{
     Lexer, LiteralTokenLocation, LexerError, ParseMode, Token, identifier_prefix_start, lex_spanned,
 };
 pub use parser::{
-    ParseError, Parser, parse, parse_condition, parse_condition_spanned, parse_spanned,
+    ParseError, Parser, parse, parse_callback, parse_callback_spanned, parse_condition, parse_condition_spanned,
+    parse_spanned,
 };
 pub use prepared::{
     AuthoredMode, PreparationError, PreparedExpression, PreparedValue, ValidationDiagnostic,
@@ -384,6 +388,15 @@ pub trait EvaluationLookup {
     /// parsed expression calls this first; the default is a no-op for lookups
     /// that hold no lazy root.
     fn begin_expression_scope(&self) {}
+
+    /// The innermost lexical scope this lookup reads locals from, if any.
+    ///
+    /// The default is `None`: a lookup that holds no callback or iteration
+    /// parameters. [`ScopedLookup`] returns its frame, and delegating lookups
+    /// forward their inner lookup's scope.
+    fn lexical_scope(&self) -> Option<&std::sync::Arc<LexicalScope>> {
+        None
+    }
 }
 
 /// The default [`EvaluationLookup::format_resolved`] rendering.

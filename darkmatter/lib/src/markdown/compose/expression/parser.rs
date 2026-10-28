@@ -58,7 +58,7 @@
 
 use super::{
     LexerError, ParseMode, Token,
-    ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind},
+    ast::{BinaryOp, Callback, Expr, SpannedCallback, SpannedExpr, SpannedExprKind},
     lexer::lex_spanned,
 };
 use crate::markdown::span::Spanned;
@@ -707,6 +707,31 @@ pub fn parse(input: &str) -> Result<Expr, ParseError> {
 /// Returns an error for invalid syntax.
 pub fn parse_spanned(input: &str) -> Result<SpannedExpr, ParseError> {
     Parser::new(input)?.parse_spanned()
+}
+
+/// Diagnostic code for callback grammar errors and protected parameter names.
+pub const INVALID_CALLBACK_CODE: &str = "dm.expression.invalid_callback";
+
+/// Parses a callback (`pattern => body` or `pattern -> body`) into the
+/// span-erased [`Callback`].
+///
+/// ## Errors
+///
+/// Returns an error for invalid syntax. Callback grammar is not implemented
+/// yet, so every input is currently rejected.
+pub fn parse_callback(input: &str) -> Result<Callback, ParseError> {
+    parse_callback_spanned(input).map(|callback| callback.erase())
+}
+
+/// Parses a callback into the span-carrying [`SpannedCallback`]; see
+/// [`parse_callback`].
+///
+/// ## Errors
+///
+/// Returns an error for invalid syntax. Callback grammar is not implemented
+/// yet, so every input is currently rejected.
+pub fn parse_callback_spanned(_input: &str) -> Result<SpannedCallback, ParseError> {
+    Err(ParseError::new("callback syntax is not implemented", 0))
 }
 
 /// Parses an expression string using condition-mode grammar.

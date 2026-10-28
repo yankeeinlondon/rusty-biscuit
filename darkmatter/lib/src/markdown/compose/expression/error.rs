@@ -238,6 +238,13 @@ pub enum ExpressionError {
     #[error("parse error: {0}")]
     Parse(String),
 
+    /// A collection allowance (visits or expansion bytes) was exhausted.
+    ///
+    /// Request-fatal on every surface: no handler, fallback, or recovery
+    /// option converts it into a value.
+    #[error("{0}")]
+    IterationLimit(Box<super::iteration::IterationError>),
+
     /// A binary arithmetic operator (`+`, `-`, `*`, `/`, `%`) received a
     /// non-numeric operand. Operators are not function calls, so they are modeled
     /// distinctly from [`Other`] — its `name():` framing would render the
@@ -515,6 +522,7 @@ impl ExpressionError {
     pub fn is_authoring_fatal(&self) -> bool {
         match self {
             ExpressionError::UnknownFunction { .. } => true,
+            ExpressionError::IterationLimit(_) => true,
             ExpressionError::GlobReference { .. } => true,
             ExpressionError::Provider { .. } => true,
             ExpressionError::ContractViolation { .. } => true,
