@@ -38,6 +38,7 @@ types:
         function(
             parameters(value: unknown | null);
             returns(boolean);
+            narrows(value: file; true-implies);
             category(Project);
         ) -> Returns true when the value is text naming a Markdown file of the project.
 ```
@@ -52,7 +53,6 @@ the same `RegistrationBuilder` the built-ins use:
 
 ```rust
 use std::sync::Arc;
-use darkmatter::markdown::compose::expression::call_binding::{FactKind, FactType};
 use darkmatter::markdown::compose::expression::{
     HostFunctionCatalog, HostFunctions, install_host_functions,
 };
@@ -62,7 +62,7 @@ let functions = HostFunctions::builder(catalog)
     .function(
         "is_project_file",
         &[],                                   // aliases
-        |registration| registration.narrows("value", FactKind::TrueImplies, FactType::Type("file".into())),
+        |registration| registration,          // the catalog's `narrows(...)` clause declares the fact
         Arc::new(|call| Ok(serde_json::json!(call.args().text(0).is_some_and(|t| t.ends_with(".md"))))),
     )
     .build()?;
@@ -79,9 +79,10 @@ install_host_functions(functions)?;
   the catalog does not declare;
 - a function is registered as lazy (host functions are always evaluated
   eagerly; only Darkmatter's `and` and `or` are lazy);
-- a fact is invalid, exactly as for a built-in: a fact on a parameter no
-  overload declares, a narrowing fact on a function that does not return
-  `boolean`, and so on.
+- a `narrows(...)` clause is invalid, exactly as for a built-in: a clause on a
+  parameter no overload declares, on a function that does not return
+  `boolean`, overloads that disagree on the fact, and so on (the catalog
+  fails to load before a builder exists).
 
 `install_host_functions` makes the set visible to every thread for the rest
 of the process. Installing is additive; a name that is already installed is
