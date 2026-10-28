@@ -416,6 +416,32 @@ fn a_document_schema_that_reaches_a_function_fails_to_load_naming_the_path() {
     assert!(validate_in(dir.path(), document).expect("a data type imports").valid);
 }
 
+/// A function carrying a `narrows(...)` clause is still description-only: a
+/// document schema reaching it fails at the property path, and the clause
+/// does not change that outcome or the message.
+#[test]
+fn a_document_schema_that_reaches_a_narrowing_function_fails_naming_the_path() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let function = "function(parameters(x: unknown | null); returns(boolean); narrows(x: string; true-iff))";
+    for (body, path) in [
+        (format!("  run: '{function}'"), "run"),
+        (format!("  run:\n    inner: '{function}[]'"), "run.inner"),
+        (format!("  run: 'tuple([string, {function}])'"), "run[1]"),
+    ] {
+        let document = format!("---\n$schema:\n{body}\n---\nBody\n");
+        match validate_in(dir.path(), &document) {
+            Err(SchemaError::Convert { property, message }) => {
+                assert_eq!(property, path, "{body}");
+                assert!(message.contains("description-only"), "{body}: {message}");
+            }
+            other => panic!("{body}: expected a load error naming `{path}`, got {other:?}"),
+        }
+    }
+    // The same function without the clause fails identically (control).
+    let plain = "---\n$schema:\n  run: 'function(parameters(x: unknown | null); returns(boolean))'\n---\nBody\n";
+    assert!(matches!(validate_in(dir.path(), plain), Err(SchemaError::Convert { .. })));
+}
+
 // ── Criterion 5: categories ───────────────────────────────────────────────
 
 #[test]

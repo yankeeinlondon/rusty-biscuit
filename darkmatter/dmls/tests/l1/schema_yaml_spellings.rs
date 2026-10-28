@@ -201,6 +201,49 @@ fn a_grammar_error_on_a_continuation_line_ranges_the_offending_token() {
     fixture.shutdown();
 }
 
+/// An invalid `narrows(...)` clause inside a `|-` block scalar is ranged at
+/// the clause's offending token, with the grammar's own message, and a
+/// control whose clause is valid reports nothing.
+#[test]
+fn an_invalid_narrows_clause_in_a_block_scalar_is_ranged_at_its_token() {
+    let function = |clause: &str| {
+        format!(
+            "kind: schema\ntypes:\n  pred: |-\n    function(\n      parameters(x: unknown | null);\n      returns(boolean);\n      {clause};\n    )\n"
+        )
+    };
+    let workspace = LspWorkspace::new();
+    let mut fixture = start(&workspace, "utf-8");
+
+    let control = function("narrows(x: string; true-iff)");
+    let uri = open(&fixture, &workspace, "narrows-valid.yaml", &control);
+    assert_eq!(definition_diagnostics(&mut fixture, &uri), Vec::<Value>::new(), "control");
+
+    for (name, clause, token, message) in [
+        ("kind.yaml", "narrows(x: string; true-sometimes)", "true-sometimes", "true-sometimes"),
+        ("parameter.yaml", "narrows(y: string; true-iff)", "y", "does not declare"),
+    ] {
+        let text = function(clause);
+        let uri = open(&fixture, &workspace, name, &text);
+        let diagnostics = definition_diagnostics(&mut fixture, &uri);
+        let [diagnostic] = diagnostics.as_slice() else {
+            panic!("{name}: expected one schema diagnostic: {diagnostics:#?}");
+        };
+        assert_eq!(diagnostic["code"], json!("dm.schema.invalid_type_definition"), "{name}: {diagnostic:#?}");
+        assert!(diagnostic["message"].as_str().is_some_and(|text| text.contains(message)), "{name}: {diagnostic:#?}");
+        let clause_start = text.find(clause).unwrap();
+        let token_start = clause_start + clause.find(token).unwrap();
+        assert_eq!(
+            diagnostic["range"],
+            json!({
+                "start": position(&text, token_start, "utf-8"),
+                "end": position(&text, token_start + token.len(), "utf-8"),
+            }),
+            "{name}: {diagnostic:#?}"
+        );
+    }
+    fixture.shutdown();
+}
+
 /// The specification's literal example: `bogus` on physical line 5, columns
 /// 5–9 when displayed one-based.
 #[test]

@@ -89,6 +89,31 @@ fn type_definition_validation_matches_the_property_definition_matrix() {
     }
 }
 
+/// A `narrows(...)` clause is checked by the same grammar behind the
+/// `type-definition` meta-type: a valid clause validates, and an invalid one
+/// is rejected with the grammar's own located message.
+#[test]
+fn type_definition_validates_narrows_clauses_with_the_grammar_messages() {
+    let function = |clause: &str| {
+        format!("candidate: 'function(parameters(x: unknown | null); returns(boolean); {clause})'\n")
+    };
+    for clause in ["narrows(x: string; true-iff)", "narrows(x: file; true-implies)", "narrows(x; false-implies)"] {
+        assert_valid_candidate("type-definition", &function(clause));
+    }
+    for (clause, expected) in [
+        ("narrows(x: string; true-sometimes)", "true-sometimes"),
+        ("narrows(y: string; true-iff)", "does not declare"),
+        ("narrows(x: string | number; true-implies)", "single type"),
+    ] {
+        let report = validate_candidate("type-definition", &function(clause));
+        assert!(!report.valid, "{clause}");
+        let problems = format!("{:?}", report.problems);
+        assert!(problems.contains(expected), "{clause}: {problems}");
+    }
+    let non_boolean = "candidate: 'function(parameters(x: unknown | null); returns(string); narrows(x; false-implies))'\n";
+    assert_invalid_candidate("type-definition", non_boolean);
+}
+
 #[test]
 fn schema_validation_is_syntax_only_and_rejects_remote_references() {
     for reference in ["./schemas/does-not-exist.yaml", "does-not-exist.yaml"] {

@@ -265,6 +265,94 @@ mod registered_facts {
     }
 }
 
+/// The catalog's own `narrows(...)` declarations (the shipped built-ins),
+/// read through the scope: what each branch proves about the original value.
+mod declared_builtin_facts {
+    use super::*;
+
+    /// `file_exists` and `is_file_type` both make an `unknown` subject a
+    /// `file` on the true side. Existence is not `true-iff`: the false side
+    /// excludes nothing, because a valid path to a missing file is still a
+    /// possible file value.
+    #[test]
+    fn the_file_predicates_narrow_unknown_to_file_on_the_true_side_only() {
+        let schema = schema("source: unknown\nchoice:\n  - file(required)\n  - number(required)\n");
+        let declared = DeclaredTypes::new(Some(&schema));
+        hooks::reset_handler_entries();
+        for predicate in ["is_file_type", "file_exists"] {
+            let guard = format!("{predicate}(source)");
+            assert_eq!(narrowed(&declared, &guard, Polarity::True, "source"), "file", "{predicate}");
+            assert_eq!(narrowed(&declared, &guard, Polarity::False, "source"), "unknown", "{predicate}");
+            let guard = format!("{predicate}(choice)");
+            assert_eq!(narrowed(&declared, &guard, Polarity::True, "choice"), "file", "{predicate}");
+            assert_eq!(narrowed(&declared, &guard, Polarity::False, "choice"), "file | number", "{predicate}");
+        }
+        assert_eq!(category_of(&declared, "frontmatter(source, 'title')", "frontmatter"), Unknown);
+        for predicate in ["is_file_type", "file_exists"] {
+            let call = format!("{predicate}(source) && frontmatter(source, 'title')");
+            assert_eq!(category_of(&declared, &call, "frontmatter"), Compatible, "{predicate}");
+        }
+        assert_eq!(hooks::handler_entries("file_exists"), 0);
+        assert_eq!(hooks::handler_entries("is_file_type"), 0);
+    }
+
+    /// The migrated `true-iff` primitives keep both branch shapes, and
+    /// `is_empty` proves only presence on its false side.
+    #[test]
+    fn the_migrated_primitives_keep_their_branch_shapes() {
+        let schema = schema(UNION);
+        let declared = DeclaredTypes::new(Some(&schema));
+        assert_eq!(narrowed(&declared, "is_string(foo)", Polarity::True, "foo"), "string");
+        assert_eq!(narrowed(&declared, "is_string(foo)", Polarity::False, "foo"), "number");
+        assert_eq!(narrowed(&declared, "is_number(foo)", Polarity::True, "foo"), "number");
+        assert_eq!(narrowed(&declared, "is_number(foo)", Polarity::False, "foo"), "string");
+        assert_eq!(narrowed(&declared, "is_null(x)", Polarity::True, "x"), "null");
+        assert_eq!(narrowed(&declared, "is_null(x)", Polarity::False, "x"), "number");
+        assert_eq!(narrowed(&declared, "is_empty(x)", Polarity::False, "x"), "number");
+        assert_eq!(narrowed(&declared, "is_empty(x)", Polarity::True, "x"), "number | null");
+        assert_eq!(narrowed(&declared, "is_empty(foo)", Polarity::False, "foo"), "number | string");
+        let objects = schema_with_object_and_array();
+        let declared = DeclaredTypes::new(Some(&objects));
+        assert_eq!(narrowed(&declared, "is_array(v)", Polarity::True, "v"), "unknown[]");
+        assert_eq!(narrowed(&declared, "is_array(v)", Polarity::False, "v"), "string | {a: string}");
+        assert_eq!(narrowed(&declared, "is_object(v)", Polarity::False, "v"), "string | unknown[]");
+    }
+
+    fn schema_with_object_and_array() -> SimplifiedSchema {
+        schema("v:\n  - string(required)\n  - unknown[](required)\n  - \"{ a: string }\"\n")
+    }
+
+    /// A function's aliases resolve to the same registration, so they narrow
+    /// identically.
+    #[test]
+    fn aliases_narrow_like_the_canonical_name() {
+        let schema = schema("source: unknown\n");
+        let union = super::schema(UNION);
+        let declared = DeclaredTypes::new(Some(&schema));
+        for alias in ["fileExists", "fileexists"] {
+            assert_eq!(narrowed(&declared, &format!("{alias}(source)"), Polarity::True, "source"), "file", "{alias}");
+        }
+        let declared = DeclaredTypes::new(Some(&union));
+        assert_eq!(narrowed(&declared, "isstring(foo)", Polarity::True, "foo"), "string");
+        assert_eq!(narrowed(&declared, "isstring(foo)", Polarity::False, "foo"), "number");
+    }
+
+    /// When the argument carrying the fact is omitted, the call proves
+    /// nothing about any other argument.
+    #[test]
+    fn an_omitted_optional_fact_argument_narrows_nothing() {
+        let schema = schema(UNION);
+        let declared = DeclaredTypes::new(Some(&schema));
+        let signature = "function(parameters(first: unknown | null, second?: unknown | null); returns(boolean); narrows(second: string; true-iff))";
+        let builder = FunctionRegistration::builder("optional_fact", signature);
+        let _guard = hooks::register(builder.build().expect("registers"), Arc::new(|_| Ok(json!(true))));
+        assert_eq!(narrowed(&declared, "optional_fact(foo)", Polarity::True, "foo"), "number | string");
+        assert_eq!(narrowed(&declared, "optional_fact(foo)", Polarity::False, "foo"), "number | string");
+        assert_eq!(narrowed(&declared, "optional_fact(1, foo)", Polarity::True, "foo"), "string");
+        assert_eq!(narrowed(&declared, "optional_fact(1, foo)", Polarity::False, "foo"), "number");
+    }
+}
+
 /// A recursive arm is classified by its definition body, one level, and
 /// kept as its named reference.
 mod recursive_arms {

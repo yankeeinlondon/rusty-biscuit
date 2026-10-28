@@ -813,6 +813,32 @@ fn installed_host_functions_get_the_built_in_checks_and_run_only_when_evaluated(
     assert_eq!(entries(), (1, 0), "only the evaluated host call entered its handler");
 }
 
+/// Criterion 37, passivity: a fact the catalog declares is compiled, written
+/// to the artifact, and used for narrowing without entering a handler at any
+/// step, and the catalog text is the only source of the fact.
+#[test]
+fn declaring_and_using_a_catalog_fact_enters_no_handler() {
+    let catalog = std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join("tests/fixtures/host_functions/project.yaml"))
+        .expect("the test catalog");
+    assert!(catalog.contains("narrows(value: file; true-implies)"), "the fixture declares the fact");
+
+    let loaded = load(&catalog);
+    assert_eq!(entries(), (0, 0), "loading the catalog ran nothing");
+    let host = test_host(&catalog);
+    assert_eq!(entries(), (0, 0), "building the host ran nothing");
+    let artifact = host.facts_artifact();
+    assert!(artifact.contains("is_project_file"), "the derived artifact records the declared fact");
+    assert_eq!(entries(), (0, 0), "writing the artifact ran nothing");
+    drop(loaded);
+
+    let schema = schema("source: unknown\n");
+    let declared = DeclaredTypes::new(Some(&schema));
+    install_host_functions(host).expect("installs");
+    assert_eq!(check_in(&declared, GUARDED, "frontmatter").unwrap().category(), ArgumentCategory::Compatible);
+    assert_eq!(check_in(&declared, UNGUARDED, "frontmatter").unwrap().category(), ArgumentCategory::Unknown);
+    assert_eq!(entries(), (0, 0), "narrowing a guarded call ran nothing");
+}
+
 /// A function catalog in a schema root is discovered for its role only: it
 /// is not a global catalog, contributes no document property, and is no
 /// trigger.
