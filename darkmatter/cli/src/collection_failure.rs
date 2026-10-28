@@ -2,10 +2,10 @@
 //! `::filter` collection.
 //!
 //! The library's own block names the code and the iteration path but not the
-//! authored location, and its diagnostic record names the location but not
-//! the path. [`CollectionFailure`] carries both to both sinks from the one
-//! typed [`CollectionError`], so the terminal and the report agree on code,
-//! file, line, column, and path.
+//! authored location. [`CollectionFailure`] adds the location to the terminal
+//! block; its report records are the library's
+//! ([`error_diagnostics`]), which already carry the site, span, and path, so
+//! the terminal and the report agree on code, file, line, column, and path.
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::status::StatusState;
@@ -27,17 +27,7 @@ pub struct CollectionFailure {
 impl CollectionFailure {
     /// Wraps `error`, deriving its diagnostic record.
     pub fn new(error: CollectionError) -> Self {
-        let path = error.iteration_path();
-        let mut diagnostics = error_diagnostics(&MarkdownError::Collection(Box::new(error.clone())));
-        if !path.is_empty() {
-            let path = path.to_string();
-            for diagnostic in &mut diagnostics {
-                // The record's message may already name the path.
-                if !diagnostic.message.contains(&path) {
-                    diagnostic.message = format!("{} at {path}", diagnostic.message);
-                }
-            }
-        }
+        let diagnostics = error_diagnostics(&MarkdownError::Collection(Box::new(error.clone())));
         Self { error, diagnostics }
     }
 

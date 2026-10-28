@@ -53,12 +53,40 @@ use crate::markdown::compose::pipeline::operations::ComposeOperation;
 /// The first defect in document order, as a located [`CollectionError`]: a
 /// malformed region or header, an untyped source (unless waived), an invalid
 /// source, a protected parameter name, a pattern mismatch, or an unsupported
-/// sort key.
+/// sort key. The warnings authored before it are dropped; a consumer that
+/// reports them with the defect uses [`analyze_collection_blocks_report`].
 pub fn analyze_collection_blocks(
     source: &str,
     site: &TypeScope<'_>,
     options: &CollectionAnalysisOptions<'_>,
 ) -> Result<CollectionAnalysis, CollectionError> {
+    let report = analyze_collection_blocks_report(source, site, options);
+    match report.rejection {
+        Some(error) => Err(error),
+        None => Ok(report.analysis),
+    }
+}
+
+/// [`analyze_collection_blocks`] with the warnings found before its defect.
+#[derive(Debug, Clone, Default)]
+pub struct CollectionAnalysisReport {
+    /// The analysis. With a `rejection`, `recovered` and `diagnostics` hold
+    /// only the waived sources authored before the rejected span, and
+    /// `regions` and `scopes` are empty when the regions did not parse.
+    pub analysis: CollectionAnalysis,
+    /// The first defect in document order, as [`analyze_collection_blocks`]
+    /// returns it.
+    pub rejection: Option<CollectionError>,
+}
+
+/// Analyzes like [`analyze_collection_blocks`], keeping the recovery warnings
+/// authored before the first defect alongside it, so a report can show them
+/// with the failure without analyzing or evaluating anything again.
+pub fn analyze_collection_blocks_report(
+    source: &str,
+    site: &TypeScope<'_>,
+    options: &CollectionAnalysisOptions<'_>,
+) -> CollectionAnalysisReport {
     let operations = &options.operations;
     let guards = if operations.contains(ComposeOperation::PageBlocks) {
         BodyGuards::scan(source)
@@ -66,13 +94,16 @@ pub fn analyze_collection_blocks(
         BodyGuards::default()
     };
     if !operations.contains(ComposeOperation::CollectionBlocks) {
-        return Ok(CollectionAnalysis {
-            scopes: BodyScopes::from_parts(guards, &[]),
-            ..CollectionAnalysis::default()
-        });
+        return CollectionAnalysisReport {
+            analysis: CollectionAnalysis { scopes: BodyScopes::from_parts(guards, &[]), ..CollectionAnalysis::default() },
+            rejection: None,
+        };
     }
 
-    let regions = parse_collection_regions_in(source, None, operations, options.source_path)?;
+    let regions = match parse_collection_regions_in(source, None, operations, options.source_path) {
+        Ok(regions) => regions,
+        Err(error) => return CollectionAnalysisReport { analysis: CollectionAnalysis::default(), rejection: Some(error) },
+    };
     let scopes = BodyScopes::from_parts(guards, &regions);
 
     let mut errors: Vec<(usize, CollectionError)> = Vec::new();
@@ -80,11 +111,15 @@ pub fn analyze_collection_blocks(
     for plan in scopes.plans() {
         check_region(source, site, options, &scopes, plan, &mut errors, &mut recovered);
     }
-    if let Some((_, error)) = errors.into_iter().min_by_key(|(at, _)| *at) {
-        return Err(error);
+    let rejection = errors.into_iter().min_by_key(|(at, _)| *at);
+    if let Some((at, _)) = &rejection {
+        recovered.retain(|found: &RecoveredSource| found.span.start < *at);
     }
     let diagnostics = recovered.iter().map(|found: &RecoveredSource| found.diagnostic.clone()).collect();
-    Ok(CollectionAnalysis { regions, scopes, diagnostics, recovered })
+    CollectionAnalysisReport {
+        analysis: CollectionAnalysis { regions, scopes, diagnostics, recovered },
+        rejection: rejection.map(|(_, error)| error),
+    }
 }
 
 /// The authored span of a binding pattern: its identifier, or first through
@@ -235,6 +270,8 @@ fn recovered_source(source: &str, path: Option<&Path>, plan: &RegionPlan, span: 
         }),
         expected_type: None,
         actual_type: None,
+        span: None,
+        iteration_path: Default::default(),
     };
     RecoveredSource { kind: plan.kind, reference, span, diagnostic }
 }

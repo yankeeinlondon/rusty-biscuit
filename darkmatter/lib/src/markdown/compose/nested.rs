@@ -338,6 +338,7 @@ struct NestedChild {
 }
 
 fn is_structural(error: &MarkdownError) -> bool {
+    let error = error.without_iteration();
     let transclusion_limit = matches!(
         error,
         MarkdownError::Transclusion(inner)

@@ -402,35 +402,22 @@ fn shape_text(shape: &Shape) -> String {
 /// every name for it shares.
 ///
 /// Build one frame per source and bind it under each callback's pattern with
-/// [`Self::enter`]. Callbacks that name the item differently, or that bind
-/// the same field of it, then share one subject, so a fact established while
-/// evaluating one callback holds under the others. A map result is a new
-/// frame built from the result type; nothing carries over by spelling.
+/// [`Self::enter`]. An identifier pattern names the item's identity and a
+/// field pattern names each field as that identity's member path, so `p`,
+/// `q`, `p.members`, and a destructured `members` all resolve to subjects of
+/// one item, and a fact established while evaluating one callback holds under
+/// the others whichever spelling it used. A map result is a new frame built
+/// from the result type; nothing carries over by spelling.
 #[derive(Debug, Clone)]
 pub struct ItemFrame {
     entry: Shape,
     id: LocalId,
-    frame: u64,
-    fields: Vec<String>,
 }
 
 impl ItemFrame {
-    /// A frame for entries of type `entry`. `patterns` are every pattern that
-    /// will bind it: their field names get stable identities. A field named
-    /// only by a pattern outside this list binds a fresh subject.
-    pub fn new(entry: Shape, patterns: &[&BindingPattern]) -> Self {
-        let frame = next_frame_id();
-        let mut fields: Vec<String> = Vec::new();
-        for pattern in patterns {
-            if let BindingPattern::Fields(names) = pattern {
-                for name in names {
-                    if !fields.contains(name) {
-                        fields.push(name.clone());
-                    }
-                }
-            }
-        }
-        Self { entry, id: LocalId::new(frame, 0), frame, fields }
+    /// A frame for entries of type `entry`, with an identity of its own.
+    pub fn new(entry: Shape) -> Self {
+        Self { entry, id: LocalId::new(next_frame_id(), 0) }
     }
 
     /// The type of one entry.
@@ -464,10 +451,7 @@ impl ItemFrame {
             .into_iter()
             .map(|(name, shape)| match pattern {
                 BindingPattern::Identifier(_) => TypedLocal::aliasing(name, self.id, shape),
-                BindingPattern::Fields(_) => match self.fields.iter().position(|field| *field == name) {
-                    Some(slot) => TypedLocal::aliasing(name, LocalId::new(self.frame, slot + 1), shape),
-                    None => TypedLocal::new(name, shape),
-                },
+                BindingPattern::Fields(_) => TypedLocal::aliasing_field(name.clone(), self.id, name, shape),
             })
             .collect();
         let layer = match parent {
@@ -540,7 +524,7 @@ impl ItemFrame {
         mapper: &SpannedCallback,
         body: &BindingPattern,
     ) -> Result<(ItemFrame, TypeScope<'d>), PatternMismatch> {
-        let result = ItemFrame::new(self.mapped_shape(outer, mapper)?, &[body]);
+        let result = ItemFrame::new(self.mapped_shape(outer, mapper)?);
         let scope = result.enter(outer, outer.lexical(), body)?;
         Ok((result, scope))
     }
@@ -803,7 +787,7 @@ mod tests {
         let outer = TypeScope::unguarded(&declared);
         let predicate = callback("item -> item");
         let body = BindingPattern::Identifier("person".into());
-        let frame = ItemFrame::new(Shape::Arms { arms: vec![PropertyAtom::bare(SimplifiedType::String)], nullable: true }, &[&predicate.pattern, &body]);
+        let frame = ItemFrame::new(Shape::Arms { arms: vec![PropertyAtom::bare(SimplifiedType::String)], nullable: true });
 
         let inside = frame.enter(&outer, None, &predicate.pattern).unwrap();
         assert!(!names_present(&inside, "item"));
@@ -832,11 +816,80 @@ mod tests {
         })));
         let predicate = callback("{ name } -> name");
         let body = fields(&["name"]);
-        let frame = ItemFrame::new(entry, &[&predicate.pattern, &body]);
+        let frame = ItemFrame::new(entry);
         let selected = frame.selected(&outer, &predicate, &body).unwrap();
         assert!(names_present(&selected, "name"));
         let mismatch = frame.selected(&outer, &callback("{ nope } -> nope"), &body);
         assert!(matches!(mismatch, Err(PatternMismatch::MissingField { .. })));
+    }
+
+    /// `{ members: unknown }` entries: a field whose array type only a guard
+    /// can establish.
+    fn members_entry() -> Shape {
+        entries("data: '{ members: unknown(required), other: unknown(required) }[](required)'", "data")
+    }
+
+    fn is_array_of(scope: &TypeScope<'_>, read: &str) -> bool {
+        let ty = scope.type_of_expr(&parse(read).unwrap()).unwrap();
+        matches!(project_source(ty.shape(), scope.definitions()), SourceProjection::Entries(_))
+    }
+
+    #[test]
+    fn a_destructured_field_and_an_object_member_are_one_subject_in_both_directions() {
+        let schema = schema("x: string\n");
+        let declared = DeclaredTypes::new(Some(&schema));
+        let outer = TypeScope::unguarded(&declared);
+        let frame = ItemFrame::new(members_entry());
+        let object = BindingPattern::Identifier("p".into());
+        let destructured = fields(&["members"]);
+
+        let via_member = frame.selected(&outer, &callback("p => is_array(p.members)"), &destructured).unwrap();
+        assert!(is_array_of(&via_member, "members"), "a fact about `p.members` holds for a destructured `members`");
+        let via_field = frame.selected(&outer, &callback("{ members } => is_array(members)"), &object).unwrap();
+        assert!(is_array_of(&via_field, "p.members"), "a fact about a destructured `members` holds for `p.members`");
+        assert!(!is_array_of(&via_field, "p.other"), "a sibling field gains nothing");
+
+        let p = frame.enter(&outer, None, &object).unwrap();
+        let members = frame.enter(&outer, None, &destructured).unwrap();
+        assert_eq!(p.subject(&parse("p.members").unwrap()), members.subject(&parse("members").unwrap()));
+        assert_eq!(p.subject(&parse("p['members']").unwrap()), members.subject(&parse("members").unwrap()));
+    }
+
+    #[test]
+    fn a_map_result_field_gains_input_facts_only_through_its_mapping_expression() {
+        let schema = schema("x: string\n");
+        let declared = DeclaredTypes::new(Some(&schema));
+        let outer = TypeScope::unguarded(&declared);
+        let frame = ItemFrame::new(members_entry());
+        let guarded = frame
+            .enter(&outer, None, &BindingPattern::Identifier("p".into()))
+            .unwrap()
+            .assume(&parse("is_array(p.members)").unwrap(), Polarity::True)
+            .with_lexical(None);
+
+        let carried = parse_callback_spanned("{ members } => { members }").unwrap();
+        let (_, body) = frame.mapped(&guarded, &carried, &fields(&["members"])).unwrap();
+        assert!(is_array_of(&body, "members"), "the mapping expression carries the proven type");
+
+        let swapped = parse_callback_spanned("{ members, other } => { members: other, other: members }").unwrap();
+        let (result, body) = frame.mapped(&guarded, &swapped, &fields(&["members", "other"])).unwrap();
+        assert!(!is_array_of(&body, "members"), "a result field named like the input field is a new subject");
+        assert!(is_array_of(&body, "other"));
+        assert_ne!(result.id(), frame.id());
+    }
+
+    #[test]
+    fn a_shadowing_destructured_field_of_another_item_does_not_inherit_outer_facts() {
+        let schema = schema("x: string\n");
+        let declared = DeclaredTypes::new(Some(&schema));
+        let outer_scope = TypeScope::unguarded(&declared);
+        let outer = ItemFrame::new(members_entry());
+        let selected = outer.selected(&outer_scope, &callback("p => is_array(p.members)"), &fields(&["members"])).unwrap();
+        assert!(is_array_of(&selected, "members"));
+
+        let inner = ItemFrame::new(members_entry());
+        let shadowed = inner.enter(&selected, selected.lexical(), &fields(&["members"])).unwrap();
+        assert!(!is_array_of(&shadowed, "members"), "the inner item's `members` is a different subject");
     }
 
     #[test]
@@ -846,7 +899,7 @@ mod tests {
         let outer = TypeScope::unguarded(&declared);
         let predicate = callback("p -> p == null");
         let body = BindingPattern::Identifier("p".into());
-        let frame = ItemFrame::new(Shape::Arms { arms: vec![PropertyAtom::bare(SimplifiedType::String)], nullable: true }, &[&body]);
+        let frame = ItemFrame::new(Shape::Arms { arms: vec![PropertyAtom::bare(SimplifiedType::String)], nullable: true });
         let kept = frame.retaining(&outer, &predicate, Polarity::False, &body).unwrap();
         assert!(!kept.type_of_expr(&parse("p").unwrap()).unwrap().admits_null());
         let selected = frame.selected(&outer, &predicate, &body).unwrap();
@@ -859,7 +912,7 @@ mod tests {
         let declared = DeclaredTypes::new(Some(&schema));
         let outer = TypeScope::unguarded(&declared);
         let input = BindingPattern::Identifier("p".into());
-        let frame = ItemFrame::new(Shape::Arms { arms: vec![PropertyAtom::bare(SimplifiedType::String)], nullable: true }, &[&input]);
+        let frame = ItemFrame::new(Shape::Arms { arms: vec![PropertyAtom::bare(SimplifiedType::String)], nullable: true });
         let narrowed_input = frame.enter(&outer, None, &input).unwrap().assume(&parse("p").unwrap(), Polarity::True);
         assert!(names_present(&narrowed_input, "p"));
 
@@ -877,7 +930,7 @@ mod tests {
         let outer = TypeScope::unguarded(&declared);
         let entry = entries("o:\n  a: string(required)\n", "o");
         let pattern = fields(&["key", "value"]);
-        let frame = ItemFrame::new(entry, &[&pattern]);
+        let frame = ItemFrame::new(entry);
 
         let reshaped = parse_callback_spanned("{ key, value } => { key, value: upper(value) }").unwrap();
         let (result, scope) = frame.mapped(&outer, &reshaped, &pattern).unwrap();

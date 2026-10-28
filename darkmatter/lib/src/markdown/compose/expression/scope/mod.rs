@@ -174,8 +174,8 @@ impl<'d> TypeScope<'d> {
     }
 
     /// This site inside the lexical `layer`. Facts already assumed stay, and
-    /// a fact about a binding the layer aliases (by local id) applies to
-    /// it under its new name. The scope this was called on is unchanged, so
+    /// a fact about a binding the layer aliases (by local id, and member path
+    /// for a destructured field) applies to it under its new name. The scope this was called on is unchanged, so
     /// dropping the result restores the outer meaning.
     #[must_use]
     pub fn within(&self, layer: Arc<LexicalTypes>) -> Self {
@@ -266,10 +266,10 @@ impl<'d> TypeScope<'d> {
         let BindingId::Local(id) = subject.binding() else {
             return self.declared.projected(subject);
         };
-        let Some(base) = self.lexical.as_ref().and_then(|layer| layer.shape_of(*id)) else {
+        let Some((base, covered)) = self.lexical.as_ref().and_then(|layer| layer.shape_below(*id, subject.path())) else {
             return (DeclaredType::NoProjection, Shape::Unknown { non_null: false });
         };
-        let shape = projection::walk(base.clone(), subject.path(), self.definitions());
+        let shape = projection::walk(base.clone(), &subject.path()[covered..], self.definitions());
         match shape.to_definition() {
             Some(def) => (DeclaredType::Property(def), shape),
             None => (DeclaredType::NoProjection, shape),

@@ -236,7 +236,9 @@ pub(super) fn escape_prose_path(input: &str) -> String {
 /// cannot see inside it. `ComposeFailed` is `Semantic` and owns whichever code
 /// this returns (decisions.md §D-3).
 fn compose_failed_code(md: &MarkdownError) -> &'static str {
-    match md {
+    // A failure inside a repeated `::map` / `::filter` copy keeps the code of
+    // the failure it wraps.
+    match md.without_iteration() {
         MarkdownError::Interpolation { cause, .. } => match cause.as_ref() {
             ExpressionError::FileReference(_) => "composition.invalid_file_reference",
             ExpressionError::UnknownFunction { .. } => "composition.unknown_function",

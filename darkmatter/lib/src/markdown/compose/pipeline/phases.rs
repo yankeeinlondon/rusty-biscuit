@@ -136,9 +136,20 @@ impl Markdown {
             &mut runtime.shell,
             &sb_ctx,
             line_offset,
-        )?;
+        )
+        .map_err(|error| match lookup.entered() {
+            // The stage entered the failing command's line, or the block's
+            // opener when the block itself failed.
+            Some(offset) => {
+                let end = self.content[offset..].find('\n').map_or(self.content.len(), |at| offset + at);
+                body.scope_failure(self, offset..end, error)
+            }
+            None => error.into(),
+        })?;
         for edit in edits.iter().filter(|edit| edit.origin == EditOrigin::Data) {
-            lookup.charge(edit.range.start, edit.replacement_len).map_err(inline::shell_expansion::collection_budget)?;
+            lookup.charge(edit.range.start, edit.replacement_len).map_err(|error| {
+                body.scope_failure(self, edit.range.clone(), inline::shell_expansion::collection_budget(error))
+            })?;
         }
         body.advance(&self.content, &edits, &new_content)?;
         self.content = new_content;
@@ -336,6 +347,7 @@ impl Markdown {
                             resolved_cache.as_ref(),
                             watch.as_mut(),
                             &body.scopes,
+                            body.origin.as_ref().filter(|origin| origin.describes(&content_now)),
                             &sites,
                         )?;
                     }
@@ -370,6 +382,7 @@ impl Markdown {
                             None,
                             watch.as_mut(),
                             &body.scopes,
+                            body.origin.as_ref().filter(|origin| origin.describes(&content_now)),
                             &sites,
                         )?;
                     }
@@ -470,7 +483,10 @@ impl Markdown {
                 Err(failure) => {
                     let (anchor, error) = *failure;
                     if transclusion_failure_is_fatal(&error) || options.fail_fast {
-                        return Err(error);
+                        return Err(match &anchor.target {
+                            ApplyTarget::Replace(span) => body.scope_failure(self, span.clone(), error),
+                            ApplyTarget::Section(_) => error,
+                        });
                     }
                     // Tolerating the failure is a promise that the output stays
                     // usable, and a document that silently omits a transcluded
@@ -513,9 +529,9 @@ impl Markdown {
         }
 
         for (_, span, replacement, _) in &replacements {
-            body.scopes
-                .charge(&iteration, span.start, replacement.len())
-                .map_err(inline::shell_expansion::collection_budget)?;
+            body.scopes.charge(&iteration, span.start, replacement.len()).map_err(|error| {
+                body.scope_failure(self, span.clone(), inline::shell_expansion::collection_budget(error))
+            })?;
         }
         if !replacements.is_empty() {
             replacements.sort_by(|left, right| {
@@ -632,7 +648,7 @@ fn tolerated_failure_warning(error: &MarkdownError) -> ComposeWarning {
 
 fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
     matches!(
-        error,
+        error.without_iteration(),
         MarkdownError::Transclusion(inner)
             if matches!(
                 inner.as_ref(),
@@ -649,7 +665,7 @@ fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
         || error.shell_input_violation().is_some()
         || error.shell_span_failure()
         // A collection failure never becomes a successful notice.
-        || matches!(error, MarkdownError::Collection(_))
+        || matches!(error.without_iteration(), MarkdownError::Collection(_))
 }
 
 #[cfg(test)]

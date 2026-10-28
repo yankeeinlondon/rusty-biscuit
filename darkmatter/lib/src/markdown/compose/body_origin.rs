@@ -745,6 +745,19 @@ impl BodyProvenance {
         scoped_site(&self.scopes, self.authored.as_ref(), current, span, line_offset)
     }
 
+    /// `error`, raised by the site at `span` of `markdown`'s current body,
+    /// with its authored site and iteration (see
+    /// [`scope_failure`](super::site_scope::scope_failure)).
+    pub(crate) fn scope_failure(
+        &self,
+        markdown: &crate::markdown::Markdown,
+        span: Range<usize>,
+        error: impl Into<crate::markdown::types::MarkdownError>,
+    ) -> crate::markdown::types::MarkdownError {
+        let origin = self.origin.as_ref().filter(|origin| origin.describes(markdown.content()));
+        super::site_scope::scope_failure(error.into(), markdown, origin, &self.scopes, span)
+    }
+
     /// Carries every map past a stage that rewrote `before` into `after` by
     /// applying `edits`.
     ///

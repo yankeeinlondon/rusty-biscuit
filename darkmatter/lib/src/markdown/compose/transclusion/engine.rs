@@ -554,6 +554,7 @@ impl<'a> TransclusionEngine<'a> {
         >,
         mut watch: Option<&mut crate::markdown::compose::pipeline::ReportWatch<'_>>,
         scopes: &crate::markdown::compose::body_origin::ScopeRanges,
+        origin: Option<&crate::markdown::compose::body_origin::BodyOrigin>,
         sites: &[Option<crate::markdown::compose::preflight::ScopedSite>],
     ) -> MarkdownResult<()> {
         let ignore_invalid = self.resolve_ignore_invalid(options);
@@ -564,6 +565,17 @@ impl<'a> TransclusionEngine<'a> {
             }
             _ => directive.kind != transclusion::DirectiveKind::Code,
         }) {
+            // A failure of a directive a collection body repeated names the
+            // directive's authored site and the copy's items.
+            let in_scope = |error: crate::markdown::types::MarkdownError| {
+                crate::markdown::compose::site_scope::scope_failure(
+                    error,
+                    self.markdown,
+                    origin,
+                    scopes,
+                    directive.span.clone(),
+                )
+            };
             for unknown in &directive.options.unknown_options {
                 report.add_warning(
                     ComposeWarning::new(
@@ -671,7 +683,7 @@ impl<'a> TransclusionEngine<'a> {
                         self.markdown.source_context_for_errors(),
                         &mut missing,
                     )
-                    .map_err(transclusion::TransclusionError::from)?;
+                    .map_err(|error| in_scope(transclusion::TransclusionError::from(error).into()))?;
                 report.add_unknown_root_candidates("condition", missing, |_| {
                     crate::markdown::compose::unknown_identifiers::directive_locus(
                         self.markdown,
@@ -699,9 +711,10 @@ impl<'a> TransclusionEngine<'a> {
             // parameters, and a target no copy was discovered for was never
             // approved.
             let scoped = match (site, options.preflight_graph()) {
-                (Some(site), Some(graph)) if !graph.is_empty() => Some(self.scoped_resolution(
-                    directive, site, graph, options, &transclusion_opts,
-                )?),
+                (Some(site), Some(graph)) if !graph.is_empty() => Some(
+                    self.scoped_resolution(directive, site, graph, options, &transclusion_opts)
+                        .map_err(in_scope)?,
+                ),
                 _ => None,
             };
             let cached = match &scoped {
@@ -756,7 +769,7 @@ impl<'a> TransclusionEngine<'a> {
                         *next_order += 1;
                         continue;
                     }
-                    Err(err) => return Err(err.into()),
+                    Err(err) => return Err(in_scope(err.into())),
                 }
             };
 
@@ -841,10 +854,9 @@ impl<'a> TransclusionEngine<'a> {
                     *next_order += 1;
                 }
                 transclusion::ResolvedTarget::Url { url, .. } => {
-                    return Err(transclusion::TransclusionError::UrlExecutionDisabled {
-                        url: url.to_string(),
-                    }
-                    .into());
+                    return Err(in_scope(
+                        transclusion::TransclusionError::UrlExecutionDisabled { url: url.to_string() }.into(),
+                    ));
                 }
             }
         }
@@ -1650,7 +1662,9 @@ impl<'a> TransclusionEngine<'a> {
         if outcome.reused {
             runtime
                 .iteration
-                .reserve_usage(outcome.result.usage, &crate::markdown::compose::expression::iteration::IterationPath::empty())
+                // A replay is charged to the item whose copy holds this
+                // directive, as the first composition was.
+                .reserve_usage(outcome.result.usage, &site.map(|site| site.iteration.clone()).unwrap_or_default())
                 .map_err(crate::markdown::compose::inline::shell_expansion::collection_budget)?;
         }
         let cached = outcome.result;

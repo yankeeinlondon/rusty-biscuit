@@ -14,5 +14,6 @@ mod budget;
 mod docs_corpus;
 mod grammar;
 mod pipeline;
+mod provenance;
 mod scope_schedule;
 mod types_values;

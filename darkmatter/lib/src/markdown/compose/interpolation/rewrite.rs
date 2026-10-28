@@ -240,7 +240,7 @@ pub(crate) fn charge(
     };
     site.charge(offset, bytes).map_err(|error| LocatedInterpolationError {
         error: Box::new(crate::markdown::types::MarkdownError::from(Box::new(
-            crate::markdown::compose::collection_blocks::CollectionError::Budget(Box::new(error)),
+            crate::markdown::compose::collection_blocks::CollectionError::budget(error),
         ))),
         span,
     })

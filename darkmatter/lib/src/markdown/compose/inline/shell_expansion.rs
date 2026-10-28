@@ -122,7 +122,8 @@ pub(crate) fn run_stage(
                         &evaluator,
                         frame,
                         &|types| body_scopes.scope_at(types, authored_offset),
-                    )?,
+                    )
+                    .map_err(|error| body.scope_failure(markdown, line.span.clone(), error))?,
                     None => None,
                 }
             }
@@ -151,8 +152,10 @@ pub(crate) fn run_stage(
         // A template reads its holes now, so the copy it lies in is entered
         // again: every directive was read before any ran.
         lookup.enter(span.start);
-        let prepared = prepare_site(parsed, site.as_ref(), options, &policy_paths, &mut runtime.shell)?;
-        let execution = execute_prepared_directive(&prepared, options, &runtime.shell)?;
+        let prepared = prepare_site(parsed, site.as_ref(), options, &policy_paths, &mut runtime.shell)
+            .map_err(|error| body.scope_failure(markdown, span.clone(), error))?;
+        let execution = execute_prepared_directive(&prepared, options, &runtime.shell)
+            .map_err(|error| body.scope_failure(markdown, span.clone(), error))?;
         if let Some(start) = span_start {
             let raw_command = &prepared.effective.raw_command;
             perf.record_shell_span(ShellCommandSpan {
@@ -176,7 +179,9 @@ pub(crate) fn run_stage(
     }
 
     for (span, output) in &replacements {
-        lookup.charge(span.start, output.len()).map_err(collection_budget)?;
+        lookup
+            .charge(span.start, output.len())
+            .map_err(|error| body.scope_failure(markdown, span.clone(), collection_budget(error)))?;
     }
     let before = markdown.content().to_string();
     let edits = apply_replacements_with_edits(markdown.content_mut(), replacements, EditOrigin::Data);
@@ -199,7 +204,9 @@ fn directive_extent(content: &str, data: &DataRanges, line: &parser::DirectiveLi
     line.span.start..content.len()
 }
 
-/// A budget exhaustion as the request-fatal composition error.
+/// A budget exhaustion as the request-fatal composition error, not yet
+/// located: the charging stage locates it with
+/// [`BodyProvenance::scope_failure`].
 pub(crate) fn collection_budget(error: super::super::expression::iteration::IterationError) -> crate::markdown::types::MarkdownError {
-    super::super::collection_blocks::CollectionError::Budget(Box::new(error)).into()
+    super::super::collection_blocks::CollectionError::budget(error).into()
 }

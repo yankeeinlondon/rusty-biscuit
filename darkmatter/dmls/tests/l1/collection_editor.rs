@@ -614,3 +614,36 @@ fn call_errors_in_callbacks_are_ranged_through_the_escapes() {
     );
     session.shutdown();
 }
+
+/// The editor reads the library's one identity for an original item's field:
+/// a guard fact recorded through `p.members` proves a destructured `members`
+/// and the reverse, so neither document publishes a collection finding, while
+/// an inner region's own `members` stays unproven.
+#[test]
+fn guard_facts_cross_destructured_and_object_spellings_in_editor_diagnostics() {
+    let head = "---\n$schema:\n  data: '{ members: any(required) }[](required)'\ndata: [{members: [a, b]}]\n---\n";
+    let documents: Vec<(String, String)> = [
+        ("object_guard", "::filter data \"{members} => true\" filter=\"p => is_array(p.members)\"\n::map members\n- {{i}}\n::end-map\n::end-filter\n"),
+        ("destructured_guard", "::filter data \"p => true\" until=\"{members} => !is_array(members)\"\n::map p.members\n- {{i}}\n::end-map\n::end-filter\n"),
+        (
+            "shadowed",
+            "::filter data \"p => true\" filter=\"p => is_array(p.members)\"\n::map data \"{members} => {members}\"\n::map members\n- {{i}}\n::end-map\n::end-map\n::end-filter\n",
+        ),
+    ]
+    .iter()
+    .map(|(name, body)| ((*name).to_string(), format!("{head}{body}")))
+    .collect();
+    let workspace = LspWorkspace::new();
+    let found = published(&workspace, &documents);
+    let collection_codes = |diagnostics: &[Value]| -> Vec<String> {
+        diagnostics
+            .iter()
+            .filter_map(|diagnostic| diagnostic["code"].as_str())
+            .filter(|code| code.starts_with("dm.collection."))
+            .map(str::to_string)
+            .collect()
+    };
+    assert!(collection_codes(&found[0]).is_empty(), "{:#?}", found[0]);
+    assert!(collection_codes(&found[1]).is_empty(), "{:#?}", found[1]);
+    assert_eq!(collection_codes(&found[2]), ["dm.collection.untyped_map_source"], "{:#?}", found[2]);
+}

@@ -7,8 +7,10 @@
 //! failure, is classified by its
 //! typed error into a code of the same `dm.<family>.<kind>` taxonomy DMLS
 //! reports, with `source` and the types left `None` where the error holds no
-//! authored position. Classification reads only the error and warning
-//! values: it evaluates nothing and reads no file.
+//! authored position. A failure inside a repeated `::map` / `::filter` copy
+//! also carries the typed `span` and `iteration_path` its error holds, so
+//! every host reports the same provenance. Classification reads only the
+//! error and warning values: it evaluates nothing and reads no file.
 //!
 //! See `darkmatter/docs/cli/report-json.md` for the report shape.
 
@@ -18,6 +20,7 @@ use super::ShellExpansionError;
 use super::TransclusionError;
 use super::conditions::ConditionError;
 use super::context::report::ComposeWarning;
+use super::expression::iteration::IterationPath;
 use super::expression::{Diagnostic, DiagnosticSource, ExpressionError, Severity};
 use super::page_blocks::PageBlockError;
 use crate::markdown::reference::validate::{ReferenceIssue, ReferenceIssueCode, ReferenceSeverity};
@@ -94,6 +97,9 @@ pub fn reference_issue_diagnostic(issue: &ReferenceIssue) -> Diagnostic {
 /// - Any other Darkmatter error reports one record classified by its
 ///   innermost typed error; a foreign error reports [`INPUT_READ_CODE`] for an
 ///   I/O error and [`COMPOSE_FAILURE_CODE`] otherwise.
+/// - Every record of a Darkmatter failure carries the iteration path of the
+///   copies it happened in, and an otherwise unlocated record their authored
+///   site (see `with_iteration_context`).
 pub fn error_diagnostics(error: &(dyn Error + 'static)) -> Vec<Diagnostic> {
     let mut current = Some(error);
     while let Some(error) = current {
@@ -140,10 +146,56 @@ fn markdown_error_diagnostics(error: &MarkdownError) -> Vec<Diagnostic> {
     if let Some((blocking, earlier)) = blocked(error) {
         return earlier.iter().chain(blocking).map(warning_diagnostic).collect();
     }
-    if let Some(diagnostic) = error.call_diagnostic() {
-        return vec![diagnostic];
+    let mut diagnostics = match error.call_diagnostic() {
+        Some(diagnostic) => vec![diagnostic],
+        None => failure_diagnostics(innermost(error)),
+    };
+    with_iteration_context(error, &mut diagnostics);
+    diagnostics
+}
+
+/// Gives every record of a failure the provenance the chain of `error`
+/// carries: each enclosing repeated copy's items
+/// ([`IterationFailure`](super::collection_blocks::IterationFailure)),
+/// outermost first, followed by the items a collection failure itself names;
+/// and, for a record with no position of its own, the authored site of the
+/// innermost copy that proved one. A message that does not already name the
+/// path ends with `at <path>`.
+fn with_iteration_context(error: &MarkdownError, diagnostics: &mut [Diagnostic]) {
+    let mut path = super::expression::iteration::IterationPath::empty();
+    let mut location = None;
+    let mut current: Option<&(dyn Error + 'static)> = Some(error);
+    while let Some(cause) = current {
+        if let Some(MarkdownError::InIteration(failure)) = as_markdown_error(cause) {
+            path = path.joined(&failure.iteration_path);
+            if let Some(found) = failure.location.as_deref().and_then(located) {
+                location = Some(found);
+            }
+        }
+        current = cause.source();
     }
-    let leaf = innermost(error);
+    if let MarkdownError::Collection(inner) = innermost(error) {
+        path = path.joined(&inner.iteration_path());
+    }
+    let rendered = path.to_string();
+    for diagnostic in diagnostics {
+        if diagnostic.source.is_none()
+            && let Some((source, span)) = location.clone()
+        {
+            diagnostic.source = Some(source);
+            diagnostic.span = Some(span);
+        }
+        if !path.is_empty() {
+            if !diagnostic.message.contains(&rendered) {
+                diagnostic.message = format!("{} at {rendered}", diagnostic.message);
+            }
+            diagnostic.iteration_path = path.clone();
+        }
+    }
+}
+
+/// The records of `leaf`, the deepest Darkmatter error of a failure.
+fn failure_diagnostics(leaf: &MarkdownError) -> Vec<Diagnostic> {
     match leaf {
         MarkdownError::SchemaValidationFailed { path, problems, .. } if !problems.is_empty() => problems
             .iter()
@@ -158,6 +210,8 @@ fn markdown_error_diagnostics(error: &MarkdownError) -> Vec<Diagnostic> {
                 }),
                 expected_type: None,
                 actual_type: None,
+                span: None,
+                iteration_path: IterationPath::empty(),
             })
             .collect(),
         MarkdownError::ShellExpansion(shell) => shell_error_diagnostics(shell),
@@ -165,8 +219,26 @@ fn markdown_error_diagnostics(error: &MarkdownError) -> Vec<Diagnostic> {
     }
 }
 
+/// Where `source` starts in its file and the bytes it covers, when it is a
+/// proven authored span.
+fn located(source: &SourceRef) -> Option<(DiagnosticSource, std::ops::Range<usize>)> {
+    match source {
+        SourceRef::OnDiskSpan { context, span } => Some((
+            DiagnosticSource { file: named(&context.display), line: span.line(), column: span.column() },
+            span.range(),
+        )),
+        _ => None,
+    }
+}
+
 fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
     let message = error.to_string();
+    let mut span = None;
+    let mut proven = |source: Option<&SourceRef>| {
+        let (source, range) = source.and_then(located)?;
+        span = Some(range);
+        Some(source)
+    };
     let (code, source) = match error {
         MarkdownError::FrontmatterParse { ctx, source } => (
             FRONTMATTER_PARSE_CODE,
@@ -182,17 +254,7 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
         ),
         MarkdownError::SchemaValidationFailed { .. } => (crate::markdown::schemas::SCHEMA_PREPARE_CODE, None),
         MarkdownError::FileLoad(_) | MarkdownError::UrlFetch(_) => (INPUT_READ_CODE, None),
-        MarkdownError::Interpolation { source, cause, .. } => (
-            expression_code(cause),
-            match source.as_ref() {
-                SourceRef::OnDiskSpan { context, span } => Some(DiagnosticSource {
-                    file: named(&context.display),
-                    line: span.line(),
-                    column: span.column(),
-                }),
-                _ => None,
-            },
-        ),
+        MarkdownError::Interpolation { source, cause, .. } => (expression_code(cause), proven(Some(source.as_ref()))),
         MarkdownError::Transclusion(inner) => (
             match inner.as_ref() {
                 TransclusionError::ParseDirective { .. } => DIRECTIVE_PARSE_CODE,
@@ -211,17 +273,7 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
             },
             None,
         ),
-        MarkdownError::Collection(inner) => (
-            inner.code(),
-            match inner.site().map(|site| site.source.as_ref()) {
-                Some(SourceRef::OnDiskSpan { context, span }) => Some(DiagnosticSource {
-                    file: named(&context.display),
-                    line: span.line(),
-                    column: span.column(),
-                }),
-                _ => None,
-            },
-        ),
+        MarkdownError::Collection(inner) => (inner.code(), proven(inner.site().map(|site| site.source.as_ref()))),
         MarkdownError::ShellBlock(_) => (SHELL_FAILURE_CODE, None),
         MarkdownError::Reference(_) => (REFERENCE_FAILURE_CODE, None),
         MarkdownError::ParameterBinding { .. } | MarkdownError::CallerFileClassificationChanged { .. } => {
@@ -229,7 +281,16 @@ fn leaf_diagnostic(error: &MarkdownError) -> Diagnostic {
         }
         _ => (COMPOSE_FAILURE_CODE, None),
     };
-    Diagnostic { code: code.to_string(), severity: Severity::Error, message, source, expected_type: None, actual_type: None }
+    Diagnostic {
+        code: code.to_string(),
+        severity: Severity::Error,
+        message,
+        source,
+        expected_type: None,
+        actual_type: None,
+        span,
+        iteration_path: IterationPath::empty(),
+    }
 }
 
 fn shell_error_diagnostics(error: &ShellExpansionError) -> Vec<Diagnostic> {
@@ -303,5 +364,14 @@ fn named(display: &std::path::Path) -> Option<std::path::PathBuf> {
 }
 
 fn unlocated(code: &str, severity: Severity, message: String) -> Diagnostic {
-    Diagnostic { code: code.to_string(), severity, message, source: None, expected_type: None, actual_type: None }
+    Diagnostic {
+        code: code.to_string(),
+        severity,
+        message,
+        source: None,
+        expected_type: None,
+        actual_type: None,
+        span: None,
+        iteration_path: IterationPath::empty(),
+    }
 }

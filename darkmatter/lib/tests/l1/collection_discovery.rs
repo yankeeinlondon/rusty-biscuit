@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::compose::preflight::ComposePreflightReport;
+use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
 use darkmatter::markdown::compose::shell_expansion::template::{HoleTiming, ModeRequirement};
 use darkmatter::markdown::compose::shell_expansion::types::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
@@ -195,7 +196,10 @@ mod local_templates {
         for item in ["null", "[1]", "{a: 1}"] {
             let (output, _) = compose("::map data\n::shell echo {{ i }}\n::end-map\n", &format!("[{item}]"));
             let error = output.expect_err(item);
-            assert!(matches!(error, MarkdownError::ShellExpansion(_)), "{item}: {error:?}");
+            assert!(matches!(error.without_iteration(), MarkdownError::ShellExpansion(_)), "{item}: {error:?}");
+            let [record] = error_diagnostics(&error).try_into().expect("one record");
+            assert_eq!(record.iteration_path.to_string(), "data[0]", "{item}: {record:?}");
+            assert_eq!(record.source.as_ref().map(|source| source.line), Some(7), "{item}: {record:?}");
         }
     }
 }
@@ -326,9 +330,11 @@ mod scoped_children {
             .compose_with(&crate::request_support::request(options))
             .expect_err("c.md was never discovered");
         assert!(
-            matches!(&error, MarkdownError::ShellExpansion(inner) if matches!(**inner, ShellExpansionError::NotPreApproved { .. })),
+            matches!(error.without_iteration(), MarkdownError::ShellExpansion(inner) if matches!(**inner, ShellExpansionError::NotPreApproved { .. })),
             "{error}"
         );
+        let [record] = error_diagnostics(&error).try_into().expect("one record");
+        assert_eq!(record.iteration_path.to_string(), "names[1]", "{record:?}");
 
         // Control: the document discovery walked composes.
         write(&root, "doc.md", &names_doc("::map names\n::file {{ i }}\n::end-map\n", "[a.md, b.md]"));

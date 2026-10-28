@@ -274,9 +274,7 @@ impl RegionPlan {
         };
 
         let body_pattern = self.body_pattern();
-        let mut patterns: Vec<&BindingPattern> = self.callbacks().map(|(_, callback)| &callback.erased.pattern).collect();
-        patterns.push(&body_pattern);
-        let frame = ItemFrame::new(entry, &patterns);
+        let frame = ItemFrame::new(entry);
 
         let parent = gated.lexical().cloned();
         let mut accumulated = gated.clone();

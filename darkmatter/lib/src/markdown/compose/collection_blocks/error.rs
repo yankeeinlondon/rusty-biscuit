@@ -9,7 +9,7 @@ use super::diagnostics;
 use super::types::CollectionKind;
 use crate::markdown::compose::expression::ExpressionError;
 use crate::markdown::compose::expression::iteration::{IterationError, IterationPath};
-use crate::markdown::types::SourceRef;
+use crate::markdown::types::{MarkdownError, SourceRef};
 
 /// Where a collection failure happened: the authored location and, for a
 /// runtime failure, the original positions of the items being processed.
@@ -98,8 +98,18 @@ pub enum CollectionError {
     },
 
     /// A request allowance ran out.
-    #[error("{0}")]
-    Budget(Box<IterationError>),
+    ///
+    /// The counters that detect exhaustion know only the iteration path; the
+    /// stage that charged them locates the failure at the authored site whose
+    /// work was being paid for (see [`Self::with_source`]).
+    #[error("{error}")]
+    Budget {
+        /// The authored site whose work exhausted the allowance, once the
+        /// charging stage located it; its path is `error.path`.
+        site: Option<CollectionSite>,
+        /// The typed exhaustion, with the original items being processed.
+        error: Box<IterationError>,
+    },
 }
 
 impl CollectionError {
@@ -114,13 +124,23 @@ impl CollectionError {
             Self::PatternMismatch { .. } => diagnostics::PATTERN_MISMATCH_CODE,
             Self::InvalidSortKey { .. } => diagnostics::INVALID_SORT_KEY_CODE,
             Self::CallbackFailed { .. } => diagnostics::CALLBACK_FAILED_CODE,
-            Self::Budget(error) => error.kind.code(),
+            Self::Budget { error, .. } => error.kind.code(),
         }
     }
 
+    /// An exhaustion not yet located at an authored site.
+    pub fn budget(error: IterationError) -> Self {
+        Self::Budget { site: None, error: Box::new(error) }
+    }
+
+    /// Whether this is an exhaustion no stage has located yet.
+    pub fn is_unlocated_budget(&self) -> bool {
+        matches!(self, Self::Budget { site: None, .. })
+    }
+
     /// This failure located at `source` instead: the same finding re-anchored
-    /// to a richer authored context. A budget failure has no site and is
-    /// returned unchanged.
+    /// to a richer authored context. An unlocated budget failure gains a site
+    /// whose path is the exhaustion's.
     #[must_use]
     pub fn with_source(mut self, source: SourceRef) -> Self {
         match &mut self {
@@ -130,8 +150,11 @@ impl CollectionError {
             | Self::InvalidCallback { site, .. }
             | Self::PatternMismatch { site, .. }
             | Self::InvalidSortKey { site, .. }
-            | Self::CallbackFailed { site, .. } => *site.source = source,
-            Self::Budget(_) => {}
+            | Self::CallbackFailed { site, .. }
+            | Self::Budget { site: Some(site), .. } => *site.source = source,
+            Self::Budget { site, error } => {
+                *site = Some(CollectionSite { source: Box::new(source), iteration_path: error.path.clone() });
+            }
         }
         self
     }
@@ -146,14 +169,14 @@ impl CollectionError {
             | Self::PatternMismatch { site, .. }
             | Self::InvalidSortKey { site, .. }
             | Self::CallbackFailed { site, .. } => Some(site),
-            Self::Budget(_) => None,
+            Self::Budget { site, .. } => site.as_ref(),
         }
     }
 
     /// The original item positions of a runtime failure.
     pub fn iteration_path(&self) -> IterationPath {
         match self {
-            Self::Budget(error) => error.path.clone(),
+            Self::Budget { error, .. } => error.path.clone(),
             other => other.site().map(|site| site.iteration_path.clone()).unwrap_or_default(),
         }
     }
@@ -170,5 +193,42 @@ impl BlockError for CollectionError {
         StatusBlock::new(StatusState::Error)
             .error_header(ErrorHeader::new("CollectionError", self.code()))
             .body(body)
+    }
+}
+
+/// A later body stage's failure at a site a `::map` / `::filter` body
+/// repeated: the underlying error, unchanged, with the authored site and the
+/// original items of the copy the site ran in.
+///
+/// Wrapping never changes what the failure is. Its message, diagnostic code,
+/// and recoverability are `error`'s: recovery decisions read
+/// [`MarkdownError::without_iteration`], and the error chain continues into
+/// `error`. A failure inside a transcluded child that a repeated `::file`
+/// included is wrapped once per enclosing document, outermost first.
+#[derive(Debug)]
+pub struct IterationFailure {
+    /// The authored site in the loaded file, when the stage proved one.
+    pub location: Option<Box<SourceRef>>,
+    /// The original items of the copy, outermost first; never empty.
+    pub iteration_path: IterationPath,
+    /// The failure itself.
+    pub error: Box<MarkdownError>,
+}
+
+impl std::fmt::Display for IterationFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for IterationFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.error.as_ref())
+    }
+}
+
+impl BlockError for IterationFailure {
+    fn status_block(&self, term: &Terminal) -> StatusBlock {
+        self.error.status_block(term).hint(format!("Iteration path: {}", self.iteration_path))
     }
 }

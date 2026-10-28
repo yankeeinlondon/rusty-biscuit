@@ -94,14 +94,19 @@ impl Subject {
         })
     }
 
-    /// The subject below local `id`, below constant `rest` (`a.b`, or empty).
-    pub(super) fn local(id: LocalId, rest: &str) -> Self {
+    /// The subject below local `id` at `prefix` (the member a destructured
+    /// local names, or empty), below constant `rest` (`a.b`, or empty).
+    pub(super) fn local(id: LocalId, prefix: &[Member], rest: &str) -> Self {
         Self {
             binding: BindingId::Local(id),
-            path: rest
-                .split('.')
-                .filter(|segment| !segment.is_empty())
-                .map(|segment| Member::Field(segment.to_string()))
+            path: prefix
+                .iter()
+                .cloned()
+                .chain(
+                    rest.split('.')
+                        .filter(|segment| !segment.is_empty())
+                        .map(|segment| Member::Field(segment.to_string())),
+                )
                 .collect(),
         }
     }

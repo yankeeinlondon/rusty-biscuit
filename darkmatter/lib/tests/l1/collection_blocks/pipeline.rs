@@ -427,3 +427,122 @@ fn a_cached_child_is_never_replayed_for_a_different_local_binding() {
         assert_eq!(greetings, ["hello ada", "hello bob", "hello ada"], "{kind:?}: {output}");
     }
 }
+
+// ── recovery warnings before a failure ──────────────────────────────────
+
+/// A waived untyped source's warning, authored before a later failure, stays
+/// in the failure report once, whether the later failure is a static
+/// rejection or a runtime one; one authored after a static rejection, or one
+/// whose recovery the request does not allow, is not a warning.
+mod recovery_prefix {
+    use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::compose::collection_blocks::CollectionKind::{self, Filter, Map};
+    use darkmatter::markdown::compose::report_diagnostics::{error_diagnostics, warning_diagnostic};
+    use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
+    use tempfile::TempDir;
+
+    use super::super::support::region;
+
+    /// `unknown` is undeclared; `scalar`, `nums`, and `data` are declared.
+    const FRONTMATTER: &str = "---\n$schema:\n  scalar: number(required)\n  nums: number[](required)\n  data: any[](required)\nunknown: [1]\nscalar: 2\nnums: [1]\ndata: [1]\n---\n";
+
+    fn untyped_code(kind: CollectionKind) -> &'static str {
+        match kind {
+            Map => "dm.collection.untyped_map_source",
+            Filter => "dm.collection.untyped_filter_source",
+        }
+    }
+
+    /// The region iterating the undeclared `unknown`.
+    fn recovered(kind: CollectionKind) -> String {
+        region(kind, "unknown", "- {{ i }}\n")
+    }
+
+    /// `(warning codes, failure codes)` of composing `body` through the public
+    /// report projection; the failure codes are empty on success.
+    fn report(body: &str, allow: bool) -> (Vec<String>, Vec<String>) {
+        let dir = TempDir::new().unwrap();
+        let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+        let path = root.join("doc.md");
+        std::fs::write(&path, format!("{FRONTMATTER}{body}")).unwrap();
+        let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(&root, ""))
+            .with_source_file(path.clone())
+            .with_allow_untyped_map_variables(allow)
+            .with_allow_untyped_filter_variables(allow);
+        let request = crate::request_support::request_at(&root, options);
+        let codes = |warnings: &[darkmatter::markdown::compose::ComposeWarning]| {
+            warnings.iter().map(|warning| warning_diagnostic(warning).code).collect::<Vec<_>>()
+        };
+        match Markdown::try_from(path.as_path()).unwrap().compose_with_warnings(&request) {
+            Ok((_, report)) => (codes(&report.warnings), Vec::new()),
+            Err(failure) => (
+                codes(&failure.warnings),
+                error_diagnostics(&failure.error).into_iter().map(|diagnostic| diagnostic.code).collect(),
+            ),
+        }
+    }
+
+    /// The earlier recovered `kind` region followed by `later`: exactly one
+    /// warning for the recovery, then `failure` (none on success).
+    #[track_caller]
+    fn earlier_warning_then(kind: CollectionKind, later: &str, failure: Option<&str>) {
+        let body = format!("{}{later}", recovered(kind));
+        let (warnings, errors) = report(&body, true);
+        assert_eq!(warnings, [untyped_code(kind)], "{body}");
+        assert_eq!(errors, failure.into_iter().collect::<Vec<_>>(), "{body}");
+    }
+
+    macro_rules! recovery_rows {
+        ($($name:ident: $kind:expr, $later:expr => $failure:expr;)+) => {
+            $( #[test] fn $name() { earlier_warning_then($kind, $later, $failure); } )+
+        };
+    }
+
+    const INVALID_SOURCE: Option<&str> = Some("dm.collection.invalid_source");
+    const PATTERN: Option<&str> = Some("dm.collection.pattern_mismatch");
+    const SORT_KEY: Option<&str> = Some("dm.collection.invalid_sort_key");
+    const PROTECTED: Option<&str> = Some("dm.expression.invalid_callback");
+
+    recovery_rows! {
+        // F3.1 / F3.2: a static source rejection after the recovery.
+        recovered_map_source_before_static_source_rejection: Map, "::filter scalar\n- x\n::end-filter\n" => INVALID_SOURCE;
+        recovered_filter_source_before_static_source_rejection: Filter, "::map scalar\n- x\n::end-map\n" => INVALID_SOURCE;
+        // F3.3 / F3.4: a runtime pattern failure after the recovery.
+        recovered_map_source_before_runtime_pattern_failure: Map, "::map data \"{x} => x\"\n- x\n::end-map\n" => PATTERN;
+        recovered_filter_source_before_runtime_pattern_failure: Filter, "::filter data \"{x} => true\"\n- x\n::end-filter\n" => PATTERN;
+        // F3.5: the recovery alone.
+        recovered_map_source_alone_succeeds: Map, "" => None;
+        recovered_filter_source_alone_succeeds: Filter, "" => None;
+        // F3.6: the pattern, sort-key, and protected-name static branches.
+        recovered_map_source_before_static_pattern_rejection: Map, "::map nums \"{missing} => missing\"\n- x\n::end-map\n" => PATTERN;
+        recovered_filter_source_before_static_pattern_rejection: Filter, "::filter nums \"{missing} => true\"\n- x\n::end-filter\n" => PATTERN;
+        recovered_map_source_before_static_sort_key_rejection: Map, "::map nums \"i => i\" sort=\"i => true\"\n- x\n::end-map\n" => SORT_KEY;
+        recovered_filter_source_before_static_sort_key_rejection: Filter, "::filter nums \"i => true\" sort=\"i => true\"\n- x\n::end-filter\n" => SORT_KEY;
+        recovered_map_source_before_protected_name_rejection: Map, "::map nums \"ctx => ctx\"\n- x\n::end-map\n" => PROTECTED;
+        recovered_filter_source_before_protected_name_rejection: Filter, "::filter nums \"ctx => true\"\n- x\n::end-filter\n" => PROTECTED;
+    }
+
+    /// F3.7: the call check's authored-order prefix keeps only warnings
+    /// authored before the rejection; a recovery after it is not reported.
+    #[test]
+    fn a_recovered_source_after_a_static_rejection_is_not_reported() {
+        for kind in [Map, Filter] {
+            let body = format!("::map scalar\n- x\n::end-map\n{}", recovered(kind));
+            let (warnings, errors) = report(&body, true);
+            assert!(warnings.is_empty(), "{kind:?}: {warnings:?}");
+            assert_eq!(errors, ["dm.collection.invalid_source"], "{kind:?}");
+        }
+    }
+
+    /// Without the recovery the untyped source is itself the failure, the
+    /// first in authored order, and no warning precedes it.
+    #[test]
+    fn an_unrecovered_source_is_the_failure_before_a_later_rejection() {
+        for kind in [Map, Filter] {
+            let body = format!("{}::map scalar\n- x\n::end-map\n", recovered(kind));
+            let (warnings, errors) = report(&body, false);
+            assert!(warnings.is_empty(), "{kind:?}: {warnings:?}");
+            assert_eq!(errors, [untyped_code(kind)], "{kind:?}");
+        }
+    }
+}

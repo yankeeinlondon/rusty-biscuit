@@ -9,6 +9,8 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::support::{KINDS, closer, opener, region};
+use darkmatter::markdown::compose::report_diagnostics::error_diagnostics;
+
 use crate::collection_execution::{any_items, codes, compose_configured, compose_with_options};
 
 fn limit(value: u64) -> NonZeroU64 {
@@ -39,12 +41,22 @@ fn assert_boundary(document: &str, visits: Option<(u64, u64)>, bytes: Option<(u6
         assert!(run(document, Some(fits), None).is_ok(), "{what}: {fits} visits should fit");
         let error = run(document, Some(fails), None).unwrap_err();
         assert_eq!(codes(&error), ["dm.iteration.visit_limit"], "{what}: {error}");
+        assert_located(&error, what);
     }
     if let Some((fits, fails)) = bytes {
         assert!(run(document, None, Some(fits)).is_ok(), "{what}: {fits} bytes should fit");
         let error = run(document, None, Some(fails)).unwrap_err();
         assert_eq!(codes(&error), ["dm.iteration.expansion_limit"], "{what}: {error}");
+        assert_located(&error, what);
     }
+}
+
+/// Every exhaustion names an authored line and the item it was paying for.
+#[track_caller]
+fn assert_located(error: &darkmatter::markdown::MarkdownError, what: &str) {
+    let [record] = error_diagnostics(error).try_into().unwrap_or_else(|records| panic!("{what}: {records:#?}"));
+    assert!(record.source.is_some(), "{what}: {record:?}");
+    assert!(!record.iteration_path.is_empty(), "{what}: {record:?}");
 }
 
 #[test]
@@ -114,6 +126,7 @@ fn a_failure_before_an_excessive_append_returns_no_partial_document() {
         let document = doc(kind, json!(["a", "b", "c"]), "data", "- {{i}}\n");
         let error = run(&document, None, Some(10)).unwrap_err();
         assert_eq!(codes(&error), ["dm.iteration.expansion_limit"], "{kind:?}: {error}");
+        assert_located(&error, &format!("{kind:?}"));
     }
 }
 
@@ -187,6 +200,7 @@ fn distinct_children_spend_the_parents_visit_allowance_for_both_kinds() {
         assert!(output.contains("ax") && output.contains("cy"), "{kind:?}: {output}");
         let error = run_in(&root, &document, 8).unwrap_err();
         assert_eq!(codes(&error), ["dm.iteration.visit_limit"], "{kind:?}: {error}");
+        assert_located(&error, &format!("{kind:?}"));
     }
 }
 
@@ -221,7 +235,9 @@ fn a_cached_child_is_charged_again_for_every_insertion_and_every_visit() {
         // Visits replay the same way: 3 parent visits + 3 replays of the 2 the child paid.
         let document = reused(3);
         assert!(run_in(&root, &document, 9).is_ok(), "{kind:?}");
-        assert!(run_in(&root, &document, 8).is_err(), "{kind:?}");
+        let error = run_in(&root, &document, 8).unwrap_err();
+        assert_eq!(codes(&error), ["dm.iteration.visit_limit"], "{kind:?}: {error}");
+        assert_located(&error, &format!("{kind:?} replay"));
     }
 }
 

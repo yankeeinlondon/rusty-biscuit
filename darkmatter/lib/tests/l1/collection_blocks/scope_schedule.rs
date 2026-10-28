@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use super::support::{KINDS, closer, opener, region, row_tests};
 use super::support::composed_raw;
-use crate::collection_execution::{any_items, codes, compose, composed};
+use crate::collection_execution::{any_items, codes, compose, compose_with_options, composed};
 
 /// An `any[]` document of `items` whose region of `kind` has `header` and `body`.
 fn any_doc(kind: CollectionKind, items: Value, header: &str, body: &str) -> String {
@@ -299,5 +299,133 @@ fn the_region_text_survives_every_row_builder() {
     // Guards `region`/`opener`/`closer` against drifting from the directive names.
     for kind in KINDS {
         assert_eq!(region(kind, "x", "b\n"), format!("{} x\nb\n{}\n", opener(kind), closer(kind)));
+    }
+}
+
+// ── selection facts across destructured and object spellings ─────────────
+
+/// Items whose `members` only a selection guard proves to be an array.
+const MEMBERS: &str = "---\n$schema:\n  data: \"{ members: any(required), other: any(required) }[](required)\"\ndata: [{members: [a, b], other: x}]\n---\n";
+
+/// The selection option for `slot` that retains items where `test` holds:
+/// `until=` stops at the first item where it holds, so it takes the negation.
+fn retaining(slot: &str, param: &str, test: &str) -> String {
+    match slot {
+        "until" => format!("until=\"{param} => !({test})\""),
+        _ => format!("{slot}=\"{param} => {test}\""),
+    }
+}
+
+/// Composes a `kind` region over [`MEMBERS`] with `positional`, a retaining
+/// `slot` guard, and a nested `::map inner` body.
+fn guarded_members(kind: CollectionKind, positional: &str, slot: &str, param: &str, test: &str, inner: &str) -> String {
+    let header = format!("data \"{positional}\" {}", retaining(slot, param, test));
+    format!("{MEMBERS}{}", region(kind, &header, &region(CollectionKind::Map, inner, "- {{i}}\n")))
+}
+
+/// One test per selection slot: each guard fact, recorded under one spelling
+/// of an original-item field, must prove the nested source under the other.
+macro_rules! guard_identity_rows {
+    ($($row:ident: $kind:expr, $positional:literal, $param:literal, $test:literal, $inner:literal;)+) => {$(
+        mod $row {
+            use super::*;
+
+            fn run(slot: &str) {
+                let document = guarded_members($kind, $positional, slot, $param, $test, $inner);
+                match compose(&document) {
+                    Ok(output) => assert_eq!(output, "- a\n- b\n", "{slot}: {document}"),
+                    Err(error) => panic!("{slot}: {:?} {error}\n{document}", codes(&error)),
+                }
+            }
+
+            #[test]
+            fn filter_slot() {
+                run("filter");
+            }
+
+            #[test]
+            fn while_slot() {
+                run("while");
+            }
+
+            #[test]
+            fn until_slot() {
+                run("until");
+            }
+        }
+    )+};
+}
+
+guard_identity_rows! {
+    destructured_filter_body_with_an_object_guard:
+        CollectionKind::Filter, "{members} => true", "p", "is_array(p.members)", "members";
+    object_filter_body_with_a_destructured_guard:
+        CollectionKind::Filter, "p => true", "{members}", "is_array(members)", "p.members";
+    destructured_map_result_with_an_object_guard:
+        CollectionKind::Map, "{members} => {members}", "p", "is_array(p.members)", "members";
+    object_filter_body_with_a_differently_named_object_guard:
+        CollectionKind::Filter, "p => true", "q", "is_array(q.members)", "p.members";
+    destructured_filter_body_with_a_destructured_guard:
+        CollectionKind::Filter, "{members} => true", "{members}", "is_array(members)", "members";
+    destructured_map_result_with_a_destructured_guard:
+        CollectionKind::Map, "{members} => {members}", "{members}", "is_array(members)", "members";
+}
+
+#[test]
+fn a_map_result_field_named_like_a_guarded_input_field_is_a_new_binding() {
+    for slot in ["filter", "while", "until"] {
+        let positional = "{members, other} => {members: other, other: members}";
+        let renamed = guarded_members(CollectionKind::Map, positional, slot, "p", "is_array(p.members)", "other");
+        assert_eq!(composed(&renamed), "- a\n- b\n", "{slot}: the mapping expression carries the proven type");
+        let same_name = guarded_members(CollectionKind::Map, positional, slot, "p", "is_array(p.members)", "members");
+        assert_eq!(
+            codes(&compose(&same_name).unwrap_err()),
+            ["dm.collection.untyped_map_source"],
+            "{slot}: the result's `members` holds the unproven input `other`"
+        );
+    }
+}
+
+#[test]
+fn an_inner_destructured_field_does_not_inherit_the_outer_items_guard_facts() {
+    let document = concat!(
+        "---\n$schema:\n  data: \"{ members: any(required), groups: { members: any(required) }[](required) }[](required)\"\n",
+        "data: [{members: [a, b], groups: [{members: [c]}]}]\n---\n",
+        "::filter data \"{members, groups} => true\" filter=\"p => is_array(p.members)\"\n",
+        "::filter groups \"{members} => true\"\n",
+        "::map members\n- {{i}}\n::end-map\n",
+        "::end-filter\n",
+        "::end-filter\n",
+    );
+    assert_eq!(codes(&compose(document).unwrap_err()), ["dm.collection.untyped_map_source"]);
+    let outer_read = document.replace("::filter groups \"{members} => true\"", "::filter groups \"{other} => true\"");
+    let outer_read = outer_read.replace("groups: { members: any(required) }", "groups: { other: any(required) }");
+    let outer_read = outer_read.replace("groups: [{members: [c]}]", "groups: [{other: c}]");
+    assert_eq!(composed(&outer_read), "- a\n- b\n", "the outer field stays proven where nothing shadows it");
+}
+
+#[test]
+fn a_file_field_checked_through_an_object_parameter_is_read_through_a_destructured_one() {
+    use darkmatter::markdown::compose::expression::UNCERTAIN_CALL_CODE;
+    use darkmatter::markdown::compose::policy::BlockingPolicy;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = biscuit_file::canonicalize_simplified(dir.path()).unwrap();
+    std::fs::write(root.join("a.md"), "---\ntitle: Beta\n---\nA\n").unwrap();
+    std::fs::write(root.join("b.md"), "---\ntitle: Alpha\n---\nB\n").unwrap();
+    for slot in ["filter", "while", "until"] {
+        let header = format!(
+            "docs \"{{path}} => {{path: frontmatter(path, 'title')}}\" sort=\"{{path}} => frontmatter(path, 'title')\" {}",
+            retaining(slot, "p", "p.path != null"),
+        );
+        let document = format!(
+            "---\n$schema:\n  docs: \"{{ path: file }}[](required)\"\ndocs: [{{path: ./a.md}}, {{path: ./b.md}}]\n---\n{}",
+            region(CollectionKind::Map, &header, "- {{path}}\n"),
+        );
+        let output = compose_with_options(&root, &document, |options| {
+            options.with_blocking_policy(BlockingPolicy::default().deny_code(UNCERTAIN_CALL_CODE))
+        })
+        .unwrap_or_else(|error| panic!("{slot}: {error}\n{document}"));
+        assert_eq!(output, "- Alpha\n- Beta\n", "{slot}");
     }
 }

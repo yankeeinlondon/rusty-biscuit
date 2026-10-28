@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use serde_json::{Number, Value};
 
-use super::error::{CollectionError, CollectionSite};
+use super::error::{CollectionError, CollectionSite, IterationFailure};
 use super::parser::site;
 use super::types::{CollectionKind, CollectionRegion, QuotedExpression, SortOrder};
 use crate::markdown::compose::body_origin::{ExpansionWriter, ScopeRanges, Splice};
@@ -128,9 +128,6 @@ fn failed(error: CollectionError) -> Halt {
     Halt::Failed(Box::new(error.into()))
 }
 
-fn budget(error: IterationError) -> Halt {
-    failed(CollectionError::Budget(Box::new(error)))
-}
 
 /// A sort key: all numbers or all strings.
 #[derive(Debug, Clone, PartialEq)]
@@ -267,14 +264,16 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
     ) -> Result<(), Halt> {
         let mut cursor = range.start;
         for node in nodes {
-            writer.copy(self.content, cursor..node.region.span().start, path).map_err(budget)?;
+            let copied = cursor..node.region.span().start;
+            writer.copy(self.content, copied.clone(), path).map_err(|error| self.exhausted(copied, error))?;
             match node.region {
                 Region::Page(region) => self.page(writer, region, node, scope, path)?,
                 Region::Collection(region) => self.collection(writer, region, node, scope, path)?,
             }
             cursor = node.region.span().end;
         }
-        writer.copy(self.content, cursor..range.end, path).map_err(budget)?;
+        let copied = cursor..range.end;
+        writer.copy(self.content, copied.clone(), path).map_err(|error| self.exhausted(copied, error))?;
         Ok(())
     }
 
@@ -288,7 +287,16 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
     ) -> Result<(), Halt> {
         let enabled = match &region.options.when_expr {
             Some(_) if self.discover => true,
-            Some(expression) => self.condition(expression, region.start_line, scope)?,
+            Some(expression) => {
+                let opener = &self.content[region.span.start..region.body_span.start.max(region.span.start)];
+                let span = opener
+                    .find(expression.as_str())
+                    .map_or(region.span.start..region.span.start + 2, |at| {
+                        region.span.start + at..region.span.start + at + expression.len()
+                    });
+                self.condition(expression, region.start_line, scope)
+                    .map_err(|halt| self.in_iteration(halt, span, path))?
+            }
             None => true,
         };
         if enabled {
@@ -372,6 +380,28 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
         Ok(plan)
     }
 
+    /// An exhaustion located at `span`, the authored text whose work was
+    /// being reserved.
+    fn exhausted(&self, span: Range<usize>, error: IterationError) -> Halt {
+        failed(CollectionError::Budget { site: Some(self.site(span, &error.path)), error: Box::new(error) })
+    }
+
+    /// A gate's failure inside a repeated copy, wrapped with the gate's site
+    /// and the copy's items. The stage re-anchors the site to the loaded file
+    /// with the collection failures it locates.
+    fn in_iteration(&self, halt: Halt, span: Range<usize>, path: &IterationPath) -> Halt {
+        match halt {
+            Halt::Failed(error) if !path.is_empty() => Halt::Failed(Box::new(MarkdownError::InIteration(Box::new(
+                IterationFailure {
+                    location: Some(self.site(span, path).source),
+                    iteration_path: path.clone(),
+                    error,
+                },
+            )))),
+            other => other,
+        }
+    }
+
     fn site(&self, span: Range<usize>, path: &IterationPath) -> CollectionSite {
         let mut located = site(self.content, Some(std::path::Path::new("document")), span);
         located.iteration_path = path.clone();
@@ -392,7 +422,9 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
 
         if !self.discover
             && let Some(when) = &header.when
-            && !self.condition(&when.text, region.start_line, scope)?
+            && !self
+                .condition(&when.text, region.start_line, scope)
+                .map_err(|halt| self.in_iteration(halt, when.span.clone(), path))?
         {
             return Ok(());
         }
@@ -452,7 +484,7 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
 
     fn callback_failure(&self, span: Range<usize>, path: &IterationPath, cause: ExpressionError) -> Halt {
         match cause {
-            ExpressionError::IterationLimit(error) => budget(*error),
+            ExpressionError::IterationLimit(error) => self.exhausted(span, *error),
             cause => failed(CollectionError::CallbackFailed {
                 site: self.site(span, path),
                 cause: Box::new(cause),
@@ -618,7 +650,7 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
             None => {
                 for entry in source.entries() {
                     let item = item_path(&entry);
-                    self.budget.reserve_visit(&item).map_err(budget)?;
+                    self.budget.reserve_visit(&item).map_err(|error| self.exhausted(region.span.start..region.header_span.end, error))?;
                     if !self.selected(selectors(), scope, &entry, &item)? {
                         continue;
                     }
@@ -632,7 +664,7 @@ impl<'a, L: EvaluationLookup> Execution<'a, L> {
                 let mut kept: Vec<(SourceEntry<'_>, SortKey)> = Vec::new();
                 for entry in source.entries() {
                     let item = item_path(&entry);
-                    self.budget.reserve_visit(&item).map_err(budget)?;
+                    self.budget.reserve_visit(&item).map_err(|error| self.exhausted(region.span.start..region.header_span.end, error))?;
                     if !self.selected(selectors(), scope, &entry, &item)? {
                         continue;
                     }

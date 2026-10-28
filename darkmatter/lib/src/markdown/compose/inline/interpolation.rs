@@ -3,7 +3,7 @@
 use super::super::super::Markdown;
 use super::super::super::types::{AuthoredSpan, MarkdownError, MarkdownResult};
 use super::super::context::effective_state as state;
-use super::super::body_origin::{BodyOrigin, BodyProvenance, DataRanges};
+use super::super::body_origin::{BodyOrigin, BodyProvenance, DataRanges, ScopeRanges};
 use super::super::directive_targets::{DirectiveTargetRewrite, rewrite_directive_targets};
 use super::super::interpolation;
 use super::super::shell_expansion;
@@ -34,7 +34,9 @@ use tracing::debug;
 /// `ComposeOptions::fail_fast`, and the body is left unrewritten. Only the
 /// shell-command discovery pass defers such failures to warnings. The failure
 /// is anchored to its authored span when `body.origin` (the map from the
-/// current body back to the loaded text) proves one.
+/// current body back to the loaded text) proves one, and a failure inside a
+/// repeated `::map` / `::filter` copy keeps that copy's items
+/// ([`MarkdownError::InIteration`]).
 ///
 /// Under a blocking policy, a warning or undeclared read an evaluated
 /// expression reported stops the stage before the next expression is
@@ -85,7 +87,7 @@ pub(crate) fn run_stage(
             .with_presentation_values(state.presentation_values())
             .observing_missing_roots();
         let targets = rewrite_targets_guarded(
-            markdown, &body.data, &evaluator, origin, report, options, verdict, Some(&sited),
+            markdown, &body.data, &evaluator, origin, &body.scopes, report, options, verdict, Some(&sited),
         )?;
         // An absent property in a whole-value directive target already warns as a
         // skipped nullable target; a second warning would report one issue twice.
@@ -136,7 +138,7 @@ pub(crate) fn run_stage(
         guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
         Some(&lookup),
     )
-    .map_err(|failure| anchor_authored_failure(markdown, origin.as_ref(), failure))?;
+    .map_err(|failure| anchor_authored_failure(markdown, origin.as_ref(), &scopes, failure))?;
     drop(guard);
 
     let data = data.after_edits(&result.edits, &result.output);
@@ -175,6 +177,7 @@ fn rewrite_targets_guarded<L: EvaluationLookup>(
     data: &DataRanges,
     evaluator: &interpolation::Evaluator<'_, L>,
     origin: Option<&BodyOrigin>,
+    ranges: &ScopeRanges,
     report: &ComposeReport,
     options: &crate::markdown::compose::ComposeRequest,
     verdict: FinalVerdict<'_>,
@@ -191,10 +194,11 @@ fn rewrite_targets_guarded<L: EvaluationLookup>(
         guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
         site,
     )
-    .map_err(|failure| anchor_authored_failure(markdown, origin, failure))
+    .map_err(|failure| anchor_authored_failure(markdown, origin, ranges, failure))
 }
 
-/// Anchors a body failure to its authored span when `origin` proves one.
+/// Anchors a body failure to its authored span when `origin` proves one, and
+/// gives a failure inside a repeated copy (`ranges`) that copy's items.
 ///
 /// `origin` maps the text the failing span indexes back to the loaded
 /// document. An expression inside text an earlier stage inserted (an authored
@@ -203,19 +207,22 @@ fn rewrite_targets_guarded<L: EvaluationLookup>(
 fn anchor_authored_failure(
     markdown: &Markdown,
     origin: Option<&BodyOrigin>,
+    ranges: &ScopeRanges,
     failure: interpolation::LocatedInterpolationError,
 ) -> MarkdownError {
     let interpolation::LocatedInterpolationError { error, span } = failure;
-    let error = *error;
-    let Some(context) = markdown.loaded_source_context_for_errors() else {
-        return error;
-    };
-    match span
-        .zip(origin)
-        .and_then(|(span, origin)| origin.project(&span))
-        .and_then(|range| AuthoredSpan::locate(&context.content, range))
+    let mut error = *error;
+    if let Some(context) = markdown.loaded_source_context_for_errors()
+        && let Some(authored) = span
+            .clone()
+            .zip(origin)
+            .and_then(|(span, origin)| origin.project(&span))
+            .and_then(|range| AuthoredSpan::locate(&context.content, range))
     {
-        Some(span) => error.with_authored_span(context, span),
+        error = error.with_authored_span(context, authored);
+    }
+    match span {
+        Some(span) => super::super::site_scope::scope_failure(error, markdown, origin, ranges, span),
         None => error,
     }
 }

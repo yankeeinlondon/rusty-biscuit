@@ -799,6 +799,8 @@ impl ComposeWarning {
             }),
             expected_type: None,
             actual_type: None,
+            span: None,
+            iteration_path: Default::default(),
         };
         Self {
             stage: "schema_validation".to_string(),

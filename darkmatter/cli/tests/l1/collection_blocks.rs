@@ -193,6 +193,112 @@ fn report_json_agrees_with_the_terminal_on_the_failure() {
     assert!(document.exists());
 }
 
+/// `md compose --output report-json` prints, for a failure inside a repeated
+/// body, the provenance the library's record carries: the authored file,
+/// line, span, and original item path. The library owns it; the CLI only
+/// collects it.
+macro_rules! report_parity {
+    ($name:ident, $opener:literal, $closer:literal, $files:expr, $body:literal, $args:expr, $code:literal, $line:literal, $path:literal) => {
+        #[test]
+        fn $name() {
+            let recorder = Recorder::new(stringify!($name));
+            for (name, content) in $files {
+                recorder.fixture.write_file(format!("cwd/{name}"), content);
+            }
+            let body = $body.replace("{OPEN}", $opener).replace("{CLOSE}", $closer);
+            let document = recorder.document(&strings_document("[./ok.md, ./missing.md]", &body));
+            let args: &[&str] = $args;
+
+            let output = recorder.compose(&[&["--output", "report-json"], args].concat());
+            let stdout = stdout_of(&output);
+            let report: Value = serde_json::from_str(&stdout).unwrap_or_else(|error| panic!("{error}: {stdout}"));
+            assert_eq!(output.status.code(), Some(1), "{report:#}");
+            let [diagnostic] = report["diagnostics"].as_array().expect("an array").as_slice() else {
+                panic!("one record: {report:#}")
+            };
+            assert_eq!(diagnostic["code"], $code, "{diagnostic:#}");
+            assert_eq!(diagnostic["source"]["line"], $line, "{diagnostic:#}");
+            assert_eq!(
+                diagnostic["source"]["file"].as_str().map(PathBuf::from),
+                Some(document.clone()),
+                "{diagnostic:#}"
+            );
+            assert!(diagnostic["span"]["start"].is_u64(), "{diagnostic:#}");
+            let path: Vec<String> = diagnostic["iteration_path"]
+                .as_array()
+                .expect("an array")
+                .iter()
+                .map(|frame| format!("{}[{}]", frame["collection"].as_str().unwrap(), frame["position"]))
+                .collect();
+            assert_eq!(path.join(" → "), $path, "{diagnostic:#}");
+            assert!(diagnostic["message"].as_str().unwrap().ends_with(concat!(" at ", $path)), "{diagnostic:#}");
+
+            // The terminal names the same item.
+            let terminal = stderr_of(&recorder.compose(args));
+            assert!(terminal.contains(concat!("Iteration path: ", $path)), "{terminal}");
+        }
+    };
+}
+
+const OK: [(&str, &str); 1] = [("ok.md", "---\ntitle: ./ok.md\n---\nok\n")];
+
+report_parity!(
+    report_locates_a_visit_exhaustion_in_a_map, "::map", "::end-map", OK,
+    "{OPEN} data\nx\n{CLOSE}\n", &["--max-iteration-visits", "1"], "dm.iteration.visit_limit", 6, "data[1]"
+);
+report_parity!(
+    report_locates_a_visit_exhaustion_in_a_filter, "::filter", "::end-filter", OK,
+    "{OPEN} data\nx\n{CLOSE}\n", &["--max-iteration-visits", "1"], "dm.iteration.visit_limit", 6, "data[1]"
+);
+report_parity!(
+    report_locates_a_repeated_interpolation_failure_in_a_map, "::map", "::end-map", OK,
+    "{OPEN} data\n{{ frontmatter(i, 'title') }}\n{CLOSE}\n", &[], "dm.expression.evaluation_failure", 7, "data[1]"
+);
+report_parity!(
+    report_locates_a_repeated_gate_failure_in_a_filter, "::filter", "::end-filter", OK,
+    "{OPEN} data\n::block when=\"frontmatter(i, 'title')\"\nx\n::end-block\n{CLOSE}\n", &[],
+    "dm.expression.evaluation_failure", 7, "data[1]"
+);
+report_parity!(
+    report_locates_a_repeated_child_insertion_in_a_map, "::map", "::end-map",
+    [("ok.md", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n")],
+    "{OPEN} data\n::file ./ok.md\n{CLOSE}\n", &["--max-expansion-bytes", "40"], "dm.iteration.expansion_limit", 7, "data[0]"
+);
+
+/// A failing command inside a repeated `::shell-block` is located at its own
+/// line, not the block's opener: the second command, given a null argument,
+/// is the one reported, and nothing runs because every command of a block is
+/// prepared before the first one runs.
+#[test]
+fn report_locates_a_later_shell_block_command_in_each_kind() {
+    for (opener, closer) in [("::map", "::end-map"), ("::filter", "::end-filter")] {
+        let recorder = Recorder::new("report_locates_a_later_shell_block_command");
+        recorder.whitelist(&format!("exact argv-recorder first\n{}", template_rule("argv-recorder {{ i }}")));
+        let document_text = format!(
+            "---\n$schema:\n  data: any[](required)\ndata: [null]\n---\n{opener} data\n::shell-block\nargv-recorder first\nargv-recorder {{{{ i }}}}\n::end-block\n{closer}\n"
+        );
+        let document = recorder.document(&document_text);
+
+        let output = recorder.compose(&["--output", "report-json"]);
+        let stdout = stdout_of(&output);
+        let report: Value = serde_json::from_str(&stdout).unwrap_or_else(|error| panic!("{error}: {stdout}"));
+        assert_eq!(output.status.code(), Some(1), "{opener}: {report:#}");
+        let [diagnostic] = report["diagnostics"].as_array().expect("an array").as_slice() else {
+            panic!("{opener}: one record: {report:#}")
+        };
+        assert_eq!(diagnostic["code"], "dm.shell.failure", "{opener}: {diagnostic:#}");
+        assert_eq!(diagnostic["source"]["line"], 9, "{opener}: {diagnostic:#}");
+        assert_eq!(diagnostic["source"]["column"], 1, "{opener}: {diagnostic:#}");
+        let start = document_text.find("argv-recorder {{ i }}").unwrap();
+        assert_eq!(diagnostic["span"]["start"], start, "{opener}: {diagnostic:#}");
+        let end = diagnostic["span"]["end"].as_u64().expect("a command span") as usize;
+        assert!(end > start && end <= start + "argv-recorder {{ i }}".len(), "{opener}: {diagnostic:#}");
+        assert_eq!(diagnostic["source"]["file"].as_str().map(PathBuf::from), Some(document), "{opener}");
+        assert_eq!(diagnostic["iteration_path"], serde_json::json!([{ "collection": "data", "position": 0 }]), "{opener}");
+        assert!(recorder.runs().is_empty(), "{opener}: nothing ran: {:?}", recorder.runs());
+    }
+}
+
 /// A command inside a candidate the run skips is still authorized at
 /// preflight: without approval the command fails before anything runs.
 macro_rules! skipped_candidate_is_denied {

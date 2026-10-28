@@ -25,6 +25,7 @@ use serde::Serialize;
 
 use super::ast::SpannedExpr;
 use super::call_check::{ALWAYS_FALSE_CALL_CODE, ArgumentCategory, CallCheck, check_expression_calls};
+use super::iteration::IterationPath;
 use super::host::{INCOMPLETE_ANALYSIS_CODE, IncompleteHostCall, incomplete_host_calls};
 use super::scope::TypeScope;
 use crate::markdown::span::SourceSpan;
@@ -98,6 +99,8 @@ impl ExpressionDiagnostic {
             source: position.map(|(line, column)| DiagnosticSource { file, line, column }),
             expected_type: self.expected_type.clone(),
             actual_type: self.actual_type.clone(),
+            span: None,
+            iteration_path: IterationPath::empty(),
         }
     }
 
@@ -118,6 +121,13 @@ pub struct Diagnostic {
     pub source: Option<DiagnosticSource>,
     pub expected_type: Option<String>,
     pub actual_type: Option<String>,
+    /// The byte range of the authored construct in `source.file`, when the
+    /// producer proved one; `None` otherwise.
+    pub span: Option<std::ops::Range<usize>>,
+    /// The original positions of the items being processed when a composition
+    /// failed, outermost first. Empty for a static finding, a warning, or a
+    /// failure outside every `::map` / `::filter` body.
+    pub iteration_path: IterationPath,
 }
 
 /// The start of a diagnostic's authored range.

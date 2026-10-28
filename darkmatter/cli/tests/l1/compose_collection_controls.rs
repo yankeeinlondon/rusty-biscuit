@@ -155,6 +155,30 @@ recovery!(
     "- a\n- c"
 );
 
+/// A recovered source authored before a later static rejection keeps its
+/// warning in the failure report, ahead of the rejection.
+#[test]
+fn a_recovered_source_warning_survives_a_later_static_rejection_in_the_report() {
+    let recorder = Recorder::new("a_recovered_source_warning_survives_a_later_static_rejection_in_the_report");
+    for (id, earlier, later, warning) in [
+        ("untyped-map-variables", "::map unknown\n- {{i}}\n::end-map\n", "::filter scalar\n- x\n::end-filter\n", "dm.collection.untyped_map_source"),
+        ("untyped-filter-variables", "::filter unknown\n- {{i}}\n::end-filter\n", "::map scalar\n- x\n::end-map\n", "dm.collection.untyped_filter_source"),
+    ] {
+        recorder.document(&format!("---\n$schema:\n  scalar: number(required)\nunknown: [1]\nscalar: 2\n---\n{earlier}{later}"));
+        let output = recorder.compose(&["--allow", id, "--output", "report-json"]);
+        assert_eq!(output.status.code(), Some(1), "--allow {id}: {}", stderr_of(&output));
+        let report: serde_json::Value = serde_json::from_str(&stdout_of(&output)).expect("one JSON object");
+        assert_eq!(report["outcome"], "failure", "{report:#}");
+        let rows: Vec<(&str, &str)> = report["diagnostics"]
+            .as_array()
+            .expect("an array")
+            .iter()
+            .map(|diagnostic| (diagnostic["code"].as_str().unwrap(), diagnostic["severity"].as_str().unwrap()))
+            .collect();
+        assert_eq!(rows, [(warning, "warning"), ("dm.collection.invalid_source", "error")], "--allow {id}: {report:#}");
+    }
+}
+
 /// `--deny` of the recovery, by id or by code, beats `--allow all`; the
 /// opposite spellings of one selection conflict; `--deny all` spares a
 /// recovery named by `--allow`.

@@ -11,13 +11,15 @@
 //! Layers are immutable and share their parents through [`Arc`]. A local's
 //! identity is a [`LocalId`], never its spelling. A binding built with
 //! [`TypedLocal::aliasing`] reuses an existing id, so two callbacks that name
-//! the same original item differently share that item's facts, while
-//! [`TypedLocal::new`] mints a fresh subject, as a map result is.
+//! the same original item differently share that item's facts, and
+//! [`TypedLocal::aliasing_field`] names one field of such an item as that
+//! item's member path, so a destructured `members` and `p.members` are one
+//! subject. [`TypedLocal::new`] mints a fresh subject, as a map result is.
 
 use std::sync::Arc;
 
 use super::Shape;
-use super::projection::Subject;
+use super::projection::{Member, Subject};
 use crate::markdown::compose::expression::binding::{LocalId, next_frame_id};
 use crate::markdown::schemas::DefinitionTable;
 
@@ -26,6 +28,7 @@ use crate::markdown::schemas::DefinitionTable;
 pub struct TypedLocal {
     name: String,
     id: Option<LocalId>,
+    path: Vec<Member>,
     shape: Shape,
 }
 
@@ -35,6 +38,7 @@ impl TypedLocal {
         Self {
             name: name.into(),
             id: None,
+            path: Vec::new(),
             shape,
         }
     }
@@ -50,6 +54,19 @@ impl TypedLocal {
         Self {
             name: name.into(),
             id: Some(id),
+            path: Vec::new(),
+            shape,
+        }
+    }
+
+    /// A local naming field `field` of the subject `id` identifies, as a
+    /// destructuring pattern binds it: the local is the subject `id.field`,
+    /// so a fact recorded through either spelling holds for both.
+    pub fn aliasing_field(name: impl Into<String>, id: LocalId, field: impl Into<String>, shape: Shape) -> Self {
+        Self {
+            name: name.into(),
+            id: Some(id),
+            path: vec![Member::Field(field.into())],
             shape,
         }
     }
@@ -59,6 +76,8 @@ impl TypedLocal {
 struct DeclaredLocal {
     name: String,
     id: LocalId,
+    /// The member path below `id` this local names; empty for a whole binding.
+    path: Vec<Member>,
     shape: Shape,
 }
 
@@ -102,6 +121,7 @@ impl LexicalTypes {
                 .enumerate()
                 .map(|(slot, local)| DeclaredLocal {
                     id: local.id.unwrap_or_else(|| LocalId::new(frame, slot)),
+                    path: local.path,
                     name: local.name,
                     shape: local.shape,
                 })
@@ -111,7 +131,8 @@ impl LexicalTypes {
         })
     }
 
-    /// The id of the nearest local named `name`.
+    /// The root binding id of the nearest local named `name`. A local bound
+    /// by [`TypedLocal::aliasing_field`] is a member of that binding.
     pub fn id_of(&self, name: &str) -> Option<LocalId> {
         self.nearest(name).map(|local| local.id)
     }
@@ -121,11 +142,19 @@ impl LexicalTypes {
         self.nearest(name).map(|local| &local.shape)
     }
 
-    /// The declared shape of the nearest binding with identity `id`.
-    pub fn shape_of(&self, id: LocalId) -> Option<&Shape> {
-        self.layers()
-            .find_map(|layer| layer.locals.iter().find(|local| local.id == id))
-            .map(|local| &local.shape)
+    /// The declared shape of the nearest local that names `id` at a prefix
+    /// of `path`, with the number of `path` steps that prefix covers; the
+    /// caller walks the rest. Within one layer the longest prefix wins, so a
+    /// destructured field answers for its own member path.
+    pub fn shape_below(&self, id: LocalId, path: &[Member]) -> Option<(&Shape, usize)> {
+        self.layers().find_map(|layer| {
+            layer
+                .locals
+                .iter()
+                .filter(|local| local.id == id && path.starts_with(&local.path))
+                .max_by_key(|local| local.path.len())
+                .map(|local| (&local.shape, local.path.len()))
+        })
     }
 
     /// Every visible name, nearest first, shadowed names once.
@@ -146,7 +175,7 @@ impl LexicalTypes {
 
     /// The subject of local `name` below the constant path `rest`.
     pub(super) fn subject(&self, name: &str, rest: &str) -> Option<Subject> {
-        self.id_of(name).map(|id| Subject::local(id, rest))
+        self.nearest(name).map(|local| Subject::local(local.id, &local.path, rest))
     }
 
     fn nearest(&self, name: &str) -> Option<&DeclaredLocal> {

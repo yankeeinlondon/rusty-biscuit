@@ -37,7 +37,8 @@
 //! a runtime gate never excuses a statically invalid call. A region's static
 //! defects (source typing, protected names, patterns, sort keys) are
 //! rejected once, before any expression runs, and a waived untyped source is
-//! a warning the blocking policy sees with the others. A transcluded child runs its own pipeline node, so it is
+//! a warning the blocking policy sees with the others, kept with a later
+//! rejection like any earlier warning. A transcluded child runs its own pipeline node, so it is
 //! checked against its own schema and origin before its own evaluation;
 //! nothing a parent inserts is the parent's syntax.
 
@@ -54,7 +55,7 @@ use super::expression::{
 use super::frontmatter_interpolation::{FrontmatterExpressionLocation, LocatedFrontmatterError};
 use super::value_origin::ValuePathSegment as Segment;
 use super::collection_blocks::{
-    BodyScopes, CollectionAnalysisOptions, CollectionError, analyze_collection_blocks, diagnostics::COLLECTION_SOURCE,
+    BodyScopes, CollectionAnalysisOptions, CollectionError, analyze_collection_blocks_report, diagnostics::COLLECTION_SOURCE,
 };
 use super::page_blocks::{PageBlockError, PageBlockRegion};
 use super::pipeline::operations::ComposeOperationSet;
@@ -467,14 +468,16 @@ fn check_body(
             // the span in the body.
             source_path: Some(std::path::Path::new("document")),
         };
-        match analyze_collection_blocks(body, site, &analysis_options) {
-            Ok(analysis) => {
-                for recovered in analysis.recovered {
-                    advisories.recovered.push(((BODY_RANK, recovered.span.start), recovered));
-                }
-                guards = analysis.scopes;
-            }
-            Err(error) => {
+        // A waived source authored before a static rejection is still an
+        // advisory: the authored-order filter in `check_document` keeps it
+        // with whichever rejection is first.
+        let report = analyze_collection_blocks_report(body, site, &analysis_options);
+        for recovered in report.analysis.recovered {
+            advisories.recovered.push(((BODY_RANK, recovered.span.start), recovered));
+        }
+        match report.rejection {
+            None => guards = report.analysis.scopes,
+            Some(error) => {
                 let at = collection_offset(&error);
                 rejections.push((at, collection_rejection(markdown, error)));
             }

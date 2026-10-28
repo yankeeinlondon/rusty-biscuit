@@ -7,10 +7,14 @@
 //! stage last [`enter`](SiteHook::enter)ed.
 
 use std::cell::{Cell, OnceCell};
+use std::ops::Range;
 
 use serde_json::Value;
 
-use super::body_origin::ScopeRanges;
+use super::body_origin::{BodyOrigin, ScopeRanges};
+use super::collection_blocks::IterationFailure;
+use crate::markdown::Markdown;
+use crate::markdown::types::{AuthoredSpan, MarkdownError, SourceRef};
 use super::expression::iteration::{IterationBudget, IterationError};
 use super::expression::{
     BindingView, EvaluationLookup, ExpressionError, LexicalScope, ResolutionContext, ResolvedBinding, ScopedLookup,
@@ -35,6 +39,7 @@ pub(crate) struct SiteLookup<'a> {
     ranges: &'a ScopeRanges,
     scoped: Vec<OnceCell<ScopedLookup<'a>>>,
     current: Cell<Option<usize>>,
+    entered: Cell<Option<usize>>,
     budget: Option<&'a IterationBudget>,
 }
 
@@ -51,8 +56,15 @@ impl<'a> SiteLookup<'a> {
             ranges,
             scoped: (0..ranges.len()).map(|_| OnceCell::new()).collect(),
             current: Cell::new(None),
+            entered: Cell::new(None),
             budget,
         }
+    }
+
+    /// The offset the stage last [`enter`](SiteHook::enter)ed: the site a
+    /// failure raised since then belongs to.
+    pub(crate) fn entered(&self) -> Option<usize> {
+        self.entered.get()
     }
 
     fn active(&self) -> &dyn EvaluationLookup {
@@ -69,6 +81,7 @@ impl<'a> SiteLookup<'a> {
 impl SiteHook for SiteLookup<'_> {
     fn enter(&self, offset: usize) {
         self.current.set(self.ranges.index_at(offset));
+        self.entered.set(Some(offset));
     }
 
     fn charge(&self, offset: usize, bytes: usize) -> Result<(), IterationError> {
@@ -123,4 +136,62 @@ impl EvaluationLookup for SiteLookup<'_> {
     fn lexical_scope(&self) -> Option<&std::sync::Arc<LexicalScope>> {
         self.active().lexical_scope()
     }
+}
+
+/// `error`, raised by the site at `span` of a body, with the provenance a
+/// report needs: the authored site in `markdown`'s loaded file and the
+/// original items of the repeated copy (`ranges`) the site lies in.
+///
+/// - An exhaustion no stage has located yet is located at the site; it keeps
+///   its own variant and the path its counter recorded.
+/// - Any other failure inside a repeated copy is wrapped in
+///   [`MarkdownError::InIteration`], which changes neither its message, its
+///   code, nor whether a caller may recover from it.
+/// - A failure outside every copy, and a policy stop, are returned unchanged.
+///
+/// `origin` maps the text `span` indexes back to the loaded document; the
+/// caller proves it describes that text. Without a proven mapping the site is
+/// the file alone.
+pub(crate) fn scope_failure(
+    error: MarkdownError,
+    markdown: &Markdown,
+    origin: Option<&BodyOrigin>,
+    ranges: &ScopeRanges,
+    span: Range<usize>,
+) -> MarkdownError {
+    let iteration = ranges.at(span.start).map(|range| range.iteration.clone()).unwrap_or_default();
+    match error {
+        MarkdownError::Collection(inner) if inner.is_unlocated_budget() => {
+            match authored_location(markdown, origin, &span) {
+                Some(location) => (*inner).with_source(location).into(),
+                None => MarkdownError::Collection(inner),
+            }
+        }
+        error @ MarkdownError::BlockedDiagnostics { .. } => error,
+        error if iteration.is_empty() => error,
+        error => MarkdownError::InIteration(Box::new(IterationFailure {
+            location: authored_location(markdown, origin, &span).map(Box::new),
+            iteration_path: iteration,
+            error: Box::new(error),
+        })),
+    }
+}
+
+/// Where `span` of the current body sits in `markdown`'s loaded file: the
+/// whole span when every byte of it is authored, otherwise its opener (the
+/// directive marker no stage writes), otherwise the file alone.
+fn authored_location(markdown: &Markdown, origin: Option<&BodyOrigin>, span: &Range<usize>) -> Option<SourceRef> {
+    let context = markdown.loaded_source_context_for_errors()?;
+    let located = origin.and_then(|origin| {
+        let opener = |len: usize| span.start..(span.start + len).min(span.end.max(span.start + 1));
+        [span.clone(), opener(2), opener(1)]
+            .into_iter()
+            .filter(|range| !range.is_empty())
+            .find_map(|range| origin.project(&range))
+            .and_then(|range| AuthoredSpan::locate(&context.content, range))
+    });
+    Some(match located {
+        Some(span) => SourceRef::OnDiskSpan { context, span },
+        None => SourceRef::OnDisk(context),
+    })
 }

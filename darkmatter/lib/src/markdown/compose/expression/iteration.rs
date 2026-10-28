@@ -96,7 +96,10 @@ impl ExpansionUsage {
 }
 
 /// The position of one item in its original, unsorted and unfiltered source.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// Serializes as a bare number (an index) or string (a key).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(untagged)]
 pub enum IterationPosition {
     /// A zero-based array or tuple index.
     Index(u64),
@@ -115,7 +118,7 @@ impl fmt::Display for IterationPosition {
 
 /// One step of an [`IterationPath`]: the source reference as authored and the
 /// original position of the item being processed.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct IterationFrame {
     /// The source reference spelling, such as `teams`.
     pub collection: String,
@@ -131,8 +134,10 @@ impl fmt::Display for IterationFrame {
 
 /// The nested original positions leading to a failure, outermost first.
 ///
-/// Renders as `teams[2] → members[4]`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+/// Renders as `teams[2] → members[4]`; serializes as the array of its
+/// frames.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(transparent)]
 pub struct IterationPath(Vec<IterationFrame>);
 
 impl IterationPath {
@@ -146,6 +151,15 @@ impl IterationPath {
     pub fn pushed(&self, frame: IterationFrame) -> Self {
         let mut frames = self.0.clone();
         frames.push(frame);
+        Self(frames)
+    }
+
+    /// `self` followed by `inner`'s frames: the path of a failure that
+    /// `inner` locates inside the item `self` names.
+    #[must_use]
+    pub fn joined(&self, inner: &IterationPath) -> Self {
+        let mut frames = self.0.clone();
+        frames.extend(inner.0.iter().cloned());
         Self(frames)
     }
 

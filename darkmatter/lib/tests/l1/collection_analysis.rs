@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use darkmatter::markdown::coercion::ValueKind;
 use darkmatter::markdown::compose::collection_blocks::{
     BodyScopes, CollectionAnalysis, CollectionAnalysisOptions, CollectionError, ExpressionRole, analyze_collection_blocks,
+    analyze_collection_blocks_report,
 };
 use darkmatter::markdown::compose::expression::{
     Availability, BindingView, DeclaredTypes, HostFunctionCatalog, HostFunctions, ScopeId, Severity, TypeScope,
@@ -185,6 +186,35 @@ fn only_an_unknown_source_is_recoverable_and_the_warning_is_reported_once() {
     assert_eq!(error.code(), "dm.collection.invalid_source");
 }
 
+/// The report form keeps the recoveries authored before the first defect,
+/// and only those, beside the same defect the plain form returns.
+#[test]
+fn the_report_keeps_recovered_sources_before_the_rejection() {
+    let schema = schema("s: string(required)\n");
+    let declared = DeclaredTypes::new(Some(&schema));
+    let site = TypeScope::unguarded(&declared);
+    let mut waived = options(None);
+    waived.allow_untyped_map_variables = true;
+    waived.allow_untyped_filter_variables = true;
+    let source = "::map nope\nb\n::end-map\n::filter s\nb\n::end-filter\n::filter later\nb\n::end-filter\n";
+
+    let report = analyze_collection_blocks_report(source, &site, &waived);
+    let rejection = report.rejection.expect("the scalar source is rejected");
+    assert_eq!(rejection.code(), "dm.collection.invalid_source");
+    assert_eq!(located(source, &rejection), (4, "s"));
+    let kept: Vec<_> = report.analysis.recovered.iter().map(|found| &source[found.span.clone()]).collect();
+    assert_eq!(kept, ["nope"], "the recovery after the rejection is not part of the prefix");
+    let codes: Vec<_> = report.analysis.diagnostics.iter().map(|d| d.code.as_str()).collect();
+    assert_eq!(codes, ["dm.collection.untyped_map_source"]);
+
+    let plain = analyze_collection_blocks(source, &site, &waived).expect_err("the plain form fails the same way");
+    assert_eq!((plain.code(), located(source, &plain)), (rejection.code(), (4, "s")));
+
+    let malformed = analyze_collection_blocks_report("::map nope\nb\n", &site, &waived);
+    assert_eq!(malformed.rejection.expect("unterminated").code(), "dm.collection.malformed");
+    assert!(malformed.analysis.recovered.is_empty());
+}
+
 #[test]
 fn disabled_collection_blocks_leave_wrappers_inert() {
     let schema = schema("x: string\n");
@@ -267,6 +297,38 @@ fn nested_regions_see_the_enclosing_iteration_locals() {
 
     let untyped = "::map teams \"team => team\"\n::map team.nothing \"m => m\"\nb\n::end-map\n::end-map\n";
     assert_eq!(rejected(yaml, untyped), ("dm.collection.untyped_map_source", "team.nothing"));
+}
+
+/// Passive analysis and every consumer of its [`BodyScopes`] see one
+/// identity for an original item's field, whether a callback names it
+/// through an object parameter or destructures it.
+#[test]
+fn a_guard_fact_crosses_destructured_and_object_spellings_in_the_shared_scopes() {
+    let yaml = "data: '{ members: any(required) }[](required)'\n";
+    let schema = schema(yaml);
+    let declared = DeclaredTypes::new(Some(&schema));
+    let site = TypeScope::unguarded(&declared);
+    for (header, read) in [
+        ("::filter data \"{members} => true\" filter=\"p => is_array(p.members)\"", "members"),
+        ("::filter data \"p => true\" filter=\"{members} => is_array(members)\"", "p.members"),
+        ("::filter data \"{members} => true\" while=\"p => is_array(p.members)\"", "members"),
+        ("::filter data \"p => true\" until=\"{members} => !is_array(members)\"", "p.members"),
+        ("::map data \"{members} => {members}\" filter=\"p => is_array(p.members)\"", "members"),
+    ] {
+        let source = format!("{header}\n{{{{ {read} }}}}\n::map {read}\n- {{{{i}}}}\n::end-map\n::end-{}\n", if header.starts_with("::map") { "map" } else { "filter" });
+        let analysis = analyze_collection_blocks(&source, &site, &options(None))
+            .unwrap_or_else(|error| panic!("{header}: {} {error}", error.code()));
+        let body = analysis.scopes.scope_at(site.clone(), source.find("{{").unwrap());
+        let ty = body.type_of_expr(&parse(read).unwrap()).expect("the read names a subject");
+        assert!(ty.admits(&json!(["a"])) && !ty.admits(&json!("a")), "{header}: `{read}` is proven an array");
+    }
+
+    let shadowed = "::filter data \"p => true\" filter=\"p => is_array(p.members)\"\n::map data \"{members} => {members}\"\n::map members\nb\n::end-map\n::end-map\n::end-filter\n";
+    assert_eq!(
+        rejected(yaml, shadowed),
+        ("dm.collection.untyped_map_source", "members"),
+        "an inner region's item is a different subject from the outer guarded one"
+    );
 }
 
 #[test]

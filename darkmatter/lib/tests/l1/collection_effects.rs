@@ -197,7 +197,7 @@ fn a_failure_inside_a_repeated_body_keeps_its_authored_location() {
     let (_probe, _boom) = probes();
     let document = any_items(json!([1, 2]), "::map data\n- {{ boom('body', i) }}\n::end-map\n");
     let error = failed(&document);
-    let located = match &error {
+    let located = match error.without_iteration() {
         MarkdownError::Interpolation { source, .. } => match source.as_ref() {
             SourceRef::OnDiskSpan { span, .. } => Some(span.line()),
             _ => None,
@@ -205,6 +205,8 @@ fn a_failure_inside_a_repeated_body_keeps_its_authored_location() {
         _ => None,
     };
     assert_eq!(located, Some(7), "the copy's expression points at the authored body line: {error:?}");
+    let MarkdownError::InIteration(failure) = &error else { panic!("the copy's items are kept: {error:?}") };
+    assert_eq!(failure.iteration_path.to_string(), "data[1]");
 }
 
 // ── budgets ──────────────────────────────────────────────────────────────

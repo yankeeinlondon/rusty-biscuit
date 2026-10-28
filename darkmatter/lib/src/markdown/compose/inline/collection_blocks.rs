@@ -107,26 +107,39 @@ fn rejection(markdown: &Markdown, body: &BodyProvenance, error: CollectionError)
     anchor(markdown, body, error.into())
 }
 
-/// A collection failure located in the loaded file the way body
-/// interpolation locates its own: the engine located it in the body text.
+/// A collection failure, or a gate failure inside a repeated copy, located in
+/// the loaded file the way body interpolation locates its own: the engine
+/// located it in the body text.
 fn anchor(markdown: &Markdown, body: &BodyProvenance, error: MarkdownError) -> MarkdownError {
-    let MarkdownError::Collection(inner) = error else {
-        return error;
-    };
-    let span = match inner.site().map(|site| site.source.as_ref()) {
-        Some(SourceRef::OnDiskSpan { span, .. }) => Some(span.range()),
-        _ => None,
-    };
     let origin = body.origin.as_ref().filter(|origin| origin.describes(markdown.content()));
-    let located = match (span, markdown.loaded_source_context_for_errors(), origin) {
-        (Some(span), Some(context), Some(origin)) => origin
-            .project(&span)
-            .and_then(|range| AuthoredSpan::locate(&context.content, range))
-            .map(|authored| SourceRef::OnDiskSpan { context, span: authored }),
-        _ => None,
+    let relocate = |source: Option<&SourceRef>| -> Option<SourceRef> {
+        let context = markdown.loaded_source_context_for_errors()?;
+        let span = match source {
+            Some(SourceRef::OnDiskSpan { span, .. }) => Some(span.range()),
+            _ => None,
+        };
+        let located = span
+            .zip(origin)
+            .and_then(|(span, origin)| origin.project(&span))
+            .and_then(|range| AuthoredSpan::locate(&context.content, range));
+        Some(match located {
+            Some(authored) => SourceRef::OnDiskSpan { context, span: authored },
+            None => SourceRef::OnDisk(context),
+        })
     };
-    match located {
-        Some(source) => (*inner).with_source(source).into(),
-        None => MarkdownError::Collection(inner),
+    match error {
+        MarkdownError::Collection(inner) => {
+            match relocate(inner.site().map(|site| site.source.as_ref())) {
+                Some(source @ SourceRef::OnDiskSpan { .. }) => (*inner).with_source(source).into(),
+                _ => MarkdownError::Collection(inner),
+            }
+        }
+        MarkdownError::InIteration(mut failure) => {
+            // The engine's body-relative site names no real file, so it is
+            // replaced even when only the file can be proven.
+            failure.location = relocate(failure.location.as_deref()).map(Box::new);
+            MarkdownError::InIteration(failure)
+        }
+        other => other,
     }
 }
