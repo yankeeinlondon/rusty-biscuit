@@ -148,8 +148,9 @@ pub use parser::{
     ParseError, Parser, parse, parse_condition, parse_condition_spanned, parse_spanned,
 };
 pub use prepared::{
-    AuthoredMode, PreparationError, PreparedExpression, PreparedValue, ValidationDiagnostic,
-    evaluate_prepared, prepare_value, validate_expression, validate_prepared,
+    AuthoredMode, PlaceholderView, PreparationError, PreparedExpression, PreparedInterpolation,
+    PreparedInterpolationView, PreparedPlaceholder, PreparedValue, ValidationDiagnostic,
+    evaluate_prepared, prepare_value, validate_expression, validate_interpolation, validate_prepared,
 };
 
 use absence::{AbsenceScope, MissingRootObserver};
