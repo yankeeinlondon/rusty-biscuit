@@ -59,8 +59,8 @@ and DMLS both read it.
 - File-reference syntax is `biscuit_file::FileReference::new` alone (the
   passive validator); Darkmatter's `is_well_formed_reference` only adds the
   `file://` adapter (`normalize_path_arg`, which strips the prefix and never
-  collapses separators). `is_file_type` (pure, true-implies `file`) and
-  `file_exists` (malformed text is `false` before any lookup) both use it;
+  collapses separators). `is_file_type` (pure) and
+  `file_exists` (both `narrows(...; true-implies)` `file`; malformed text is `false` before any lookup) both use it;
   never add a second reference grammar.
 - Build the site over `DeclaredTypes::for_schema(Some(&effective))` (every
   layer: document, triggers, the merged JSON's `RawDeclarations`, layered
@@ -196,14 +196,19 @@ only fact producer. It handles `!`, parentheses, `and`/`or`/`||` (lowered to
 `finite_values` for subject-to-subject), and each predicate's
 `NarrowingFact` (`call_binding/registration.rs`: `FactKind::{TrueIff,
 TrueImplies, FalseImplies}` × `FactType::{NonNull, Type(text)}`), read
-through `functions::inspect_registration`, so a built-in (`FunctionBinding::narrowing`),
-a test function, and a host function narrow alike; never key a fact on a
-name. Host functions (`expression::host`): `HostFunctions::builder(HostFunctionCatalog)`
+through `functions::inspect_registration`. The fact is declared in the
+function's signature by `narrows(param: T; kind)` / `narrows(param; kind)`
+(`file_exists` and `is_file_type` are `true-implies` `file`; `is_empty` is
+presence-only `false-implies`) and compiled at registration, so a built-in, a
+test function, and a host function narrow alike. There is no Rust-side
+`narrows` setter on `RegistrationBuilder`; never key a fact on a name. Host functions (`expression::host`): `HostFunctions::builder(HostFunctionCatalog)`
 validates names, catalog parity, eagerness, and facts at `build`;
 `install_host_functions` (process-wide) or `HostFunctions::enter` (thread
 guard, DMLS) make a set visible; lookup order is test hooks → entered →
-installed → built-ins in `functions/mod.rs`. The editor rebuilds facts from
-`<stem>.facts.json` (`facts_artifact` / `analysis_only`); a function it cannot
+installed → built-ins in `functions/mod.rs`. The editor rebuilds registrations from the catalog; `<stem>.facts.json`
+(`facts_artifact` / `analysis_only`) is derived, and the reader compares its
+`facts` with the catalog-compiled fact (absence included; `format_version`
+stays 1), so a mismatch makes that function incomplete; a function it cannot
 trust is *incomplete* (dispatchable, no registration) and
 `incomplete_host_calls` reports it. Catalog descriptors own their data
 (`Box<str>`, boxed slices, an owned `FunctionType`); `load_catalog` leaks

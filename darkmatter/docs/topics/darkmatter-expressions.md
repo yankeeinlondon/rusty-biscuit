@@ -328,7 +328,7 @@ false side (an `else`, a ternary's second branch, or `!` around it):
 | `is_string(x)`, `is_number(x)`, `is_array(x)`, `is_object(x)` | `x` has that type; a recursive named type (`node`) counts by the top level of its definition and keeps its name | `x` does not have that type |
 | `is_null(x)` | `x` is missing | `x` is present |
 | `is_empty(x)` | nothing | `x` is present |
-| `file_exists(x)` | `x` is a present string | nothing |
+| `file_exists(x)` | `x` is suitable for a `file` | nothing |
 | `is_file_type(x)` | `x` is suitable for a `file` parameter | nothing |
 | `x == null` | `x` is missing | `x` is present |
 | `x != null` | `x` is present | `x` is missing |
@@ -360,16 +360,17 @@ applies to the region.
 
 ### Where a predicate's facts come from
 
-A predicate proves exactly the **narrowing fact** registered with the
-function, never a rule keyed by its name. Built-in predicates, a test
-function, and a host's function (such as a Claudine predicate) register
-facts the same way, and analysis reads them without calling the function.
+A predicate proves exactly the **narrowing fact** declared in the
+function's signature, never a rule keyed by its name. Built-in predicates, a
+test function, and a host's function (such as a Claudine predicate) declare
+facts the same way, with a `narrows(...)` clause, and analysis reads them
+without calling the function.
 There are three kinds:
 
 | Kind | True side | False side | Example |
 | --- | --- | --- | --- |
 | true-iff a type | the argument has that type | that type is removed | `is_string(x)`, `is_null(x)` |
-| true-implies a type | the argument is suitable for that type | nothing | `file_exists(x)` (a string), `is_file_type(x)` (a `file`) |
+| true-implies a type | the argument is suitable for that type | nothing | `file_exists(x)`, `is_file_type(x)` (both a `file`) |
 | false-implies a type | nothing | the argument is suitable for that type | `is_empty(x)` (present) |
 
 "Suitable for a type" keeps an alternative that already fits it, turns an
@@ -381,9 +382,14 @@ true-implies `file` lets `is_project_file(source) && frontmatter(source,
 `number`, `boolean`, `object`, `unknown[]`), because only those have a
 false side Darkmatter can describe. Registration rejects a fact on a
 function that does not return `boolean`, on a parameter it does not
-declare, or of a type its kind cannot prove. A host's facts reach the editor
-through a generated facts artifact; see
-[Host Expression Functions](./host-functions.md).
+declare, or of a type its kind cannot prove. `file_exists` is true-implies, not true-iff: a
+file that exists is a valid file reference, but a valid file reference may name
+a file that is missing, so a false result removes nothing. The fact is declared
+by the function's `narrows(...)` clause in its signature, which is the
+authority for the grammar and its rules; see
+[Function Signatures](./schemas/definition.md#narrowing-facts). A host's facts
+reach the editor through the function catalog and a generated facts artifact;
+see [Host Expression Functions](./host-functions.md).
 
 ### How long a fact lasts
 

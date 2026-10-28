@@ -1014,3 +1014,13 @@ catalog that fails to load is a `dm.schema.host_catalog` warning. Inside an
 md event's stack DMLS uses that event's registry `BindingView`
 (`dmls/src/overlay/event_views.rs`), so `err` where the event has none is
 `dm.expression.unavailable_global`.
+
+- **`function(...)` narrowing clause.** `narrows(param: T; true-implies |
+  true-iff | false-implies)` (or presence-only `narrows(param; kind)`, which
+  lowers to `FactType::NonNull`) is an optional, at-most-one clause after
+  `returns(...)`; it is description-only and a document schema reaching it
+  fails to load. Validation lives with the signature grammar
+  (`simplified/signature.rs`): boolean returns, a declared non-rest parameter,
+  a self-contained single-type target (no union or named reference), `true-iff`
+  only for `null` and bare families, and all overloads agreeing. Docs:
+  `docs/topics/schemas/definition.md#narrowing-facts`.

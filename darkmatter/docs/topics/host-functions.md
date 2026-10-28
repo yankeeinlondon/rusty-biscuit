@@ -19,8 +19,8 @@ Each host function has three parts, kept in two places:
 
 | Part | Where it lives | What it says |
 | --- | --- | --- |
-| Signature | the host's **function catalog**, a YAML file | parameters, return type, category, description |
-| Behavior facts | Rust registration | what a `true` result proves (narrowing), source exclusions, numeric recovery, the malformed-reference rule |
+| Signature | the host's **function catalog**, a YAML file | parameters, return type, category, description, and what a `true`/`false` result proves (the `narrows(...)` clause) |
+| Behavior facts | Rust registration | source exclusions, numeric recovery, the malformed-reference rule |
 | Handler | Rust registration | the code that computes the result |
 
 The function catalog uses the same format as Darkmatter's own
@@ -113,6 +113,13 @@ function set to `install_host_functions`, which takes ownership of that set:
 std::fs::write("schemas/project.facts.json", functions.facts_artifact())?;
 ```
 
+The artifact is **derived output**. Narrowing facts come from the catalog's
+`narrows(...)` clauses; the artifact's `facts` list repeats them so the editor
+can check that the artifact belongs to this catalog. The reader compares the
+decoded fact with the one the catalog declares, including absence, and a
+mismatch makes that function's analysis incomplete (below). `format_version`
+stays `1`. Never edit the artifact by hand; regenerate it.
+
 The artifact sits beside the catalog and is named after it: `project.yaml`
 gets `project.facts.json`. That naming convention is the only way the editor
 finds it.
@@ -187,10 +194,11 @@ narrowing, and each call is reported as `dm.expression.incomplete_analysis`.
 | an entry field is absent, of the wrong type, or unknown, or a field that must not be `null` is `null` | that function |
 | one element of `facts` or `source_exclusions` is invalid (never skipped) | that function |
 | a fact names a parameter the catalog does not declare, or records the wrong position | that function |
+| the artifact's `facts` differ from the catalog's `narrows(...)` clause (a different kind, type, or parameter, a fact the catalog does not declare, or none where it does) | that function |
 
 An absent field and an explicit `null` are different problems and the
-message says which. `facts: []` is valid and means the function proves
-nothing; `conversion_recovery: null` and `malformed_reference: null` mean the
+message says which. `facts: []` is valid and means the function declares no
+narrowing; `conversion_recovery: null` and `malformed_reference: null` mean the
 function has none.
 
 Editing a catalog changes its hash, so its artifact reads as stale until the

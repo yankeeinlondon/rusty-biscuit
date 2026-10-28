@@ -57,6 +57,10 @@ behavior.
   and `Described::{key, description, category}` borrow from `&self`;
   `Described::example()` returns a `Copy` `Example<'_>` view. Never
   reintroduce a leak or `'static` field to satisfy a borrow; borrow or clone.
+- The public `RegistrationBuilder::narrows` setter is gone: narrowing facts
+  are declared with a `narrows(...)` clause in `function(...)` signatures
+  (built-ins, host catalogs, `FunctionRegistration::builder`/
+  `builder_from_types`). Do not reintroduce a Rust-side fact setter.
 - Host function catalogs (`HostFunctionCatalog`, `HostFunctions`) share one
   `Arc` freed with the last holder. `host_function_catalogs` caches one result
   per discovery path, replaced on any catalog/artifact byte change and never

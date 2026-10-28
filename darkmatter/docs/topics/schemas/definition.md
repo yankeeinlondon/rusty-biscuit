@@ -2224,6 +2224,7 @@ Constraints are separated by `;`, and a trailing `;` before `)` is allowed.
 | `parameters(name: T, ...)` | The arguments, in order. `parameters(void)` for none. |
 | `returns(T)` | The value returned on success; any type, including a union. |
 | `category(Name)` | The documentation category (see [Categories](#categories)). |
+| `narrows(name: T; kind)` / `narrows(name; kind)` | What a guard call proves about one argument (see [Narrowing facts](#narrowing-facts)). Optional; at most one. |
 | `fallible` | The function can fail even when its arguments are valid. A function whose only failure is a wrong argument is not fallible: such a call never reaches it (see [Type Coercion](#function-calls-bind-then-compute)). |
 | `example(call => result)` | An inline example; repeatable (see below). |
 | `example(./file.yaml)` | An example file, as on any type. |
@@ -2275,6 +2276,65 @@ returns: |-
     b
     c
 ```
+
+### Narrowing facts
+
+A predicate used as a guard (`when="file_exists(log)"`, `a ? b : c`) can tell
+the analyzer what its result proves about an argument. The `narrows` clause
+declares that fact in the signature, so the catalog is the one place it is
+written:
+
+```yaml
+types:
+    file_exists: |-
+        function(
+            parameters(path: unknown | null);
+            returns(boolean);
+            narrows(path: file; true-implies);
+            category(Filesystem);
+        ) -> Returns true when the file exists.
+    is_empty: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            narrows(x; false-implies);
+        ) -> Returns true for null, empty text, and empty collections.
+```
+
+| Form | True result | False result |
+|---|---|---|
+| `narrows(x: T; true-implies)` | `x` is suitable for `T` | nothing |
+| `narrows(x: T; true-iff)` | `x` has type `T` | `T` is removed from `x` |
+| `narrows(x: T; false-implies)` | nothing | `x` is suitable for `T` |
+
+Omitting the type gives a presence-only fact: `true-implies` excludes `null`
+when the result is true, `false-implies` when it is false, and `true-iff` on
+the true side while keeping only `null` on the false side.
+
+Rules:
+
+- **Ordering.** The clause may appear anywhere among the clauses, separated
+  by `;` like the others. It names one parameter exactly as declared; the
+  `: T` operand is optional, and omitting it means "present" (not `null`),
+  never "nonempty" or "truthy".
+- **Boolean returns.** The function must return `boolean`; the clause on any
+  other return type is an error.
+- **Targets.** `T` is a single self-contained type: a union and a named
+  reference are rejected, and `true-iff` is limited to `null` and the bare
+  families (`string`, `number`, `boolean`, `object`, `unknown[]`), because
+  only those have a false side that can be described. The parameter cannot
+  be a rest parameter or one the function does not declare.
+- **Overloads.** Every overload must declare the same fact, or none may. A
+  disagreement is an error naming both clauses.
+- **Original argument.** The fact is about the value as the caller wrote it,
+  not a coerced copy: `is_number("4")` is `false` even though `"4"` would
+  convert. Negative narrowing is limited to what can be described: removing
+  `string` from a `string | number` leaves `number`, but a false
+  `true-implies` never removes anything.
+- **Description-only.** The clause validates no data, changes no binding,
+  runs no handler, and is read without calling the function. A document
+  schema that reaches a `function(...)` with a `narrows` clause fails to load
+  like any other function.
 
 **Overloads.** A function with several signatures is a union of `function(...)`
 types, written as a YAML list or with `|`. Two overloads whose parameters bind
