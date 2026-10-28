@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-10-27
 total_phases: 3
-phase: 2
+phase: 4
 agent: codex/gpt-6.1-sol
 yolo: 'true'
 source_files_during_phase_1:
@@ -10,6 +10,29 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+- claudine/lib/tests/l1/invalid_trigger_findings.rs
+- claudine/lib/src/composition/schema/findings.rs
+- claudine/lib/benches/pipeline_work_alloc.rs
+docs_updated_during_phase_2:
+- claudine/docs/topics/schemas.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+- .claude/skills/claudine/SKILL.md
+source_files_during_phase_3: []
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_code:
+- claudine/lib/src/composition/schema/mod.rs
+- claudine/lib/tests/l1/invalid_trigger_findings.rs
+- claudine/lib/src/composition/schema/findings.rs
+- claudine/lib/benches/pipeline_work_alloc.rs
+documentation:
+- claudine/docs/topics/schemas.md
+- .claude/skills/claudine/SKILL.md
+completed_phase: 3
+implemented: true
 packages:
 - claudine
 ---
@@ -80,7 +103,7 @@ Paths below are repository-relative. Execute phases in order. Wave numbers are u
 
 The following tasks depend on Phase 1 and can run concurrently. One agent owns `invalid_trigger_findings.rs`; another owns topic/skill/findings documentation and the benchmark comment. Neither changes production control flow. Run focused verification after the wave joins so concurrent test builds do not duplicate work.
 
-- [ ] **Cover shared discovery**
+- [x] **Cover shared discovery**
   - Extend `claudine/lib/tests/l1/invalid_trigger_findings.rs` with all cases below. Retain the module's registration in `tests/l1/main.rs`; no new target is needed. Use `test_toolkit::trace_phase!` to mark fixture setup and observed work where useful.
   - Add a successful matching disk-trigger control with a valid required number. Measure only `pre_validate_schema` and assert discovery = 1 and effective preparations = 2. Repeat against the same source/context and assert the same delta independently.
   - Add a trigger matching numeric or string `count` via `match: { group: [{ count: "string(required)" }, { count: "number(required)" }] }` and declaring `count: number(optional)` plus `ticket: string(required)` in its payload. Control: valid `count` without `ticket` returns `MissingProperties`. Edited case: wrong-type `count` is dropped, the final verdict succeeds without `ticket`, and the returned source has no `count`. Assert one `Frontmatter`/`PreValidation` drop with a nonempty reason and the 1/2 counter delta.
@@ -92,7 +115,7 @@ The following tasks depend on Phase 1 and can run concurrently. One agent owns `
   - Add the invalid-UTF-8 infrastructure case in Rule 11, asserting no partial findings and successful recovery on the next call. Also exercise standalone cleanup on the failing scan: it returns unchanged source/overrides and no drops.
   - Counter assertions are feature-gated; behavior assertions remain active without counters. All new cases execute in process, without provider, terminal, browser, shell, or ambient user-schema dependencies.
 
-- [ ] **Document call lifetime**
+- [x] **Document call lifetime**
   - Update `claudine/docs/topics/schemas.md` around trigger discovery and invalid-trigger warnings. State that one pre-validation shares loaded trigger rules/payloads across cleanup and verdict, while matching each pass's current values. Show the `count` cleanup example and explain that the final verdict no longer selects its trigger.
   - Add a compact Mermaid flow: discover/record findings → original callers and values → cleanup preparation → cleaned callers and values → verdict preparation → owner released. Show scan errors exiting before preparation.
   - State that edits between calls are visible, edits between passes do not replace loaded trigger contents, authored `$schema` still resolves per preparation, and discovery is not an atomic filesystem snapshot. Keep separate composition/status/standalone boundaries clear.
@@ -105,12 +128,12 @@ Validation checkpoint after Wave 2: from the absolute `claudine/` working direct
 
 ### Wave 3
 
-- [ ] **Measure allocation savings**
+- [x] **Measure allocation savings**
   - Depends on Phase 2. Run the Rule 13 benchmark once on this host after the implementation stabilizes. Record exact command, current base revision, uncommitted change state, `rustc --version --verbose`, bench profile, and raw six D3 rows in the adjacent `implementation-log.md`. Use `GIT_TERMINAL_PROMPT=0` for Git commands. Do not commit for measurement identity.
   - Put baseline and new warm allocated bytes, discovery counts, preparation counts, absolute bytes saved, and percentage saved side by side for each pre-validation size. Baselines are 331,851 / 1,940,903 / 18,023,939 B, with counts 2/2; baseline one-discovery controls are 157,365 / 961,891 / 9,003,409 B. Identify these as the specification's historical baseline, not a fresh same-tree control run.
   - Expect pre-validation counts 1/2 and one-discovery controls 1/0. The historical subtraction estimates are 174,486 / 979,012 / 9,020,530 B remaining; these are explanatory estimates, not exact allocation thresholds. New pre-validation bytes must decrease at all three sizes. Inspect and eliminate owner/registry copies and accidental rediscovery responsible for a failed comparison, then rerun D3 after the corrective code change. Timing is informational only.
 
-- [ ] **Run completion checks**
+- [x] **Run completion checks**
   - Run `just test` and then `just lint` from the absolute starting worktree's `claudine/` directory, using explicit tool working directories to avoid `CDPATH`. These are the final area gates; do not run full-workspace tests, L2/L3, providers, or Darkmatter's separate gates. Darkmatter code is outside this plan and remains unchanged.
   - Resolve failures caused by this implementation and rerun the affected checks; preserve unrelated working-tree edits. Never run `cargo fmt` or formatting repair commands. Required lint checks may report formatting; fix touched lines manually.
   - Review the final diff for one call-local owner, two matches/preparations, replaced caller origins, early finding recording, unchanged public signatures, no new cache/API/dependency/CI scope, and portable fixture paths. Retain existing CLI `launch_trigger_schemas` and `compose_schema_cli` tests as the wiring evidence; no new CLI process matrix is introduced.

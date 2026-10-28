@@ -30,6 +30,8 @@ reviewed_on: 2026-10-27
 review_iterations: 0
 related:
     - 2026-10-25-pipeline-work-reduction
+implemented: true
+implemented_by: "claude/sonnet"
 ---
 
 # Share one trigger discovery across a launch's schema pre-validation
