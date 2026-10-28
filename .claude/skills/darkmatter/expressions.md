@@ -200,7 +200,16 @@ through `functions::inspect_registration`. The fact is declared in the
 function's signature by `narrows(param: T; kind)` / `narrows(param; kind)`
 (`file_exists` and `is_file_type` are `true-implies` `file`; `is_empty` is
 presence-only `false-implies`) and compiled at registration, so a built-in, a
-test function, and a host function narrow alike. There is no Rust-side
+test function, and a host function narrow alike. Declaration validity is
+schema-owned (`schemas/simplified/narrowing.rs`: `clause_problem`,
+`declaration_problem`, `overload_arms_problem`, plus the pure family
+predicates `scope/shape.rs` imports); the grammar, catalog loading, and
+`compile_declared_fact` all apply it, and registration only lowers. Never add
+a fact rule in registration or scope alone. `scope/facts.rs::assume` applies
+a fact only when `call_check::call_is_rejected` is false (the passive call
+check typed in the current scope; unknown/uncertain/nullable arguments do not
+reject), so a binding failure or wrong arity proves neither side; `and`/`or`
+bind any value, so their arity check is their acceptance. There is no Rust-side
 `narrows` setter on `RegistrationBuilder`; never key a fact on a name. Host functions (`expression::host`): `HostFunctions::builder(HostFunctionCatalog)`
 validates names, catalog parity, eagerness, and facts at `build`;
 `install_host_functions` (process-wide) or `HostFunctions::enter` (thread

@@ -787,6 +787,22 @@ unsupported presentation, or alias leaves the range `None` but always keeps
 the error. A projection-only failure after a successful parse is the
 projection error at the root path. Source-free parsers discard the path.
 
+A failure with two locations carries them structurally, never as offsets in
+message text: `SchemaError::Grammar.related: Vec<GrammarRelated>` (span in
+the same text, or `arm: Some(i)` for another option of a YAML-sequence
+union), projected by the same path into `LocatedDefinitionFailure.related`.
+Narrowing overload problems carry `NarrowsProblem.related` (the other
+overload; its span is `None` for an overload without a clause, which the
+grammar fills from `Parser::arm_spans` and the YAML-list parser from the
+option's scalar). Registration's text path keeps them on
+`RegistrationError::Grammar`; the programmatic path has no text and gives
+`InvalidFact.overloads` instead; `HostCatalogError::span()/related()` are
+located in the catalog source. A standalone file's payload failure is folded
+into `SchemaError::SchemaDocument`'s message, so DMLS locates it when the
+overlay is assembled (`overlay::file_failures`, keyed by the path the error
+names) and diagnostics read `DocumentOverlay::file_failures`; a diagnostic
+request must never read or parse a file.
+
 `decode_plain_scalar_node` (`yaml_scalar.rs`) is `decode_scalar_node`
 restricted to plain scalars (same-line tags/anchors skipped; quoted, block,
 flow, alias, comment, empty, and later-line-property values are `None`, and

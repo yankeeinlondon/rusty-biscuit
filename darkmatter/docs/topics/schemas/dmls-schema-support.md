@@ -163,6 +163,39 @@ The severity policy follows one guiding principle: *diagnose edit-time problems,
 
 Standalone schema documents **own their problems**: when a `kind: schema` file is open in the editor, its `invalid_suggestion` warnings and `document_malformed` errors are published on that file, never duplicated onto the Markdown documents consuming it.
 
+#### Definitions with two locations
+
+Some definition errors involve two declarations: a second `narrows` clause
+on one `function`, a constraint written twice (`returns(...)` twice, two
+`suggest(...)` constraints), or overloads that disagree on their `narrows`
+fact. The diagnostic is ranged on the declaration that is rejected and lists
+the other one as `relatedInformation`:
+
+| Error | Ranged on | Related location |
+|---|---|---|
+| two `narrows` clauses | the second `narrows` keyword | the whole first clause |
+| a repeated constraint | the second keyword | the first keyword |
+| overloads with different facts | the later overload's clause | the earlier overload's clause |
+| one overload declares a fact, another does not | the declaring clause | the whole overload that declares none |
+
+```yaml
+kind: schema
+types:
+    pred: 'function(parameters(x: unknown | null); returns(boolean); narrows(x: string; true-iff); narrows(x; false-implies))'
+```
+
+Here the diagnostic covers the second `narrows`, and its related location is
+`narrows(x: string; true-iff)`.
+
+Both ranges are exact through a quoted scalar, a `|-` block scalar, and one
+option of a YAML list union (where the related location is in the other
+option). When the definition is in another file, reached through
+`$schema: ./types.yaml` or an import such as `pred@./types.yaml`, the
+diagnostic stays on this document's reference and both locations are
+related information in that file: the rejected token first, labelled
+"schema definition is authored in this file", then the declaration it
+conflicts with.
+
 #### Named-type references
 
 Named-type failures are defects of the schema, not of a document value, so

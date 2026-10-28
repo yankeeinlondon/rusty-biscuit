@@ -2311,6 +2311,11 @@ Omitting the type gives a presence-only fact: `true-implies` excludes `null`
 when the result is true, `false-implies` when it is false, and `true-iff` on
 the true side while keeping only `null` on the false side.
 
+A call proves its fact only when the design-time call check accepts it; a
+call with the wrong argument count, or with an argument no value of its type
+can bind, proves neither side (see
+[Darkmatter Expressions](../darkmatter-expressions.md#where-a-predicates-facts-come-from)).
+
 Rules:
 
 - **Ordering.** The clause may appear anywhere among the clauses, separated
@@ -2320,12 +2325,31 @@ Rules:
 - **Boolean returns.** The function must return `boolean`; the clause on any
   other return type is an error.
 - **Targets.** `T` is a single self-contained type: a union and a named
-  reference are rejected, and `true-iff` is limited to `null` and the bare
+  reference are rejected, and so is a named type anywhere inside `T` (in an
+  object member, a dictionary value, a tuple position, a union arm, or a
+  grouped array such as `(Name | string)[]`), because a fact is applied
+  without the definitions of the schema that declared it. `{a: string}` and
+  `tuple([string])` are valid one-way targets; `{a: Name}` and
+  `tuple([Name])` are not. `true-iff` is limited to `null` and the bare
   families (`string`, `number`, `boolean`, `object`, `unknown[]`), because
-  only those have a false side that can be described. The parameter cannot
-  be a rest parameter or one the function does not declare.
-- **Overloads.** Every overload must declare the same fact, or none may. A
-  disagreement is an error naming both clauses.
+  only those have a false side that can be described. A refinement or a
+  constrained type (`file`, `string(min(3))`, `enum(a, b)`) is a one-way
+  target only. An array of a grouped union, `(string | number)[]`, is one
+  array type and a valid one-way target. The parameter cannot be a rest
+  parameter or one the function does not declare.
+- **Overloads.** Every overload must declare the same fact, or none may:
+  the same parameter at the same position, the same implication, and the
+  same target (compared by meaning, not spelling). A disagreement is an
+  error naming both overloads, with both locations: different facts are
+  reported at the later overload's clause, and a missing fact at the
+  declaring clause, each with the other overload as a related location (see
+  [DMLS schema support](./dmls-schema-support.md#definitions-with-two-locations)).
+  A second `narrows` clause on one function is reported at its keyword, with
+  the first clause as the related location.
+- **One set of rules.** Every reader applies these rules the same way:
+  parsing a schema, the `type-definition` and `schema` meta-types, editor
+  diagnostics, host catalog loading, and function registration. A
+  declaration a schema accepts is one a host can register.
 - **Original argument.** The fact is about the value as the caller wrote it,
   not a coerced copy: `is_number("4")` is `false` even though `"4"` would
   convert. Negative narrowing is limited to what can be described: removing

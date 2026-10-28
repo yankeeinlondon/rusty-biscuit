@@ -391,6 +391,25 @@ authority for the grammar and its rules; see
 reach the editor through the function catalog and a generated facts artifact;
 see [Host Expression Functions](./host-functions.md).
 
+A fact applies only to a call the [call check](../inline/call-check.md)
+accepts. A call it rejects (no signature takes that many arguments, or an
+argument no value of its type can bind) fails when the document runs, so
+neither of its sides is ever reached and it proves nothing. With
+`is_project_file(source: unknown, depth: number)` declared true-implies
+`file`:
+
+| Guard | `source` where the guard is true |
+| --- | --- |
+| `is_project_file(source, 1)` | `file` |
+| `is_project_file(source, {})` | `unknown` (`{}` can never be a `number`) |
+| `is_project_file(source)` | `unknown` (no signature takes one argument) |
+| `is_project_file(source, depth)`, `depth` of unknown type | `file` |
+
+Only a proven rejection withholds the fact: an argument whose fit is unknown,
+uncertain, or maybe `null` may still bind, and a guard whose branch runs at
+all has bound. The same holds under `!`, inside `&&`, `||`, and `?:`, in a
+`::block when="..."` body, and in the editor, which reads the same analysis.
+
 ### How long a fact lasts
 
 - A fact ends where its region ends. After a conditional, only what every
