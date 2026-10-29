@@ -85,7 +85,7 @@ The principles worth carrying around:
   simply `{{ spec-name }}`. `a - b`, `a -b`, `4-2`, and `foo--bar` stay
   subtraction. Subtracting from a name therefore needs whitespace:
   `iteration - 1`, not `iteration-1`, which names a key. See
-  [lexing](./parsing/lexing.md#--inside-an-identifier).
+  [lexing](./schemas/parsing/lexing.md#--inside-an-identifier).
 - **Dotted paths are one token.** `a.b.c` lexes as a single variable; a `.`
   followed by a digit does not fold, which is why `items.0` is rejected and
   `items[0]` is the array form.
@@ -107,9 +107,9 @@ The principles worth carrying around:
   handles the absence (`x || "d"`, `x ? … : …`, `is_null(x)`). See
   [Interpolation § Missing Variables](../inline/interpolation.md#missing-variables).
 
-Full detail lives under [Parsing](./parsing/index.md):
-[scanning](./parsing/scanning.md), [lexing](./parsing/lexing.md), and
-[grammar](./parsing/grammar.md).
+Full detail lives under [Parsing](./schemas/parsing/index.md):
+[scanning](./schemas/parsing/scanning.md), [lexing](./schemas/parsing/lexing.md), and
+[grammar](./schemas/parsing/grammar.md).
 
 ## Where Expressions Read Values From
 
@@ -698,14 +698,16 @@ child, which receives values only through its explicit parameters.
 
 ## Inline collection callbacks
 
-The shared parser and passive checker accept callbacks in function argument
-positions. Both arrows mean the same thing, and a shallow field pattern binds
-one object item:
+Use `map` to transform a collection into an array and `filter` to keep its
+matching items. They work in frontmatter interpolation, body interpolation,
+conditions, and lifecycle expressions. Both arrows mean the same thing, and a
+shallow field pattern binds one object item:
 
 ```text
 map(people, person => person.name)
 map({Ada: 90, Grace: 70}, {key, value} -> {key, score: value})
 filter(people, person => person.active)
+map([[1, 2], [3]], row => map(row, n -> n * 2))
 ```
 
 `map` evaluates its body once per item and collects the results. `filter`
@@ -720,12 +722,35 @@ in an array, object, frontmatter property, or returned from another callback.
 Only one input pattern is accepted; nested patterns, defaults, aliases, and
 multiple parameters are errors. The arrow has lower precedence than the body’s
 operators, so `x => x.active ? x.name : 'unknown'` includes the entire ternary.
+The comma or closing parenthesis of the containing call ends the body. A quoted
+`"x => x.name"` is a string, not an inline callback; quoted callbacks belong to
+directive options. `map(people, 'p => p.name')` is invalid.
 
 Callbacks share the directives’ lexical scope: `person` and `local.person`
 refer to the nearest local, while `fm.person` always reads frontmatter.
 A local may shadow another local or a document property, including with null.
 Reserved namespaces and registered host globals cannot be parameters. Leaving
 a callback restores the enclosing scope without changing document properties.
+This shadowing produces no advisory. A null local, or a missing member of a
+local, never falls through to frontmatter. `null` itself is also a protected
+parameter name.
+
+```mermaid
+flowchart TD
+    A[Check all authored callback bodies passively] --> B[Evaluate source once in enclosing scope]
+    B --> C{Next original item?}
+    C -->|yes| D[Charge shared visit and bind immutable item frame]
+    D --> E[Evaluate body with enclosing locals and request context]
+    E -->|success| F[Collect map result or retain truthy filter item]
+    F --> G[Leave frame and restore enclosing scope]
+    G --> C
+    E -->|failure| H[Stop with original position and typed cause]
+    C -->|no| I[Return array]
+```
+
+For example, `map([1, 2], n => map([3], m => n + m))` returns
+`[[4], [5]]`: the inner callback captures `n`. Reusing `n` in the inner
+pattern shadows it only for that inner body.
 
 Passive checking projects array and tuple element types and object entry
 `{key: string, value: ...}` types into the pattern. It derives a map result’s
@@ -742,7 +767,15 @@ nullable source signature; unrelated missing reads inside a callback still warn.
 Results are arrays in source order, with object filters retaining `{key, value}`
 entry objects. Absent, null, and empty sources return `[]` without running the
 callback. Non-null scalars are rejected. Null elements and map results remain
-data. A map result need not satisfy its input pattern.
+data. A map result need not satisfy its input pattern. Filter uses ordinary
+expression truthiness: `null`, `false`, zero, `""`, `[]`, and `{}` are false;
+all other values are true, including nonempty strings such as `"false"`.
+
+Whole-value frontmatter interpolation preserves the array value rather than
+rendering JSON text. It runs before schema coercion: filtering a YAML array of
+quoted numbers preserves those strings, while filtering native numbers preserves
+numbers. Text returned by a callback remains data; expression-looking strings
+are never evaluated a second time.
 
 Callbacks share the enclosing request’s visit allowance (100,000 by default),
 including rejected filter items, nested calls, directives, and child composition.
@@ -2038,7 +2071,7 @@ Invalid expressions fail composition with a parse or evaluation error that
 includes the source line number. This holds on **every** surface, body
 interpolation included: an expression that cannot be parsed or evaluated is an
 authoring error, never something to paper over by emitting the `{{ … }}`
-verbatim. See [Parsing § Failure handling](./parsing/index.md#failure-handling).
+verbatim. See [Parsing § Failure handling](./schemas/parsing/index.md#failure-handling).
 
 Unsupported or easy-to-misread forms:
 
@@ -2102,7 +2135,7 @@ it never leaks an unresolved `{{ … }}` literal.
 
 - [Host Expression Functions](./host-functions.md) — functions a host
   registers, and the facts artifact the editor reads
-- [Parsing](./parsing/index.md) — scanning, lexing, and grammar in detail
+- [Parsing](./schemas/parsing/index.md) — scanning, lexing, and grammar in detail
 - [Side Effects](./side-effects.md)
 - [Page Blocks](../inline/page-blocks.md)
 - [Block Transclusion](../transclusion/block-transclusion.md)

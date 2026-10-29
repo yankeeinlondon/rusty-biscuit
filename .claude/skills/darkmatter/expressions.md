@@ -110,8 +110,8 @@ and DMLS both read it.
   if they grow.
   User docs: `darkmatter/docs/inline/call-check.md`.
 
-**Function binding** (`expression/call_binding/`). Every call binds through
-the shared coercion engine before its handler runs; handlers are
+**Function binding** (`expression/call_binding/`). Ordinary value calls bind
+through the shared coercion engine before their handler runs; handlers are
 `PureFn = fn(&BoundCall) -> Result<Value, String>` and
 `ContextFn = fn(&BoundCall, &ResolutionContext)`, and read only `BoundArgs`
 accessors and `overload()`. Never re-check types, parse, or convert inside a
@@ -123,7 +123,9 @@ handler returning a value outside its declared `returns`, checked by
 `check_return` without conversion) is authoring-fatal. Null reaches a
 parameter only through an explicit `| null`. `and`/`or` are lazy
 (`LazyCall`): the precheck visits every argument, the runtime binds only the
-ones it evaluates. User docs: "Function Calls: Bind, Then Compute" in
+ones it evaluates. Callback registrations bind the source through the same
+engine; the evaluator owns item frames and body execution, with no eager
+callback handler. User docs: "Function Calls: Bind, Then Compute" in
 `darkmatter/docs/topics/schemas/definition.md`.
 
 **Inserted text is data.** Every authored span is scanned once. Produced text
@@ -311,8 +313,15 @@ bytes. Locals resolve before document lookup, shadow even at null, and never
 fall through for a missing member; `local.x` and bare `x` are the same subject,
 `fm.x` stays the document. A pattern name may not collide with a reserved
 root, `null`, or a registered global, and a host may not register `local`.
-Expression-level `map()`/`filter()` functions are not shipped; only the
-shared substrate is.
+Expression-level `map()`/`filter()` ship through the authoritative catalog.
+They accept an array, tuple, object, or null plus one inline callback; both
+return arrays, and objects visit insertion-ordered `{key, value}` entries.
+`map` keeps body results (including null); `filter` retains original entries
+using ordinary truthiness. Missing/null/empty sources produce `[]` without
+executing the body, but passive checking still visits it. Quoted callback text
+is for directive syntax, not expression function arguments. Whole-value
+frontmatter interpolation preserves typed arrays before schema coercion;
+callback-produced text remains data. Ordinary shadowing earns no advisory.
 
 ## Inline callback argument infrastructure
 

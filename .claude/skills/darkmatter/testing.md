@@ -183,3 +183,9 @@ when changing the oracle.
 - CLI: `darkmatter/cli/tests/l1/{collection_blocks,compose_collection_controls}.rs`;
   DMLS: `dmls/tests/l1/collection_editor.rs`; Claudine compatibility:
   `claudine/lib/tests/l1/collection_host_compat.rs`.
+- Expression-call acceptance: `lib/tests/l1/collection_expression_surfaces.rs`
+  covers typed frontmatter, body and block conditions, nested scope, warnings,
+  and inserted-text provenance; CLI wiring is in `compose_call_warnings.rs`.
+  Claudine's `collection_host_compat` tests prepare dependency gates against
+  fixture-owned specs and execute the initialize event with its host binding
+  view, without providers or shells.

@@ -151,6 +151,12 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
   Darkmatter's shared region analysis (see [Autocomplete](./autocomplete.md#collection-regions),
   [Hover](./hover.md#collection-locals), and
   [Diagnostics](./diagnostics.md#collection-regions)).
+- **Inline collection callbacks** (`map` / `filter`) — completion prefers the
+  innermost callback locals within its body, and hover shows their owner and
+  projected item type. Both arrows and shallow pattern bindings are highlighted.
+  The iterable argument keeps its enclosing scope, and locals disappear after
+  the callback. Parsing, typing, and diagnostics are passive and shared with
+  composition; see [Diagnostics](./diagnostics.md#inline-collection-callbacks).
 - **Transclusion** (`::file` / `::code` / `prologue` / `epilogue`) — document
   links, go-to-definition, "who transcludes this file" references,
   broken-path diagnostics, and **cycle detection** (with the cycle ancestry

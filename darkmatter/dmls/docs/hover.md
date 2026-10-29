@@ -414,3 +414,14 @@ parameters show the types at that callback's own scope (another callback's
 parameter is not visible there). The keyword still shows the directive
 description.
 
+
+
+## Inline callback locals
+
+In `map(people, person => person.name)`, hover on a body read identifies it as
+a callback local, names the owning function, and shows the projected item or
+member type. A shallow `{name}` pattern projects that field directly. Bare
+`person` and `local.person` refer to the same binding; `fm.person` still gets
+document hover. Nested callbacks use the innermost matching local. The source
+argument uses its enclosing scope and the local ends with the callback. Hover
+uses shared passive type analysis and never runs a callback to obtain a value.

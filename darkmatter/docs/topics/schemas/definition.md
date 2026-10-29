@@ -3289,7 +3289,7 @@ written back only when the converted document satisfies that arm.
 
 An [expression function](../darkmatter-expressions.md#functions) declares
 its parameters with the same types (see
-[Function Signatures](#function-signatures)), and every call runs in two
+[Function Signatures](#function-signatures)). Ordinary eager calls run in two
 steps:
 
 1. **Bind.** The engine checks every argument against its parameter, keeping
@@ -3298,6 +3298,13 @@ steps:
 2. **Compute.** The function receives values of exactly its declared types
    and does its work. Only a function marked `fallible` can fail here, with
    a domain error such as a failed network request.
+
+`and` and `or` bind operands only as short-circuit evaluation reaches them.
+`map` and `filter` bind their iterable argument once; the evaluator then binds
+an immutable local frame and evaluates the inline callback for each visited
+item. A callback is syntax in an argument position, not a value converted by
+the coercion engine. These calls still use the shared signatures and passive
+call checks. See [Inline collection callbacks](../darkmatter-expressions.md#inline-collection-callbacks).
 
 ```md
 {{ min("4", 5) }}      ⇒ 4         "4" binds as the number 4

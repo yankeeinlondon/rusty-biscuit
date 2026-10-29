@@ -687,6 +687,30 @@ for what else a reload recomputes.
 - [Autocomplete](./autocomplete.md) — completion behavior and fields.
 - [Features](./features.md) — the full capability overview and per-editor matrix.
 
+### Inline collection callbacks
+
+Diagnostics for `map(items, item => expression)` and `filter(items, item ->
+predicate)` use the library's shared parser, lexical frames, and call checker.
+A misplaced arrow, malformed pattern, or protected parameter name reports
+`dm.expression.invalid_callback`. A provably incompatible call in the body
+reports `dm.expression.incompatible_call`, even on an empty or null source:
+`map([], x => min(true, 5))` is an error. A string such as `'x => x'` is a
+value, not a callback argument.
+
+Known array, tuple, and object-entry types are projected into callback locals.
+Locals shadow document declarations and their guard facts without an advisory;
+bare `x` and `local.x` share the local subject while `fm.x` remains the
+document subject. Bound names and members produce no undeclared-property
+warning; genuinely free missing reads retain the ordinary absence rules.
+Nested scopes restore outer bindings on exit.
+
+These rules apply in body expressions and expression-bearing frontmatter,
+including lifecycle scalars. Ranges refer to authored bytes, including escaped
+YAML strings. DMLS checks without executing callbacks or calling providers;
+iteration failures and budget exhaustion are compose-time results. See
+[Callback semantics](../../docs/topics/darkmatter-expressions.md#inline-collection-callbacks)
+and [Call checking](../../docs/inline/call-check.md#calls-inside-callbacks).
+
 ### Collection regions
 
 `::map` and `::filter` regions are judged by Darkmatter's own analysis, so the

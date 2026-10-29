@@ -310,3 +310,15 @@ evaluates an expression, fetches a remote URL, or mutates a file. Offering a
   within.
 - [Diagnostics](./diagnostics.md) — problem reporting and the stable code taxonomy.
 - [Features](./features.md) — the full capability overview and per-editor matrix.
+
+
+## Inline collection callbacks
+
+Inside `map(people, person => person.name)`, completion in the body prefers
+`person` and `local.person`, with projected types in their details, over
+same-named document properties. `fm.person` offers the document property.
+Array/tuple item and object-entry types come from the shared library projection.
+Nested callbacks see their enclosing locals, with the nearest binding winning.
+The iterable argument is completed before the new parameter exists, and the
+binding is not offered after the callback ends. Incomplete callback bodies use
+the same cursor scope without executing the expression.
