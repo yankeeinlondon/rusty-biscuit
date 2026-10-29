@@ -1,26 +1,128 @@
 ---
 total_phases: 6
 created: 2026-10-23
-phase: 5
+phase: 6
 agent: claude/sonnet
 yolo: true
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-source_files_during_phase_2: [biscuit-hash/lib/Cargo.toml, biscuit-hash/lib/src/json.rs, biscuit-hash/lib/src/lib.rs, biscuit-hash/justfile]
-docs_updated_during_phase_2: [biscuit-hash/README.md, docs/dependencies.md]
-docs_created_during_phase_2: [biscuit-hash/docs/json.md]
-skills_files_updated_during_phase_2: [.claude/skills/biscuit-hash/SKILL.md, .claude/skills/biscuit-hash/library-api.md]
-packages: [biscuit-hash, darkmatter, dmls, claudine]
-source_files_during_phase_3: [darkmatter/lib/Cargo.toml, darkmatter/lib/src/markdown/hash/mod.rs, darkmatter/lib/src/markdown/hash/compute.rs, darkmatter/lib/src/markdown/toc/mod.rs, darkmatter/lib/src/markdown/toc/types.rs, darkmatter/lib/src/markdown/schemas/validate.rs, darkmatter/lib/src/markdown/compose/cache/hashing.rs, darkmatter/lib/src/markdown/compose/cache/operation.rs, darkmatter/lib/src/markdown/compose/context/options.rs, darkmatter/lib/src/markdown/compose/expression/binding.rs, darkmatter/dmls/src/overlay/mod.rs]
-docs_updated_during_phase_3: [darkmatter/docs/cli/hash.md]
+source_files_during_phase_2:
+- biscuit-hash/lib/Cargo.toml
+- biscuit-hash/lib/src/json.rs
+- biscuit-hash/lib/src/lib.rs
+- biscuit-hash/justfile
+docs_updated_during_phase_2:
+- biscuit-hash/README.md
+- docs/dependencies.md
+docs_created_during_phase_2:
+- biscuit-hash/docs/json.md
+skills_files_updated_during_phase_2:
+- .claude/skills/biscuit-hash/SKILL.md
+- .claude/skills/biscuit-hash/library-api.md
+packages:
+- biscuit-hash
+- darkmatter
+- dmls
+- claudine
+source_files_during_phase_3:
+- darkmatter/lib/Cargo.toml
+- darkmatter/lib/src/markdown/hash/mod.rs
+- darkmatter/lib/src/markdown/hash/compute.rs
+- darkmatter/lib/src/markdown/toc/mod.rs
+- darkmatter/lib/src/markdown/toc/types.rs
+- darkmatter/lib/src/markdown/schemas/validate.rs
+- darkmatter/lib/src/markdown/compose/cache/hashing.rs
+- darkmatter/lib/src/markdown/compose/cache/operation.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/expression/binding.rs
+- darkmatter/dmls/src/overlay/mod.rs
+docs_updated_during_phase_3:
+- darkmatter/docs/cli/hash.md
 docs_created_during_phase_3: []
-skills_files_updated_during_phase_3: [.claude/skills/darkmatter/frontmatter.md]
-source_files_during_phase_4: [claudine/lib/src/composition/interpolation_conformance.rs, claudine/lib/src/composition/lifecycle/context/tests.rs, claudine/lib/src/composition/lifecycle/executor.rs, claudine/lib/src/composition/lifecycle/prewarm/classify.rs, claudine/lib/src/composition/preflight.rs, claudine/lib/src/composition/sequence/preflight/mod.rs, claudine/lib/src/composition/sequence/preflight/providers.rs, claudine/lib/src/composition/sequence/preflight/providers/tests.rs, claudine/lib/src/composition/sequence/preflight/reapproval.rs, claudine/lib/src/composition/sequence/task/tests.rs, darkmatter/lib/benches/phase6_interpolation.rs, darkmatter/lib/src/markdown/compose/cache/hashing.rs, darkmatter/lib/src/markdown/compose/conditions.rs, darkmatter/lib/src/markdown/compose/context/checked.rs, darkmatter/lib/src/markdown/compose/context/effective_state.rs, darkmatter/lib/src/markdown/compose/context/merge.rs, darkmatter/lib/src/markdown/compose/expression/fm_namespace.rs, darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs, darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs, darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs, darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs, darkmatter/lib/src/markdown/compose/inline/replacement.rs, darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs, darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs, darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs, darkmatter/lib/src/markdown/compose/page_blocks/engine.rs, darkmatter/lib/src/markdown/compose/preflight/collect.rs, darkmatter/lib/src/markdown/compose/replacement.rs, darkmatter/lib/src/markdown/compose/subtree.rs, darkmatter/lib/src/markdown/compose/tests/frontmatter.rs, darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs, darkmatter/lib/src/markdown/compose/transclusion/engine.rs, darkmatter/lib/src/markdown/compose/util.rs, darkmatter/lib/src/markdown/frontmatter.rs, darkmatter/lib/src/markdown/mapping_orders.rs, darkmatter/lib/src/markdown/reference/graph.rs, darkmatter/lib/src/markdown/schemas/clean.rs, darkmatter/lib/tests/l1/binding_contract.rs, darkmatter/lib/tests/l1/compose_expression_failure_contract.rs, darkmatter/lib/tests/l1/frontmatter_merge_order.rs, darkmatter/lib/tests/l1/main.rs, darkmatter/lib/tests/l1/shell_result_values.rs]
+skills_files_updated_during_phase_3:
+- .claude/skills/darkmatter/frontmatter.md
+source_files_during_phase_4:
+- claudine/lib/src/composition/interpolation_conformance.rs
+- claudine/lib/src/composition/lifecycle/context/tests.rs
+- claudine/lib/src/composition/lifecycle/executor.rs
+- claudine/lib/src/composition/lifecycle/prewarm/classify.rs
+- claudine/lib/src/composition/preflight.rs
+- claudine/lib/src/composition/sequence/preflight/mod.rs
+- claudine/lib/src/composition/sequence/preflight/providers.rs
+- claudine/lib/src/composition/sequence/preflight/providers/tests.rs
+- claudine/lib/src/composition/sequence/preflight/reapproval.rs
+- claudine/lib/src/composition/sequence/task/tests.rs
+- darkmatter/lib/benches/phase6_interpolation.rs
+- darkmatter/lib/src/markdown/compose/cache/hashing.rs
+- darkmatter/lib/src/markdown/compose/conditions.rs
+- darkmatter/lib/src/markdown/compose/context/checked.rs
+- darkmatter/lib/src/markdown/compose/context/effective_state.rs
+- darkmatter/lib/src/markdown/compose/context/merge.rs
+- darkmatter/lib/src/markdown/compose/expression/fm_namespace.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs
+- darkmatter/lib/src/markdown/compose/inline/replacement.rs
+- darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+- darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs
+- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+- darkmatter/lib/src/markdown/compose/page_blocks/engine.rs
+- darkmatter/lib/src/markdown/compose/preflight/collect.rs
+- darkmatter/lib/src/markdown/compose/replacement.rs
+- darkmatter/lib/src/markdown/compose/subtree.rs
+- darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+- darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+- darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+- darkmatter/lib/src/markdown/compose/util.rs
+- darkmatter/lib/src/markdown/frontmatter.rs
+- darkmatter/lib/src/markdown/mapping_orders.rs
+- darkmatter/lib/src/markdown/reference/graph.rs
+- darkmatter/lib/src/markdown/schemas/clean.rs
+- darkmatter/lib/tests/l1/binding_contract.rs
+- darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+- darkmatter/lib/tests/l1/frontmatter_merge_order.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/shell_result_values.rs
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
-skills_files_updated_during_phase_4: [.claude/skills/darkmatter/frontmatter.md]
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/frontmatter.md
+source_files_during_phase_5:
+- darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+- darkmatter/lib/src/markdown/schemas/resolve.rs
+- darkmatter/lib/src/markdown/schemas/scope.rs
+- darkmatter/lib/tests/l1/schema_json_key_order.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_matching_default.snap
+- darkmatter/cli/tests/l1/frontmatter_key_order.rs
+- darkmatter/cli/tests/l1/main.rs
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-claudine.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-lifecycle.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence-types.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-style.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-inline-compose.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-sequence.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-with-document-schema.digest
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schema-yaml-spellings-root-union-conventional-schema-body.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schema-yaml-spellings-root-union-serialized-schema-body.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schemas-feature-review.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/validate-root-union-fileref.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/validate-root-union-none-match.json
+- darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/validate-root-union.json
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/frontmatter.md
 ---
 
 # Plan: Frontmatter key order is the contract, the hash ignores it
@@ -336,7 +438,7 @@ path (grep `into_iter().collect()` on frontmatter objects).
 
 ### Wave 1 (parallel by test file)
 
-- [ ] **Review each candidate failure individually** (do not bulk-accept
+- [x] **Review each candidate failure individually** (do not bulk-accept
   snapshots):
   - `frontmatter::tests::parsed_frontmatter_retains_nested_mapping_order_as_metadata`
   - `fn_list_formatting::as_json5_uses_the_formatter_object_idiom`
@@ -348,18 +450,18 @@ path (grep `into_iter().collect()` on frontmatter objects).
     legacy-command byte comparison confirm both routes agree before touching
     expected text; record justification in the log
   - order fixtures built from parsed YAML or explicit insertion
-- [ ] **Remaining failures** from the Phase 1 baseline list: triage each as
+- [x] **Remaining failures** from the Phase 1 baseline list: triage each as
   resolved by earlier phases, a justified update, or a code fix.
 
 ### Wave 2 (parallel, ordinary process tests via the test toolkit; no terminal or browser focus)
 
-- [ ] **`md frontmatter` round trip.** read, edit, save, reread, repeat: nested
+- [x] **`md frontmatter` round trip.** read, edit, save, reread, repeat: nested
   and top-level order survives; replacing an existing key keeps its position;
   new keys append.
-- [ ] **`md hash --save` / `--diff`.** Save a non-strict baseline, reorder
+- [x] **`md hash --save` / `--diff`.** Save a non-strict baseline, reorder
   nested keys only, then: no semantic change, baseline file not rewritten, no
   timestamp bump, empty diff.
-- [ ] **Strict-baseline correction.** A test (or log entry if a test is not
+- [x] **Strict-baseline correction.** A test (or log entry if a test is not
   meaningful) showing strict hashes of nested maps follow author order; no
   automatic migration.
 

@@ -72,28 +72,65 @@ decisions_for_review:
         object. It now keeps `ctx` at its authored position. The alternative
         (always last) is simpler to describe but contradicts author order.
         Reverting is a few lines in `EffectiveState::get_fm`.
+    - |-
+        Phase 5's 43 review-list failures were already green when the phase
+        started: a parallel commit merged into this branch after Phase 4
+        (58e2a5790, "preserve authored order and validate numeric ingress")
+        updated the 40 conversion snapshots, the JSON5 and suggestion tests,
+        and made `md schema validate --format json` sort its report keys
+        (`sort_all_objects`) to keep that published output alphabetical. I
+        reviewed and kept those changes rather than redoing them. The
+        alternative for the JSON report is to let it follow construction
+        order; that changes a published byte-for-byte output, so I left the
+        sort. Reverting would mean re-recording the legacy JSON fixtures.
+    - |-
+        The review found that schema lowering still used swap-removes
+        (`serde_json::Map::remove`), so some emitted JSON Schema keys were not
+        in the order the code builds them: a root-union arm got `required`
+        moved to its front, and a union arm with a description and annotations
+        had them shuffled. The plan only asked to review outputs. I switched
+        the removals in `convert.rs`, `resolve.rs`, and `scope.rs` to
+        `shift_remove`, and built the property-union wrapper with its null
+        arm already in place instead of removing and re-adding `anyOf`. As a
+        result `anyOf` now leads that wrapper (before `default`/`description`),
+        the same as for an optional single property. This re-recorded 20
+        schema goldens and 1 conversion snapshot. Every changed golden was
+        checked to be the same JSON with only key order changed. The
+        alternative was to leave the swap order, which is deterministic and
+        semantically harmless but does not match the code. A stronger option
+        not taken: a clippy `disallowed-methods` ban on `Map::remove` across
+        darkmatter, which would need a crate-wide audit. Reverting means
+        restoring the three files and re-blessing the goldens with
+        `DARKMATTER_BLESS_RECURSIVE_GOLDEN=1`.
+    - |-
+        `darkmatter/lib/src/markdown/schemas/resolve.rs` already carried
+        another session's uncommitted edits (named-type work) when this phase
+        started. My change there is nine one-word `remove` -> `shift_remove`
+        hunks, separate from that work. Whoever commits this phase should
+        expect the file to contain both sets of changes.
+    - |-
+        The plan and spec say `md frontmatter`, but the commands are top-level
+        `md get`, `md set`, and `md rm`. The round-trip test drives those.
+        `md set` treats a dotted name as a literal key, so nested edits are
+        made by replacing the parent object; the test does exactly that.
 message_to_agent: |-
-    Phase 4 is done; its code was committed mid-phase by the concurrent
-    process (d15577cd6). For Phase 5:
-    - `just test --no-fail-fast` in darkmatter/ shows 43 failures: the Phase 1
-      baseline minus `benchmark_manifest_matches_recorded_identities` (Phase 3)
-      and the frontmatter metadata test (Phase 4 rewrote it as
-      `parsed_frontmatter_mapping_order_metadata_agrees_with_value_order`).
-      All 43 are on your review list.
-    - Likely cause for `schemas_convert_snapshots::*`: under serde_json
-      `preserve_order`, `Map::remove` is a SWAP remove (the last key jumps
-      into the removed slot). `schemas/simplified/convert.rs` (~288-571,
-      1521) and `schemas/resolve.rs` (`strip_schema_uri`, `required`) call
-      `.remove(...)` on JSON Schema objects. Construction order there is not
-      author order until those become `shift_remove`; check that before
-      accepting any snapshot.
-    - Compose state is now ordered end to end (`EffectiveState::data()` is a
-      `serde_json::Map`), and bare `{{ fm }}` renders document order:
-      receiving document's keys first, then external/inherited keys.
-    - Claudine CLI tests need `--features test-fixtures` (the claudine `test`
-      recipe passes it); without it, fixture-binary tests fail spuriously.
-    - `just test` does not run doctests; run `cargo test -p darkmatter --doc`
-      after an API change.
+    Phase 5 is done; `just test` in darkmatter is fully green (13768 passed).
+    For Phase 6 (docs and final gates):
+    - The 43 baseline failures were fixed by a parallel commit merged into
+      this branch (58e2a5790), not by this fix; Phase 5 reviewed them and
+      fixed the remaining swap-remove order in schema lowering (see the log).
+    - For `docs/cli/hash.md`: `--strict --save` over a baseline saved without
+      `--strict` (or vice versa) sees a changed hash and bumps
+      `last_updated`, because a stored hash does not record its mode. That is
+      the "normal save path" refresh for an affected strict baseline;
+      `--diff` never rewrites anything. The mixed-mode case was observed by
+      hand; the strict refresh and no-migration cases are tested in
+      `darkmatter-cli::l1 frontmatter_key_order::*`.
+    - The frontmatter commands are `md get|set|rm`, not `md frontmatter ...`;
+      write docs with the real spelling.
+    - `.claude/skills/darkmatter/schema.md` and several
+      `darkmatter/docs/topics/schemas/*.md` pages carry another session's
+      uncommitted edits; leave those hunks alone.
 source_files_during_phase_3: [darkmatter/lib/Cargo.toml, darkmatter/lib/src/markdown/hash/mod.rs, darkmatter/lib/src/markdown/hash/compute.rs, darkmatter/lib/src/markdown/toc/mod.rs, darkmatter/lib/src/markdown/toc/types.rs, darkmatter/lib/src/markdown/schemas/validate.rs, darkmatter/lib/src/markdown/compose/cache/hashing.rs, darkmatter/lib/src/markdown/compose/cache/operation.rs, darkmatter/lib/src/markdown/compose/context/options.rs, darkmatter/lib/src/markdown/compose/expression/binding.rs, darkmatter/dmls/src/overlay/mod.rs]
 docs_updated_during_phase_3: [darkmatter/docs/cli/hash.md]
 docs_created_during_phase_3: []
@@ -102,6 +139,10 @@ source_files_during_phase_4: [claudine/lib/src/composition/interpolation_conform
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: [.claude/skills/darkmatter/frontmatter.md]
+source_files_during_phase_5: [darkmatter/lib/src/markdown/schemas/simplified/convert.rs, darkmatter/lib/src/markdown/schemas/resolve.rs, darkmatter/lib/src/markdown/schemas/scope.rs, darkmatter/lib/tests/l1/schema_json_key_order.rs, darkmatter/lib/tests/l1/main.rs, darkmatter/lib/tests/l1/snapshots/l1__schemas_convert_snapshots__snapshot_property_union_hoists_matching_default.snap, darkmatter/cli/tests/l1/frontmatter_key_order.rs, darkmatter/cli/tests/l1/main.rs, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-claudine.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-lifecycle.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence-types.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/claudine-schemas-sequence.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-darkmatter-schema-body.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-fm.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/darkmatter-schemas-partials-style.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-inline.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-root-union.digest, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-baseline-schema-file.digest, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-inline-compose.digest, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-sequence.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/effective-trigger-with-document-schema.digest, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/embedded-darkmatter-base.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schema-yaml-spellings-root-union-conventional-schema-body.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schema-yaml-spellings-root-union-serialized-schema-body.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/schemas-feature-review.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/validate-root-union-fileref.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/validate-root-union-none-match.json, darkmatter/lib/tests/fixtures/recursive_schema_golden/golden/validate-root-union.json]
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: [.claude/skills/darkmatter/frontmatter.md]
 ---
 
 # Implementation Log for 2026-10-23-frontmatter-key-order (6 phases)
@@ -679,3 +720,115 @@ All three end-to-end tests were confirmed to **fail** with the old
   no commits. Uncommitted Phase 4 changes at the end: the `replacement.rs`
   doctest fix, the darkmatter skill edit, and the plan/log frontmatter and
   log entries.
+
+## Phase 5
+
+Failing-output review and CLI process tests. Run 2026-10-29 on macOS.
+
+### Starting state
+
+The 43 review-list failures left by Phase 4 were already passing on the
+current tree. A parallel commit merged into this branch after Phase 4,
+`58e2a5790 feat(darkmatter): preserve authored order and validate numeric
+ingress` (2026-10-22), updated them. Each group was reviewed against the code
+rather than accepted as given:
+
+| Test(s) | Resolution | Justification |
+|---|---|---|
+| `fn_list_formatting::as_json5_uses_the_formatter_object_idiom` | expected text updated by 58e2a5790 | `as_json5` now prints `{package, 'dev deps'}`, the order the `json!` literal writes; before, it was alphabetical only because maps were sorted |
+| `schema_validate_baseline::schema_validate_legacy_json_output_is_byte_identical` | code fix in 58e2a5790; expected fixtures untouched | `md schema validate --format json` sorts its report (`sort_all_objects` in `cli/src/commands/schema/validate.rs`), keeping the published alphabetical byte output. Both routes (the legacy fixture and the command) agree without editing expected text |
+| `schemas_convert_snapshots::*` (40), `suggest_constraint_phase3::conversion_snapshot_covers_valid_and_invalid_metadata` | snapshots updated by 58e2a5790; `$schema` placed first in `to_json_schema` | Each new snapshot lists keys in the order `convert.rs` inserts them (for example `type` then `format`; `type, items, uniqueItems, minItems, maxItems`). Serialization is deterministic (insertion-ordered `IndexMap`), so nothing was random. Verified by rerunning with every removal switched to `shift_remove`: no snapshot changed |
+| `benchmark_manifest_matches_recorded_identities`, frontmatter metadata test | resolved in Phases 3 and 4 | see those sections |
+
+### Code fix: swap removes in schema lowering
+
+The review found the order defect the Phase 4 handoff predicted, on paths the
+convert snapshots do not reach. Under `preserve_order`, `Map::remove` is a swap
+remove. Probes through the public API showed two misorders:
+
+- **Root-union arms** (`resolve_yaml_schema` on a `$schema` list):
+  `strip_schema_uri` removes the arm's leading `$schema`, so the arm's last
+  key (`required`) jumped to the front:
+  `{"required":["title"],"type":"object",...}`.
+- **Property-union arms** with a description and annotations: hoisting
+  `default` off the arm moved `x-darkmatter-example` ahead of `description`,
+  and the wrapper came out as `x-darkmatter-generated, default, anyOf`.
+
+Fix:
+
+- `schemas/simplified/convert.rs`: every `Map` removal is `shift_remove`.
+  `union_property_to_schema` puts the `null` arm into the arms vector before it
+  builds the wrapper, instead of removing and re-inserting `anyOf`. The
+  wrapper therefore leads with `anyOf` and then `default`/`description`/
+  `x-darkmatter-generated`, matching an optional single property.
+- `schemas/resolve.rs` (`strip_schema_uri`, the `$defs` hoists, `merge_layer`'s
+  `properties`/`required`, `merge_baseline`'s `$defs`, example rehoming) and
+  `schemas/scope.rs` (`fold_definitions`): `shift_remove`.
+- Not changed: `schemas/validate.rs` `arm_with_assertions_beside` builds an
+  internal validator schema that is never shown, and the remaining `.remove`
+  calls in `schemas/` are on `Vec`, `HashSet`, or cache maps.
+
+Output updates caused by the fix:
+
+- 1 conversion snapshot (`snapshot_property_union_hoists_matching_default`):
+  `default` moves after `anyOf`.
+- 20 `recursive_schema_golden` goldens (14 full JSON, 6 digests). To prove
+  these are order-only, the full lowered JSON of all 104 manifest entries was
+  dumped once under the old code and once under the new. 84 were
+  byte-identical; the 20 that differ compare equal as parsed JSON (objects
+  unordered, arrays ordered). None differed in content. The moved keys
+  were `default`/`description` (the union wrapper change) and
+  `required`/`additionalProperties` (the root-union swap). The goldens were
+  then re-blessed with `DARKMATTER_BLESS_RECURSIVE_GOLDEN=1`.
+
+### CLI process tests
+
+The plan says `md frontmatter`, but the commands are `md get`, `md set`, and
+`md rm`. `md set` treats a dotted name as a literal key, so a nested edit
+replaces the parent object.
+
+### Strict-baseline correction
+
+Strict hashes follow author key order at every depth, and a stored strict
+baseline is not migrated. After a nested-only reorder, `md hash --strict
+--diff` exits 2 ("Frontmatter has changed, body remains unchanged
+semantically") and leaves the file untouched. `md hash --strict --save`
+refreshes it, and a following `--strict --diff` exits 0. Observed by hand
+and not asserted: a stored hash does not record its mode, so `--strict --save`
+over a non-strict baseline also counts as a change and bumps `last_updated`.
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) | Rung / tier |
+|---|---|---|
+| Review-list outputs follow construction order | the 43 review-list tests (passing), plus the `shift_remove` rerun showing no snapshot depends on swap order | F1 / L1 |
+| Root-union arm keeps its lowered key order (regression; fails with swap remove) | `darkmatter::l1 schema_json_key_order::root_union_arms_keep_their_lowered_key_order` | F2 / L1, public `resolve_yaml_schema` |
+| Union wrapper and arm keep their built key order (regression; fails with swap remove) | `schema_json_key_order::property_union_arm_and_wrapper_keep_their_built_key_order` | F2 / L1, public `to_json_schema` |
+| Shipped schemas lower deterministically, order-only change | `recursive_schema_golden::*` (17 tests, 104 entries, real shipped schema files) | F2 / L1 |
+| `md get/set/rm` round trip, repeated: nested and top-level order kept, replaced key keeps its position, new key appends, nested object replace, `rm` closes the gap, file returns byte-identical to the original | `darkmatter-cli::l1 frontmatter_key_order::get_set_rm_round_trip_keeps_author_order_at_every_depth` (2 passes) | F3 / L1 process |
+| `md hash --save`/`--diff` after a nested-only reorder: no semantic change, file not rewritten, no `last_updated` bump | `frontmatter_key_order::hash_baseline_ignores_a_nested_only_reorder` | F3 / L1 process |
+| Strict hash follows nested order; strict baseline not migrated; refresh via save | `frontmatter_key_order::strict_hash_follows_nested_author_order_and_is_refreshed_only_by_save` | F3 / L1 process |
+
+Both new `schema_json_key_order` tests were run as probes against the old
+code first; each showed the misordered output.
+
+### Phase gates
+
+- `just lint` (darkmatter): clean.
+- `just test` (darkmatter): **13768 run, 13768 passed, 10 skipped**. No
+  failures remain from the Phase 1 baseline.
+- `just check-tier-coverage darkmatter`: nothing stranded.
+- Dependents (Claudine reads lowered schemas):
+  `cargo nextest run -p claudine -E 'test(/schema/)'` → 1091 passed;
+  `cargo nextest run -p claudine-cli --features test-fixtures -E 'test(/schema/)'`
+  → 266 passed.
+- No public API changed, so doctests were not rerun.
+- No cross-OS run: the changes are in-memory map ordering and process tests
+  over temp files, with no path, process, or `cfg` differences.
+
+### Environment notes
+
+- `darkmatter/lib/src/markdown/schemas/resolve.rs` and several other files
+  already carried another session's uncommitted edits when the phase
+  started (see `git status` at start). This phase added only the
+  `shift_remove` hunks to `resolve.rs` and touched none of the others.
