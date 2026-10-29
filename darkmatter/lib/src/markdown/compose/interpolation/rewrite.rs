@@ -15,6 +15,7 @@ use crate::markdown::compose::parse_utils::structural_view;
 use crate::markdown::compose::expression::lint::whole_value_span;
 use crate::markdown::compose::expression::{EvaluationLookup, ExpressionError};
 use crate::markdown::compose::ComposeWarning;
+use crate::markdown::compose::site_scope::SiteHook;
 use crate::markdown::compose::context::report::ExpressionOrigin;
 use crate::markdown::literal_token::{TOKEN_PREFIX, TokenError};
 use crate::markdown::types::{MarkdownError, SourceRef};
@@ -196,7 +197,7 @@ pub(crate) fn interpolate_text_in<L: EvaluationLookup>(
     policy: ExpressionFailurePolicy,
     warning_stage: &'static str,
 ) -> Result<InterpolationRewrite, LocatedInterpolationError> {
-    interpolate_text_guarded(input, data, evaluator, scan_mode, policy, warning_stage, None)
+    interpolate_text_guarded(input, data, evaluator, scan_mode, policy, warning_stage, None, None)
 }
 
 /// A check a rewrite makes before it evaluates each expression and once
@@ -227,8 +228,27 @@ pub(crate) fn show_new_warnings(
     check(new).map_err(|error| LocatedInterpolationError { error: Box::new(error), span: None })
 }
 
+/// Charges `bytes` inserted at `offset` to the expansions that own it.
+pub(crate) fn charge(
+    site: Option<&dyn SiteHook>,
+    offset: usize,
+    bytes: usize,
+    span: Option<std::ops::Range<usize>>,
+) -> Result<(), LocatedInterpolationError> {
+    let Some(site) = site else {
+        return Ok(());
+    };
+    site.charge(offset, bytes).map_err(|error| LocatedInterpolationError {
+        error: Box::new(crate::markdown::types::MarkdownError::from(Box::new(
+            crate::markdown::compose::collection_blocks::CollectionError::budget(error),
+        ))),
+        span,
+    })
+}
+
 /// [`interpolate_text_in`], checking `before_eval` before each expression is
 /// evaluated and after the last.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn interpolate_text_guarded<L: EvaluationLookup>(
     input: &str,
     data: Option<&DataRanges>,
@@ -237,6 +257,7 @@ pub(crate) fn interpolate_text_guarded<L: EvaluationLookup>(
     policy: ExpressionFailurePolicy,
     warning_stage: &'static str,
     mut before_eval: BeforeEval<'_>,
+    site: Option<&dyn SiteHook>,
 ) -> Result<InterpolationRewrite, LocatedInterpolationError> {
     let strict = policy == ExpressionFailurePolicy::Strict;
     // Fast path (F14): a `{{ … }}` expression and a `{{{ … }}}` literal both
@@ -291,9 +312,13 @@ pub(crate) fn interpolate_text_guarded<L: EvaluationLookup>(
     let mut edits = Vec::new();
 
     for (start, end, item) in found {
+        if let Some(site) = site {
+            site.enter(start);
+        }
         let loc = match item {
             Found::Literal(lit) => {
                 let replacement = format!("{}{}{}", "{{", lit.content, "}}");
+                charge(site, start, replacement.len(), None)?;
                 edits.push(TextEdit::data(start..end, replacement.len()));
                 output.replace_range(start..end, &replacement);
                 continue;
@@ -331,6 +356,7 @@ pub(crate) fn interpolate_text_guarded<L: EvaluationLookup>(
                         } else {
                             replacement
                         };
+                        charge(site, loc.start, replacement.len(), Some(loc.start..loc.end))?;
                         edits.push(TextEdit::data(loc.start..loc.end, replacement.len()));
                         output.replace_range(loc.start..loc.end, &replacement);
                         count += 1;
@@ -355,7 +381,7 @@ pub(crate) fn interpolate_text_guarded<L: EvaluationLookup>(
                 return Err(LocatedInterpolationError {
                     error: Box::new(interpolation_error(
                         &loc.expression,
-                        ExpressionError::Parse(e.to_string()),
+                        ExpressionError::from(e),
                     )),
                     span: Some(loc.start..loc.end),
                 });
@@ -449,7 +475,7 @@ pub(crate) fn interpolate_value_guarded<L: EvaluationLookup>(
             return Err(failure);
         }
         let expr = parse(&loc.expression).map_err(|e| {
-            located(interpolation_error(&loc.expression, ExpressionError::Parse(e.to_string())))
+            located(interpolation_error(&loc.expression, ExpressionError::from(e)))
         })?;
         // The whole-value path bypasses `interpolate_text`, so it must still run
         // the context-typo check on its single parsed expression — otherwise
@@ -462,7 +488,7 @@ pub(crate) fn interpolate_value_guarded<L: EvaluationLookup>(
             .map_err(|cause| located(interpolation_error(&loc.expression, cause)))?;
         return Ok((value, 1, warnings));
     }
-    let result = interpolate_text_guarded(input, None, evaluator, ScanMode::Plain, policy, warning_stage, before_eval)?;
+    let result = interpolate_text_guarded(input, None, evaluator, ScanMode::Plain, policy, warning_stage, before_eval, None)?;
     Ok((Value::String(result.output), result.replacements, result.warnings))
 }
 

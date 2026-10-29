@@ -31,9 +31,9 @@ fn parse(args: &[&str]) -> Cli {
 
 /// The features `md` hands the renderer: the top-level list plus `render`'s.
 fn dispatched_features(cli: &Cli) -> Vec<Feature> {
-    match &cli.command {
-        Some(Command::Render { features, .. }) => [cli.features.as_slice(), features].concat(),
-        _ => cli.features.clone(),
+    match cli.command_or_render() {
+        Command::Render(options) => options.features,
+        _ => cli.render.features.clone(),
     }
 }
 

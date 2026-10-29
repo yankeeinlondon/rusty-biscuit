@@ -365,6 +365,129 @@ pub struct FunctionType {
     pub fallible: bool,
     /// Inline `example(call => result)` constraints, in authored order.
     pub examples: Vec<CallExample>,
+    /// `narrows(...)`: what a `true` (or `false`) result proves about one
+    /// argument. `None` is meaningful: the function declares no fact.
+    pub narrows: Option<NarrowsClause>,
+}
+
+/// What a predicate's boolean result proves about its original argument.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NarrowsKind {
+    /// `true-implies`: a `true` result proves the argument is the target.
+    TrueImplies,
+    /// `true-iff`: `true` proves the target and `false` proves its absence.
+    TrueIff,
+    /// `false-implies`: a `false` result proves the argument is the target.
+    FalseImplies,
+}
+
+impl NarrowsKind {
+    /// The authored keyword.
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Self::TrueImplies => "true-implies",
+            Self::TrueIff => "true-iff",
+            Self::FalseImplies => "false-implies",
+        }
+    }
+
+    /// The kind spelled by `keyword`, if it is one of the three.
+    pub fn from_keyword(keyword: &str) -> Option<Self> {
+        match keyword {
+            "true-implies" => Some(Self::TrueImplies),
+            "true-iff" => Some(Self::TrueIff),
+            "false-implies" => Some(Self::FalseImplies),
+            _ => None,
+        }
+    }
+}
+
+/// A `narrows(name: T; kind)` or presence-only `narrows(name; kind)` clause.
+///
+/// Equality ignores the spans: they record where the clause was authored,
+/// not what it says.
+#[derive(Debug, Clone)]
+pub struct NarrowsClause {
+    /// The narrowed parameter's name.
+    pub parameter: String,
+    /// Byte span of [`NarrowsClause::parameter`] in the type-expression string.
+    pub parameter_span: SourceSpan,
+    /// The target type; `None` for a presence-only clause (non-null).
+    pub target: Option<PropertyAtom>,
+    /// Byte span of the target, or of the parameter when there is none.
+    pub target_span: SourceSpan,
+    /// The implication.
+    pub kind: NarrowsKind,
+    /// Byte span of the implication keyword.
+    pub kind_span: SourceSpan,
+    /// Byte span of the whole clause, keyword through closing `)`.
+    pub clause_span: SourceSpan,
+}
+
+impl PartialEq for NarrowsClause {
+    fn eq(&self, other: &Self) -> bool {
+        self.parameter == other.parameter && self.target == other.target && self.kind == other.kind
+    }
+}
+
+/// Whether `returns` is exactly the single primitive `boolean`: the only
+/// return type a `narrows` clause may accompany. `boolean | null`, `unknown`,
+/// `boolish`, unions, and arrays do not qualify.
+pub(crate) fn returns_exact_boolean(returns: &PropertyDef) -> bool {
+    matches!(
+        returns,
+        PropertyDef::Single(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::Boolean),
+            is_array: false,
+            ..
+        })
+    )
+}
+
+/// Why `target` cannot be a narrowing target, if it cannot: a named type
+/// (reference) anywhere in it, at the top or nested in an object member,
+/// dictionary value, tuple position, union arm, or function signature, is not
+/// self-contained. A fact is applied against the document's definitions, not
+/// the declaring catalog's, so a name inside the target could never be
+/// honored as written.
+pub(crate) fn narrows_target_problem(target: &PropertyAtom) -> Option<String> {
+    let name = named_reference_in(target)?;
+    Some(format!(
+        "a narrowing target cannot use the named type `{name}`, at its top or nested inside it; \
+         write a self-contained type"
+    ))
+}
+
+/// The first named or definition-table reference in `atom`, depth first.
+fn named_reference_in(atom: &PropertyAtom) -> Option<String> {
+    let in_def = |def: &PropertyDef| match def {
+        PropertyDef::Single(atom) => named_reference_in(atom),
+        PropertyDef::Union(arms) => arms.iter().find_map(named_reference_in),
+    };
+    match &atom.ty {
+        TypeExpr::Primitive(_) => None,
+        TypeExpr::Imported { name, reference } if reference == LOCAL_REFERENCE => Some(name.clone()),
+        TypeExpr::Imported { name, reference } => Some(format!("{name}@{reference}")),
+        TypeExpr::Ref(key) => Some(key.name.clone()),
+        TypeExpr::InlineObject(shape) => shape
+            .properties
+            .values()
+            .chain(shape.pattern_keys.iter().map(|pattern| &pattern.def))
+            .find_map(in_def),
+        TypeExpr::Union(arms) => arms.iter().find_map(named_reference_in),
+        TypeExpr::Tuple(tuple) => tuple
+            .elements
+            .iter()
+            .find_map(|element| in_def(&element.def))
+            .or_else(|| tuple.spread.as_deref().and_then(named_reference_in)),
+        TypeExpr::Function(function) => function
+            .parameters
+            .as_slice()
+            .iter()
+            .find_map(|parameter| in_def(&parameter.def))
+            .or_else(|| in_def(&function.returns))
+            .or_else(|| function.narrows.as_ref()?.target.as_ref().and_then(named_reference_in)),
+    }
 }
 
 /// The `parameters(...)` of a [`FunctionType`].

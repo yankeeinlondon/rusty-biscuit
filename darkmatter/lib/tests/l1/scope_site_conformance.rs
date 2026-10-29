@@ -22,11 +22,14 @@ mod cases;
 use std::path::{Path, PathBuf};
 
 use cases::{BlockCase, GuardCase, frontmatter, rows, wrap};
+use darkmatter::markdown::compose::collection_blocks::CollectionKind;
 use darkmatter::markdown::compose::conditions::evaluate_condition_against;
 use darkmatter::markdown::compose::directive_targets::{DirectiveTargetAnalysis, analyze_directive_targets};
 use darkmatter::markdown::compose::preflight::ComposePreflightReport;
 use darkmatter::markdown::compose::shell_expansion::template::{HoleTiming, ModeRequirement, ShellPreApprovals};
-use darkmatter::markdown::compose::shell_expansion::types::{ShellCommandOrigin, ShellExpansionError};
+use darkmatter::markdown::compose::shell_expansion::types::{
+    ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellCommandOrigin, ShellExpansionError,
+};
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
 use darkmatter::markdown::schemas::DarkmatterSchemas;
 use darkmatter::markdown::{Markdown, MarkdownError};
@@ -67,6 +70,15 @@ scope_sites! {
     SequenceTaskShell,
     /// A sequence task's `with:` values under its `when:`.
     SequenceTaskWith,
+    /// A `::shell` command in the body of a `::map`, itself under `::block`
+    /// guards.
+    MapBodyShell,
+    /// A `::shell` command in the body of a `::filter`.
+    FilterBodyShell,
+    /// A `::file` target expression in the body of a `::map`.
+    MapBodyTarget,
+    /// A `::file` target expression in the body of a `::filter`.
+    FilterBodyTarget,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,7 +120,13 @@ fn planned(case: GuardCase) -> Option<State> {
 fn state(site: ScopeSite, case: GuardCase) -> State {
     use GuardCase as C;
     match site {
-        ScopeSite::BodyShell | ScopeSite::BodyShellBlock | ScopeSite::TransclusionTarget => match case {
+        ScopeSite::BodyShell
+        | ScopeSite::BodyShellBlock
+        | ScopeSite::TransclusionTarget
+        | ScopeSite::MapBodyShell
+        | ScopeSite::FilterBodyShell
+        | ScopeSite::MapBodyTarget
+        | ScopeSite::FilterBodyTarget => match case {
             C::TrueGuard
             | C::NegatedGuard
             | C::NestedGuards
@@ -265,6 +283,74 @@ run_here! {
         other_value_not_deferred: OtherValueNotDeferred,
         runtime_selection: RuntimeSelection,
     }
+    map_body_shell: MapBodyShell {
+        true_guard: TrueGuard,
+        negated_guard: NegatedGuard,
+        nested_guards: NestedGuards,
+        conjunction_operand: ConjunctionOperand,
+        disjunction_join: DisjunctionJoin,
+        fm_alias: FmAlias,
+        predicate_alias: PredicateAlias,
+        not_null: NotNull,
+        equality: Equality,
+        optional_declaration: OptionalDeclaration,
+        unknown_value: UnknownValue,
+        contradictory_guard: ContradictoryGuard,
+        sibling_or_parent_path: SiblingOrParentPath,
+        other_value_not_deferred: OtherValueNotDeferred,
+        runtime_selection: RuntimeSelection,
+    }
+    filter_body_shell: FilterBodyShell {
+        true_guard: TrueGuard,
+        negated_guard: NegatedGuard,
+        nested_guards: NestedGuards,
+        conjunction_operand: ConjunctionOperand,
+        disjunction_join: DisjunctionJoin,
+        fm_alias: FmAlias,
+        predicate_alias: PredicateAlias,
+        not_null: NotNull,
+        equality: Equality,
+        optional_declaration: OptionalDeclaration,
+        unknown_value: UnknownValue,
+        contradictory_guard: ContradictoryGuard,
+        sibling_or_parent_path: SiblingOrParentPath,
+        other_value_not_deferred: OtherValueNotDeferred,
+        runtime_selection: RuntimeSelection,
+    }
+    map_body_target: MapBodyTarget {
+        true_guard: TrueGuard,
+        negated_guard: NegatedGuard,
+        nested_guards: NestedGuards,
+        conjunction_operand: ConjunctionOperand,
+        disjunction_join: DisjunctionJoin,
+        fm_alias: FmAlias,
+        predicate_alias: PredicateAlias,
+        not_null: NotNull,
+        equality: Equality,
+        optional_declaration: OptionalDeclaration,
+        unknown_value: UnknownValue,
+        contradictory_guard: ContradictoryGuard,
+        sibling_or_parent_path: SiblingOrParentPath,
+        other_value_not_deferred: OtherValueNotDeferred,
+        runtime_selection: RuntimeSelection,
+    }
+    filter_body_target: FilterBodyTarget {
+        true_guard: TrueGuard,
+        negated_guard: NegatedGuard,
+        nested_guards: NestedGuards,
+        conjunction_operand: ConjunctionOperand,
+        disjunction_join: DisjunctionJoin,
+        fm_alias: FmAlias,
+        predicate_alias: PredicateAlias,
+        not_null: NotNull,
+        equality: Equality,
+        optional_declaration: OptionalDeclaration,
+        unknown_value: UnknownValue,
+        contradictory_guard: ContradictoryGuard,
+        sibling_or_parent_path: SiblingOrParentPath,
+        other_value_not_deferred: OtherValueNotDeferred,
+        runtime_selection: RuntimeSelection,
+    }
     frontmatter_shell: FrontmatterShell {
         optional_declaration: OptionalDeclaration,
         unknown_value: UnknownValue,
@@ -278,9 +364,17 @@ run_here! {
 /// only at Darkmatter sites, Claudine cells only at host sites.
 #[test]
 fn every_site_and_case_has_one_explicit_state() {
-    assert_eq!(ScopeSite::ALL.len(), 9, "the matrix names all nine sites");
-    let darkmatter_sites =
-        [ScopeSite::BodyShell, ScopeSite::BodyShellBlock, ScopeSite::TransclusionTarget, ScopeSite::FrontmatterShell];
+    assert_eq!(ScopeSite::ALL.len(), 13, "the matrix names all thirteen sites");
+    let darkmatter_sites = [
+        ScopeSite::BodyShell,
+        ScopeSite::BodyShellBlock,
+        ScopeSite::TransclusionTarget,
+        ScopeSite::FrontmatterShell,
+        ScopeSite::MapBodyShell,
+        ScopeSite::FilterBodyShell,
+        ScopeSite::MapBodyTarget,
+        ScopeSite::FilterBodyTarget,
+    ];
     for &site in ScopeSite::ALL {
         let mut live = 0;
         for &case in GuardCase::ALL {
@@ -353,6 +447,9 @@ fn run(site: ScopeSite, case: GuardCase) {
         (ScopeSite::FrontmatterShell, case) => frontmatter_value_stays_unguarded(case),
         (site, GuardCase::RuntimeSelection) => runtime_selection(site),
         (ScopeSite::TransclusionTarget, case) => rows(case).for_each(transclusion_row),
+        (site @ (ScopeSite::MapBodyTarget | ScopeSite::FilterBodyTarget), case) => {
+            rows(case).for_each(|row| collection_target_row(site, row))
+        }
         (site, case) => rows(case).for_each(|row| shell_row(site, row)),
     }
 }
@@ -435,6 +532,29 @@ fn origin_line(origin: &ShellCommandOrigin) -> usize {
     }
 }
 
+/// The directive kind of a collection site.
+fn collection_kind(site: ScopeSite) -> Option<CollectionKind> {
+    match site {
+        ScopeSite::MapBodyShell | ScopeSite::MapBodyTarget => Some(CollectionKind::Map),
+        ScopeSite::FilterBodyShell | ScopeSite::FilterBodyTarget => Some(CollectionKind::Filter),
+        _ => None,
+    }
+}
+
+/// `body` repeated once by a collection region over the declared `data`.
+fn collection_region(kind: CollectionKind, body: &str) -> String {
+    format!("::{} data\n{body}::{}\n", kind.opener(), kind.closer())
+}
+
+/// The cell's frontmatter: the shared declarations, plus the one-item `data`
+/// array a collection site iterates.
+fn site_frontmatter(site: ScopeSite) -> String {
+    match collection_kind(site) {
+        Some(_) => frontmatter("  data: any[](required)\ndata: [1]\n"),
+        None => frontmatter(""),
+    }
+}
+
 /// One guard row at a body `::shell` or `::shell-block` site: a proven read
 /// is one guarded, template-required hole labelled by an enclosing block; an
 /// unproven read is `MissingValue` for that read at the command's line.
@@ -443,9 +563,11 @@ fn shell_row(site: ScopeSite, row: &BlockCase) {
     let inner = match site {
         ScopeSite::BodyShell => format!("::shell {command}\n"),
         ScopeSite::BodyShellBlock => format!("::shell-block\n{command}\n::end-block\n"),
+        ScopeSite::MapBodyShell => collection_region(CollectionKind::Map, &format!("::shell {command}\n")),
+        ScopeSite::FilterBodyShell => collection_region(CollectionKind::Filter, &format!("::shell {command}\n")),
         other => unreachable!("{other:?} is not a body shell site"),
     };
-    let text = format!("{}# Doc\n{}", frontmatter(""), wrap(row, &inner));
+    let text = format!("{}# Doc\n{}", site_frontmatter(site), wrap(row, &inner));
     let command_line = text
         .lines()
         .position(|line| line.contains(&command))
@@ -527,9 +649,27 @@ fn transclusion_row(row: &BlockCase) {
     assert_eq!(analysis.is_narrowed(), row.proven, "{row:?}: narrowed paths {:?}", analysis.narrowed_paths);
 }
 
+/// [`transclusion_row`] for a target inside the body of a collection region
+/// that sits under the row's guards: the region adds no scope that hides the
+/// guarded read, so the target is narrowed exactly when the row is proven.
+fn collection_target_row(site: ScopeSite, row: &BlockCase) {
+    let kind = collection_kind(site).expect("a collection site");
+    let target = format!("{{{{{}}}}}", row.read);
+    let region = collection_region(kind, &format!("::file {target}\n"));
+    let text = format!("{}{}", site_frontmatter(site), wrap(row, &region));
+    let [analysis] = analyze(&text).try_into().unwrap_or_else(|all: Vec<_>| panic!("{site:?} {row:?}: one target: {all:?}"));
+    let body = Markdown::from(text.as_str()).content().to_string();
+    assert_eq!(&body[analysis.expression_span.clone()], target, "{site:?} {row:?}");
+    assert_eq!(analysis.is_narrowed(), row.proven, "{site:?} {row:?}: narrowed paths {:?}", analysis.narrowed_paths);
+}
+
 /// A false block removes its site before it runs; a selected one runs with
 /// the live value, approved by nothing but the shape discovery reported.
 fn runtime_selection(site: ScopeSite) {
+    if let Some(kind) = collection_kind(site) {
+        collection_runtime_selection(site, kind);
+        return;
+    }
     if site == ScopeSite::TransclusionTarget {
         let doc = Doc::new("---\npart: part.md\n---\n::block when=\"part\"\n::file {{part}}\n::end-block\n::block when=\"!part\"\n::file {{part}}\n::end-block\n::block when=\"x\"\n::file {{x}}\n::end-block\nend\n");
         std::fs::write(doc.dir.path().join("part.md"), "PART-BODY\n").unwrap();
@@ -550,6 +690,59 @@ fn runtime_selection(site: ScopeSite) {
     let selected = Doc::new(&format!("---\nflag: --version\n---\n::block when=\"flag\"\n{}::end-block\n", wrap_command("git {{ flag }}")));
     let composed = selected.compose_approving_discovered_shapes().unwrap();
     assert!(composed.contains("git version"), "{site:?}: {composed}");
+}
+
+/// Records each shell approval request and denies it, so no command runs.
+struct DenyingRecorder(std::sync::Mutex<Vec<String>>);
+
+impl ShellApprovalHandler for DenyingRecorder {
+    fn approve(&self, request: ShellApprovalRequest) -> Result<ShellApprovalDecision, ShellExpansionError> {
+        self.0.lock().unwrap().push(request.raw_command);
+        Ok(ShellApprovalDecision::Deny)
+    }
+}
+
+/// The collection counterpart of [`runtime_selection`]: a false block skips
+/// the whole region, so nothing asks for approval; a selected one reaches the
+/// body command (shell) or the target (file) once per item.
+fn collection_runtime_selection(site: ScopeSite, kind: CollectionKind) {
+    let shell = matches!(site, ScopeSite::MapBodyShell | ScopeSite::FilterBodyShell);
+    let body = |read: &str| {
+        if shell {
+            format!("::shell git {{{{ {read} }}}}\n")
+        } else {
+            format!("::file {{{{ {read} }}}}\n")
+        }
+    };
+    let run = |text: &str| {
+        let recorder = std::sync::Arc::new(DenyingRecorder(std::sync::Mutex::default()));
+        let doc = Doc::new(text);
+        std::fs::write(doc.dir.path().join("part.md"), "PART-BODY\n").unwrap();
+        let options = doc.options().with_shell_approval_handler(recorder.clone());
+        let composed = doc.markdown().compose_with(&crate::request_support::request(options)).map(|(m, _)| m.content().to_string());
+        let asked = recorder.0.lock().unwrap().clone();
+        (composed, asked)
+    };
+    let skipped = format!(
+        "{}::block when=\"x\"\n{}::end-block\nend\n",
+        site_frontmatter(site),
+        collection_region(kind, &body("x"))
+    );
+    let (composed, asked) = run(&skipped);
+    assert!(composed.unwrap().contains("end") && asked.is_empty(), "{site:?}: a false block runs nothing: {asked:?}");
+
+    let selected = format!(
+        "{}::block when=\"flag\"\n{}::end-block\n",
+        site_frontmatter(site).replace("---\n$schema", "---\nflag: part.md\n$schema"),
+        collection_region(kind, &body("flag"))
+    );
+    let (composed, asked) = run(&selected);
+    if shell {
+        assert!(composed.is_err(), "{site:?}: the denied command fails the document");
+        assert_eq!(asked.len(), 1, "{site:?}: {asked:?}");
+    } else {
+        assert!(composed.unwrap().contains("PART-BODY"), "{site:?}");
+    }
 }
 
 /// A frontmatter `$( … )` value reading a missing value fails with
@@ -643,14 +836,15 @@ fn planned_projections_stay_unclaimed_at_body_shell() {
     }
 }
 
-/// `file_exists` inspects its argument without converting it, so only text
-/// can make it true: its true side narrows a mixed declaration to `string`.
+/// `file_exists` inspects its argument without converting it, and only a
+/// file reference can name an existing file: its true side narrows a mixed
+/// declaration to `file`.
 #[test]
-fn file_exists_true_side_narrows_a_mixed_declaration_to_string() {
+fn file_exists_true_side_narrows_a_mixed_declaration_to_file() {
     let text = format!(
         "{}::block when=\"file_exists(target)\"\n::shell git --version {{{{ target }}}}\n::end-block\n",
         frontmatter("")
     );
     let report = Doc::new(&text).preflight().unwrap();
-    assert_eq!(report.candidates[0].shape().unwrap().canonical_text(), "git --version {{ string }}");
+    assert_eq!(report.candidates[0].shape().unwrap().canonical_text(), "git --version {{ file }}");
 }

@@ -17,6 +17,7 @@ use std::ffi::OsStr;
 
 use clap::builder::TypedValueParser;
 use clap_complete::engine::CompletionCandidate;
+use darkmatter::markdown::compose::collection_blocks::diagnostics::{UNTYPED_FILTER_SOURCE_CODE, UNTYPED_MAP_SOURCE_CODE};
 use darkmatter::markdown::compose::policy::{
     BlockingPolicy, COMPOSE_DIAGNOSTIC_CODES, CTX_OVERRIDE_CODE, INVALID_FRONTMATTER_ASSIGNMENT_CODE,
     MISSING_HYPERLINK_CODE, MISSING_IMAGE_CODE, MISSING_TRANSCLUSION_CODE,
@@ -177,6 +178,20 @@ pub const POLICY_REGISTRY: &[PolicyEntry] = &[
         summary: "replace a timed-out shell command's output with an empty string",
     },
     PolicyEntry {
+        id: "untyped-map-variables",
+        kind: PolicyKind::Recovery,
+        commands: &[Compose],
+        codes: &[UNTYPED_MAP_SOURCE_CODE],
+        summary: "accept a `::map` source with no iterable declaration, as a warning",
+    },
+    PolicyEntry {
+        id: "untyped-filter-variables",
+        kind: PolicyKind::Recovery,
+        commands: &[Compose],
+        codes: &[UNTYPED_FILTER_SOURCE_CODE],
+        summary: "accept a `::filter` source with no iterable declaration, as a warning",
+    },
+    PolicyEntry {
         id: "host",
         kind: PolicyKind::Host,
         commands: &[Compose],
@@ -196,6 +211,13 @@ pub const POLICY_REGISTRY: &[PolicyEntry] = &[
         commands: &[Compose, Clean, SchemaValidate],
         codes: &[],
         summary: "schema-trigger discovery and bare-name schema-root lookup",
+    },
+    PolicyEntry {
+        id: "collection-blocks",
+        kind: PolicyKind::Feature,
+        commands: &[Compose],
+        codes: &[],
+        summary: "the `::map` and `::filter` directive stage",
     },
     PolicyEntry {
         id: "style",
@@ -630,5 +652,89 @@ mod tests {
         use darkmatter::markdown::compose::expression::Severity;
         assert!(!blocking.blocks(Some(SHELL_TIMEOUT_CODE), Severity::Warning));
         assert!(blocking.blocks(Some(CTX_OVERRIDE_CODE), Severity::Warning));
+    }
+
+    #[test]
+    fn collection_recoveries_resolve_by_id_and_by_code() {
+        for (id, code) in [
+            ("untyped-map-variables", UNTYPED_MAP_SOURCE_CODE),
+            ("untyped-filter-variables", UNTYPED_FILTER_SOURCE_CODE),
+        ] {
+            for verb in [PolicyVerb::Allow, PolicyVerb::Deny] {
+                assert!(matches!(parse(Compose, verb, id), PolicySelector::Entry { entry, .. } if entry.id == id));
+            }
+            let by_code = parse(Compose, PolicyVerb::Deny, code);
+            assert!(matches!(by_code, PolicySelector::Entry { entry, .. } if entry.id == id), "{code}");
+            assert!(parse_selector(Compose, PolicyVerb::Disable, id).is_err());
+            assert!(parse_selector(Render, PolicyVerb::Deny, id).is_err());
+        }
+    }
+
+    #[test]
+    fn collection_blocks_is_a_compose_feature_only() {
+        assert!(matches!(
+            parse(Compose, PolicyVerb::Disable, "collection-blocks"),
+            PolicySelector::Entry { entry, .. } if entry.id == "collection-blocks"
+        ));
+        for verb in [PolicyVerb::Allow, PolicyVerb::Deny] {
+            let error = parse_selector(Compose, verb, "collection-blocks").unwrap_err();
+            assert!(error.contains("--disable collection-blocks"), "{error}");
+        }
+        for command in [Render, Clean, SchemaValidate] {
+            assert!(parse_selector(command, PolicyVerb::Disable, "collection-blocks").is_err());
+        }
+    }
+
+    #[test]
+    fn allow_all_recovers_collection_sources_unless_denied_by_name_or_code() {
+        let all = [PolicySelector::All];
+        let policy = ResolvedPolicy::resolve(&all, &[], &[]).unwrap();
+        assert!(policy.recovers("untyped-map-variables") && policy.recovers("untyped-filter-variables"));
+
+        let deny_name = [parse(Compose, PolicyVerb::Deny, "untyped-map-variables")];
+        let policy = ResolvedPolicy::resolve(&all, &deny_name, &[]).unwrap();
+        assert!(!policy.recovers("untyped-map-variables"), "a specific deny beats `all`");
+        assert!(policy.recovers("untyped-filter-variables"));
+
+        let deny_code = [parse(Compose, PolicyVerb::Deny, UNTYPED_FILTER_SOURCE_CODE)];
+        let policy = ResolvedPolicy::resolve(&all, &deny_code, &[]).unwrap();
+        assert!(!policy.recovers("untyped-filter-variables"));
+        assert!(policy.blocking_policy().blocks(Some(UNTYPED_FILTER_SOURCE_CODE), darkmatter::markdown::compose::expression::Severity::Warning));
+    }
+
+    #[test]
+    fn a_collection_recovery_and_its_code_conflict() {
+        let allow = [parse(Compose, PolicyVerb::Allow, "untyped-map-variables")];
+        let deny = [parse(Compose, PolicyVerb::Deny, UNTYPED_MAP_SOURCE_CODE)];
+        let error = ResolvedPolicy::resolve(&allow, &deny, &[]).unwrap_err();
+        assert!(error.contains("untyped-map-variables"), "{error}");
+    }
+
+    #[test]
+    fn deny_all_exempts_only_the_collection_recovery_named_by_allow() {
+        use darkmatter::markdown::compose::expression::Severity;
+        let allow = [parse(Compose, PolicyVerb::Allow, "untyped-map-variables")];
+        let policy = ResolvedPolicy::resolve(&allow, &[PolicySelector::All], &[]).unwrap();
+        let blocking = policy.blocking_policy();
+        assert!(!blocking.blocks(Some(UNTYPED_MAP_SOURCE_CODE), Severity::Warning));
+        assert!(blocking.blocks(Some(UNTYPED_FILTER_SOURCE_CODE), Severity::Warning));
+    }
+
+    #[test]
+    fn collection_entries_are_listed_in_help_and_completions() {
+        let allow_help = long_help(Compose, PolicyVerb::Allow);
+        assert!(allow_help.contains("untyped-map-variables:") && allow_help.contains("untyped-filter-variables:"));
+        assert!(!allow_help.contains("collection-blocks"));
+        assert!(long_help(Compose, PolicyVerb::Disable).contains("collection-blocks:"));
+        let names = |verb, current: &str| -> Vec<String> {
+            complete(Compose, verb, OsStr::new(current))
+                .iter()
+                .map(|candidate| candidate.get_value().to_string_lossy().into_owned())
+                .collect()
+        };
+        assert!(names(PolicyVerb::Allow, "untyped-").len() == 2);
+        assert_eq!(names(PolicyVerb::Disable, "collection"), ["collection-blocks"]);
+        assert!(names(PolicyVerb::Deny, "dm.collection.untyped").len() == 2);
+        assert!(long_help(Render, PolicyVerb::Deny).find("untyped").is_none());
     }
 }

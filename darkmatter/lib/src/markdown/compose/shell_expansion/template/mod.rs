@@ -121,6 +121,11 @@ pub enum HoleTiming {
     /// ([`resolve_late_values`]), so a branch that does not run cannot fail
     /// on it.
     Guarded { guard: GuardOrigin, roots: Vec<String> },
+    /// The hole reads a local of an enclosing `::map` / `::filter` body. Its
+    /// value belongs to one repeated copy, so it is read from that copy's
+    /// frame when the command is reached: never at approval, and never by an
+    /// unconditional barrier. Only a template can be approved for it.
+    Local,
 }
 
 impl HoleTiming {

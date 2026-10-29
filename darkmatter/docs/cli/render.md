@@ -8,6 +8,9 @@ The `render` command renders markdown documents for terminal viewing or export f
 - `md README.md`
 
 Use `render` when you want explicit command intent in scripts and docs.
+Both forms use the same argument definitions and command dispatch, including
+`--indent`, output selection, features, and diagnostic policy. For example,
+`md README.md --indent 2` is an alias for `md render README.md --indent 2`.
 
 ## Reporting
 

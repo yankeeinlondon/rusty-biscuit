@@ -5,6 +5,52 @@ use predicates::prelude::*;
 use std::io::Write;
 
 #[test]
+fn default_render_is_an_alias_with_the_same_options() {
+    let fixture = CliProcessFixture::named("render-alias-options");
+    let path = fixture.write_file("cwd/doc.md", "# Alias\n\n- parent\n    - child\n");
+    for format in ["auto", "markdown", "markdown-plus", "html", "json"] {
+        let mut outputs = Vec::new();
+        for prefix in [&[][..], &["render"][..]] {
+            let output = fixture
+                .command()
+                .args(prefix)
+                .arg(&path)
+                .args(["--output", format, "--indent", "2", "--feature", "no-mermaid-rendering"])
+                .assert()
+                .success()
+                .get_output()
+                .clone();
+            assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+            assert!(!output.stdout.is_empty());
+            outputs.push(output.stdout);
+        }
+        assert_eq!(outputs[0], outputs[1], "format: {format}");
+        if matches!(format, "auto" | "markdown") {
+            assert!(String::from_utf8_lossy(&outputs[0]).contains("- parent\n  - child"));
+        }
+    }
+}
+
+#[test]
+fn render_features_are_combined_once_during_normalization() {
+    use clap::Parser;
+    use darkmatter_cli::args::{Cli, Command, Feature};
+
+    for args in [
+        vec!["md", "doc.md", "--feature", "embed-mermaid-font,no-mermaid-rendering"],
+        vec!["md", "--feature", "embed-mermaid-font", "render", "doc.md", "--feature", "no-mermaid-rendering"],
+    ] {
+        let cli = Cli::try_parse_from(args).unwrap();
+        for _ in 0..2 {
+            let Command::Render(options) = cli.command_or_render() else {
+                panic!("expected render");
+            };
+            assert_eq!(options.features, [Feature::EmbedMermaidFont, Feature::NoMermaidRendering]);
+        }
+    }
+}
+
+#[test]
 fn test_stdin_rendering_auto_non_tty_outputs_markdown() {
     let fixture = CliProcessFixture::named("test_stdin_rendering_auto_non_tty_outputs_markdown");
     fixture

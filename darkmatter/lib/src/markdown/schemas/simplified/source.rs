@@ -180,7 +180,9 @@ pub struct SchemaConstraintParticipant {
 /// caller's `source_offset` applied once. `authored_span` is the rejected
 /// scalar token; `value_span` is the whole rejected value, for fallback.
 /// Either is `None` when it cannot be projected trustworthily; `error` is
-/// returned regardless.
+/// returned regardless. `related` holds the error's
+/// [`GrammarRelated`](crate::markdown::schemas::GrammarRelated) locations
+/// projected the same way; one that cannot be projected is left out.
 #[derive(Debug)]
 pub struct LocatedDefinitionFailure {
     /// Structural path of the rejected node.
@@ -193,6 +195,15 @@ pub struct LocatedDefinitionFailure {
     pub authored_span: Option<Range<usize>>,
     /// The rejected value's byte range, when locatable.
     pub value_span: Option<Range<usize>>,
+    /// The error's secondary locations, as labelled byte ranges.
+    pub related: Vec<LocatedRelated>,
+}
+
+/// One projected secondary location of a [`LocatedDefinitionFailure`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocatedRelated {
+    pub message: String,
+    pub span: Range<usize>,
 }
 
 impl std::fmt::Display for LocatedDefinitionFailure {
@@ -544,6 +555,7 @@ fn unlocated_failure(error: SchemaError) -> LocatedDefinitionFailure {
         error: Box::new(error),
         authored_span: None,
         value_span: None,
+        related: Vec::new(),
     }
 }
 
@@ -582,28 +594,67 @@ fn project_definition_failure(
     let value_span = rejected
         .filter(|(located, value)| verify_located(located, value).is_ok())
         .map(|(located, _)| offset_span(&located.span, source_offset));
-    let authored_span = match (&*failure.error, rejected) {
-        (
-            SchemaError::Grammar { span, .. },
-            Some((
-                LocatedValue {
-                    kind: LocatedKind::Scalar(scalar),
-                    ..
-                },
-                YamlValue::String(text),
-            )),
-        ) if !span.is_empty() && scalar.decoded() == text => scalar
-            .project(span.clone())
-            .filter(|projected| !projected.is_empty())
-            .map(|projected| offset_span(&projected, source_offset)),
-        _ => None,
+    let (authored_span, related) = match &*failure.error {
+        SchemaError::Grammar { span, related, .. } => {
+            let related = related
+                .iter()
+                .filter_map(|entry| {
+                    // `arm` names a sibling option of the rejected one.
+                    let node = match entry.arm {
+                        None => rejected,
+                        Some(arm) => root.and_then(|(located, value)| {
+                            follow_path(located, value, &sibling_arm(&failure.path, arm)?)
+                        }),
+                    };
+                    let span = project_token(node, &entry.span, source_offset)?;
+                    Some(LocatedRelated { message: entry.message.clone(), span })
+                })
+                .collect();
+            (project_token(rejected, span, source_offset), related)
+        }
+        _ => (None, Vec::new()),
     };
     LocatedDefinitionFailure {
         path: prefix.join(&failure.path),
         error: failure.error,
         authored_span,
         value_span,
+        related,
     }
+}
+
+/// `span`, a range in the decoded text of the string scalar `node`, in
+/// authored bytes; `None` unless `node` is that scalar and the range
+/// projects to a non-empty one.
+fn project_token(
+    node: Option<(&LocatedValue, &YamlValue)>,
+    span: &Range<usize>,
+    source_offset: usize,
+) -> Option<Range<usize>> {
+    match node? {
+        (
+            LocatedValue {
+                kind: LocatedKind::Scalar(scalar),
+                ..
+            },
+            YamlValue::String(text),
+        ) if !span.is_empty() && scalar.decoded() == text => scalar
+            .project(span.clone())
+            .filter(|projected| !projected.is_empty())
+            .map(|projected| offset_span(&projected, source_offset)),
+        _ => None,
+    }
+}
+
+/// `path` with its final union-arm index replaced by `arm`; `None` when
+/// `path` does not end in a union arm.
+fn sibling_arm(path: &SchemaSourcePath, arm: usize) -> Option<SchemaSourcePath> {
+    let (last, parent) = path.0.split_last()?;
+    matches!(last, SchemaSourcePathSegment::UnionArm(_)).then(|| {
+        let mut segments = parent.to_vec();
+        segments.push(SchemaSourcePathSegment::UnionArm(arm));
+        SchemaSourcePath(segments)
+    })
 }
 
 /// The located node and parsed value `path` addresses, following both trees
@@ -2715,6 +2766,7 @@ fn projection_error() -> SchemaError {
         property: "<source>".into(),
         message: "could not project SimplifiedSchema expression spans through YAML source".into(),
         span: 0..0,
+        related: Vec::new(),
     }
 }
 

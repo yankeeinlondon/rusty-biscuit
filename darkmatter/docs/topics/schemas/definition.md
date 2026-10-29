@@ -2249,6 +2249,7 @@ Constraints are separated by `;`, and a trailing `;` before `)` is allowed.
 | `parameters(name: T, ...)` | The arguments, in order. `parameters(void)` for none. |
 | `returns(T)` | The value returned on success; any type, including a union. |
 | `category(Name)` | The documentation category (see [Categories](#categories)). |
+| `narrows(name: T; kind)` / `narrows(name; kind)` | What a guard call proves about one argument (see [Narrowing facts](#narrowing-facts)). Optional; at most one. |
 | `fallible` | The function can fail even when its arguments are valid. A function whose only failure is a wrong argument is not fallible: such a call never reaches it (see [Type Coercion](#function-calls-bind-then-compute)). |
 | `example(call => result)` | An inline example; repeatable (see below). |
 | `example(./file.yaml)` | An example file, as on any type. |
@@ -2300,6 +2301,89 @@ returns: |-
     b
     c
 ```
+
+### Narrowing facts
+
+A predicate used as a guard (`when="file_exists(log)"`, `a ? b : c`) can tell
+the analyzer what its result proves about an argument. The `narrows` clause
+declares that fact in the signature, so the catalog is the one place it is
+written:
+
+```yaml
+types:
+    file_exists: |-
+        function(
+            parameters(path: unknown | null);
+            returns(boolean);
+            narrows(path: file; true-implies);
+            category(Filesystem);
+        ) -> Returns true when the file exists.
+    is_empty: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            narrows(x; false-implies);
+        ) -> Returns true for null, empty text, and empty collections.
+```
+
+| Form | True result | False result |
+|---|---|---|
+| `narrows(x: T; true-implies)` | `x` is suitable for `T` | nothing |
+| `narrows(x: T; true-iff)` | `x` has type `T` | `T` is removed from `x` |
+| `narrows(x: T; false-implies)` | nothing | `x` is suitable for `T` |
+
+Omitting the type gives a presence-only fact: `true-implies` excludes `null`
+when the result is true, `false-implies` when it is false, and `true-iff` on
+the true side while keeping only `null` on the false side.
+
+A call proves its fact only when the design-time call check accepts it; a
+call with the wrong argument count, or with an argument no value of its type
+can bind, proves neither side (see
+[Darkmatter Expressions](../darkmatter-expressions.md#where-a-predicates-facts-come-from)).
+
+Rules:
+
+- **Ordering.** The clause may appear anywhere among the clauses, separated
+  by `;` like the others. It names one parameter exactly as declared; the
+  `: T` operand is optional, and omitting it means "present" (not `null`),
+  never "nonempty" or "truthy".
+- **Boolean returns.** The function must return `boolean`; the clause on any
+  other return type is an error.
+- **Targets.** `T` is a single self-contained type: a union and a named
+  reference are rejected, and so is a named type anywhere inside `T` (in an
+  object member, a dictionary value, a tuple position, a union arm, or a
+  grouped array such as `(Name | string)[]`), because a fact is applied
+  without the definitions of the schema that declared it. `{a: string}` and
+  `tuple([string])` are valid one-way targets; `{a: Name}` and
+  `tuple([Name])` are not. `true-iff` is limited to `null` and the bare
+  families (`string`, `number`, `boolean`, `object`, `unknown[]`), because
+  only those have a false side that can be described. A refinement or a
+  constrained type (`file`, `string(min(3))`, `enum(a, b)`) is a one-way
+  target only. An array of a grouped union, `(string | number)[]`, is one
+  array type and a valid one-way target. The parameter cannot be a rest
+  parameter or one the function does not declare.
+- **Overloads.** Every overload must declare the same fact, or none may:
+  the same parameter at the same position, the same implication, and the
+  same target (compared by meaning, not spelling). A disagreement is an
+  error naming both overloads, with both locations: different facts are
+  reported at the later overload's clause, and a missing fact at the
+  declaring clause, each with the other overload as a related location (see
+  [DMLS schema support](./dmls-schema-support.md#definitions-with-two-locations)).
+  A second `narrows` clause on one function is reported at its keyword, with
+  the first clause as the related location.
+- **One set of rules.** Every reader applies these rules the same way:
+  parsing a schema, the `type-definition` and `schema` meta-types, editor
+  diagnostics, host catalog loading, and function registration. A
+  declaration a schema accepts is one a host can register.
+- **Original argument.** The fact is about the value as the caller wrote it,
+  not a coerced copy: `is_number("4")` is `false` even though `"4"` would
+  convert. Negative narrowing is limited to what can be described: removing
+  `string` from a `string | number` leaves `number`, but a false
+  `true-implies` never removes anything.
+- **Description-only.** The clause validates no data, changes no binding,
+  runs no handler, and is read without calling the function. A document
+  schema that reaches a `function(...)` with a `narrows` clause fails to load
+  like any other function.
 
 **Overloads.** A function with several signatures is a union of `function(...)`
 types, written as a YAML list or with `|`. Two overloads whose parameters bind
@@ -3314,7 +3398,7 @@ written back only when the converted document satisfies that arm.
 
 An [expression function](../darkmatter-expressions.md#functions) declares
 its parameters with the same types (see
-[Function Signatures](#function-signatures)), and every call runs in two
+[Function Signatures](#function-signatures)). Ordinary eager calls run in two
 steps:
 
 1. **Bind.** The engine checks every argument against its parameter, keeping
@@ -3323,6 +3407,13 @@ steps:
 2. **Compute.** The function receives values of exactly its declared types
    and does its work. Only a function marked `fallible` can fail here, with
    a domain error such as a failed network request.
+
+`and` and `or` bind operands only as short-circuit evaluation reaches them.
+`map` and `filter` bind their iterable argument once; the evaluator then binds
+an immutable local frame and evaluates the inline callback for each visited
+item. A callback is syntax in an argument position, not a value converted by
+the coercion engine. These calls still use the shared signatures and passive
+call checks. See [Inline collection callbacks](../darkmatter-expressions.md#inline-collection-callbacks).
 
 ```md
 {{ min("4", 5) }}      ⇒ 4         "4" binds as the number 4

@@ -128,6 +128,29 @@ mod tests {
         out
     }
 
+    #[test]
+    fn callbacks_reject_protected_patterns_and_nested_calls_without_execution() {
+        let found = diagnostics("---\ntitle: ok\n---\n{{ map([], local => local) }}\n{{ map([], x => min(true, 5)) }}\n");
+        let codes: Vec<_> = found.iter().filter_map(|diagnostic| match &diagnostic.code {
+            Some(NumberOrString::String(code)) => Some(code.as_str()),
+            _ => None,
+        }).collect();
+        assert!(codes.contains(&"dm.expression.invalid_callback"), "{found:#?}");
+        assert!(codes.contains(&"dm.expression.incompatible_call"), "{found:#?}");
+    }
+
+    #[test]
+    fn callback_analysis_never_runs_provider_handlers() {
+        use darkmatter::markdown::compose::expression::call_binding::FunctionRegistration;
+        use darkmatter::markdown::compose::expression::function_test_hooks as hooks;
+        let registration = FunctionRegistration::builder("callback_effect", "function(parameters(void); returns(boolean))").build().unwrap();
+        let _effect = hooks::register(registration, std::sync::Arc::new(|_| panic!("passive callback executed a provider")));
+        hooks::reset_handler_entries();
+        let found = diagnostics("{{ map([1], x => callback_effect()) }}\n{{ filter(null, x -> callback_effect()) }}\n");
+        assert!(found.iter().all(|diagnostic| diagnostic.severity != Some(DiagnosticSeverity::ERROR)), "{found:#?}");
+        assert_eq!(hooks::handler_entries("callback_effect"), 0);
+    }
+
     /// Criterion 53, editor side: diagnostics never enter a handler, even for
     /// a test-registered effect in branches a run would skip, while the
     /// proven-bad call beside it is still reported.

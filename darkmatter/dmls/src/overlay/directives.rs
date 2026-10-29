@@ -88,6 +88,26 @@ pub const DIRECTIVE_CATALOG: &[DirectiveInfo] = &[
         kind: DirectiveKind::EndDisclosure,
         summary: "Close a `::disclosure` block.",
     },
+    DirectiveInfo {
+        keyword: "::map",
+        kind: DirectiveKind::Map,
+        summary: "Repeat the body once per source entry, bound to the mapped value; `::end-map` closes it.",
+    },
+    DirectiveInfo {
+        keyword: "::end-map",
+        kind: DirectiveKind::EndMap,
+        summary: "Close a `::map` block.",
+    },
+    DirectiveInfo {
+        keyword: "::filter",
+        kind: DirectiveKind::Filter,
+        summary: "Repeat the body once per retained source entry, bound to the original item; `::end-filter` closes it.",
+    },
+    DirectiveInfo {
+        keyword: "::end-filter",
+        kind: DirectiveKind::EndFilter,
+        summary: "Close a `::filter` block.",
+    },
 ];
 
 /// The catalog entry for a directive kind.
@@ -139,6 +159,18 @@ pub fn name_partial(line_prefix: &str) -> Option<&str> {
     (!rest.contains(char::is_whitespace)).then_some(rest)
 }
 
+/// The named options of `::map` / `::filter` openers, in the order the
+/// specification lists them.
+pub const COLLECTION_OPTIONS: &[&str] = &["when", "filter", "sort", "sort-order", "while", "until"];
+
+/// Whether `kind` opens or closes a `::map` / `::filter` region.
+pub fn is_collection(kind: DirectiveKind) -> bool {
+    matches!(
+        kind,
+        DirectiveKind::Map | DirectiveKind::EndMap | DirectiveKind::Filter | DirectiveKind::EndFilter
+    )
+}
+
 /// Recognized option keys for a directive family — the completion set and the
 /// allow-list for malformed-option diagnostics. Families not listed accept any
 /// option (empty slice → no validation).
@@ -148,6 +180,7 @@ pub fn option_keys(kind: DirectiveKind) -> &'static [&'static str] {
             &["when", "quotation", "disclosure", "replace", "exclude", "set"]
         }
         DirectiveKind::Block | DirectiveKind::ShellBlock => &["when"],
+        DirectiveKind::Map | DirectiveKind::Filter => COLLECTION_OPTIONS,
         _ => &[],
     }
 }
@@ -156,6 +189,7 @@ pub fn option_keys(kind: DirectiveKind) -> &'static [&'static str] {
 pub fn option_values(key: &str) -> Option<&'static [&'static str]> {
     match key {
         "quotation" | "disclosure" | "replace" => Some(&["true", "false"]),
+        "sort-order" => Some(&["asc", "desc"]),
         _ => None,
     }
 }
@@ -163,6 +197,11 @@ pub fn option_values(key: &str) -> Option<&'static [&'static str]> {
 /// Whether `key` is accepted by `kind` (dotted `set.<name>` and `--flag` forms
 /// pass permissively; empty allow-lists accept everything).
 pub fn option_recognized(kind: DirectiveKind, key: &str) -> bool {
+    // The collection grammar validates its own header (unknown, duplicate,
+    // and bare options) and reports through `dm.collection.malformed`.
+    if matches!(kind, DirectiveKind::Map | DirectiveKind::Filter) {
+        return true;
+    }
     let allowed = option_keys(kind);
     if allowed.is_empty() {
         return true;
@@ -224,6 +263,8 @@ mod tests {
         assert!(!option_recognized(DirectiveKind::File, "bogus"));
         // Families with no allow-list accept anything.
         assert!(option_recognized(DirectiveKind::Shell, "anything"));
+        // The collection grammar reports its own unknown options.
+        assert!(option_recognized(DirectiveKind::Map, "bogus"));
     }
 
     #[test]
@@ -231,7 +272,43 @@ mod tests {
         assert_eq!(keyword_token("::file ./a.md"), "::file");
         assert!(is_known_keyword("::file"));
         assert!(!is_known_keyword("::frobnicate"));
+        for keyword in ["::map", "::end-map", "::filter", "::end-filter"] {
+            assert!(is_known_keyword(keyword), "{keyword}");
+        }
         assert!(looks_like_directive("::frobnicate x"));
         assert!(!looks_like_directive(":: not"));
+    }
+
+    /// Every directive kind has exactly one catalog row spelled as the
+    /// library spells it; the exhaustive `match` fails to compile when the
+    /// library adds a kind this inventory does not list.
+    #[test]
+    fn catalog_covers_every_library_directive_kind() {
+        const fn listed(kind: DirectiveKind) -> bool {
+            match kind {
+                DirectiveKind::File
+                | DirectiveKind::Code
+                | DirectiveKind::Url
+                | DirectiveKind::FileLinks
+                | DirectiveKind::TocLinking
+                | DirectiveKind::Shell
+                | DirectiveKind::Block
+                | DirectiveKind::ShellBlock
+                | DirectiveKind::EndBlock
+                | DirectiveKind::Disclosure
+                | DirectiveKind::Details
+                | DirectiveKind::EndDisclosure
+                | DirectiveKind::Map
+                | DirectiveKind::EndMap
+                | DirectiveKind::Filter
+                | DirectiveKind::EndFilter => true,
+            }
+        }
+        assert!(listed(DirectiveKind::Map));
+        assert_eq!(DIRECTIVE_CATALOG.len(), 16);
+        for info in DIRECTIVE_CATALOG {
+            assert_eq!(info.keyword, info.kind.keyword());
+            assert_eq!(DIRECTIVE_CATALOG.iter().filter(|other| other.kind == info.kind).count(), 1);
+        }
     }
 }

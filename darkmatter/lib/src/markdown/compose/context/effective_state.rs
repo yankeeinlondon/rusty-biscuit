@@ -247,6 +247,11 @@ impl EffectiveState {
     ///
     /// Returns `None` if the key doesn't exist or the path is invalid.
     pub fn get(&self, path: &str) -> Option<Value> {
+        // `local` is bound only by a lexical scope, which wraps this lookup;
+        // seen here it has no bindings and never reads a data key.
+        if super::super::expression::is_local_path(path) {
+            return None;
+        }
         // The reserved lazy root — intercepted before every other surface, so no
         // frontmatter key, external-state key, or authored `ctx` entry can
         // shadow `current`.

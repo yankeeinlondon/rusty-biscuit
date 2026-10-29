@@ -232,7 +232,7 @@ fn a_null_default_must_be_null() {
     for (definition, argument) in [("null(default(1))", "1"), ("null(required; default(x))", "x")] {
         let error = resolve_inline(dir.path(), &format!("gone: \"{definition}\"\n"))
             .expect_err("a non-null default fails to load");
-        let SchemaError::Grammar { property, message, span } = &error else {
+        let SchemaError::Grammar { property, message, span, .. } = &error else {
             panic!("{definition}: a located grammar error expected, got {error:?}");
         };
         assert_eq!(property, "gone");

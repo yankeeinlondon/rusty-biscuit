@@ -1,6 +1,6 @@
 //! `md compose --output report-json` end to end (criteria 19, 22, 28, 29, 39):
 //! every parsed invocation writes exactly one JSON object to stdout, with
-//! `outcome`, every diagnostic with all six fields, and the document only on
+//! `outcome`, every diagnostic with all eight fields, and the document only on
 //! success; failures exit non-zero with `document: null` and nothing on
 //! stderr that repeats the report. Other commands reject the format before
 //! any work.
@@ -28,7 +28,11 @@ fn report_of(output: &std::process::Output) -> Value {
     assert_eq!(keys, ["outcome", "diagnostics", "document"], "{report:#}");
     for diagnostic in report["diagnostics"].as_array().expect("an array") {
         let keys: Vec<&str> = diagnostic.as_object().expect("an object").keys().map(String::as_str).collect();
-        assert_eq!(keys, ["code", "severity", "message", "source", "expected_type", "actual_type"], "{diagnostic:#}");
+        assert_eq!(
+            keys,
+            ["code", "severity", "message", "source", "expected_type", "actual_type", "span", "iteration_path"],
+            "{diagnostic:#}"
+        );
         if let Some(source) = diagnostic["source"].as_object() {
             let keys: Vec<&str> = source.keys().map(String::as_str).collect();
             assert_eq!(keys, ["file", "line", "column"], "{diagnostic:#}");
@@ -103,6 +107,8 @@ fn a_category_3_warning_is_reported_once_with_every_field() {
             "source": { "file": given(&document), "line": 6, "column": 13 },
             "expected_type": "number",
             "actual_type": "string | null",
+            "span": null,
+            "iteration_path": [],
         })
     );
     assert_eq!(codes(&report).len(), 1, "{report:#}");

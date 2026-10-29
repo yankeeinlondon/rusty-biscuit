@@ -186,6 +186,17 @@ When a cached command is one that is known to vary (`uuidgen`, `date`, `openssl`
 
 The opt-out is spelled to suit each directive: `--no-cache` here, `::no-cache` in a frontmatter expression, and `no_cache=true` on a shell block.
 
+## Inside `::map` and `::filter`
+
+A `::shell` line inside a [`::map`](./map.md) or [`::filter`](./filter.md) body
+may read the iteration's local bindings, such as `::shell echo {{ i.name }}`.
+Because the value is unknown until the item is reached, approval is by
+`template` shape rather than `exact` bytes, and a local that holds a number is
+still checked as a number. Approval discovers the line even when the region is
+empty or its gate is false. Null and container values are rejected when the
+command is built. Identical commands may reuse the request-wide result cache;
+use `--no-cache` to launch each occurrence.
+
 ## Approval
 
 A command runs only if it is approved: whitelisted, or approved interactively when the composition starts. A few commands can never be approved. Both checks happen before anything runs, and both cover every `::shell` line in the document and in every file it transcludes, including lines inside a `::block` whose condition is false.

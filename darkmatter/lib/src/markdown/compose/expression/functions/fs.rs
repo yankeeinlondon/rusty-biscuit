@@ -149,8 +149,10 @@ pub fn absolute_fn(call: &BoundCall<'_>, ctx: &ResolutionContext) -> Result<Valu
 /// names a directory) is `false`, and so is `null`: an optional reference that
 /// was never supplied names no file. The argument is inspected, never
 /// converted: a number, boolean, array, or object is `false`, so `42` does not
-/// name a file called `42`. Only text can be `true`, which is what lets a
-/// `file_exists(x)` guard prove `x` a present string.
+/// name a file called `42`. Only text can be `true`. The signature's
+/// `narrows(...; true-implies)` clause lets a `file_exists(x)` guard prove
+/// `x` suitable for a `file`. The proof attaches to the checked binding only;
+/// an independent read of the same expression is not refined.
 ///
 /// Text that is not a well-formed reference ([`is_well_formed_reference`]:
 /// `""`, `https://`) is `false` before any filesystem or network access; it

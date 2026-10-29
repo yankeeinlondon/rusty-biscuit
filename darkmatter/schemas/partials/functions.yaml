@@ -75,6 +75,7 @@ types:
         function(
             parameters(x: unknown | null);
             returns(boolean);
+            narrows(x: unknown[]; true-iff);
             category(Type Predicates);
             example(is_array([1, 2, 3]) => true);
         ) -> Returns true when the value is an array.
@@ -82,6 +83,7 @@ types:
         function(
             parameters(x: unknown | null);
             returns(boolean);
+            narrows(x; false-implies);
             category(Type Predicates);
             example(is_empty("") => true);
         ) -> Returns true when the value is null, empty text, an empty array, or an empty object.
@@ -103,6 +105,7 @@ types:
         function(
             parameters(x: unknown | null);
             returns(boolean);
+            narrows(x: null; true-iff);
             category(Type Predicates);
             example(is_null(null) => true);
         ) -> Returns true when the value is null.
@@ -110,6 +113,7 @@ types:
         function(
             parameters(x: unknown | null);
             returns(boolean);
+            narrows(x: number; true-iff);
             category(Type Predicates);
             example(is_number(42) => true);
         ) -> Returns true when the value is a number; numeric text such as `"4"` is not.
@@ -117,6 +121,7 @@ types:
         function(
             parameters(x: unknown | null);
             returns(boolean);
+            narrows(x: object; true-iff);
             category(Type Predicates);
             example(is_object({a: 1}) => true);
         ) -> Returns true when the value is an object.
@@ -131,6 +136,7 @@ types:
         function(
             parameters(x: unknown | null);
             returns(boolean);
+            narrows(x: string; true-iff);
             category(Type Predicates);
             example(is_string("hello") => true);
         ) -> Returns true when the value is text.
@@ -181,6 +187,36 @@ types:
             example(contains([4], "4") => true);
             example(contains({a: "x"}, "a") => false);
         ) -> Returns true when the needle occurs in the haystack. Text is searched for a case-sensitive substring; array elements and object values (never keys) are compared by their rendered text, so `4` matches `"4"`. A null needle renders as empty text, and a null haystack is false.
+    map: |-
+        function(
+            parameters(iterable: unknown[] | object | null, callback: function(parameters(item: unknown | null); returns(unknown | null)));
+            returns((unknown | null)[]);
+            category(Collection);
+            example(map([1, 2, 3], n => n * 2) => [2, 4, 6]);
+            example(map([1, "two", null], item -> item) => [1, "two", null]);
+            example(map({z: 2, a: 1}, {key, value} => {key, value}) => [{key: "z", value: 2}, {key: "a", value: 1}]);
+            example(map([1, null], item => null) => [null, null]);
+            example(map(null, item => item) => []);
+            example(map([], item -> item) => []);
+            example(map([[1, 2], [3]], items => map(items, n -> n * 2)) => [[2, 4], [6]]);
+            example(map(["=>", "->"], item => item) => ["=>", "->"]);
+            example(map(1, item => item) => error);
+        ) -> Maps each collection item to its callback result, preserving order and null results.
+    filter: |-
+        function(
+            parameters(iterable: unknown[] | object | null, callback: function(parameters(item: unknown | null); returns(unknown | null)));
+            returns((unknown | null)[]);
+            category(Collection);
+            example(filter([1, 2, 3], n => n > 1) => [2, 3]);
+            example(filter([1, 2, 3], n -> n > 1) => [2, 3]);
+            example(filter({z: 2, a: 1}, {key, value} -> value > 1) => [{key: "z", value: 2}]);
+            example(filter([null, false, 0, "", 2], item => item) => [2]);
+            example(filter([null], item -> true) => [null]);
+            example(filter(null, item => true) => []);
+            example(filter([], item -> true) => []);
+            example(filter([[1], []], items => length(filter(items, n -> n > 0))) => [[1]]);
+            example(filter(false, item => true) => error);
+        ) -> Retains original items whose callback result is truthy, preserving order.
     first: |-
         function(
             parameters(x: any[] | null);
@@ -625,6 +661,7 @@ types:
         function(
             parameters(value: unknown | null);
             returns(boolean);
+            narrows(value: file; true-implies);
             category(Filesystem);
             fallible;
             example(file_exists("fixture.md") => true);
@@ -712,6 +749,7 @@ types:
         function(
             parameters(value: unknown | null);
             returns(boolean);
+            narrows(value: file; true-implies);
             category(Filesystem);
             example(is_file_type("./docs/spec.md") => true);
             example(is_file_type("hello world") => true);

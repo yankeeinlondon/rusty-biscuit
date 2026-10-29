@@ -23,7 +23,6 @@ use darkmatter::markdown::compose::directive_targets::{
     TargetNullability, analyze_directive_targets,
 };
 use darkmatter::markdown::compose::expression::{DeclaredTypes, ExpressionFinder, SpannedExpr, TypeScope};
-use darkmatter::markdown::compose::page_blocks::BodyGuards;
 use darkmatter::markdown::compose::{
     FRONTMATTER_SHELL_SUFFIXES, FrontmatterShellValue, describe_suffix,
     parse_frontmatter_shell_suffixes, parse_frontmatter_shell_value_spanned,
@@ -38,13 +37,14 @@ use lsp_types::{
 };
 
 use super::DocumentContext;
+use super::collections as collections_provider;
 use super::frontmatter;
 use super::location::line_range;
 use crate::diagnostics::call_check;
 use crate::diagnostics::codes::{code, source};
 use crate::context::{ReferenceTarget, resolution_failure_data};
 use crate::overlay::shell::PolicyVerdict;
-use crate::overlay::{directives, doc_links, expressions, shell};
+use crate::overlay::{collections, directives, doc_links, expressions, shell};
 use crate::workspace::file_path_to_uri;
 
 // ── Completion ──────────────────────────────────────────────────────────────
@@ -58,6 +58,9 @@ pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
         return directive_name_completions(ctx, offset, partial);
     }
     if let Some(items) = shell_suffix_completions(ctx, offset) {
+        return items;
+    }
+    if let Some(items) = collections_provider::completion(ctx, offset, prefix) {
         return items;
     }
     if let Some((token_start, partial)) = expressions::completion_partial(ctx.text, offset) {
@@ -217,27 +220,44 @@ fn interpolation_completions(
 ) -> Vec<CompletionItem> {
     let frontmatter_keys = frontmatter::expression_property_keys(ctx);
     let host = expressions::host_global_candidates(partial, &host_catalogs(ctx));
-    lower_candidates(expressions::completion_candidates(partial, &frontmatter_keys).into_iter().chain(host))
+    // Callback locals extend the enclosing directive scope only at this cursor.
+    let candidates = with_site_scope(ctx, Some(token_start), |site| {
+        let prefix = &ctx.text[..offset];
+        let start = prefix.rfind("{{").map_or(token_start, |start| start + 2);
+        let scope = expressions::cursor_scope(&ctx.text[start..offset], offset - start, site);
+        expressions::scoped_completion_candidates(partial, &frontmatter_keys, host, &scope)
+    });
+    let prioritize = candidates.iter().any(|candidate| candidate.kind == expressions::ExprCompletionKind::LocalBinding);
+    let mut items: Vec<_> = lower_candidates(candidates)
         .into_iter()
         .filter_map(|candidate| text_edit_item(ctx, token_start, offset, candidate))
-        .collect()
+        .collect();
+    if prioritize { retain_completion_order(&mut items); }
+    items
+}
+
+/// Preserve lexical proximity when a client otherwise sorts by label.
+pub(super) fn retain_completion_order(items: &mut [CompletionItem]) {
+    for (index, item) in items.iter_mut().enumerate() {
+        item.sort_text = Some(format!("{index:08}"));
+    }
 }
 
 /// One completion candidate before LSP lowering. Pure data so the D3/D4 field
 /// mapping is unit-testable without a [`DocumentContext`].
-struct CompletionCandidate {
+pub(super) struct CompletionCandidate {
     /// The completion label — the untyped `signature` for functions.
-    label: String,
+    pub(super) label: String,
     /// The eagerly inserted text — the bare name for functions (no snippet,
     /// no synthesized parentheses), the fully qualified `ctx.<name>` for
     /// context variables.
-    new_text: String,
-    kind: CompletionItemKind,
+    pub(super) new_text: String,
+    pub(super) kind: CompletionItemKind,
     /// D3/D4: the rendered `display_type` (`ctx.*`) or `typed_signature()`
     /// (functions).
-    detail: Option<String>,
+    pub(super) detail: Option<String>,
     /// D3/D4: the catalog description, lowered to eager Markdown.
-    documentation: Option<String>,
+    pub(super) documentation: Option<String>,
 }
 
 /// Candidates matching `partial` (prefix-based, case-sensitive): top-level
@@ -384,7 +404,7 @@ fn lifecycle_host_diagnostics(
     }
 }
 
-fn lower_candidates(candidates: impl IntoIterator<Item = expressions::ExprCompletion>) -> Vec<CompletionCandidate> {
+pub(super) fn lower_candidates(candidates: impl IntoIterator<Item = expressions::ExprCompletion>) -> Vec<CompletionCandidate> {
     candidates
         .into_iter()
         .map(|candidate| CompletionCandidate {
@@ -395,6 +415,7 @@ fn lower_candidates(candidates: impl IntoIterator<Item = expressions::ExprComple
                 expressions::ExprCompletionKind::ContextVariable => CompletionItemKind::VARIABLE,
                 expressions::ExprCompletionKind::ReservedRoot => CompletionItemKind::MODULE,
                 expressions::ExprCompletionKind::Function => CompletionItemKind::FUNCTION,
+                expressions::ExprCompletionKind::LocalBinding => CompletionItemKind::VARIABLE,
             },
             detail: candidate.detail,
             documentation: candidate.documentation,
@@ -407,6 +428,11 @@ fn lower_candidates(candidates: impl IntoIterator<Item = expressions::ExprComple
 /// Hover for a directive, interpolation, frontmatter `$()` value, or
 /// interpolation literal.
 pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
+    // A collection opener's source and callbacks are typed by the library's
+    // region scopes; its keyword falls through to the catalog hover.
+    if let Some(hover) = collections_provider::hover(ctx, offset) {
+        return Some(hover);
+    }
     if let Some(hover) = directive_hover(ctx, offset) {
         return Some(hover);
     }
@@ -483,7 +509,8 @@ fn interpolation_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
 /// Runs `analyze` with the type scope of a site in this document: the
 /// declared layer of every layer of its effective schema
 /// (`DeclaredTypes::for_schema`) and static frontmatter, narrowed, for a body `offset`, by every `::block when`
-/// enclosing it ([`BodyGuards`]). These are the inputs composition and
+/// and `::map` / `::filter` region enclosing it ([`collections::scopes`], the
+/// library's `BodyScopes`). These are the inputs composition and
 /// `analyze_directive_targets` build the same site's scope from. A
 /// frontmatter site (`None`) is unguarded: a lifecycle or task `when` is not
 /// applied to the actions it selects (see `docs/hover.md`).
@@ -501,7 +528,7 @@ pub(crate) fn with_site_scope<R>(
         .with_static_frontmatter(static_frontmatter);
     let unguarded = TypeScope::unguarded(&declared);
     let site = match offset {
-        Some(offset) => BodyGuards::scan(ctx.text).scope_at(unguarded, offset),
+        Some(offset) => collections::scopes(ctx.text).scope_at(unguarded, offset),
         None => unguarded,
     };
     analyze(&site)
@@ -582,7 +609,7 @@ fn interpolation_hover_markdown(
 /// provider's renderer, but without its `**`key`**` heading: the interpolation
 /// hover already shows the identifier in its `**Expression**` header, so the
 /// heading-less details avoid repeating the property name.
-fn schema_property_hover(ctx: &DocumentContext, name: &str) -> Option<String> {
+pub(super) fn schema_property_hover(ctx: &DocumentContext, name: &str) -> Option<String> {
     let shape = frontmatter::known_shape(ctx);
     let definitions = frontmatter::definitions(ctx);
     let def = frontmatter::def_at_path(shape, &[crate::overlay::FmPathSegment::Key(name)], definitions)?;
@@ -745,7 +772,8 @@ pub fn references(ctx: &DocumentContext, offset: usize, _include_declaration: bo
 
 // ── Folding ─────────────────────────────────────────────────────────────────
 
-/// Folds for `::block` / `::shell-block` regions and `::disclosure` blocks.
+/// Folds for `::block` / `::shell-block`, `::map` / `::filter`, and
+/// `::disclosure` regions.
 pub fn folding_ranges(ctx: &DocumentContext) -> Vec<FoldingRange> {
     if !ctx.profile.supports_folding {
         return Vec::new();
@@ -761,6 +789,7 @@ pub fn folding_ranges(ctx: &DocumentContext) -> Vec<FoldingRange> {
             push_span_fold(ctx, &mut folds, disclosure.block_span);
         }
     }
+    collections_provider::folds(ctx, &mut folds);
     folds
 }
 
@@ -1033,7 +1062,7 @@ fn expression_diagnostics(
     let view = known_roots.as_ref().map(|known_roots| known_roots.view(None));
     let declared = call_check::declared_types(ctx);
     let unguarded = TypeScope::unguarded(&declared);
-    let guards = BodyGuards::scan(ctx.text);
+    let guards = collections::scopes(ctx.text);
     let strict = ctx.config.expressions.strict;
     let calls = |expr: &SpannedExpr, at: usize, project: &dyn Fn(SourceSpan) -> SourceSpan| {
         let site = guards.scope_at(unguarded.clone(), at);
@@ -1046,6 +1075,11 @@ fn expression_diagnostics(
             .collect::<Vec<_>>()
     };
     for directive in directives::directives(ctx.text) {
+        // A collection opener's gate is an expression site of the shared
+        // region analysis, checked with its callbacks below.
+        if directives::is_collection(directive.kind) {
+            continue;
+        }
         for option in &directive.options {
             let Some(value) = option.value.as_ref().filter(|_| option.key.value == "when") else {
                 continue;
@@ -1069,6 +1103,7 @@ fn expression_diagnostics(
             }));
         }
     }
+    collections_provider::diagnostics(ctx, view.as_ref(), &declared, strict, out);
     for interpolation in expressions::interpolations(ctx.text, body_base) {
         match expressions::parse(&interpolation.text) {
             Err(error) => {
@@ -1080,7 +1115,7 @@ fn expression_diagnostics(
                     out.push(diagnostic(
                         range,
                         DiagnosticSeverity::WARNING,
-                        code::EXPRESSION_MALFORMED,
+                        error.diagnostic_code().unwrap_or(code::EXPRESSION_MALFORMED),
                         source::COMPOSE,
                         format!("malformed expression: {}", error.message),
                     ));
@@ -1105,7 +1140,17 @@ fn expression_diagnostics(
                 let (Some(known_roots), Some(view)) = (&known_roots, &view) else {
                     continue;
                 };
-                for finding in known_roots.findings(view, &expr, &interpolation.text, expressions::parse, None) {
+                // Names bound by an enclosing collection body are not
+                // document properties, whichever way they are spelled.
+                let site = guards.scope_at(unguarded.clone(), base);
+                for finding in known_roots.findings_in(
+                    view,
+                    &expr,
+                    &interpolation.text,
+                    expressions::parse,
+                    None,
+                    Some(&site),
+                ) {
                     let span = finding_span(&finding);
                     if let Some(range) =
                         ctx.source_map.byte_range_to_lsp(base + span.start..base + span.end)
@@ -1183,17 +1228,37 @@ impl<'a> KnownRoots<'a> {
         >,
         forbidden_quote: Option<char>,
     ) -> Vec<expressions::UndeclaredPropertyFinding> {
+        self.findings_in(view, expr, source, reparse, forbidden_quote, None)
+    }
+
+    /// [`Self::findings`] for an expression at `site`: a root that resolves to
+    /// a lexical local there is not a document property.
+    pub(crate) fn findings_in(
+        &self,
+        view: &darkmatter::markdown::compose::expression::BindingView,
+        expr: &darkmatter::markdown::compose::expression::SpannedExpr,
+        source: &str,
+        reparse: fn(
+            &str,
+        ) -> Result<
+            darkmatter::markdown::compose::expression::SpannedExpr,
+            darkmatter::markdown::compose::expression::ParseError,
+        >,
+        forbidden_quote: Option<char>,
+        site: Option<&TypeScope<'_>>,
+    ) -> Vec<expressions::UndeclaredPropertyFinding> {
         expressions::undeclared_property_findings(
             expr,
             source,
             reparse,
             |root| {
-                expressions::is_undeclared_property(
-                    root,
-                    view,
-                    |name| self.ast.entry_by_dotted(name).is_some(),
-                    |name| self.shape.properties.contains_key(name),
-                )
+                !site.is_some_and(|site| site.resolves_to_local(root))
+                    && expressions::is_undeclared_property(
+                        root,
+                        view,
+                        |name| self.ast.entry_by_dotted(name).is_some(),
+                        |name| self.shape.properties.contains_key(name),
+                    )
             },
             |key| self.is_key(key),
             forbidden_quote,
@@ -1466,7 +1531,7 @@ fn file_location(path: &Path) -> Option<Location> {
 }
 
 /// The frontmatter scalar value for a dotted key, from the overlay AST.
-fn frontmatter_scalar(ctx: &DocumentContext, dotted: &str) -> Option<String> {
+pub(super) fn frontmatter_scalar(ctx: &DocumentContext, dotted: &str) -> Option<String> {
     ctx.overlay
         .and_then(|overlay| overlay.ast.as_ref())
         .and_then(|ast| ast.entry_by_dotted(dotted))
@@ -1546,7 +1611,7 @@ fn is_remote(raw: &str) -> bool {
 }
 
 /// The word (and its start offset) under the cursor on a directive line.
-fn word_under_cursor(prefix: &str, offset: usize) -> (usize, &str) {
+pub(super) fn word_under_cursor(prefix: &str, offset: usize) -> (usize, &str) {
     let token_start = prefix
         .rfind(char::is_whitespace)
         .map(|index| index + 1)
@@ -1573,7 +1638,7 @@ fn is_fence(trimmed: &str, marker: char) -> bool {
 }
 
 /// Pushes a line-only fold for a 1-indexed `[start_line, end_line]` block.
-fn push_line_fold(ctx: &DocumentContext, folds: &mut Vec<FoldingRange>, start_line: usize, end_line: usize) {
+pub(super) fn push_line_fold(ctx: &DocumentContext, folds: &mut Vec<FoldingRange>, start_line: usize, end_line: usize) {
     let _ = ctx;
     if end_line > start_line {
         folds.push(FoldingRange {
@@ -1612,7 +1677,7 @@ fn push_span_fold(ctx: &DocumentContext, folds: &mut Vec<FoldingRange>, span: So
 /// replacing `start..offset` and eager Markdown `documentation` (D3/D4 —
 /// nothing is deferred to `completionItem/resolve`, which Zed never uses for
 /// `textEdit`).
-fn text_edit_item(
+pub(super) fn text_edit_item(
     ctx: &DocumentContext,
     start: usize,
     offset: usize,
@@ -1638,7 +1703,7 @@ fn text_edit_item(
 }
 
 /// Builds a Markdown hover over `span`.
-fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: String) -> Hover {
+pub(super) fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: String) -> Hover {
     Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
@@ -1649,7 +1714,7 @@ fn markup_hover(ctx: &DocumentContext, span: SourceSpan, value: String) -> Hover
 }
 
 /// Builds a diagnostic with a namespaced source and stable code.
-fn diagnostic(
+pub(super) fn diagnostic(
     range: Range,
     severity: DiagnosticSeverity,
     code_value: &str,

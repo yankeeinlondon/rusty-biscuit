@@ -237,17 +237,17 @@ fn type_predicates_narrow_a_declared_union_on_both_sides() {
 }
 
 #[test]
-fn file_exists_proves_a_present_string_without_touching_the_filesystem() {
+fn file_exists_proves_a_file_without_touching_the_filesystem() {
     // The path names nothing on disk (and would be fetched if it were run):
     // the true side holds anyway, because no handler runs.
     let frontmatter = json!({ "plan": "https://127.0.0.1:9/never-fetched.md" });
     let schema = schema("plan: [string, number]\n");
     let declared = DeclaredTypes::new(Some(&schema)).with_static_frontmatter(&frontmatter);
-    assert_eq!(narrowed(&declared, "file_exists(plan)", Polarity::True, "plan"), "string");
-    assert_eq!(narrowed(&declared, "fileExists(plan)", Polarity::True, "plan"), "string");
+    assert_eq!(narrowed(&declared, "file_exists(plan)", Polarity::True, "plan"), "file");
+    assert_eq!(narrowed(&declared, "fileExists(plan)", Polarity::True, "plan"), "file");
     let unknown = DeclaredTypes::new(None);
     assert_eq!(narrowed(&unknown, "file_exists(plan)", Polarity::False, "plan"), "unknown");
-    assert_eq!(narrowed(&unknown, "file_exists(plan)", Polarity::True, "plan"), "string");
+    assert_eq!(narrowed(&unknown, "file_exists(plan)", Polarity::True, "plan"), "file");
 }
 
 /// The specification's equality table, row by row.
@@ -435,9 +435,14 @@ fn assert_sound(declared: &DeclaredTypes<'_>, guard: &str, files: &ResolutionCon
         (Polarity::True, site.assume(&parsed, Polarity::True)),
         (Polarity::False, site.assume(&parsed, Polarity::False)),
     ];
+    let x_type = type_at(&site, "x");
+    let y_type = type_at(&site, "y");
+    let x_samples: Vec<_> = samples().into_iter().filter(|value| x_type.admits(value)).collect();
+    let y_samples: Vec<_> = samples().into_iter().filter(|value| y_type.admits(value)).collect();
+    let side_types = sides.each_ref().map(|(_, scope)| [type_at(scope, "x"), type_at(scope, "y")]);
     let mut reached = [false, false];
-    for x in samples().into_iter().filter(|value| type_at(&site, "x").admits(value)) {
-        for y in samples().into_iter().filter(|value| type_at(&site, "y").admits(value)) {
+    for x in &x_samples {
+        for y in &y_samples {
             let lookup = Values(
                 HashMap::from([("x".to_string(), x.clone()), ("y".to_string(), y.clone())]),
                 Some(files.clone()),
@@ -447,13 +452,12 @@ fn assert_sound(declared: &DeclaredTypes<'_>, guard: &str, files: &ResolutionCon
             };
             let taken = if darkmatter::markdown::compose::expression::is_truthy(&outcome) { 0 } else { 1 };
             reached[taken] = true;
-            let (polarity, scope) = &sides[taken];
-            for (name, value) in [("x", &x), ("y", &y)] {
-                let ty = type_at(scope, name);
+            let (polarity, _) = &sides[taken];
+            for ((name, value), ty) in [("x", x), ("y", y)].into_iter().zip(&side_types[taken]) {
                 assert!(
                     ty.admits(value),
                     "{guard} is {polarity:?} for x={x}, y={y}, but the analyzed {name} ({}) excludes {value}",
-                    shape_text(&ty)
+                    shape_text(ty)
                 );
             }
         }

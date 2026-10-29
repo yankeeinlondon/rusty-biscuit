@@ -328,3 +328,10 @@ fn old_doc_namespace_expression_matcher_does_not_match() {
     assert!(!matches(old.as_ref(), &bash));
     assert!(matches(unprefixed.as_ref(), &bash));
 }
+
+#[test]
+fn inline_callbacks_compile_as_expression_matchers() {
+    for source in ["map([], x => x)", "filter([], {value} -> value)"] {
+        assert!(matches!(RuntimeMatcher::compile(source), Some(RuntimeMatcher::Expression { .. })), "{source}");
+    }
+}

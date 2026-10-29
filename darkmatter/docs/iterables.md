@@ -5,19 +5,29 @@ related: "darkmatter/docs/inline/map.md"
 
 # Iterables
 
-In Darkmatter we consider both arrays and key/value types as _iterable_ types. The planned [map directive](./inline/map.md) will iterate over either type. `::map` and `::end-map` are not implemented yet; the examples below describe the intended behavior:
+In Darkmatter, arrays, tuples, and key/value objects are _iterable_ types. The [map](./inline/map.md) and [filter](./inline/filter.md) directives iterate over these types. A source must have a known iterable type from its effective schema, namespace declaration, or enclosing local binding.
 
+Optional and nullable collections are accepted: missing or null sources render
+nothing, as do empty collections. Non-null scalar sources are errors. Arrays
+and tuples preserve element order, and objects preserve insertion order unless
+the map explicitly sorts them.
+
+Map bindings live in the `local` namespace. A bare `i` prefers the nearest local
+binding; `local.i` accesses that binding explicitly, while `fm.i` accesses the
+frontmatter property even when a local shadows it.
 
 ## Iterating over an Array
 
 ```md
 ---
+$schema:
+    data: "{ name: string(required) }[](required)"
 data: 
     - { name: foo } 
     - { name: bar }
     - { name: baz }
 ---
-::map data fn="i -> i"
+::map data "i -> i"
 - {{i.name}}
 ::end-map
 ```
@@ -28,12 +38,14 @@ An alternative syntax that could have been used to provide the same results is:
 
 ```md
 ---
+$schema:
+    data: "{ name: string(required) }[](required)"
 data: 
     - { name: foo } 
     - { name: bar }
     - { name: baz }
 ---
-::map data fn="i -> i.name"
+::map data "i -> i.name"
 - {{i}}
 ::end-map
 ```
@@ -42,16 +54,36 @@ data:
 
 ```md
 ---
+$schema:
+    data: "{ foo: { nickname: string(required) }(required), bar: { nickname: string(required) }(required), baz: { nickname: string(required) }(required) }(required)"
 data:
-    foo: { nickname: foey },
-    bar: { nickname: barred },
+    foo: { nickname: foey }
+    bar: { nickname: barred }
     baz: { nickname: bazzy }
 ---
-::map data fn="i => i"
-- {{index(i)}} is often referred to as "{{i.nickname}}"
+::map data
+- {{i.key}} is often referred to as "{{i.value.nickname}}"
 ::end-map
 ```
 
-This example leverages the `index(_iterable_)` expression to leverage both the key and value of each key/value pair in `data`.
+Objects yield entries with the general shape `{key: string, value: any}`. The
+declared value type is preserved, so `i.value.nickname` remains typed as a
+string in this example. Keys are explicit entry fields, not recovered through
+an `index(i)` function.
 
-**Note:** the `index(_iterable_)` expression is only available inside the [map](./inline/map.md) directive but it's available for both numeric arrays as well as key/value objects.
+Shallow destructuring can expose those fields directly:
+
+```md
+::map data "{key,value} => {key,value}"
+- {{key}} is often referred to as "{{value.nickname}}"
+::end-map
+```
+
+An object pattern requires an object item and every named field. `{key}` accepts
+`{key: null}` because the field exists; it rejects a null item or an object
+without `key`. A null or empty source has no items to bind.
+
+The quoted mapping function is optional and positional. Both `->` and `=>`
+have the same meaning. Its parameter pattern binds the input for evaluating
+the expression, then binds the result for rendering the body; see the map
+directive for transformation and type-checking rules.

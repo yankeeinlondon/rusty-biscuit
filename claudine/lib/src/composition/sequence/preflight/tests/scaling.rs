@@ -119,6 +119,7 @@ mod counted {
     fn timing_label(timing: &HoleTiming) -> String {
         match timing {
             HoleTiming::ApprovalTime => "approval".to_string(),
+            HoleTiming::Local => "local".to_string(),
             HoleTiming::Deferred { roots } => format!("deferred:{}", roots.join(",")),
             HoleTiming::Guarded { roots, .. } => format!("guarded:{}", roots.join(",")),
         }

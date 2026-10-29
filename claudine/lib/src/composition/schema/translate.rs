@@ -18,6 +18,7 @@ pub(in crate::composition) fn schema_error_to_composition_error(
             property,
             message,
             span,
+            ..
         }) => CompositionError::SchemaParse {
             source_path: source_path.to_path_buf(),
             property: real_property(property),

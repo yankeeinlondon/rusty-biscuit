@@ -47,7 +47,7 @@ Every field is always present.
 | `diagnostics` | every diagnostic the run reported, in the order below; `[]` when there were none |
 | `document` | the composed Markdown on success (as `--output markdown` would print it, honoring `--frontmatter`); `null` on failure |
 
-Each diagnostic has six fields:
+Each diagnostic has eight fields:
 
 | Field | Value |
 |---|---|
@@ -57,6 +57,8 @@ Each diagnostic has six fields:
 | `source` | `{ "file", "line", "column" }` where the authored text starts, or `null` when the problem has no known position |
 | `expected_type` | for a call argument, the parameter's declared type; otherwise `null` |
 | `actual_type` | for a call argument, the argument's type; otherwise `null` |
+| `span` | `{ "start", "end" }`, the byte range of the failing authored construct in `source.file`, for a composition failure located at one; otherwise `null` |
+| `iteration_path` | for a failure while a `::map` or `::filter` body was being processed, the original position of each item, outermost first, as `{ "collection", "position" }` (a number for an index, a string for a key); otherwise `[]` |
 
 `line` and `column` are one-based, and the column counts characters. `file`
 names the root document as you gave it on the command line, and a transcluded
@@ -114,7 +116,10 @@ flowchart LR
   the failure report too. A rejected call keeps the passive warnings found
   before it in that order, including an earlier call in its own expression;
   a finding after the rejected call is not reported, since the check stops
-  there. A failure in a transcluded document comes after every warning of
+  there. A static `::map`/`::filter` defect (an invalid source, a pattern, a
+  sort key, a protected parameter name) is rejected the same way: a recovered
+  untyped source written before it keeps its `untyped_map_source` or
+  `untyped_filter_source` warning in the report. A failure in a transcluded document comes after every warning of
   the documents that transclude it, outermost first, then its own: a
   parent's passive check covers the whole parent before any child composes,
   so a parent warning written after the `::file` line is reported too.
@@ -185,6 +190,8 @@ classified by what failed:
 | `dm.expression.evaluation_failure` | an expression fails to evaluate; located when the expression is authored in the file |
 | `dm.expression.unknown_function` | an expression calls a function that does not exist |
 | `dm.directive.parse_failure` | a `::` directive does not parse |
+| `dm.collection.*` | a `::map` or `::filter` fails (`malformed`, `untyped_map_source`, `untyped_filter_source`, `invalid_source`, `pattern_mismatch`, `invalid_sort_key`, `callback_failed`), located at the directive opener or the failing callback; a static defect is reported once, with `iteration_path: []` |
+| `dm.iteration.visit_limit`, `dm.iteration.expansion_limit` | a request ran past `--max-iteration-visits` or `--max-expansion-bytes`; located at the authored text whose work was being paid for: the collection opener for a visit, the copied body text, or the `{{ }}`, `::shell`, `::shell-block`, or `::file` whose output was being inserted (a cached child that is included again is located at the including `::file`) |
 | `dm.shell.failure` | a shell command fails, times out, or is refused |
 | `dm.transclusion.failure` | a transclusion fails for another reason |
 | `dm.reference.failure` | a file reference does not resolve |
@@ -193,6 +200,47 @@ classified by what failed:
 | `dm.compose.failure` | anything else |
 
 A warning whose producer declares no code reports `dm.compose.warning`.
+
+### Failures inside `::map` and `::filter` bodies
+
+A failure of any kind while a repeated body was being processed (a callback,
+a `when=` gate, a `{{ }}` expression, a `::shell` or `::shell-block`
+argument, a `::file` target or condition, a child document, or an allowance)
+keeps its own `code` and `message`, and adds where it happened: `source` and
+`span` locate the authored site in the file (not in the expanded text), and
+`iteration_path` names the item whose copy ran it. The `message` ends with
+`at <path>`. For a shell-block command failure, the site is the command's
+authored line, including when an earlier command succeeded; for the block's
+combined-output allowance, it is the block opener.
+
+Given this `doc.md`, where only `ok.md` exists:
+
+```md
+---
+$schema:
+  data: string[](required)
+data: [./ok.md, ./missing.md]
+---
+::map data
+{{ frontmatter(i, 'title') }}
+::end-map
+```
+
+the second item fails on line 7:
+
+```json
+{ "code": "dm.expression.evaluation_failure", "severity": "error",
+  "message": "interpolation of `frontmatter(i, 'title')` failed: invalid file path: ./missing.md at data[1]",
+  "source": { "file": "doc.md", "line": 7, "column": 1 },
+  "expected_type": null, "actual_type": null,
+  "span": { "start": 85, "end": 114 },
+  "iteration_path": [{ "collection": "data", "position": 1 }] }
+```
+
+Positions are the items' places in the original source, before any filter or
+sort. A failure inside a child document that a repeated `::file` included
+joins both paths, outer first (`data[1] → d[0]`), and keeps the child's own
+`source`.
 
 A [schema trigger skipped because it failed to load](../topics/schemas/schema-triggers.md#invalid-discovered-triggers)
 is a `dm.schema.invalid_trigger` warning. It belongs to the trigger, not to

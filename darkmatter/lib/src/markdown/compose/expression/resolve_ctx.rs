@@ -99,6 +99,8 @@ pub struct ResolutionContext {
     /// the compose lookups (frontmatter seed state and the body's resolving
     /// lookup) before the document. `None` declares nothing.
     pub(crate) host_globals: Option<super::HostGlobals>,
+    /// Collection callbacks share the enclosing request or standalone context's allowance.
+    pub(crate) iteration: super::iteration::IterationBudget,
     /// Projected property/array occurrences mapped back to their immutable caller records.
     pub(crate) caller_file_provenance: HashMap<String, CallerFileProvenance>,
     /// Caller record selected from the source expression for the active filesystem call.
@@ -134,6 +136,7 @@ impl ResolutionContext {
             current: Default::default(),
             file_resolution_context: context,
             host_globals: None,
+            iteration: super::iteration::IterationBudget::new(Default::default()),
             caller_file_provenance: HashMap::new(),
             active_caller_file_provenance: None,
         }

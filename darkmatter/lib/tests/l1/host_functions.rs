@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::coercion::ValueKind;
-use darkmatter::markdown::compose::expression::call_binding::{EvaluationMode, FactKind, FactType, RegistrationError};
+use darkmatter::markdown::compose::expression::call_binding::{EvaluationMode, FactKind};
 use darkmatter::markdown::compose::expression::host::FactsArtifact;
 use darkmatter::markdown::compose::expression::{
     ArgumentCategory, BindingView, CallCheck, DeclaredTypes, ExpressionError, HostCatalogError, HostFunctionCatalog,
@@ -52,7 +52,7 @@ fn test_host(catalog: &str) -> HostFunctions {
         .function(
             "is_project_file",
             &[],
-            |registration| registration.narrows("value", FactKind::TrueImplies, FactType::Type("file".into())),
+            |registration| registration,
             Arc::new(|call| {
                 IS_PROJECT_FILE_ENTRIES.fetch_add(1, Ordering::SeqCst);
                 Ok(json!(call.args().text(0).is_some_and(|text| text.ends_with(".md"))))
@@ -124,26 +124,28 @@ fn registration_rejects_collisions_parity_gaps_and_invalid_facts_before_evaluati
         .build();
     assert_eq!(error(extra), HostFunctionError::MissingCatalogFunction { function: "not_in_catalog".into() });
 
-    let unknown_parameter = HostFunctions::builder(load(&catalog))
-        .function(
-            "is_project_file",
-            &[],
-            |r| r.narrows("other", FactKind::TrueImplies, FactType::Type("file".into())),
-            handler.clone(),
-        )
-        .function("project_label", &[], |r| r, label.clone())
-        .build();
-    assert!(
-        matches!(error(unknown_parameter), HostFunctionError::Registration(RegistrationError::UnknownParameter { .. })),
-        "a fact on a parameter no overload declares"
-    );
-    let not_boolean = base(&[])
-        .function("project_label", &[], |r| r.narrows("name", FactKind::TrueImplies, FactType::NonNull), label.clone())
-        .build();
-    assert!(
-        matches!(error(not_boolean), HostFunctionError::Registration(RegistrationError::InvalidFact { .. })),
-        "a narrowing fact on a function returning string"
-    );
+    // A fact is declared by the catalog, so an invalid clause fails the load
+    // before any builder or handler exists.
+    let load_error = |edited: String| {
+        HostFunctionCatalog::load(&edited, "tests/fixtures/host_functions/project.yaml").expect_err("the catalog is invalid")
+    };
+    let unknown_parameter = load_error(catalog.replace("narrows(value: file; true-implies)", "narrows(other: file; true-implies)"));
+    assert!(unknown_parameter.to_string().contains("does not declare"), "{unknown_parameter}");
+    let not_boolean = load_error(catalog.replace(
+        "function(\n            parameters(name: string);",
+        "function(\n            parameters(name: string);\n            narrows(name; true-implies);",
+    ));
+    assert!(not_boolean.to_string().contains("returns(boolean)"), "a narrowing fact on a function returning string: {not_boolean}");
+    for target in ["file", "string(min(3))", "enum(a,b)"] {
+        let refinement =
+            load_error(catalog.replace("narrows(value: file; true-implies)", &format!("narrows(value: {target}; true-iff)")));
+        assert!(refinement.to_string().contains("true-iff"), "{target}: {refinement}");
+    }
+    let disagreeing = load_error(catalog.replace(
+        "        ) -> Returns true when the value is text naming a Markdown file of the project.",
+        "        ) | function(parameters(value: unknown | null, strict: boolean); returns(boolean); category(Project))",
+    ));
+    assert!(disagreeing.to_string().contains("does not"), "an overload without the fact: {disagreeing}");
     let lazy = HostFunctions::builder(load(&catalog))
         .function("is_project_file", &[], |r| r.evaluation(EvaluationMode::Lazy), handler.clone())
         .function("project_label", &[], |r| r, label.clone())
@@ -154,6 +156,65 @@ fn registration_rejects_collisions_parity_gaps_and_invalid_facts_before_evaluati
     let again = install_host_functions(test_host(&catalog)).expect_err("names already installed");
     assert!(matches!(again, HostFunctionError::InstalledCollision { .. }), "{again:?}");
     assert_eq!(entries(), (0, 0), "no handler ran");
+}
+
+/// A catalog fact whose target names a type anywhere inside it, top-level or
+/// nested in an object, tuple, grouped array, union arm, or dictionary value,
+/// fails the load at that declaration; self-contained compound targets load
+/// as one-way facts.
+#[test]
+fn a_host_catalog_rejects_named_types_nested_in_a_fact_target() {
+    let catalog = std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join("tests/fixtures/host_functions/project.yaml"))
+        .expect("the test catalog");
+    let with_target = |target: &str| catalog.replace("narrows(value: file; true-implies)", &format!("narrows(value: {target}; true-implies)"));
+    for target in ["{a: Name}", "tuple([Name])", "Name[]", "(Name | string)[]", "{a: string | Name}", "{<string>: Name}"] {
+        let error = HostFunctionCatalog::load(&with_target(target), "tests/fixtures/host_functions/project.yaml")
+            .expect_err(target)
+            .to_string();
+        assert!(error.contains("named type `Name`") && !error.contains("union"), "{target}: {error}");
+        assert!(error.contains("is_project_file"), "{target}: located at the declaring function: {error}");
+    }
+    for target in ["{a: string}", "tuple([string])", "string(min(3))", "enum(a,b)", "file", "(string|number)[]"] {
+        HostFunctionCatalog::load(&with_target(target), "tests/fixtures/host_functions/project.yaml").expect(target);
+    }
+}
+
+/// A rejected catalog fact is located in the catalog source itself, through
+/// the block scalar it is written in: a refinement declared `true-iff` at its
+/// target, a second clause at its keyword with the first related, and an
+/// overload that disagrees at its clause with the earlier one related.
+#[test]
+fn a_host_catalog_locates_a_rejected_fact_in_its_source() {
+    let path = "tests/fixtures/host_functions/project.yaml";
+    let catalog = std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join(path)).expect("the test catalog");
+    let clause = "narrows(value: file; true-implies)";
+    let at = |source: &str, needle: &str, occurrence: usize| {
+        let start = source.match_indices(needle).nth(occurrence).unwrap_or_else(|| panic!("{needle}")).0;
+        start..start + needle.len()
+    };
+
+    let iff = catalog.replace(clause, "narrows(value: file; true-iff)");
+    let error = HostFunctionCatalog::load(&iff, path).expect_err("a one-way target declared true-iff");
+    assert!(error.to_string().contains("true-iff"), "{error}");
+    let target = at(&iff, "file; true-iff", 0).start;
+    assert_eq!(error.span(), Some(&(target..target + "file".len())), "at the target: {error:?}");
+    assert!(error.related().is_empty(), "{error:?}");
+
+    let duplicate = catalog.replace(clause, &format!("{clause};\n            narrows(value; false-implies)"));
+    let error = HostFunctionCatalog::load(&duplicate, path).expect_err("two clauses");
+    assert_eq!(error.span(), Some(&at(&duplicate, "narrows", 1)), "{error:?}");
+    let [related] = error.related() else { panic!("one related location: {error:?}") };
+    assert_eq!(related.span, at(&duplicate, clause, 0));
+
+    let later = "narrows(value: string; true-iff)";
+    let disagreeing = catalog.replace(
+        "        ) -> Returns true when the value is text naming a Markdown file of the project.",
+        &format!("        ) | function(parameters(value: unknown | null, strict: boolean); returns(boolean); {later}; category(Project))"),
+    );
+    let error = HostFunctionCatalog::load(&disagreeing, path).expect_err("different facts");
+    assert_eq!(error.span(), Some(&at(&disagreeing, later, 0)), "{error:?}");
+    let [related] = error.related() else { panic!("one related location: {error:?}") };
+    assert_eq!(related.span, at(&disagreeing, clause, 0));
 }
 
 /// A loaded catalog owns what it read: after the source text and path
@@ -191,7 +252,7 @@ fn a_host_catalog_outlives_the_strings_it_was_loaded_from() {
         .function(
             "is_project_file",
             &[],
-            |registration| registration.narrows("value", FactKind::TrueImplies, FactType::Type("file".into())),
+            |registration| registration,
             handler.clone(),
         )
         .function("project_label", &[], |registration| registration.reject_sources("name", &[ValueKind::Number]), handler)
@@ -259,8 +320,6 @@ enum Expect {
     AllIncomplete,
     /// Exactly these functions are incomplete.
     Incomplete(&'static [&'static str]),
-    /// Nothing is incomplete, but `is_project_file` proves nothing.
-    NoFacts,
     /// Nothing is incomplete, but `project_label` refuses no source.
     NoExclusions,
     /// Nothing is incomplete, and the check sees the edited field's rule.
@@ -435,7 +494,7 @@ fn the_facts_artifact_reader_walks_the_input_robustness_matrix() {
             "fact on a nonexistent parameter",
             Edit::Json(|root| root["functions"]["is_project_file"]["facts"][0]["parameter"] = json!("other")),
             Expect::Incomplete(&["is_project_file"]),
-            "does not register",
+            "differs from the one the catalog declares",
         ),
         (
             "fact at the wrong position",
@@ -581,7 +640,31 @@ fn the_facts_artifact_reader_walks_the_input_robustness_matrix() {
             Expect::Incomplete(&["is_project_file"]),
             "`malformed_reference` has unknown field `extra`",
         ),
-        ("empty facts", Edit::Json(|root| root["functions"]["is_project_file"]["facts"] = json!([])), Expect::NoFacts, ""),
+        ("empty facts", Edit::Json(|root| root["functions"]["is_project_file"]["facts"] = json!([])), Expect::Incomplete(&["is_project_file"]), "records no fact, but the catalog declares one"),
+        (
+            "a fact the catalog does not declare",
+            Edit::Json(|root| root["functions"]["project_label"]["facts"] = json!([{"kind": "true_implies", "parameter": "name", "position": 0, "type": "string"}])),
+            Expect::Incomplete(&["project_label"]),
+            "but the catalog declares none",
+        ),
+        (
+            "wrong fact kind",
+            Edit::Json(|root| root["functions"]["is_project_file"]["facts"][0]["kind"] = json!("true_iff")),
+            Expect::Incomplete(&["is_project_file"]),
+            "differs from the one the catalog declares",
+        ),
+        (
+            "wrong fact type spelling",
+            Edit::Json(|root| root["functions"]["is_project_file"]["facts"][0]["type"] = json!("string")),
+            Expect::Incomplete(&["is_project_file"]),
+            "differs from the one the catalog declares",
+        ),
+        (
+            "non-null spelling for a declared type",
+            Edit::Json(|root| root["functions"]["is_project_file"]["facts"][0]["type"] = json!("<non-null>")),
+            Expect::Incomplete(&["is_project_file"]),
+            "differs from the one the catalog declares",
+        ),
         (
             "empty source_exclusions",
             Edit::Json(|root| root["functions"]["project_label"]["source_exclusions"] = json!([])),
@@ -612,7 +695,7 @@ fn the_facts_artifact_reader_walks_the_input_robustness_matrix() {
         let expected: &[&str] = match expect {
             Expect::AllIncomplete => both,
             Expect::Incomplete(names) => names,
-            Expect::NoFacts | Expect::NoExclusions | Expect::Complete(_) => &[],
+            Expect::NoExclusions | Expect::Complete(_) => &[],
         };
         if let Expect::Complete(check) = expect {
             check(&functions);
@@ -626,7 +709,7 @@ fn the_facts_artifact_reader_walks_the_input_robustness_matrix() {
         let label_incomplete = expected.contains(&"project_label");
         let guarded = parse_spanned(GUARDED).unwrap();
         let narrowed = check_in(&declared, GUARDED, "frontmatter").expect("frontmatter is a built-in").category();
-        let narrows = !file_incomplete && !matches!(expect, Expect::NoFacts);
+        let narrows = !file_incomplete;
         let category = if narrows { ArgumentCategory::Compatible } else { ArgumentCategory::Unknown };
         assert_eq!(narrowed, category, "{cell}: the guarded `frontmatter` call");
         assert_eq!(check_in(&declared, GUARDED, "is_project_file").is_none(), file_incomplete, "{cell}: is_project_file check");
@@ -653,7 +736,7 @@ fn the_facts_artifact_reader_walks_the_input_robustness_matrix() {
         }
         walked.push(cell);
     }
-    assert_eq!(walked.len(), 71, "every cell ran: {walked:?}");
+    assert_eq!(walked.len(), 75, "every cell ran: {walked:?}");
     assert_eq!(entries(), (0, 0), "analysis never enters a host handler");
 
     conversion_recovery_cells();
@@ -797,6 +880,32 @@ fn installed_host_functions_get_the_built_in_checks_and_run_only_when_evaluated(
     .unwrap_or_else(|error| panic!("composes: {error}"));
     assert!(composed.content().contains("The Note skipped"), "{}", composed.content());
     assert_eq!(entries(), (1, 0), "only the evaluated host call entered its handler");
+}
+
+/// Criterion 37, passivity: a fact the catalog declares is compiled, written
+/// to the artifact, and used for narrowing without entering a handler at any
+/// step, and the catalog text is the only source of the fact.
+#[test]
+fn declaring_and_using_a_catalog_fact_enters_no_handler() {
+    let catalog = std::fs::read_to_string(biscuit_test_harness::manifest_dir!().join("tests/fixtures/host_functions/project.yaml"))
+        .expect("the test catalog");
+    assert!(catalog.contains("narrows(value: file; true-implies)"), "the fixture declares the fact");
+
+    let loaded = load(&catalog);
+    assert_eq!(entries(), (0, 0), "loading the catalog ran nothing");
+    let host = test_host(&catalog);
+    assert_eq!(entries(), (0, 0), "building the host ran nothing");
+    let artifact = host.facts_artifact();
+    assert!(artifact.contains("is_project_file"), "the derived artifact records the declared fact");
+    assert_eq!(entries(), (0, 0), "writing the artifact ran nothing");
+    drop(loaded);
+
+    let schema = schema("source: unknown\n");
+    let declared = DeclaredTypes::new(Some(&schema));
+    install_host_functions(host).expect("installs");
+    assert_eq!(check_in(&declared, GUARDED, "frontmatter").unwrap().category(), ArgumentCategory::Compatible);
+    assert_eq!(check_in(&declared, UNGUARDED, "frontmatter").unwrap().category(), ArgumentCategory::Unknown);
+    assert_eq!(entries(), (0, 0), "narrowing a guarded call ran nothing");
 }
 
 /// A function catalog in a schema root is discovered for its role only: it

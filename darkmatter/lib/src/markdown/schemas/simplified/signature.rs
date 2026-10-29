@@ -182,6 +182,7 @@ fn canonical_atoms(
         TypeExpr::Function(function) => {
             let mut function = function.as_ref().clone();
             function.examples.clear();
+            function.narrows = None;
             function.returns = canonical_def(&function.returns, named, depth);
             if let super::types::FunctionParameters::List(parameters) = &mut function.parameters {
                 for parameter in parameters {
@@ -265,5 +266,40 @@ mod tests {
         let (index, message) = duplicate_overload_arm(&union, None).expect("arms 0 and 2 bind alike");
         assert_eq!(index, 2);
         assert_eq!(Some(message), duplicate_overload(&union, None));
+    }
+}
+
+#[cfg(test)]
+mod narrows_contract_tests {
+    use super::*;
+    use crate::markdown::schemas::simplified::grammar::parse_type_definition;
+
+    fn arm(text: &str) -> PropertyAtom {
+        match parse_type_definition("f", text).unwrap_or_else(|error| panic!("{text}: {error}")) {
+            PropertyDef::Single(atom) => atom,
+            other => panic!("{text}: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn overloads_differing_only_in_narrows_remain_duplicates() {
+        let union = [
+            arm("function(parameters(x: unknown); returns(boolean); narrows(x: string; true-iff))"),
+            arm("function(parameters(x: unknown); returns(boolean); narrows(x: file; true-implies))"),
+        ];
+        assert!(duplicate_overload(&union, None).is_some());
+        let with_and_without = [
+            arm("function(parameters(x: unknown); returns(boolean); narrows(x; false-implies))"),
+            arm("function(parameters(x: unknown); returns(boolean))"),
+        ];
+        assert!(duplicate_overload(&with_and_without, None).is_some());
+    }
+
+    #[test]
+    fn canonical_atoms_clear_the_clause() {
+        let atom = arm("function(parameters(x: unknown); returns(boolean); narrows(x; false-implies))");
+        let canonical = canonical_atoms(&atom, None, 0).remove(0);
+        let TypeExpr::Function(function) = canonical.ty else { panic!("a function") };
+        assert_eq!(function.narrows, None);
     }
 }

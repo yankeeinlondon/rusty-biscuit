@@ -38,8 +38,8 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
-use super::absence::static_variable_reads;
-use super::ast::{Expr, SpannedExpr, SpannedExprKind};
+use super::absence::static_variable_reads_in_scope;
+use super::ast::{Expr, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind};
 use super::binding::{
     Availability, BindingError, BindingView, EvaluationSession, RootClass, UnavailableBinding,
 };
@@ -195,7 +195,7 @@ fn parse_in_mode(text: &str, mode: ParseMode) -> Result<SpannedExpr, ExpressionE
         ParseMode::Interpolation => parse_spanned(text),
         ParseMode::Condition => parse_condition_spanned(text),
     }
-    .map_err(|error| ExpressionError::Parse(error.to_string()))
+    .map_err(ExpressionError::from)
 }
 
 fn scan_tree(
@@ -514,8 +514,8 @@ pub fn validate_interpolation(
     Ok(diagnostics)
 }
 
-/// Reports every definitely unavailable global and unknown function in
-/// `prepared`, in every branch.
+/// Reports unavailable globals, unknown functions, and protected callback
+/// bindings in every branch of `prepared`.
 ///
 /// An `execution-dependent` global is deferred to runtime. Nothing is
 /// evaluated and no provider runs.
@@ -546,8 +546,20 @@ fn expression_diagnostics<'a>(
 /// unavailable global and unknown function, in every branch, with its span in
 /// `expr`'s text and the typed error evaluation raises.
 pub fn validate_expression(expr: &SpannedExpr, view: &BindingView) -> Vec<(SourceSpan, ExpressionError)> {
+    validate_expression_in_scope(expr, view, &[])
+}
+
+/// [`validate_expression`] for an expression evaluated inside lexical scopes
+/// that bind `locals`: a read of a local is never a global or a document read,
+/// so it is never reported, while every free capture (`ctx`, `current`, host
+/// globals) is still checked.
+pub fn validate_expression_in_scope(
+    expr: &SpannedExpr,
+    view: &BindingView,
+    locals: &[&str],
+) -> Vec<(SourceSpan, ExpressionError)> {
     let mut diagnostics = Vec::new();
-    for read in static_variable_reads(expr) {
+    for read in static_variable_reads_in_scope(expr, locals) {
         if let RootClass::Global(Availability::Unavailable(reason)) = view.classify_root(read.root()) {
             diagnostics.push((
                 read.span.clone(),
@@ -563,6 +575,18 @@ pub fn validate_expression(expr: &SpannedExpr, view: &BindingView) -> Vec<(Sourc
             ));
         }
     }
+    super::call_check::visit_call_nodes(expr, &mut |call| {
+        let SpannedExprKind::CallbackCall { args, .. } = &call.kind else { return; };
+        for argument in args {
+            let super::ast::SpannedCallArgument::Callback(callback) = argument else { continue; };
+            if let Err(error) = super::check_local_names(callback.pattern.erase().names(), Some(view)) {
+                diagnostics.push((callback.pattern_span.clone(), ExpressionError::InvalidCallback {
+                    span: callback.pattern_span.clone(),
+                    message: error.to_string(),
+                }));
+            }
+        }
+    });
     visit_calls(expr, &mut |name, span| {
         if !functions::is_dispatchable(name) {
             diagnostics.push((span.clone(), unknown_function_error(name)));
@@ -571,12 +595,31 @@ pub fn validate_expression(expr: &SpannedExpr, view: &BindingView) -> Vec<(Sourc
     diagnostics
 }
 
-/// Points an unavailable-global error's span at `span` (the leaf range).
+/// [`validate_expression_in_scope`] for a callback body, with its pattern
+/// names added to `outer_locals`. Pattern-name collisions are not reported
+/// here; see [`check_local_names`](super::check_local_names).
+pub fn validate_callback(
+    callback: &SpannedCallback,
+    view: &BindingView,
+    outer_locals: &[&str],
+) -> Vec<(SourceSpan, ExpressionError)> {
+    let mut locals: Vec<&str> = outer_locals.to_vec();
+    match &callback.pattern {
+        SpannedBindingPattern::Identifier(name) => locals.push(&name.value),
+        SpannedBindingPattern::Fields(fields) => locals.extend(fields.iter().map(|field| field.value.as_str())),
+    }
+    validate_expression_in_scope(&callback.body, view, &locals)
+}
+
+/// Locates binding and callback failures within their string leaf.
 fn relocate(mut error: ExpressionError, span: SourceSpan) -> ExpressionError {
     if let ExpressionError::Binding(binding) = &mut error
         && let BindingError::Unavailable(unavailable) = binding.as_mut()
     {
-        unavailable.span = Some(span);
+        unavailable.span = Some(span.clone());
+    }
+    if let ExpressionError::InvalidCallback { span: located, .. } = &mut error {
+        *located = span;
     }
     error
 }
@@ -621,6 +664,10 @@ fn visit_calls<'e>(expr: &'e SpannedExpr, visit: &mut impl FnMut(&'e str, &'e So
         SpannedExprKind::FunctionCall { name, args } => {
             visit(name, &expr.span);
             args.iter().for_each(|arg| visit_calls(arg, visit));
+        }
+        SpannedExprKind::CallbackCall { name, args } => {
+            visit(name, &expr.span);
+            args.iter().for_each(|arg| visit_calls(arg.expression(), visit));
         }
     }
 }
@@ -817,6 +864,20 @@ mod interpolation_tests {
     }
 
     #[test]
+    fn retained_callbacks_validate_locals_and_free_captures_at_source_coordinates() {
+        let text = "é {{ map([], item => item.message || err.message) }}";
+        let prepared = PreparedInterpolation::new(text);
+        let diagnostics = validate_interpolation(&prepared, &err_view()).unwrap();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(&text[diagnostics[0].span.clone()], "err.message");
+        let text = "{{ map([], err => err.message) }}";
+        let diagnostics = validate_interpolation(&PreparedInterpolation::new(text), &err_view()).unwrap();
+        assert_eq!(diagnostics.len(), 1);
+        assert!(matches!(diagnostics[0].error, ExpressionError::InvalidCallback { .. }));
+        assert_eq!(&text[diagnostics[0].span.clone()], "err");
+    }
+
+    #[test]
     fn a_retained_failure_suppresses_every_diagnostic() {
         let prepared = PreparedInterpolation::new("{{ err.message }} {{ 1 + }}");
         let error = validate_interpolation(&prepared, &err_view()).unwrap_err();
@@ -869,5 +930,71 @@ mod interpolation_tests {
             });
             assert_eq!(parses, 2);
         }
+    }
+}
+
+#[cfg(test)]
+mod lexical_tests {
+    use super::*;
+    use crate::markdown::compose::expression::binding::{ScopeId, UnavailabilityReason};
+    use crate::markdown::span::Spanned;
+
+    fn view() -> BindingView {
+        BindingView::builder(ScopeId::new("lexical"))
+            .declare("gone", "unavailable", Availability::Unavailable(UnavailabilityReason::new("host.gone")))
+            .build()
+            .unwrap()
+    }
+
+    fn callback(body: &str) -> SpannedCallback {
+        SpannedCallback {
+            pattern_span: 0..1,
+            pattern: SpannedBindingPattern::Identifier(Spanned::new("p".to_string(), 0..1)),
+            arrow: 2..4,
+            body: parse_spanned(body).unwrap(),
+        }
+    }
+
+    #[test]
+    fn a_callback_body_still_reports_an_unavailable_host_capture() {
+        let diagnostics = validate_callback(&callback("p.x || gone.y || local.gone || local.p"), &view(), &[]);
+        let reads: Vec<String> = diagnostics
+            .iter()
+            .map(|(_, error)| match error {
+                ExpressionError::Binding(binding) => binding.root().to_string(),
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert_eq!(reads, ["gone"], "only the free capture counts; `local.gone` is lexical");
+    }
+
+    #[test]
+    fn an_unknown_function_in_a_callback_body_is_still_reported() {
+        let diagnostics = validate_callback(&callback("no_such_fn(p)"), &view(), &[]);
+        assert_eq!(diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn inline_callback_validation_checks_nested_calls_and_protected_names_passively() {
+        for arrow in ["=>", "->"] {
+            let text = format!("map([], gone {arrow} gone.value)");
+            let prepared = prepare_value(&serde_json::json!(text), AuthoredMode::Expression(ParseMode::Interpolation)).unwrap();
+            let diagnostics = validate_prepared(&prepared, &view());
+            assert_eq!(diagnostics.len(), 1, "{text}: {diagnostics:?}");
+            assert!(matches!(&diagnostics[0].error, ExpressionError::InvalidCallback { message, .. } if message.contains("gone")));
+            assert_eq!(&text[diagnostics[0].span.clone()], "gone");
+            let text = format!("map([], p {arrow} no_such_fn(p.value))");
+            let expression = parse_spanned(&text).unwrap();
+            let diagnostics = validate_expression(&expression, &view());
+            assert_eq!(diagnostics.len(), 1);
+            assert!(matches!(&diagnostics[0].1, ExpressionError::UnknownFunction { name } if name == "no_such_fn"));
+        }
+    }
+
+    #[test]
+    fn unscoped_validation_is_unchanged() {
+        let expr = parse_spanned("gone.y").unwrap();
+        assert_eq!(validate_expression(&expr, &view()).len(), 1);
+        assert_eq!(validate_expression_in_scope(&expr, &view(), &["gone"]).len(), 0);
     }
 }

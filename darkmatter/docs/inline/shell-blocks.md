@@ -112,6 +112,11 @@ If a command fails with no matching error handler:
   `::file`: the error names that file, and the file is never replaced by a
   "could not transclude" notice
 
+Inside a repeated `::map` or `::filter` body, a command failure's structured
+`source` and `span` identify the authored command, and `iteration_path` retains
+the original item. A failure charging the block's combined output identifies
+the block opener, where that output is inserted.
+
 In terminal error output, preserved partial output is visually demoted with
 Prose `<dim>` styling. If shell-block error output gains a dedicated HTML
 renderer, use a matching CSS treatment for that demoted partial output.
@@ -139,6 +144,12 @@ echo "detailed info"
 ::end-block
 ::end-block
 ```
+
+A shell block may also sit inside a [`::map`](./map.md) or
+[`::filter`](./filter.md) body, where its commands can read the iteration's
+local bindings and are approved by template shape (see
+[Shell Expansion](./shell-expansion.md#inside-map-and-filter)). A collection
+opener inside a shell block's command body is an error.
 
 ## Comparison with `::shell`
 

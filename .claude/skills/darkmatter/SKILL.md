@@ -82,8 +82,9 @@ The root compose pipeline is ordered: the passive call check (a proven-bad
 call in any branch rejects the document before anything runs); frontmatter
 interpolation pass 1;
 schema validation and coercion; frontmatter shell expansion; frontmatter
-interpolation pass 2; literal replacement; conditional page blocks; body
-interpolation; shell directives and blocks; link resolution; concurrent
+interpolation pass 2; literal replacement; conditional page blocks and
+`::map`/`::filter` regions (one structural traversal, callbacks finish before
+body stages); body interpolation; shell directives and blocks; link resolution; concurrent
 transclusion; inline cleanup and optional reflow; root-only link
 normalization. Keep this order stable. Whole-value `{{ ... }}` and `$(...)`
 values are executable state: they must resolve or fail, never leak as literal
@@ -99,6 +100,9 @@ and `::file-links <glob>` are `GlobReference`s judged or listed in the
 document's (or the caller's origin) context, never the process directory.
 Read [requests.md](requests.md) before touching a request, a context view,
 a validator's context, or a glob consumer.
+
+`::map` and `::filter` share one executor (`compose/collection_blocks/`); read
+the "Map and filter" section of [compose.md](compose.md) before touching it.
 
 Read [compose.md](compose.md) before changing a stage, expression function,
 context property, cache key, transclusion directive, or file-resolution path.

@@ -23,6 +23,9 @@ pub(crate) fn run_stage(
     body: &mut BodyProvenance,
     schemas: &PreparedSchemas,
 ) -> MarkdownResult<()> {
+    if super::collection_blocks::owns_page_blocks(markdown, options, body) {
+        return Ok(());
+    }
     debug!("compose: running page blocks");
     let mut watch = ReportWatch::new(report, options, FinalVerdict { markdown, state, schemas });
     let source = markdown.source_context_for_errors();
@@ -36,21 +39,6 @@ pub(crate) fn run_stage(
         return Ok(());
     }
 
-    // Warn for unknown options
-    fn warn_unknown_options(region: &page_blocks::PageBlockRegion, report: &mut ComposeReport) {
-        for unknown in &region.options.unknown_options {
-            report.add_warning(
-                ComposeWarning::new(
-                    "page_blocks",
-                    format!("Unknown page block option: '{}'", unknown),
-                )
-                .at_line(region.start_line),
-            );
-        }
-        for child in &region.children {
-            warn_unknown_options(child, report);
-        }
-    }
     for region in &regions {
         warn_unknown_options(region, report);
     }
@@ -90,4 +78,20 @@ pub(crate) fn run_stage(
     body.advance(markdown.content(), &edits, &rendered)?;
     *markdown.content_mut() = rendered;
     Ok(())
+}
+
+/// Reports each unknown option of `region` and its nested blocks.
+pub(super) fn warn_unknown_options(region: &page_blocks::PageBlockRegion, report: &mut ComposeReport) {
+    for unknown in &region.options.unknown_options {
+        report.add_warning(
+            ComposeWarning::new(
+                "page_blocks",
+                format!("Unknown page block option: '{}'", unknown),
+            )
+            .at_line(region.start_line),
+        );
+    }
+    for child in &region.children {
+        warn_unknown_options(child, report);
+    }
 }

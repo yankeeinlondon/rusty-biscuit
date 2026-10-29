@@ -358,6 +358,28 @@ Joined types are normalized one way everywhere: `unknown` absorbs every
 other type, duplicates collapse, and the order of arms and keys never
 changes the result (`string | number` and `number | string` are one type).
 
+## Calls inside callbacks
+
+Callback bodies are checked even when their source is empty or null:
+`map([], item => min(true, 5))` is rejected before any evaluation. Wrong
+arity, a value where a callback is required, and protected parameter names
+are also rejected. Callbacks cannot be stored or returned as values.
+
+A callback local retains its known item type. For example, with
+`flags: boolean[](required)`, `map(flags, flag => min(flag, 5))` is rejected:
+`flag` is a boolean. Tuples contribute their position types; objects contribute
+`{key, value}` entry types. Shallow patterns project their fields. Unknown
+sources remain unknown rather than borrowing a same-named document property's
+type. `map` projects the callback result into its result array, and `filter`
+retains the input item type with predicate refinements where provable.
+
+In `is_number(x) ? map(flags, x => min(x, 5)) : []`, the guard proves something
+about the document's `x`, not the boolean callback local. That call is still
+rejected. Explicit `fm.x` keeps the document's proof; `local.x` and bare `x`
+refer to the local. Nested callbacks capture enclosing locals and restore them
+on exit. These checks share the same lexical scope model as composition and
+DMLS and never execute a callback, read a file through it, or invoke a provider.
+
 ## What the check cannot see
 
 Where the declarations run out, an argument is category 4 (type not known),

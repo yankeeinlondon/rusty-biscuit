@@ -994,6 +994,7 @@ fn apply_reference_postfix(
                      `alphanumeric` target"
                 ),
                 span,
+                related: Vec::new(),
             });
         }
         let use_site: Vec<Tagged> = constraints

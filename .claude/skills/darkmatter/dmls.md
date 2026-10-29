@@ -792,3 +792,14 @@ Darkmatter library, so editor tests are not the only proof of grammar behavior.
   per-user directory and creates or repairs Zed's `installed/dmls` link.
 - `just zed-doctor` diagnoses the host's native binary, stable dev-extension
   registration, manifest, and recent Zed log evidence without launching Zed.
+
+## Map and filter projection
+
+DMLS consumes `collection_blocks::analyze_collection_blocks` and `BodyScopes`
+(no second grammar): `providers/collections.rs` and `overlay/collections.rs`
+supply semantic tokens (callback, options), hover, completion of locals, and
+the `dm.collection.*` / `dm.expression.invalid_callback` diagnostics. Untyped
+sources are always errors: the editor has no request policy, so the overlay
+never waives one and never produces a recovery warning. Not provided: member completion on `person.<field>` of a
+local. Diagnostics carry `span` and `iteration_path` (static findings have
+none).

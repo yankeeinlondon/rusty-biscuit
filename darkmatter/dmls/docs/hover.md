@@ -398,3 +398,30 @@ The formatting rule is covered at two levels:
 
 - **Unit** (`src/providers/frontmatter.rs`): `schema_hover_body` is called with   hand-built `PropertyDef`s and the emitted Markdown is asserted directly (type   is bold and not inline code; enum members and default are italic). No LSP   session is needed because the function is pure.
 - **Integration** (`tests/l1/lsp_session.rs`): a full   `initialize → didOpen → textDocument/hover` session over the in-memory   connection asserts the rendered `contents.value` the editor would receive. The   `hover_markup(fixture, uri, line, character)` helper collapses the   request-and-extract boilerplate so hover assertions stay one line.
+
+## Collection locals
+
+Inside a `::map` / `::filter` body, a read of a bound name shows the type the
+library's scope gives it at the cursor:
+
+> Local `person.name`: `string`
+
+A narrowed local appends the guards (`(narrowed by …)`), and a local shadows a
+frontmatter key or schema property of the same name, so no frontmatter value or
+property description is shown for it. On the opener, hovering the source shows
+its declared type and the type of one entry; a callback's expression and its
+parameters show the types at that callback's own scope (another callback's
+parameter is not visible there). The keyword still shows the directive
+description.
+
+
+
+## Inline callback locals
+
+In `map(people, person => person.name)`, hover on a body read identifies it as
+a callback local, names the owning function, and shows the projected item or
+member type. A shallow `{name}` pattern projects that field directly. Bare
+`person` and `local.person` refer to the same binding; `fm.person` still gets
+document hover. Nested callbacks use the innermost matching local. The source
+argument uses its enclosing scope and the local ends with the callback. Hover
+uses shared passive type analysis and never runs a callback to obtain a value.

@@ -10,7 +10,7 @@ use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
 use darkmatter_cli::Cli;
 use darkmatter::markdown::compose::RequestSnapshot;
 use darkmatter_cli::commands::{
-    CleanOptions, run_clean, run_render, run_subcommand, validate_subcommand_usage,
+    CleanOptions, run_clean, run_subcommand, validate_subcommand_usage,
 };
 use darkmatter_cli::request::{MdRequest, with_magic_roots};
 use std::io::{self, IsTerminal};
@@ -206,51 +206,28 @@ fn run() -> Result<()> {
         RequestSnapshot::from_process().wrap_err("Failed to capture the current directory")?;
     let request = MdRequest::new(with_magic_roots(snapshot, &cli.magic_roots)?);
 
-    if let Some(command) = cli.command.clone() {
+    if cli.command.is_some() {
         validate_subcommand_usage(&cli)?;
-        run_subcommand(command, &cli, &request)?;
-        return Ok(());
-    }
-
-    if cli.save {
-        if !cli.deny.is_empty() {
+    } else if cli.save {
+        if !cli.render.deny.is_empty() {
             Cli::command()
                 .error(clap::error::ErrorKind::ArgumentConflict, "`--deny` does not apply to `--save` (a clean)")
                 .exit();
         }
         let options = CleanOptions {
             save: true,
+            indent: cli.render.indent,
             verbose: cli.verbose > 0,
             ..CleanOptions::default()
         };
-        run_clean(cli.input.as_ref(), &options, &request)?;
+        run_clean(cli.render.input.as_ref(), &options, &request)?;
         return Ok(());
-    }
-
-    // No subcommand given — if no input and interactive terminal, show help
-    if cli.input.is_none() && io::stdin().is_terminal() {
+    } else if cli.render.input.is_none() && io::stdin().is_terminal() {
         Cli::command().print_help()?;
         return Ok(());
     }
 
-    // Run as implicit render using top-level args
-    let policy = darkmatter_cli::args::policy::resolve_for(
-        darkmatter_cli::args::policy::PolicyCommand::Render,
-        &[],
-        &cli.deny,
-        &[],
-        None,
-    )?;
-    run_render(
-        cli.input.as_ref(),
-        cli.output,
-        cli.show,
-        None,
-        policy.denies("style"),
-        &cli.features,
-        &cli,
-        &request,
-    )?;
+    run_subcommand(cli.command_or_render(), &cli, &request)?;
 
     Ok(())
 }

@@ -124,7 +124,7 @@ pub fn run_code_block(
     // `--show` opens the rendered output in the default app via a temp file.
     // Reuse the markdown/HTML artifact flow: HTML goes to a `.html` temp file
     // and markdown to a `.md` temp file.
-    if cli.show {
+    if cli.render.show {
         match output {
             CodeBlockOutput::Html => {
                 let fragment = BrowserRenderable::render_html_fragment(&block);

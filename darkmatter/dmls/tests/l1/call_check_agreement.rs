@@ -21,12 +21,14 @@ const FRONTMATTER: &str = "$schema:
   foo:
     - string(required)
     - number(required)
+  team: '{ flag: string(required), score: number(required), active: boolean(required) }[]'
 count: \"3\"
 maybe: 3
 size: 3
 flag: true
 foo: 4
 untyped_var: 1
+team: []
 ";
 
 /// `(name, extra frontmatter, body, rejected)`.
@@ -55,6 +57,17 @@ const CORPUS: &[(&str, &str, &str, bool)] = &[
     ("fenced", "", "```text\n{{ min(flag, 5) }}\n```", false),
     ("literal_braces", "", "{{{ min(flag, 5) }}}", false),
     ("file_exists_number", "", "{{ file_exists(42) }}", false),
+    // `::map` / `::filter`: the gate, every callback, and the body are judged
+    // under the scope each is evaluated in, in dead regions too.
+    ("map_body_call", "", "::map team \"p => p\"\n{{ min(p.active, 5) }}\n::end-map", true),
+    ("map_body_fine", "", "::map team \"p => p\"\n{{ min(p.score, 5) }}\n::end-map", false),
+    ("filter_callback_call", "", "::filter team \"p => min(p.active, 5) > 1\"\nbody\n::end-filter", true),
+    ("sort_callback_call", "", "::map team sort=\"p => min(p.active, 5)\"\nbody\n::end-map", true),
+    ("gate_call", "", "::map team when=\"min(flag, 5) > 1\"\nbody\n::end-map", true),
+    ("outer_capture", "", "::map team\n{{ min(flag, 5) }}\n::end-map", true),
+    ("shadowed_outer", "", "::map team \"{ flag } => flag\"\n{{ min(flag, 5) }}\n::end-map", false),
+    ("dead_region", "", "::filter team \"p => p\" when=\"false\"\n{{ min(p.active, 5) }}\n::end-filter", true),
+    ("escaped_callback", "", "::filter team \"p => p.flag == \\\"é\\\" && min(p.active, 5) > 0\"\nbody\n::end-filter", true),
 ];
 
 /// Retained text: a `boolish` may hold `"1"` and a `numberlike` always
@@ -115,6 +128,8 @@ agreement_groups! {
     composition_and_the_editor_reject_the_same_documents_second_group: 6..12,
     composition_and_the_editor_reject_the_same_documents_third_group: 12..18,
     composition_and_the_editor_reject_the_same_documents_fourth_group: 18..24,
+    composition_and_the_editor_reject_the_same_collection_documents: 24..30,
+    composition_and_the_editor_reject_the_same_collection_documents_second_group: 30..33,
 }
 
 #[test]

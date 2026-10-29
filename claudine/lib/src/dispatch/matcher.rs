@@ -137,7 +137,8 @@ fn expression_uses_known_features(expr: &Expr) -> bool {
         | Expr::Fallback { .. }
         | Expr::Ternary { .. }
         | Expr::Comparison { .. }
-        | Expr::FunctionCall { .. } => true,
+        | Expr::FunctionCall { .. }
+        | Expr::CallbackCall { .. } => true,
     }
 }
 

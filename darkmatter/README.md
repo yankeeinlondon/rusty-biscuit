@@ -9,6 +9,7 @@ last_updated: 2026-10-22
 - [Compose](./docs/topics/what-is-composition.md) documents together dynamically
     - Export readable Markdown with portable file links; see [compose output](./docs/cli/compose.md)
     - List documents with [`::file-links`](./docs/inline/file-links.md), using directory context labels and terminal-aware icons
+- Transform expression collections with [inline callbacks](./docs/topics/darkmatter-expressions.md#inline-collection-callbacks), such as `map(people, p => p.name)` and `filter(people, p -> p.active)`
 - Render to [multiple output formats](./docs/topics/output-formats.md)
 - Run [lifecycle events](./docs/topics/lifecycle/index.md) (`initialize`, `composed`, `failed`, `cancelled`, `finalize`) from a document's frontmatter around `md compose`
 - Compose supports body `::shell` expansion, `::shell-block` / `::end-block` multi-command blocks, and top-level frontmatter `$(...)` shell expansion with shared approval and timeout controls
@@ -78,6 +79,7 @@ host OS input and take focus.
 - to get details on the **Rendering Pipeline** in Darkmatter read: [Darkmatter Render Pipeline](./docs/darkmatter-rendering-pipeline.md)
 - for the **experimental, internal** Markdown-to-render-tree fold (does not affect `as_html` / `for_terminal`) read: [Render-Tree Fold](./docs/render-tree-fold.md)
 - for more information on how to use CLI read: [Darkmatter CLI](./docs/cli/index.md)
+- to repeat or select content from arrays and objects read: [Map Directive](./docs/inline/map.md), [Filter Directive](./docs/inline/filter.md), and [Iterables](./docs/iterables.md)
 - for shell expansion details read: [Body Shell Expansion](./docs/inline/shell-expansion.md), [Shell Blocks](./docs/inline/shell-blocks.md), and [Frontmatter Shell Expansion](./docs/inline/fm-shell-expansion.md)
 - Other topics you may be interested in:
     - [What is Composition?](./docs/topics/what-is-composition.md)
