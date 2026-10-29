@@ -46,11 +46,19 @@ All three use [the same helper](../../cli/src/commands/wrap/sequence/container.r
 | Requirement | Evidence | Appropriate level |
 | --- | --- | --- |
 | A1: absent events add no override; declared and supplied events are masked; `loop` is preserved | `only_present_events_are_masked` checks an event-free source, a declared `success`, an override-carried `finalize`, and a declared `loop`. Fresh review run passed. | Level 1, in-process. |
-| A2: root `success` and `finalize` run once | `sequence_containers::body_only_steps_run_root_success_once` asserts one success, one cleanup, and two provider results through the normal CLI with a fake provider. The implementation log records a pass. | Level 1, hermetic subprocess. |
+| A2: root `success` and `finalize` run once | `sequence_containers::body_only_steps_run_root_success_once` asserts one success, one cleanup, and two provider results through the normal CLI with a fake provider. Fresh review run passed. | Level 1, hermetic subprocess. |
 | A3: the three-item dry run makes one cold schema load | The implementation log records temporary `load_effective_schema` instrumentation: two cold loads before, one after, with total debug-build time decreasing from 1.95–2.42 seconds to 1.18–1.59 seconds. All three bodies composed in both builds. | Level 1 process measurement, as explicitly requested by the spec. |
 | A4: claudine L1 suites pass | The implementation log records `just test`: 10,626 passing tests, plus 4,721 CLI L1 passes on Linux and clean Clippy. These are implementation-time results, not a fresh full-area run by this review. | Level 1. |
 
 The new unit test is compiled in the CLI binary's test target. The existing lifecycle regression is declared by `tests/l1/main.rs`, which is the explicit `l1` target in `Cargo.toml`. Neither test name contains a higher-tier marker. None of this fix's requirements concerns terminal rendering or keyboard encoding, so Level 2 or Level 3 evidence is unnecessary.
+
+Fresh review commands:
+
+- In `claudine/`, `just test-cli only_present_events_are_masked`: one test passed (0.021 seconds).
+- In `claudine/`, `just test-cli body_only_steps_run_root_success_once`: one test passed (0.997 seconds).
+- At the repository root, `just check-tier-coverage claudine`: passed, zero stranded tests.
+
+The macOS debug linker emitted an oversized unwind-table warning; compilation and both test runs succeeded. The review did not repeat the full L1 suite or temporarily reinstrument schema loading; the implementation log supplies those acceptance results.
 
 The fix changes a presence-based override transformation, not a file loader or field validator. It introduces no new accepted file syntax or value coercion. Every present non-loop event is deliberately masked regardless of its original stack value; absent events remain absent. The changed helper contains none of the permissive parse patterns listed in the robustness instructions. An additional loader/validator shape matrix would test unchanged parsing outside this fix.
 
