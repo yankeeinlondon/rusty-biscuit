@@ -3,11 +3,13 @@ kind: feature
 created: 2026-10-27
 status: finalized-spec
 area: darkmatter
-implemented: false
+implemented: true
+implemented_by: claude/sonnet
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-27
-review_iterations: 0
+review_iterations: 3
+completed: true
 $schema:
     status: |-
         enum(

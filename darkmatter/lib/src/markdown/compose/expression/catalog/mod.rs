@@ -128,6 +128,28 @@ pub struct ExpressionFunctionDescriptor {
 }
 
 impl ExpressionFunctionDescriptor {
+    /// Whether YAML value operands can represent every parameter. Inline
+    /// callbacks are expression syntax and cannot be lifecycle verb operands.
+    pub fn accepts_value_arguments(&self) -> bool {
+        fn contains_atom(atom: &PropertyAtom) -> bool {
+            match &atom.ty {
+                TypeExpr::Function(_) => true,
+                TypeExpr::InlineObject(shape) => shape.properties.values().any(contains_def),
+                TypeExpr::Tuple(tuple) => tuple.any_atom(contains_atom),
+                TypeExpr::Union(arms) => arms.iter().any(contains_atom),
+                _ => false,
+            }
+        }
+        fn contains_def(def: &PropertyDef) -> bool {
+            match def {
+                PropertyDef::Single(atom) => contains_atom(atom),
+                PropertyDef::Union(arms) => arms.iter().any(contains_atom),
+            }
+        }
+        !self.function_type.parameters.as_slice().iter().any(|parameter| contains_def(&parameter.def))
+    }
+
+
     /// The fully typed signature, e.g.
     /// `round(x: numberlike, [fallback: number]) -> number` or
     /// `and(...values: unknown | null) -> boolean`. A fallible function's

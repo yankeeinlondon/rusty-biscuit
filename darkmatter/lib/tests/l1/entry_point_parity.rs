@@ -475,6 +475,36 @@ fn preflight_resolves_existing_and_rejects_missing_directive_targets() {
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
 }
 
+/// A `::file` target in the body of a `::map` / `::filter` region resolves
+/// in pre-flight and in composition exactly as the same target outside one:
+/// an existing target to the same file, a missing one to `NoMatch`.
+#[test]
+fn collection_body_targets_resolve_like_plain_targets_in_preflight_and_compose() {
+    let root = tempfile::TempDir::new().expect("fixture root");
+    let fixture = ParityFixture::create(root.path());
+    let existing = ChainOutcome::File(fixture.repo().join("root-only.md"));
+    let missing = ChainOutcome::Failure(biscuit_file::ResolutionFailure::NoMatch);
+    let mut mismatches = Vec::new();
+    for (opener, closer) in [("map", "end-map"), ("filter", "end-filter")] {
+        for (slug, reference, expected) in [("existing", "&root-only.md", &existing), ("missing", "&missing.md", &missing)] {
+            let document = fixture.depth_dir(Depth::One).join(format!("collection-{opener}-{slug}.md"));
+            let text = format!(
+                "---\n$schema:\n  data: any[](required)\ndata: [1]\n---\n::{opener} data\n::file {reference}\n::{closer}\n"
+            );
+            std::fs::write(&document, text).expect("write the document");
+            for (entry, observed) in [
+                ("pre-flight", preflight_outcome(&fixture, &document)),
+                ("compose", compose_outcome(&fixture, &document)),
+            ] {
+                if !outcome_matches(expected, &observed) {
+                    mismatches.push(format!("{entry} ::{opener} `{reference}`: expected {expected:?}, got {observed:?}"));
+                }
+            }
+        }
+    }
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
 fn outcome_matches(expected: &ChainOutcome, observed: &ChainOutcome) -> bool {
     match (expected, observed) {
         (ChainOutcome::File(want), ChainOutcome::File(got)) => matrix::identity(want) == matrix::identity(got),

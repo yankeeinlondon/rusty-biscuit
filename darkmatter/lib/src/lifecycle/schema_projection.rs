@@ -1107,7 +1107,7 @@ mod tests {
         assert!(projection.verb("set").is_none());
         assert!(projection.collisions.iter().any(|collision| collision.verb == "set"));
         assert!(projection.collisions.iter().any(|collision| collision.verb == "max"));
-        assert!(projection.callback_exclusions.is_empty());
+        assert_eq!(projection.callback_exclusions.iter().map(String::as_str).collect::<std::collections::BTreeSet<_>>(), std::collections::BTreeSet::from(["map", "filter"]));
     }
 
     #[test]

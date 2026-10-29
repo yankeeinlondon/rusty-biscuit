@@ -7,10 +7,20 @@
 //! [`TypeScope`] can [`assume`](TypeScope::assume_at) the true side of every
 //! enclosing guard, outermost first.
 //!
-//! Shell discovery, shell execution, transclusion-target analysis, and DMLS
-//! read the regions through this one type, so a site gets the same facts
-//! whichever of them asks; a shell site's approval shape follows its guard
-//! refinements, so discovery and execution must agree.
+//! `BodyGuards` is the conditional projection of
+//! [`BodyScopes`](crate::markdown::compose::collection_blocks::BodyScopes),
+//! the body's one scope inventory, which layers `::map` / `::filter` region
+//! locals over the same guards
+//! ([`BodyScopes::conditional`](crate::markdown::compose::collection_blocks::BodyScopes::conditional)
+//! returns this view). A document with no collection region answers
+//! identically through either. Shell discovery, shell execution, and DMLS
+//! still read the guards alone, so a shell site inside a collection body sees
+//! its enclosing `::block` facts but not the region's locals; the composition
+//! call check and transclusion-target analysis read `BodyScopes`.
+//!
+//! A site gets the same facts whichever consumer asks; a shell site's
+//! approval shape follows its guard refinements, so discovery and execution
+//! must agree.
 //!
 //! Scanning is passive: it parses the block markers and their conditions and
 //! evaluates nothing.

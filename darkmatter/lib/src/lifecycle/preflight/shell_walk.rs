@@ -512,7 +512,7 @@ impl Walk<'_> {
                 HoleTiming::Deferred { .. } => HoleTiming::ApprovalTime,
                 HoleTiming::ApprovalTime => HoleTiming::Deferred { roots: Vec::new() },
                 // Read only when its guarded action is reached.
-                guarded @ HoleTiming::Guarded { .. } => guarded.clone(),
+                guarded @ (HoleTiming::Guarded { .. } | HoleTiming::Local) => guarded.clone(),
             };
         }
         resolve_late_values([(property, &known)], &evaluator).map_err(|error| fail(error.error))?;

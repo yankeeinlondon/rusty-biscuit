@@ -7,8 +7,9 @@ use super::super::perf;
 use super::super::body_origin::{BodyProvenance, EditOrigin, apply_replacements_with_edits};
 use super::super::context::effective_state::ResolvingLookup;
 use super::super::expression::ExpressionFinder;
-use super::super::page_blocks::BodyGuards;
+use super::super::collection_blocks::BodyScopes;
 use super::super::schema_validation::PreparedSchemas;
+use super::super::site_scope::{SiteHook, SiteLookup};
 use super::super::shell_expansion::site::{SiteFrame, SiteScope, TemplateSite, authored_context, prepare_site};
 use super::super::shell_expansion::template::LookupEvaluator;
 use super::super::shell_expansion::types::{ShellCommandOrigin, ShellDirective, ShellExpansionError};
@@ -70,13 +71,15 @@ pub(crate) fn run_stage(
     // The page-block stage already removed every false block, so a site's
     // enclosing `::block when=` guards held; they are read from the authored
     // body, as discovery read them.
-    let body_guards = body
+    let body_scopes = body
         .authored
         .as_ref()
         .filter(|_| authored.iter().any(Option::is_some))
-        .map(|authored| BodyGuards::scan_body(authored.text(), line_offset))
+        .map(|authored| BodyScopes::scan_body(authored.text(), line_offset, &options.enabled_operations))
         .unwrap_or_default();
-    let lookup = ResolvingLookup::new(state, options.expression_resolution_context(&runtime.remote_fetch));
+    let document = ResolvingLookup::new(state, options.expression_resolution_context(&runtime.remote_fetch));
+    // A repeated body's placeholders read the frame of the copy they lie in.
+    let lookup = SiteLookup::new(&document, &body.scopes, Some(&runtime.iteration));
     let evaluator = LookupEvaluator::new(&lookup);
     let scope = authored
         .iter()
@@ -97,6 +100,7 @@ pub(crate) fn run_stage(
     for (line, authored) in lines.into_iter().zip(authored) {
         let site = match (authored, &scope) {
             (Some((command, file_line, authored_offset)), Some(scope)) => {
+                lookup.enter(line.span.start);
                 let frame = match &line.parsed {
                     Ok(directive) => Some(SiteFrame::of(directive)),
                     Err(_) => parser::authored_directive_options(&command, file_line, &authored_ctx)?.map(|options| {
@@ -117,8 +121,9 @@ pub(crate) fn run_stage(
                         authored_ctx.clone(),
                         &evaluator,
                         frame,
-                        &body_guards.enclosing(authored_offset),
-                    )?,
+                        &|types| body_scopes.scope_at(types, authored_offset),
+                    )
+                    .map_err(|error| body.scope_failure(markdown, line.span.clone(), error))?,
                     None => None,
                 }
             }
@@ -144,8 +149,13 @@ pub(crate) fn run_stage(
 
     for (parsed, site, span, extent, line_indent) in directives {
         let span_start = perf.is_enabled().then(std::time::Instant::now);
-        let prepared = prepare_site(parsed, site.as_ref(), options, &policy_paths, &mut runtime.shell)?;
-        let execution = execute_prepared_directive(&prepared, options, &runtime.shell)?;
+        // A template reads its holes now, so the copy it lies in is entered
+        // again: every directive was read before any ran.
+        lookup.enter(span.start);
+        let prepared = prepare_site(parsed, site.as_ref(), options, &policy_paths, &mut runtime.shell)
+            .map_err(|error| body.scope_failure(markdown, span.clone(), error))?;
+        let execution = execute_prepared_directive(&prepared, options, &runtime.shell)
+            .map_err(|error| body.scope_failure(markdown, span.clone(), error))?;
         if let Some(start) = span_start {
             let raw_command = &prepared.effective.raw_command;
             perf.record_shell_span(ShellCommandSpan {
@@ -168,6 +178,11 @@ pub(crate) fn run_stage(
         super::super::pipeline::stop_if_blocked(report, options, None)?;
     }
 
+    for (span, output) in &replacements {
+        lookup
+            .charge(span.start, output.len())
+            .map_err(|error| body.scope_failure(markdown, span.clone(), collection_budget(error)))?;
+    }
     let before = markdown.content().to_string();
     let edits = apply_replacements_with_edits(markdown.content_mut(), replacements, EditOrigin::Data);
     body.advance(&before, &edits, markdown.content())?;
@@ -187,4 +202,11 @@ fn directive_extent(content: &str, data: &DataRanges, line: &parser::DirectiveLi
         from = at + 1;
     }
     line.span.start..content.len()
+}
+
+/// A budget exhaustion as the request-fatal composition error, not yet
+/// located: the charging stage locates it with
+/// [`BodyProvenance::scope_failure`].
+pub(crate) fn collection_budget(error: super::super::expression::iteration::IterationError) -> crate::markdown::types::MarkdownError {
+    super::super::collection_blocks::CollectionError::budget(error).into()
 }

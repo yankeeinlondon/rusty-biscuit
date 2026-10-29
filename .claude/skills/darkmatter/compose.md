@@ -392,7 +392,8 @@ Classification uses only `ContextGroup::for_key`/`projected_keys` and the
 snapshot's `capture_requirements()`. Expression evaluation reads through
 `EvaluationLookup::resolve`, which `EffectiveState`, `ResolvingLookup`,
 `FrontmatterSeedState`, `ShortcutLookup`, `CtxLookup`, `DeferrableLookup`, and
-`EvaluationSession` override. A bare name is a document property only: no
+`EvaluationSession` override. Outside a local scope a bare name is a document
+property only (inside one, `ScopedLookup` answers the nearest local first): no
 lookup falls back to `ctx` (the parity inventory in
 `compose/tests/lookup_parity.rs` lists every implementation and probes it).
 
@@ -1365,3 +1366,66 @@ darkmatter/lib/src/
         ├── parser.rs    # Expression parser
         └── evaluator.rs # AST evaluation
 ```
+
+## Map and filter (`collection_blocks`)
+
+`::map` and `::filter` are two modes of one executor in
+`compose/collection_blocks/` (`parser`, `analysis`, `scopes`, `engine`,
+`error`, `diagnostics`, `types`). User docs: `docs/inline/{map,filter}.md`,
+`docs/iterables.md`.
+
+- **Operation.** `ComposeOperation::CollectionBlocks` (index 16, CLI
+  `--disable collection-blocks`) is grouped with `PageBlocks` into one
+  structural traversal between replacement and interpolation. A disabled
+  wrapper keeps its markers and contributes no bindings.
+- **Shared substrate.** Callbacks are `parse_callback[_spanned]` (never `Expr`
+  values); locals are immutable `LexicalScope` frames behind `ScopedLookup` in
+  `expression/binding.rs`; `local` is a reserved root. Iterable projection is
+  `expression/iterable.rs` plus `scope/iterable.rs`. Callback parameter names
+  alias one input subject (`ItemFrame`) for guard facts, and a destructured
+  field is that subject's member path (`TypedLocal::aliasing_field`), so
+  `p.members` and `{members}` share facts; a map body binds its result subject
+  afresh.
+- **Schedule.** Gate, then source once, in the enclosing scope. Unsorted: visit,
+  filter predicate, extra filter, prefix, map, nested preparation per reached
+  item. Sorted: visit/select/key in source order, stable sort (descending uses
+  a descending comparator, never reversal), then prefix/map/body. Callbacks
+  are serial.
+- **Retained scopes.** `BodyProvenance` carries scope/iteration/expansion-owner
+  ranges and can project one authored range repeatedly; interpolation, target
+  rewriting, shell templates, links, and transclusion preparation pick their
+  lookup at the authored site. Never recompose produced text.
+- **Budgets.** `IterationLimits` (100,000 visits, 16,777,216 bytes, `NonZeroU64`)
+  via `ComposeOptions::{with_max_iteration_visits, with_max_expansion_bytes}`,
+  read through `iteration_limits()`. One `IterationBudget` is shared through
+  `PipelineRuntime::clone_for_child`; `ExpansionWriter` reserves before every
+  append; cache entries record `ExpansionUsage` and reuse reserves it again.
+  Preflight charges nothing. Exhaustion is request-fatal, including through
+  `as_markdown()` fallbacks.
+- **Discovery boundary.** Passive `analyze_collection_blocks` runs no handlers
+  or I/O. `analyze_collection_blocks_report` returns the same first defect
+  with the recovered sources authored before it; the call precheck feeds
+  those into its authored-order prefix, so a static rejection keeps them. Preflight (`preflight/collect.rs`, with `reference/graph.rs` for
+  reference validation) enumerates sources and
+  evaluates only the dependency slice for targets; selection, sort and
+  prefix are never evaluated. Child edges are keyed by authored site,
+  iteration path and explicit-parameter identity; a graph-backed request
+  never late-approves a new target. Local-dependent shell holes are
+  `Deferred` and `TemplateRequired`. `reference/graph.rs` must not run the
+  normal `CollectionBlocks` operation (double execution).
+- **Diagnostics.** `dm.collection.*`, `dm.expression.invalid_callback`,
+  `dm.iteration.{visit,expansion}_limit`; located diagnostics carry `span` and
+  `iteration_path`. Recovery: `with_allow_untyped_{map,filter}_variables`.
+  Budget counters stay context-free (`CollectionError::budget`); the stage
+  that charged them locates the failure. A later body stage's failure at a
+  site inside a copy goes through `site_scope::scope_failure` (or
+  `BodyProvenance::scope_failure`), which locates an unlocated budget failure
+  and wraps anything else in `MarkdownError::InIteration(IterationFailure)`;
+  fatality/recovery checks read `MarkdownError::without_iteration()`, and
+  `report_diagnostics` is the one projection (it joins nested paths and
+  appends `at <path>`). Never rebuild provenance from a message.
+  Shell-block command preparation/execution enters the command's own offset;
+  combined-output charging uses the block replacement's start. Keep those
+  distinct when changing stage failure boundaries.
+- **Order identity.** Cache/graph keys add an order fingerprint
+  (`biscuit-hash`) alongside canonical value hashes.

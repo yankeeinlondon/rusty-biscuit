@@ -2401,6 +2401,24 @@
         }
       },
       {
+        "label": "filter(iterable, callback)",
+        "kind": 3,
+        "detail": "filter(iterable: unknown[] | object | null, callback: function(parameters(item: unknown | null); returns(unknown | null))) -> (unknown | null)[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "filter"
+        }
+      },
+      {
         "label": "first(x)",
         "kind": 3,
         "detail": "first(x: unknown[] | null) -> unknown",
@@ -2488,6 +2506,24 @@
             }
           },
           "newText": "length"
+        }
+      },
+      {
+        "label": "map(iterable, callback)",
+        "kind": 3,
+        "detail": "map(iterable: unknown[] | object | null, callback: function(parameters(item: unknown | null); returns(unknown | null))) -> (unknown | null)[]",
+        "textEdit": {
+          "range": {
+            "start": {
+              "line": 37,
+              "character": 14
+            },
+            "end": {
+              "line": 37,
+              "character": 14
+            }
+          },
+          "newText": "map"
         }
       },
       {

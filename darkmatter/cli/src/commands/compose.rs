@@ -160,6 +160,26 @@ pub(crate) fn reject_report_conflicts(show: bool, shell: bool) -> Result<()> {
     }
 }
 
+/// The collection limits given on the command line; `None` leaves the
+/// library default in force.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CollectionLimits {
+    pub max_iteration_visits: Option<std::num::NonZeroU64>,
+    pub max_expansion_bytes: Option<std::num::NonZeroU64>,
+}
+
+impl CollectionLimits {
+    fn apply(self, mut options: ComposeOptions) -> ComposeOptions {
+        if let Some(visits) = self.max_iteration_visits {
+            options = options.with_max_iteration_visits(visits);
+        }
+        if let Some(bytes) = self.max_expansion_bytes {
+            options = options.with_max_expansion_bytes(bytes);
+        }
+        options
+    }
+}
+
 /// Run the compose pipeline.
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, fields(command = "compose"))]
@@ -176,6 +196,7 @@ pub fn run_compose(
     policy: &ResolvedPolicy,
     baseline_schema: Option<&PathBuf>,
     timeout_secs: Option<u64>,
+    collection_limits: CollectionLimits,
     shell_report: bool,
     perf: bool,
     remote_config: darkmatter::markdown::compose::RemoteReadConfig,
@@ -262,6 +283,15 @@ pub fn run_compose(
     options = options.with_trigger_schemas(!policy.disables("schema-triggers"));
     let blocking = policy.blocking_policy();
     options = options.with_blocking_policy(blocking.clone());
+    // Collection controls must be in force before reference validation,
+    // lifecycle, or pre-flight read the options.
+    options = collection_limits.apply(options);
+    options = options
+        .with_allow_untyped_map_variables(policy.recovers("untyped-map-variables"))
+        .with_allow_untyped_filter_variables(policy.recovers("untyped-filter-variables"));
+    if policy.disables("collection-blocks") {
+        options = options.disable(darkmatter::markdown::compose::ComposeOperation::CollectionBlocks);
+    }
 
     // Parse --state as JSON or JSON5
     if let Some(json_str) = state_json {
@@ -797,6 +827,9 @@ pub(crate) fn compose_error(e: darkmatter::markdown::MarkdownError) -> color_eyr
         let diagnostics = error_diagnostics(&e);
         return ClassifiedFailure::report(shell_compose_error(e), diagnostics);
     }
+    if let darkmatter::markdown::MarkdownError::Collection(inner) = e {
+        return crate::collection_failure::CollectionFailure::new(*inner).into();
+    }
     e.into()
 }
 
@@ -1188,7 +1221,7 @@ fn preflight_approval_message(err: darkmatter::markdown::compose::ShellExpansion
         // schema validation, remote fetch, …). Convert the inner MarkdownError
         // straight to a report so `main`'s BlockError path renders its styled
         // block, identical to the `compose_with` failure path.
-        ShellExpansionError::Preflight(inner) => (*inner).into(),
+        ShellExpansionError::Preflight(inner) => compose_error(*inner),
         ShellExpansionError::Blacklisted {
             command,
             reason,

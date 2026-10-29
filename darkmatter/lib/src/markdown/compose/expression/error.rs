@@ -4,7 +4,7 @@
 //! `Result<Value, String>` boundary in the expression engine. It is introduced
 //! per the integrated design
 //! (`claudine/features/2026-06-28-real-errors/integrated-design.md` §3–§5): a
-//! flat [`ExpressionError`] (the *what*) plus a reusable
+//! typed [`ExpressionError`] (the *what*) plus a reusable
 //! [`FileReferenceDiagnostic`] shared by every filesystem builtin
 //! (`frontmatter`, `absolute`, `relative`, `load_markdown`, …).
 //!
@@ -22,7 +22,7 @@
 //! - Filesystem builtins carry [`FileReferenceDiagnostic`] via
 //!   [`ExpressionError::FileReference`].
 //! - An unrecognized function name is [`ExpressionError::UnknownFunction`] — the
-//!   sole authoring-fatal variant in lenient mode.
+//!   failure remains authoring-fatal through callback wrappers.
 //! - A call that does not bind to its declared signatures, or a handler result
 //!   that breaks its return type, is [`ExpressionError::Call`].
 //! - The recursive-descent parser stays string-typed behind
@@ -202,9 +202,8 @@ impl ProviderFailureKind {
 
 /// A typed expression-evaluation error (Layer A: the *what*).
 ///
-/// Flat by design (§3): the where (frontmatter key vs body, on-disk vs
-/// effective source) is added by the `MarkdownError::Interpolation` wrapper in a
-/// later phase, never by reformatting this error's message.
+/// Document locations are added by `MarkdownError::Interpolation`; callback
+/// wrappers retain original item positions and a typed source chain.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ExpressionError {
     /// A filesystem builtin failed to resolve its file argument.
@@ -237,6 +236,35 @@ pub enum ExpressionError {
     /// failures, so it is carried as last-mile text behind this single variant.
     #[error("parse error: {0}")]
     Parse(String),
+
+    /// A callback pattern binds a protected name or violates callback syntax.
+    #[error("invalid callback: {message}")]
+    InvalidCallback {
+        /// Located pattern or callback syntax in the expression text.
+        span: crate::markdown::span::SourceSpan,
+        /// The actionable rejection, retaining the shared binding rule.
+        message: String,
+    },
+
+    /// A callback failed at an original source position. Each enclosing
+    /// callback retains its own wrapper and the typed underlying cause.
+    #[error("{function}[{position}]: {source}")]
+    Callback {
+        /// Registered collection function.
+        function: String,
+        /// Original zero-based array index or object key.
+        position: super::iteration::IterationPosition,
+        /// Pattern or body failure, before any later item executes.
+        #[source]
+        source: Box<ExpressionError>,
+    },
+
+    /// A collection allowance (visits or expansion bytes) was exhausted.
+    ///
+    /// Request-fatal on every surface: no handler, fallback, or recovery
+    /// option converts it into a value.
+    #[error("{0}")]
+    IterationLimit(Box<super::iteration::IterationError>),
 
     /// A binary arithmetic operator (`+`, `-`, `*`, `/`, `%`) received a
     /// non-numeric operand. Operators are not function calls, so they are modeled
@@ -514,7 +542,9 @@ impl ExpressionError {
     /// [`RemoteNotEnabled`]: FileRefFailure::RemoteNotEnabled
     pub fn is_authoring_fatal(&self) -> bool {
         match self {
-            ExpressionError::UnknownFunction { .. } => true,
+            ExpressionError::Callback { source, .. } => source.is_authoring_fatal(),
+            ExpressionError::UnknownFunction { .. } | ExpressionError::InvalidCallback { .. } => true,
+            ExpressionError::IterationLimit(_) => true,
             ExpressionError::GlobReference { .. } => true,
             ExpressionError::Provider { .. } => true,
             ExpressionError::ContractViolation { .. } => true,
@@ -544,6 +574,27 @@ impl ExpressionError {
         }
     }
 
+    /// Original collection positions, outermost first, including an exhausted
+    /// visit's position when the body has not started yet.
+    pub fn callback_path(&self) -> super::iteration::IterationPath {
+        use super::iteration::{IterationFrame, IterationPath};
+        match self {
+            Self::Callback { function, position, source } => IterationPath::empty()
+                .pushed(IterationFrame { collection: function.clone(), position: position.clone() })
+                .joined(&source.callback_path()),
+            Self::IterationLimit(error) => error.path.clone(),
+            _ => IterationPath::empty(),
+        }
+    }
+
+    /// The underlying failure after all collection callback wrappers.
+    pub fn without_callbacks(&self) -> &Self {
+        match self {
+            Self::Callback { source, .. } => source.without_callbacks(),
+            other => other,
+        }
+    }
+
     /// Whether this is a missing runtime context failure
     /// ([`ContextNotCaptured`], [`FunctionContextNotCaptured`],
     /// [`ContextProjectionInvariant`], or [`ExecutionNonceUnavailable`]).
@@ -556,6 +607,9 @@ impl ExpressionError {
     /// [`ContextProjectionInvariant`]: ExpressionError::ContextProjectionInvariant
     /// [`ExecutionNonceUnavailable`]: ExpressionError::ExecutionNonceUnavailable
     pub fn is_missing_runtime_context(&self) -> bool {
+        if let Self::Callback { source, .. } = self {
+            return source.is_missing_runtime_context();
+        }
         matches!(
             self,
             ExpressionError::ContextNotCaptured { .. }
@@ -575,6 +629,16 @@ impl ExpressionError {
     /// stringly evaluator error.
     pub fn starts_with(&self, needle: &str) -> bool {
         self.to_string().starts_with(needle)
+    }
+}
+
+impl From<super::ParseError> for ExpressionError {
+    fn from(error: super::ParseError) -> Self {
+        if error.diagnostic_code().is_some() {
+            Self::InvalidCallback { span: error.position..error.position, message: error.to_string() }
+        } else {
+            Self::Parse(error.to_string())
+        }
     }
 }
 

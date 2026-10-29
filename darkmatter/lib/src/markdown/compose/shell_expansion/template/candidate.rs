@@ -10,7 +10,9 @@ use super::{
     ApprovalKey, CommandTemplate, HoleTiming, OfferedChoices, ShellPreApprovals, TemplateApprovalView,
     TemplateGrammarError, TemplateShape,
 };
-use crate::markdown::compose::expression::{Expr, ExpressionFinder, GuardOrigin, TypeScope, fm_namespace, parse};
+use crate::markdown::compose::expression::{
+    Expr, ExpressionFinder, GuardOrigin, TypeScope, parse, static_access_reads,
+};
 use crate::markdown::compose::shell_expansion::types::{ShellCommandOrigin, ShellExpansionError};
 use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
@@ -327,6 +329,8 @@ impl CandidateScope<'_> {
                         Some(guard) => HoleTiming::Guarded { guard, roots },
                         None => HoleTiming::Deferred { roots },
                     };
+                } else if reads_local(&placeholder.expression, types) {
+                    placeholder.timing = HoleTiming::Local;
                 }
             }
             template
@@ -343,7 +347,8 @@ impl CandidateScope<'_> {
                 .expressions
                 .into_iter()
                 .map(|location| {
-                    let late = self.deferred_roots(&location.expression).is_some();
+                    let late = self.deferred_roots(&location.expression).is_some()
+                        || reads_local(&location.expression, types);
                     (location.expression, late)
                 })
                 .collect(),
@@ -413,6 +418,18 @@ impl CandidateScope<'_> {
             requirement,
         })
     }
+}
+
+/// Whether `expression` reads a lexical local at a site typed by `types`,
+/// explicitly (`local.x`) or by name, anywhere inside a larger expression.
+/// Static: nothing is evaluated.
+fn reads_local(expression: &str, types: &TypeScope<'_>) -> bool {
+    let Ok(expr) = parse(expression) else {
+        return false;
+    };
+    static_access_reads(&expr)
+        .iter()
+        .any(|read| types.resolves_to_local(read.variable))
 }
 
 /// The frontmatter keys of `frontmatter` that read a late root, directly or
@@ -507,53 +524,20 @@ fn value_roots(value: &Value, roots: &mut Vec<RootRead>) {
 /// The first path segment of every variable `expr` reads, with an `fm.`
 /// prefix removed so `fm.out` and `out` name the same key.
 fn read_roots(expr: &Expr, roots: &mut Vec<RootRead>) {
-    match expr {
-        Expr::Variable(path) => {
-            let effective = fm_namespace::strip_fm_prefix(path);
-            let root = effective.split('.').next().unwrap_or(effective);
-            if !root.is_empty() {
-                roots.push(RootRead {
-                    root: root.to_string(),
-                    frontmatter: effective.len() != path.len(),
-                });
+    use crate::markdown::compose::expression::{AccessStep, static_access_reads};
+    for read in static_access_reads(expr) {
+        let path = read.variable;
+        let explicit = path.starts_with("fm.") || path == "fm";
+        let root = if path == "fm" {
+            match read.steps.first() {
+                Some(AccessStep::Key(key) | AccessStep::Member(key)) => *key,
+                _ => continue,
             }
-        }
-        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
-        Expr::UnaryNot(inner)
-        | Expr::UnaryMinus(inner)
-        | Expr::Paren(inner)
-        | Expr::MemberAccess { base: inner, .. } => read_roots(inner, roots),
-        Expr::Fallback { primary, fallback } => {
-            read_roots(primary, roots);
-            read_roots(fallback, roots);
-        }
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            read_roots(condition, roots);
-            read_roots(then_branch, roots);
-            read_roots(else_branch, roots);
-        }
-        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
-            read_roots(left, roots);
-            read_roots(right, roots);
-        }
-        Expr::Index { base, index } => {
-            if let Some(key) = fm_namespace::literal_index_key(base, index) {
-                roots.push(RootRead {
-                    root: key.to_string(),
-                    frontmatter: true,
-                });
-                return;
-            }
-            read_roots(base, roots);
-            read_roots(index, roots);
-        }
-        Expr::FunctionCall { args, .. } => args.iter().for_each(|arg| read_roots(arg, roots)),
-        Expr::ArrayLiteral(items) => items.iter().for_each(|item| read_roots(item, roots)),
-        Expr::ObjectLiteral(entries) => entries.iter().for_each(|(_, value)| read_roots(value, roots)),
+        } else {
+            path.strip_prefix("fm.").unwrap_or(path).split('.').next().unwrap_or(path)
+        };
+        if root.is_empty() { continue; }
+        roots.push(RootRead { root: root.to_string(), frontmatter: explicit });
     }
 }
 
@@ -561,6 +545,12 @@ fn read_roots(expr: &Expr, roots: &mut Vec<RootRead>) {
 mod read_root_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn callback_dependencies_keep_explicit_frontmatter_and_exclude_locals() {
+        let value = json!("{{ map(items, p => [p.name, local.p, fm.p, fm['p.name'], outer]) }}");
+        assert_eq!(value_read_roots(&value), ["items", "p", "p.name", "outer"]);
+    }
 
     #[test]
     fn read_roots_follow_every_expression_at_any_depth_and_strip_fm() {

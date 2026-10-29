@@ -5,7 +5,7 @@ related: "darkmatter/docs/inline/map.md"
 
 # Iterables
 
-In Darkmatter, arrays, tuples, and key/value objects are _iterable_ types. The planned [map directive](./inline/map.md) will iterate over these types. `::map` and `::end-map` are not implemented yet; the examples below describe the intended behavior. A source must have a known iterable type from its effective schema, namespace declaration, or enclosing local binding.
+In Darkmatter, arrays, tuples, and key/value objects are _iterable_ types. The [map](./inline/map.md) and [filter](./inline/filter.md) directives iterate over these types. A source must have a known iterable type from its effective schema, namespace declaration, or enclosing local binding.
 
 Optional and nullable collections are accepted: missing or null sources render
 nothing, as do empty collections. Non-null scalar sources are errors. Arrays
@@ -78,6 +78,10 @@ Shallow destructuring can expose those fields directly:
 - {{key}} is often referred to as "{{value.nickname}}"
 ::end-map
 ```
+
+An object pattern requires an object item and every named field. `{key}` accepts
+`{key: null}` because the field exists; it rejects a null item or an object
+without `key`. A null or empty source has no items to bind.
 
 The quoted mapping function is optional and positional. Both `->` and `=>`
 have the same meaning. Its parameter pattern binds the input for evaluating

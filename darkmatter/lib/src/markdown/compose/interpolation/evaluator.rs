@@ -476,6 +476,11 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
                 self.walk_context_variables(index, visitor);
             }
             Expr::MemberAccess { base, .. } => self.walk_context_variables(base, visitor),
+            Expr::CallbackCall { args, .. } => {
+                for arg in args {
+                    self.walk_context_variables(arg.expression(), visitor);
+                }
+            }
             Expr::FunctionCall { args, .. } => {
                 for arg in args {
                     self.walk_context_variables(arg, visitor);

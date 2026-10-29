@@ -1,7 +1,8 @@
-# Filter Directive
+---
+kind: canonical-documentation
+---
 
-**Planned:** `::filter` and `::end-filter` are not implemented yet. This page
-records their intended behavior.
+# Filter Directive
 
 Use `::filter` to render selected items from a typed collection. Its positional
 function decides which items to keep; the body receives each retained original
@@ -84,10 +85,17 @@ schema validation still rejects a missing required frontmatter property.
 Null inside an array is an actual item and is tested normally, unlike a null
 source, which has no items.
 
-The planned `--allow untyped-filter-variables` recovery permits an untyped
-source, with corresponding library policy support. It bypasses only the static
+The `--allow untyped-filter-variables` recovery (library:
+`ComposeOptions::with_allow_untyped_filter_variables(true)`) permits an untyped
+source. It bypasses only the static
 source-typing requirement; it does not make scalars iterable, waive expression
 errors, or authorize shell commands.
+
+The recovery's warning (`dm.collection.untyped_filter_source`) is reported
+once, at the source. When a later `::filter` or `::map` has a static defect,
+such as a scalar source, composition fails before anything runs and the failure
+report keeps the earlier warning ahead of the defect. A recovered source written
+after the defect is not reported: the check stops at the first defect.
 
 ## Predicate Binding and Destructuring
 
@@ -120,6 +128,19 @@ Aliases, quoted/computed keys, array patterns, nested patterns, defaults, rest
 bindings, and trailing commas are outside the initial grammar. Missing
 pattern fields are errors: reject provably incompatible input shapes
 statically and check uncertain shapes at runtime.
+
+A destructured field and the same field read through an object parameter are
+one binding, so a type a selection predicate proves under one spelling holds
+under the other. Here the body's `members` is a proven array, so the nested
+`::map` accepts it:
+
+```md
+::filter teams "{members} => true" filter="team => is_array(team.members)"
+::map members
+- {{i}}
+::end-map
+::end-filter
+```
 
 Use `::map` when the body should receive a transformed value. A filter predicate
 may compute a value to test its truthiness, but that value never replaces the
@@ -292,7 +313,7 @@ must launch a fresh process. Authorization and argument checks precede reuse.
 
 ## Discovering Child Documents
 
-This behavior is planned. Composition preflight can enumerate a typed
+Composition preflight can enumerate a typed
 collection and evaluate supported read-side expressions to discover child
 files. For example, declare `chapters` as `file[](required)` and populate it
 with `chapters: "{{ find_files('./chapters/*.md') }}"`:
@@ -343,7 +364,7 @@ Expression result arrays consume visits but are values, not rendered bytes.
 These limits do not bound arbitrary allocations inside expression handlers or
 subprocesses before their output reaches the document.
 
-Library options and the planned CLI controls accept positive limits:
+Library options (`ComposeOptions::with_max_iteration_visits` and `with_max_expansion_bytes`, both taking `NonZeroU64`) and the CLI controls accept positive limits:
 
 ```sh
 md compose report.md --max-iteration-visits 200000 --max-expansion-bytes 33554432
@@ -357,10 +378,14 @@ Preflight does not spend the execution allowance. Existing transclusion depth
 limits remain separate. Standalone expression sessions share the same default
 visit limit across nested calls.
 
-Diagnostics name the authored file, line, expression, original index or key,
-and nested iteration path. Report static defects once; attach iteration
-context to runtime failures. Sorting must not replace source positions with
-output positions.
+Diagnostics name the authored file, line, expression span, original index or
+key, and nested iteration path. A static defect is reported once, with no
+iteration. A runtime failure names the item whose copy exposed it, whichever
+stage failed: a callback, a `when=` gate, a `{{ }}` expression, a shell
+argument or its output, a `::file` target, condition, or child, or an
+allowance. Sorting never replaces source positions with output positions. The
+library's typed error and `md compose --output report-json` carry the same
+fields; see [the report](../cli/report-json.md#failures-inside-map-and-filter-bodies).
 
 ## Markdown Boundaries
 

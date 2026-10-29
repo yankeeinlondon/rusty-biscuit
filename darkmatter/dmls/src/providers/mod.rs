@@ -9,6 +9,7 @@
 //! contribution and a logged warning instead of taking down the request loop.
 
 pub mod code_actions;
+pub mod collections;
 pub mod completion;
 pub mod definition;
 pub mod diagnostics;

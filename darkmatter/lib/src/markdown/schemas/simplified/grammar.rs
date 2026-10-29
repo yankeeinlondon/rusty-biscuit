@@ -1497,7 +1497,7 @@ impl<'a> Parser<'a> {
         let expected_span = trim_span(self.src, result_range);
         let call = &self.src[call_span.clone()];
         match parse_spanned(call) {
-            Ok(expression) if matches!(expression.kind, SpannedExprKind::FunctionCall { .. }) => {}
+            Ok(expression) if matches!(expression.kind, SpannedExprKind::FunctionCall { .. } | SpannedExprKind::CallbackCall { .. }) => {}
             Ok(_) => {
                 return self.err(
                     "an example call must be a function call, as in `min(3, 5)`",

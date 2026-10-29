@@ -4,7 +4,7 @@ use crate::args::policy::{self, PolicyCommand, PolicySelector, PolicyValueParser
 use crate::args::{
     CodeBlockOutput, ComposeOutputFormat, HashKind, RemoteFreshness, SchemaTarget, ValidateTarget,
     complete_compose_args, complete_fixed_width_values, complete_indent_values,
-    complete_markdown_files, complete_theme_names, parse_fixed_width, parse_indent_size,
+    complete_markdown_files, complete_theme_names, parse_fixed_width, parse_indent_size, parse_positive_limit,
     parse_theme_name,
 };
 use darkmatter::markdown::highlighting::ThemePair;
@@ -168,6 +168,24 @@ pub enum Command {
         /// Global shell command timeout in seconds (default: 10)
         #[arg(long, value_name = "SECONDS")]
         timeout: Option<u64>,
+
+        /// Source items one request may visit across every `::map` / `::filter` (library default applies when omitted)
+        #[arg(
+            long,
+            value_name = "N",
+            value_parser = parse_positive_limit,
+            allow_negative_numbers = true
+        )]
+        max_iteration_visits: Option<std::num::NonZeroU64>,
+
+        /// Bytes of collection expansion one request may materialize (library default applies when omitted)
+        #[arg(
+            long,
+            value_name = "N",
+            value_parser = parse_positive_limit,
+            allow_negative_numbers = true
+        )]
+        max_expansion_bytes: Option<std::num::NonZeroU64>,
 
         /// Report condition-blind shell approval candidates (every command that
         /// could run under any state, including dead branches) without executing them

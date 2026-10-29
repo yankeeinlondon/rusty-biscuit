@@ -71,6 +71,7 @@ enum EvaluationMode {
     Pure,
     Context,
     Lazy,
+    Callback,
 }
 
 #[derive(Clone, Copy)]
@@ -78,7 +79,7 @@ struct FunctionBinding {
     canonical: &'static str,
     aliases: &'static [&'static str],
     evaluation: EvaluationMode,
-    /// `None` only for a lazy function, which the evaluator computes.
+    /// `None` for lazy and callback functions, which the evaluator computes.
     handler: Option<FunctionHandler>,
     /// Registered source exclusions (`reject_sources`): parameter name and the
     /// original value kinds it refuses before any conversion.
@@ -118,6 +119,10 @@ impl FunctionBinding {
 
     const fn lazy(canonical: &'static str) -> Self {
         Self::new(canonical, &[], EvaluationMode::Lazy, None)
+    }
+
+    const fn callback(canonical: &'static str) -> Self {
+        Self::new(canonical, &[], EvaluationMode::Callback, None)
     }
 
     const fn rejecting(self, rejects: &'static [(&'static str, &'static [ValueKind])]) -> Self {
@@ -241,7 +246,7 @@ fn build_registry(catalog: &FunctionCatalog) -> Result<Registry, RegistryError> 
             (EvaluationMode::Pure, Some(FunctionHandler::Pure(_))) | (
                 EvaluationMode::Context,
                 Some(FunctionHandler::Context(_))
-            ) | (EvaluationMode::Lazy, None)
+            ) | (EvaluationMode::Lazy | EvaluationMode::Callback, None)
         );
         if !valid_handler {
             return Err(RegistryError::InvalidHandler(binding.canonical.to_string()));
@@ -281,6 +286,9 @@ fn compile_binding(
     let mut builder = FunctionRegistration::builder_from_types(binding.canonical, overloads);
     if binding.evaluation == EvaluationMode::Lazy {
         builder = builder.evaluation(call_binding::EvaluationMode::Lazy);
+    }
+    if binding.evaluation == EvaluationMode::Callback {
+        builder = builder.evaluation(call_binding::EvaluationMode::Callback);
     }
     for (parameter, kinds) in binding.rejects {
         builder = builder.reject_sources(*parameter, kinds);
@@ -851,7 +859,11 @@ fn call_entry(
     let Some(handler) = entry.binding.handler else {
         return Err(ExpressionError::Other {
             function: name.to_string(),
-            message: format!("{canonical}() evaluates its arguments lazily and is called only by the evaluator"),
+            message: if entry.binding.evaluation == EvaluationMode::Lazy {
+                format!("{canonical}() evaluates its arguments lazily and is called only by the evaluator")
+            } else {
+                format!("{canonical}() requires evaluator-owned callback evaluation")
+            },
         });
     };
     let context = match handler {
@@ -2034,7 +2046,7 @@ mod registration_tests {
                     binding.handler,
                     Some(FunctionHandler::Context(_))
                 ),
-                EvaluationMode::Lazy => binding.handler.is_none(),
+                EvaluationMode::Lazy | EvaluationMode::Callback => binding.handler.is_none(),
             };
             assert!(paired, "{}", binding.canonical);
             assert_eq!(super::lazy_function(binding.canonical).is_some(), binding.evaluation == EvaluationMode::Lazy);

@@ -75,7 +75,13 @@ impl Markdown {
             options.max_transclusion_depth,
             options.cache_access_mode,
             remote_fetch,
-        );
+        )
+        .with_iteration_limits(options.iteration_limits());
+        // Discovery reads collections to find children; it consumes none of
+        // the execution allowances.
+        if options.nested_compose.is_discovery() {
+            runtime.iteration = super::expression::iteration::IterationBudget::discovery(options.iteration_limits());
+        }
         runtime.context_epoch.seed(options.context());
         runtime.root_source = Some((
             options.source.clone(),
@@ -206,6 +212,7 @@ impl Markdown {
         if let Some((id, path)) = node {
             runtime.transclusion.enter(id, path, 1)?;
         }
+        options.iteration_budget = Some(runtime.iteration.clone());
         let nested = super::nested::NestedCompose::install(&mut options, runtime, self);
 
         // Outside the closure, so a failure can still hand on what it reported.
@@ -313,7 +320,10 @@ impl Markdown {
                 }
             }
 
-            report.body_data = body.map(|body| body.data);
+            if let Some(body) = body {
+                report.body_data = Some(body.data);
+                report.body_sites = super::body_origin::BodySites { scopes: body.scopes, authored: body.authored };
+            }
 
             super::unknown_identifiers::reconcile(
                 &mut report,

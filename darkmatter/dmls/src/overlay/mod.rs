@@ -15,6 +15,7 @@
 //! touches the YAML parser or the schema library directly.
 
 pub mod analysis;
+pub mod collections;
 pub mod directives;
 pub mod doc_links;
 pub mod event_views;

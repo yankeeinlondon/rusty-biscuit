@@ -118,6 +118,8 @@ fn a_warning_keeps_its_record_or_its_code() {
                 source: None,
                 expected_type: None,
                 actual_type: None,
+                span: None,
+                iteration_path: Default::default(),
             }
         );
     }

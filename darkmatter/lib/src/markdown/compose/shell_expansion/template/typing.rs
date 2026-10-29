@@ -3,9 +3,11 @@
 //!
 //! Only a bare top-level property (`dir`, `fm.dir`) reads its declared type,
 //! from the owning document's `EffectiveSchema.simplified` through the shared
-//! declared layer. Every other
-//! expression, an undeclared name, a reserved root, and a document without a
-//! typed projection fall back to `string`, which accepts any present scalar.
+//! declared layer, and a bare read of a `::map` / `::filter` local (`i`,
+//! `local.i`) reads the type its collection declaration bound. Every other
+//! expression, an undeclared name, a reserved root, a local nothing types,
+//! and a document without a typed projection fall back to `string`, which
+//! accepts any present scalar.
 //!
 //! A hole is typed at its site's [`TypeScope`]: when an enclosing guard
 //! narrows the subject it reads, the narrowed type becomes the approval type
@@ -114,6 +116,9 @@ pub enum TypeProvenance {
     NotBareProperty,
     /// A read of a reserved root or a host global (`ctx.*`, `env.*`, `loop.*`).
     ReservedRoot,
+    /// A bare read of a `::map` / `::filter` local, typed by the collection
+    /// declaration that bound it.
+    Local { name: String },
 }
 
 impl StringLikeType {
@@ -305,18 +310,48 @@ pub fn project_hole(expression: &str, scope: &TypeScope<'_>) -> HoleType {
 
 /// [`project_hole`] for an expression already parsed.
 pub fn project_hole_expr(expr: &Expr, scope: &TypeScope<'_>) -> HoleType {
-    let mut hole = declared_hole(expr, scope);
+    let mut hole = match local_hole(expr, scope) {
+        Some(hole) => hole,
+        None => declared_hole(expr, scope),
+    };
     if let Some(narrowed) = scope.type_of_expr(expr).filter(|ty| ty.is_refined())
         && let Some(definition) = narrowed.narrowed_definition()
     {
         hole.approval = ApprovalType::for_declaration(&definition);
         hole.refinement = Some(Box::new(HoleRefinement {
-            definitions: reached_definitions(&definition, scope.declared().definitions()),
+            definitions: reached_definitions(&definition, scope.definitions()),
             definition,
             guards: narrowed.refinements().to_vec(),
         }));
     }
     hole
+}
+
+/// The hole type of a bare read of a lexical local: its bound type, and the
+/// broad `string` approval with that declaration as the validator. A local
+/// the declarations leave untyped keeps the scalar fallback.
+///
+/// `None` unless `expr` is a variable that resolves to a local at this site.
+fn local_hole(expr: &Expr, scope: &TypeScope<'_>) -> Option<HoleType> {
+    let Expr::Variable(path) = expr else {
+        return None;
+    };
+    if !scope.resolves_to_local(path) {
+        return None;
+    }
+    let name = path.strip_prefix("local.").unwrap_or(path).to_string();
+    let Some(def) = scope.type_of_expr(expr).and_then(|ty| ty.narrowed_definition()) else {
+        return Some(HoleType::fallback(TypeProvenance::Local { name }));
+    };
+    Some(HoleType {
+        approval: ApprovalType::for_declaration(&def),
+        validator: HoleValidator::Declared {
+            definitions: Arc::new(reached_definitions(&def, scope.definitions())),
+            definition: Box::new(def),
+        },
+        provenance: TypeProvenance::Local { name },
+        refinement: None,
+    })
 }
 
 /// The hole type `expr` has before any guard.
@@ -329,6 +364,10 @@ fn declared_hole(expr: &Expr, scope: &TypeScope<'_>) -> HoleType {
         VariableClass::Document { key, rest: "" } => key,
         VariableClass::Namespace { .. } | VariableClass::Host { .. } => {
             return HoleType::fallback(TypeProvenance::ReservedRoot);
+        }
+        VariableClass::Local { .. } => return HoleType::fallback(TypeProvenance::NotBareProperty),
+        VariableClass::Document { .. } if scope.resolves_to_local(path) => {
+            return HoleType::fallback(TypeProvenance::NotBareProperty);
         }
         VariableClass::Document { .. } | VariableClass::WholeFrontmatter => {
             return HoleType::fallback(TypeProvenance::NotBareProperty);

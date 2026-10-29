@@ -5,8 +5,9 @@ status: finalized-spec
 area: darkmatter
 clarified: false
 reviewed: false
-implemented: false
-review_iterations: 0
+implemented: true
+review_iterations: 2
+completed: true
 $schema:
     status: |-
         enum(
@@ -32,6 +33,7 @@ related:
     - 2026-10-28-schema-enhancements
     - 2026-10-31-type-aware-evaluation
     - 2026-10-16-type-narrowing
+implemented_by: "codex/gpt-6.1-sol"
 ---
 
 # Map and Filter

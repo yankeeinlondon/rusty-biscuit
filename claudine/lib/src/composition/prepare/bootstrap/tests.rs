@@ -449,3 +449,35 @@ fn bootstrap_overrides_cannot_enable_shell_expansion() {
     }).unwrap_err();
     assert!(matches!(error, CompositionError::ShellExpansionFailed { .. }), "{error:?}");
 }
+
+/// The body's `::map` / `::filter` regions would each fail composition: an
+/// undeclared source, and a pattern field the item lacks.
+const DORMANT_COLLECTIONS_DOC: &str = "\
+---
+phase: 1
+items: [1]
+---
+Body.
+
+::map nope \"i => i\"
+- {{i}}
+::end-map
+
+::filter items \"{a} => a\"
+- {{a}}
+::end-filter
+";
+
+#[test]
+fn bootstrap_leaves_collection_regions_dormant_while_full_preparation_judges_them() {
+    let dir = TempDir::new().unwrap();
+    let source = source_at(dir.path(), DORMANT_COLLECTIONS_DOC);
+
+    let staged = bootstrap(CompositionMode::ChainedDocument, &source, options_in(dir.path(), 1))
+        .expect("the frontmatter-only read never analyzes or runs a collection region");
+    assert_eq!(staged.effective_frontmatter["phase"], 1);
+
+    let err = full(CompositionMode::ChainedDocument, &source, options_in(dir.path(), 1))
+        .expect_err("full preparation judges the undeclared source");
+    assert!(matches!(err, CompositionError::ComposeFailed(_)), "got {err:?}");
+}

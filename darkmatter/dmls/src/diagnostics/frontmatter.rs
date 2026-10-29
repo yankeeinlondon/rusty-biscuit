@@ -801,7 +801,7 @@ fn expression_diagnostics(
                         range,
                         DiagnosticSeverity::ERROR,
                         source::FRONTMATTER,
-                        code::EXPRESSION_MALFORMED,
+                        error.diagnostic_code().unwrap_or(code::EXPRESSION_MALFORMED),
                         format!("malformed expression: {}", error.message),
                     ));
                 }

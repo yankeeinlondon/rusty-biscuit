@@ -277,7 +277,7 @@ mod registration {
     #[test]
     fn every_reserved_root_is_rejected_before_any_provider_runs() {
         let names: Vec<&str> = reserved_root_descriptors().iter().map(|root| root.name).collect();
-        assert_eq!(names, ["fm", "ctx", "env", "current"]);
+        assert_eq!(names, ["fm", "ctx", "env", "current", "local"]);
 
         let doc = document(json!({}));
         for name in names {

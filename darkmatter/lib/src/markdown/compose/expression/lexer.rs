@@ -411,6 +411,10 @@ pub enum Token {
     /// Arithmetic minus / unary minus `-`.
     Minus,
 
+    /// A callback arrow, `=>` or `->`. The two spellings are identical; the
+    /// token span records which was authored. Only callback parsing accepts it.
+    Arrow,
+
     /// Arithmetic multiplication `*`.
     Star,
 
@@ -483,6 +487,7 @@ impl fmt::Display for Token {
             Token::RBrace => write!(f, "}}"),
             Token::Plus => write!(f, "+"),
             Token::Minus => write!(f, "-"),
+            Token::Arrow => write!(f, "=>"),
             Token::Star => write!(f, "*"),
             Token::Slash => write!(f, "/"),
             Token::Percent => write!(f, "%"),
@@ -706,7 +711,15 @@ impl<'a> Lexer<'a> {
             }
             '-' => {
                 self.advance();
-                Ok(Token::Minus)
+                // `->` is a callback arrow. Previously `-` followed by `>` could
+                // never parse (a binary operand cannot start with `>`), so no
+                // valid expression changes meaning.
+                if self.current_char() == Some('>') {
+                    self.advance();
+                    Ok(Token::Arrow)
+                } else {
+                    Ok(Token::Minus)
+                }
             }
             '*' => {
                 self.advance();
@@ -726,6 +739,9 @@ impl<'a> Lexer<'a> {
                 if self.current_char() == Some('=') {
                     self.advance();
                     Ok(Token::CompOp(ComparisonOp::Equal))
+                } else if self.current_char() == Some('>') {
+                    self.advance();
+                    Ok(Token::Arrow)
                 } else {
                     Err(LexerError::new(
                         "Expected '=' after '=' for equality operator",

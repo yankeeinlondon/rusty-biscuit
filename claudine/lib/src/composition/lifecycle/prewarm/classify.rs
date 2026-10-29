@@ -235,7 +235,7 @@ fn resolve(text: &Expr, (view, globals): Bindings, inputs: &PrewarmInputs) -> Cl
 /// Whether `expr` calls a function anywhere, including untaken branches.
 fn contains_call(expr: &SpannedExpr) -> bool {
     match &expr.kind {
-        SpannedExprKind::FunctionCall { .. } => true,
+        SpannedExprKind::FunctionCall { .. } | SpannedExprKind::CallbackCall { .. } => true,
         SpannedExprKind::Variable(_)
         | SpannedExprKind::StringLiteral(_)
         | SpannedExprKind::NumberLiteral(_)
@@ -305,6 +305,22 @@ fn frontmatter_reads(expr: &SpannedExpr, view: &BindingView, reads: &mut Vec<Fro
         SpannedExprKind::ObjectLiteral(entries) => {
             for (_, value) in entries {
                 frontmatter_reads(value, view, reads);
+            }
+        }
+        SpannedExprKind::CallbackCall { .. } => {
+            let erased = expr.erase();
+            for read in darkmatter::markdown::compose::expression::static_access_reads(&erased) {
+                let path = read.static_path();
+                let mut segments = path.split('.');
+                let root = segments.next().unwrap_or(&path);
+                if root == FRONTMATTER_ROOT {
+                    reads.push(match segments.next() {
+                        Some(key) => FrontmatterRead::Key(key.to_string()),
+                        None => FrontmatterRead::Unbounded,
+                    });
+                } else if view.names_document_property(root) {
+                    reads.push(FrontmatterRead::Key(root.to_string()));
+                }
             }
         }
         SpannedExprKind::FunctionCall { args, .. } => {

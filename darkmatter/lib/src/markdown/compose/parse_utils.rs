@@ -7,6 +7,48 @@ use super::body_origin::DataRanges;
 use std::borrow::Cow;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
+/// A decoded quoted value with the map from decoded byte boundaries back to
+/// the authored bytes they came from.
+///
+/// A callback or condition is parsed from the decoded text, but errors and
+/// editor ranges must point at what the author typed; an escape such as `\"`
+/// is two authored bytes and one decoded byte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MappedQuotedValue {
+    pub(crate) decoded: String,
+    /// `authored[i]` is the authored byte offset of decoded byte `i`; one
+    /// trailing entry maps the decoded end. A byte inside a multibyte
+    /// character maps to the character's first authored byte.
+    authored: Vec<usize>,
+}
+
+impl MappedQuotedValue {
+    /// Builds the map from `(decoded text, authored start)` pieces, in order,
+    /// and the authored offset just past the value.
+    pub(crate) fn from_pieces(pieces: &[(String, usize)], authored_end: usize) -> Self {
+        let mut decoded = String::new();
+        let mut authored = Vec::new();
+        for (text, start) in pieces {
+            for _ in 0..text.len() {
+                authored.push(*start);
+            }
+            decoded.push_str(text);
+        }
+        authored.push(authored_end);
+        Self { decoded, authored }
+    }
+
+    /// The authored offset of decoded byte `boundary`, or `None` past the end.
+    pub(crate) fn authored_boundary(&self, boundary: usize) -> Option<usize> {
+        self.authored.get(boundary).copied()
+    }
+
+    /// The authored range covering decoded `range`, or `None` out of bounds.
+    pub(crate) fn authored_range(&self, range: std::ops::Range<usize>) -> Option<std::ops::Range<usize>> {
+        Some(self.authored_boundary(range.start)?..self.authored_boundary(range.end)?)
+    }
+}
+
 /// A lightweight cursor for parsing directive lines character by character.
 pub(crate) struct Cursor<'a> {
     input: &'a str,
@@ -206,15 +248,41 @@ impl<'a> Cursor<'a> {
     }
 
     fn read_quoted_value(&mut self, line: usize) -> Result<String, CursorError> {
-        let quote = self.current().ok_or_else(|| CursorError {
-            line,
-            column: self.current_column(),
-            message: "Expected quote".to_string(),
-        })?;
+        self.read_quoted_value_mapped(line).map(|mapped| mapped.decoded)
+    }
+
+    /// Reads a quoted value like [`Self::read_value`] does for a quote, but
+    /// also returns the map from decoded byte boundaries to authored offsets.
+    ///
+    /// Authored offsets are relative to this cursor's input, the same space as
+    /// [`Self::pos`]. The opening and closing quotes are not part of the
+    /// decoded text; the closing quote's offset is the mapped end boundary.
+    /// Quote and escape rules are exactly those of `read_value`.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error when the cursor is not on a quote, or the value or an
+    /// escape is unterminated.
+    pub(crate) fn read_quoted_value_mapped(
+        &mut self,
+        line: usize,
+    ) -> Result<MappedQuotedValue, CursorError> {
+        let quote = match self.current() {
+            Some(ch @ ('\'' | '"')) => ch,
+            _ => {
+                return Err(CursorError {
+                    line,
+                    column: self.current_column(),
+                    message: "Expected quote".to_string(),
+                });
+            }
+        };
         self.advance();
 
-        let mut out = String::new();
+        let mut pieces: Vec<(String, usize)> = Vec::new();
+        let authored_end;
         loop {
+            let start = self.pos;
             match self.current() {
                 None => {
                     return Err(CursorError {
@@ -231,57 +299,39 @@ impl<'a> Cursor<'a> {
                     //   when="stage == "tech-design""
                     let next = self.peek_after(quote);
                     if next.is_none() || next.is_some_and(|c| c.is_whitespace() || c == '=') {
+                        authored_end = start;
                         self.advance();
                         break;
                     }
-                    // Literal quote — keep it in the output
-                    out.push(ch);
+                    pieces.push((ch.to_string(), start));
                     self.advance();
                 }
                 Some('\\') => {
                     self.advance();
-                    match self.current() {
-                        Some('n') => {
-                            out.push('\n');
-                            self.advance();
-                        }
-                        Some('t') => {
-                            out.push('\t');
-                            self.advance();
-                        }
-                        Some('r') => {
-                            out.push('\r');
-                            self.advance();
-                        }
-                        Some('\\') => {
-                            out.push('\\');
-                            self.advance();
-                        }
-                        Some(ch) if ch == quote => {
-                            out.push(ch);
-                            self.advance();
-                        }
-                        Some(ch) => {
-                            out.push(ch);
-                            self.advance();
-                        }
-                        None => {
-                            return Err(CursorError {
-                                line,
-                                column: self.current_column(),
-                                message: "Unterminated escape sequence".to_string(),
-                            });
-                        }
-                    }
+                    let Some(escaped) = self.current() else {
+                        return Err(CursorError {
+                            line,
+                            column: self.current_column(),
+                            message: "Unterminated escape sequence".to_string(),
+                        });
+                    };
+                    let decoded = match escaped {
+                        'n' => '\n',
+                        't' => '\t',
+                        'r' => '\r',
+                        other => other,
+                    };
+                    pieces.push((decoded.to_string(), start));
+                    self.advance();
                 }
                 Some(ch) => {
-                    out.push(ch);
+                    pieces.push((ch.to_string(), start));
                     self.advance();
                 }
             }
         }
 
-        Ok(out)
+        Ok(MappedQuotedValue::from_pieces(&pieces, authored_end))
     }
 
     fn read_balanced_value(&mut self, opener: char, line: usize) -> Result<String, CursorError> {
@@ -412,26 +462,130 @@ pub(crate) fn authored_directive(data: Option<&DataRanges>, line_start: usize, k
     data.is_none_or(|data| !data.intersects(&(line_start.saturating_sub(1)..keyword_end)))
 }
 
-/// Byte ranges of the code in one text, from a single parse.
+/// Kind of a Markdown container that can hold directive lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ContainerKind {
+    /// A block quote (one entry per nesting level).
+    Quote,
+    /// A list as a whole.
+    List,
+    /// One item of a list.
+    Item,
+}
+
+/// One Markdown container from the offset scan, in document (outer-first) order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ContainerSpan {
+    /// What kind of container this is.
+    pub kind: ContainerKind,
+    /// Byte range of the container as `pulldown_cmark` reports it.
+    pub range: std::ops::Range<usize>,
+    /// For an [`ContainerKind::Item`], the byte column (offset from its line
+    /// start) where the item's content begins. A later line indented less than
+    /// this is a lazy continuation, not a member of the item. Zero otherwise.
+    pub content_column: usize,
+}
+
+/// One step of a container path: the identity of a container a line sits in.
+///
+/// Identity is the container's start offset, so two sibling list items, or two
+/// block quotes separated by a blank line, are distinct even at equal depth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ContainerStep {
+    /// What kind of container this step is.
+    pub kind: ContainerKind,
+    /// Start offset of the container; its identity.
+    pub start: usize,
+}
+
+/// Byte ranges of the code and the container ancestry in one text, from a
+/// single parse.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CodeRegions {
     /// Inline code spans and fenced/indented code blocks, in document order.
     pub all: Vec<(usize, usize)>,
     /// Fenced and indented code blocks only.
     pub blocks: Vec<(usize, usize)>,
+    /// Block quotes, lists, and list items, in the order they open.
+    pub containers: Vec<ContainerSpan>,
 }
 
-/// Finds the code regions of `content` with one Markdown parse.
+impl CodeRegions {
+    /// The container path of the directive whose first content byte is
+    /// `position` on the line starting at `line_start`, outermost first.
+    ///
+    /// A list item counts only when the line is indented to its content column,
+    /// and the n-th enclosing block quote only when the line carries more than
+    /// n quote markers, so a lazy continuation line does not belong to the
+    /// container it merely trails.
+    pub(crate) fn container_path(&self, content: &str, line_start: usize, position: usize) -> Vec<ContainerStep> {
+        let markers = content[line_start..position].bytes().filter(|byte| *byte == b'>').count();
+        let column = position - line_start;
+        let mut quotes_seen = 0usize;
+        let mut path = Vec::new();
+        for container in &self.containers {
+            if !(container.range.start <= position && position < container.range.end) {
+                continue;
+            }
+            match container.kind {
+                ContainerKind::Quote => {
+                    if quotes_seen < markers {
+                        path.push(ContainerStep { kind: container.kind, start: container.range.start });
+                    }
+                    quotes_seen += 1;
+                }
+                ContainerKind::Item => {
+                    if container.range.start >= line_start || column >= container.content_column {
+                        path.push(ContainerStep { kind: container.kind, start: container.range.start });
+                    }
+                }
+                ContainerKind::List => {
+                    path.push(ContainerStep { kind: container.kind, start: container.range.start });
+                }
+            }
+        }
+        // A list is an ancestor only through an item that kept the line.
+        let kept: Vec<bool> = (0..path.len())
+            .map(|index| path[index].kind != ContainerKind::List || path.get(index + 1).is_some_and(|next| next.kind == ContainerKind::Item))
+            .collect();
+        let mut kept = kept.into_iter();
+        path.retain(|_| kept.next().unwrap_or(true));
+        path
+    }
+}
+
+/// Byte column (offset from its line start) where a list item's content
+/// begins, given the item's marker offset.
+fn item_content_column(content: &str, marker_start: usize) -> usize {
+    let line_start = content[..marker_start].rfind('\n').map_or(0, |index| index + 1);
+    let bytes = content.as_bytes();
+    let mut cursor = marker_start;
+    if bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
+        while bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
+            cursor += 1;
+        }
+    }
+    cursor = (cursor + 1).min(bytes.len());
+    let spaces = bytes[cursor..].iter().take_while(|byte| matches!(**byte, b' ' | b'\t')).count();
+    // Five or more spaces mean indented code after a one-space marker; a
+    // marker with nothing after it also contributes one space.
+    let width = if spaces == 0 || spaces > 4 { 1 } else { spaces };
+    cursor + width - line_start
+}
+
+/// Finds the code regions and container ancestry of `content` with one
+/// Markdown parse.
 ///
 /// Every directive and expression scanner derives its code regions from
 /// here, so a caller that runs several scanners over the same text can
-/// compute them once and pass them to each `_with_code_regions` variant.
+/// compute them once and pass them to each `_with_regions` variant.
 pub(crate) fn scan_code_regions(content: &str) -> CodeRegions {
     #[cfg(test)]
     scanner_parse_count::record();
     let mut regions = CodeRegions::default();
     let mut in_code_block = false;
     let mut code_block_start = 0;
+    let mut open_containers: Vec<usize> = Vec::new();
 
     for (event, range) in Parser::new_ext(content, Options::all()).into_offset_iter() {
         match event {
@@ -446,6 +600,20 @@ pub(crate) fn scan_code_regions(content: &str) -> CodeRegions {
                 regions.all.push((code_block_start, range.end));
                 regions.blocks.push((code_block_start, range.end));
                 in_code_block = false;
+            }
+            Event::Start(tag @ (Tag::BlockQuote(_) | Tag::List(_) | Tag::Item)) => {
+                let (kind, content_column) = match tag {
+                    Tag::BlockQuote(_) => (ContainerKind::Quote, 0),
+                    Tag::List(_) => (ContainerKind::List, 0),
+                    _ => (ContainerKind::Item, item_content_column(content, range.start)),
+                };
+                open_containers.push(regions.containers.len());
+                regions.containers.push(ContainerSpan { kind, range: range.clone(), content_column });
+            }
+            Event::End(TagEnd::BlockQuote(_) | TagEnd::List(_) | TagEnd::Item) => {
+                if let Some(index) = open_containers.pop() {
+                    regions.containers[index].range.end = range.end;
+                }
             }
             _ => {}
         }
@@ -493,6 +661,58 @@ pub(crate) fn is_in_code_region(position: usize, regions: &[(usize, usize)]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mapped_quoted_value_projects_escaped_and_multibyte_ranges() {
+        // authored: "é\"x" -> decoded: é"x ; é is 2 bytes, the escape is 2 authored bytes.
+        let mapped = MappedQuotedValue::from_pieces(
+            &[("é".to_string(), 1), ("\"".to_string(), 3), ("x".to_string(), 5)],
+            6,
+        );
+        assert_eq!(mapped.decoded, "é\"x");
+        assert_eq!(mapped.authored_range(0..2), Some(1..3));
+        assert_eq!(mapped.authored_range(2..3), Some(3..5));
+        assert_eq!(mapped.authored_range(0..4), Some(1..6));
+        assert_eq!(mapped.authored_range(0..5), None);
+    }
+
+    #[test]
+    fn mapped_read_maps_multibyte_and_escaped_bytes() {
+        // authored: "é\"x" (quotes included) ; offsets: é=1..3, \"=3..5, x=5
+        let mut cursor = Cursor::new(r#""é\"x" tail"#);
+        let mapped = cursor.read_quoted_value_mapped(1).unwrap();
+        assert_eq!(mapped.decoded, "é\"x");
+        assert_eq!(mapped.authored_range(0..2), Some(1..3));
+        assert_eq!(mapped.authored_range(2..3), Some(3..5));
+        assert_eq!(mapped.authored_range(3..4), Some(5..6));
+        assert_eq!(mapped.authored_boundary(4), Some(6));
+        assert_eq!(cursor.pos(), 7);
+    }
+
+    #[test]
+    fn mapped_read_decodes_control_escapes_and_nested_quotes() {
+        let mut cursor = Cursor::new(r#""a\tb "q"x \\""#);
+        let mapped = cursor.read_quoted_value_mapped(1).unwrap();
+        assert_eq!(mapped.decoded, "a\tb \"q\"x \\");
+        assert_eq!(mapped.authored_boundary(0), Some(1));
+        assert_eq!(mapped.authored_range(1..2), Some(2..4));
+    }
+
+    #[test]
+    fn mapped_read_matches_read_value_for_quotes() {
+        for input in [r#""when == 'x'""#, r#"'it\'s'"#, r#""a "b" c" next"#, r#""é\n""#] {
+            let plain = Cursor::new(input).read_value(1).unwrap();
+            let mapped = Cursor::new(input).read_quoted_value_mapped(1).unwrap();
+            assert_eq!(mapped.decoded, plain, "for {input:?}");
+        }
+    }
+
+    #[test]
+    fn mapped_read_rejects_unquoted_and_unterminated() {
+        assert!(Cursor::new("bare").read_quoted_value_mapped(1).is_err());
+        assert!(Cursor::new("\"open").read_quoted_value_mapped(1).is_err());
+        assert!(Cursor::new("\"trail\\").read_quoted_value_mapped(1).is_err());
+    }
 
     #[test]
     fn directive_prefix_len_column_one_is_zero() {

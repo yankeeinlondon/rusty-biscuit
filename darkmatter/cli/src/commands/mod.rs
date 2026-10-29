@@ -22,7 +22,7 @@ mod trigger_findings;
 mod validate;
 
 use code_block::run_code_block;
-use compose::{build_remote_read_config, parse_compose_positionals, run_compose};
+use compose::{CollectionLimits, build_remote_read_config, parse_compose_positionals, run_compose};
 use frontmatter::{run_edit, run_get, run_rm, run_set};
 use hash::run_hash;
 
@@ -119,6 +119,8 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             deny,
             disable,
             timeout,
+            max_iteration_visits,
+            max_expansion_bytes,
             shell,
             perf,
             remote_concurrency,
@@ -162,6 +164,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                 &policy,
                 baseline_schema.as_ref(),
                 timeout,
+                CollectionLimits { max_iteration_visits, max_expansion_bytes },
                 shell,
                 perf,
                 remote_config,

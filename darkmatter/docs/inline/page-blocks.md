@@ -63,6 +63,14 @@ Inner content
 - **Shared state.** Every `when` at every depth evaluates against the same `EffectiveState`. Sibling blocks cannot influence each other's conditions; page-block evaluation runs before interpolation and shell expansion, so nested conditions cannot depend on values those stages produce.
 - **Counters.** `ComposeReport.page_blocks_rendered` and `page_blocks_skipped` are incremented per evaluated block. A skipped parent contributes `+1` skipped and zero for its children (since they are never visited).
 
+### Sharing the traversal with `::map` and `::filter`
+
+A page block may enclose, or sit inside, a [`::map`](./map.md) or
+[`::filter`](./filter.md) region. All three share one structural traversal: a
+false outer `when` skips the nested region without evaluating its source, and
+a `when` inside a region reads that iteration's local bindings. Disabling
+`collection-blocks` leaves page blocks working, and the reverse also holds.
+
 ### Pairing rules and error reporting
 
 - Pairing is strictly positional — there is **no label matching** between `::block` and `::end-block`. A stray `::end-block` inside a nested body closes the *innermost open* block, which can cause authoring mistakes to surface as `UnmatchedEnd` or `UnterminatedBlock` errors on lines far from the real mistake.

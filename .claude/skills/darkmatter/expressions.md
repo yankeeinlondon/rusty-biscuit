@@ -59,8 +59,9 @@ and DMLS both read it.
 - File-reference syntax is `biscuit_file::FileReference::new` alone (the
   passive validator); Darkmatter's `is_well_formed_reference` only adds the
   `file://` adapter (`normalize_path_arg`, which strips the prefix and never
-  collapses separators). `is_file_type` (pure) and
-  `file_exists` (both `narrows(...; true-implies)` `file`; malformed text is `false` before any lookup) both use it;
+  collapses separators). `is_file_type` (pure, true-implies `file`) and
+  `file_exists` (true-implies `file` too; malformed text is `false` before
+  any lookup) both use it;
   never add a second reference grammar.
 - Build the site over `DeclaredTypes::for_schema(Some(&effective))` (every
   layer: document, triggers, the merged JSON's `RawDeclarations`, layered
@@ -109,8 +110,8 @@ and DMLS both read it.
   if they grow.
   User docs: `darkmatter/docs/inline/call-check.md`.
 
-**Function binding** (`expression/call_binding/`). Every call binds through
-the shared coercion engine before its handler runs; handlers are
+**Function binding** (`expression/call_binding/`). Ordinary value calls bind
+through the shared coercion engine before their handler runs; handlers are
 `PureFn = fn(&BoundCall) -> Result<Value, String>` and
 `ContextFn = fn(&BoundCall, &ResolutionContext)`, and read only `BoundArgs`
 accessors and `overload()`. Never re-check types, parse, or convert inside a
@@ -122,7 +123,9 @@ handler returning a value outside its declared `returns`, checked by
 `check_return` without conversion) is authoring-fatal. Null reaches a
 parameter only through an explicit `| null`. `and`/`or` are lazy
 (`LazyCall`): the precheck visits every argument, the runtime binds only the
-ones it evaluates. User docs: "Function Calls: Bind, Then Compute" in
+ones it evaluates. Callback registrations bind the source through the same
+engine; the evaluator owns item frames and body execution, with no eager
+callback handler. User docs: "Function Calls: Bind, Then Compute" in
 `darkmatter/docs/topics/schemas/definition.md`.
 
 **Inserted text is data.** Every authored span is scanned once. Produced text
@@ -280,7 +283,8 @@ admitted number with `numeric::json_number` and render it with
 Hosts add globals (Claudine's `err`, `timing`, `group`) through the binding
 model in `expression/binding.rs`, never through a lookup override. A root
 resolves as reserved namespace → registered global (available, possibly
-`null`, or unavailable with a namespaced reason) → document property. Declare
+`null`, or unavailable with a namespaced reason) → nearest local binding
+(inside a `::map`/`::filter` scope or callback) → document property. Declare
 globals in an immutable `BindingView`, pair them with runtime entries through
 `EvaluationSession::associate` (rejects reserved names, omissions, and
 contradictions before any provider runs), check authored text passively with
@@ -328,3 +332,56 @@ share the text functions' analysis bodies: `validate_interpolation`,
 `project_hole_expr`, `DeferredShellRoots::late_roots_of_expr`,
 `lifecycle::shell_template::placeholder_guard_expr`. It holds syntax only;
 a host keeps it on the stack for one analysis and never stores it.
+
+## Callbacks and the `local` namespace
+
+`parse_callback` / `parse_callback_spanned` parse `pattern => body` and
+`pattern -> body`; a pattern is an identifier or a nonempty shallow
+`{ a, b }` field list (no alias, rest, or default). Callbacks are not values:
+the ordinary `parse` rejects an arrow. Quoted callback text is decoded once with
+a decoded-to-authored offset map so errors and DMLS ranges point at authored
+bytes. Locals resolve before document lookup, shadow even at null, and never
+fall through for a missing member; `local.x` and bare `x` are the same subject,
+`fm.x` stays the document. A pattern name may not collide with a reserved
+root, `null`, or a registered global, and a host may not register `local`.
+Expression-level `map()`/`filter()` ship through the authoritative catalog.
+They accept an array, tuple, object, or null plus one inline callback; both
+return arrays, and objects visit insertion-ordered `{key, value}` entries.
+`map` keeps body results (including null); `filter` retains original entries
+using ordinary truthiness. Missing/null/empty sources produce `[]` without
+executing the body, but passive checking still visits it. Quoted callback text
+is for directive syntax, not expression function arguments. Whole-value
+frontmatter interpolation preserves typed arrays before schema coercion;
+callback-produced text remains data. Ordinary shadowing earns no advisory.
+
+## Inline callback argument infrastructure
+
+`Expr::CallbackCall` / `SpannedExprKind::CallbackCall` hold `CallArgument` /
+`SpannedCallArgument` (`Value` or `Callback`); ordinary value-only calls keep
+`FunctionCall`. Both arrows use the existing shared pattern parser. Callbacks
+are never value expressions. `SpannedCallback` keeps `pattern_span`, `arrow`,
+and body spans. `ParseError::diagnostic_code()` identifies callback syntax errors.
+
+`call_check::callback_scope` enters an `ItemFrame` projected from the iterable;
+`branch_scope` applies it before typing nested bodies. Free-read inventories
+exclude bound bare and `local.*` reads, retaining explicit `fm.*` captures.
+The registry’s callback evaluation mode permits direct function parameters and
+rejects stored/nested callable values and function returns. Catalog descriptors’
+`accepts_value_arguments()` excludes callback-taking functions from lifecycle verbs.
+`evaluate_callback_function` executes registered callbacks serially after binding
+the iterable with `bind_callback_value`; callbacks never become JSON placeholders.
+`ScopedLookup` retains locals and forwards the request authority. Evaluation passes
+one `IterationBudget` through recursion; `EvaluationSession` shares it across calls,
+and pipeline-installed resolution contexts use the request counter (discovery
+counters charge nothing). Expression arrays charge visits, never rendered bytes.
+`ExpressionError::Callback` retains each original index/key and typed source;
+`without_callbacks` exposes the underlying cause without discarding the wrappers.
+DMLS cursor scopes use `branch_scope`, including projected callback locals;
+completion prioritizes locals only in the body, hover names the callback owner,
+and semantic tokens project patterns and either arrow through scalar mappings.
+
+Passive callback frames retain declaration locations through
+`ItemFrame::enter_spanned`, `TypedLocal::with_span`, and
+`LexicalTypes::span_of_name`. These are expression-relative byte ranges and
+survive dropping the parsed callback; a shadowing binding without a span does
+not borrow an outer binding’s location.

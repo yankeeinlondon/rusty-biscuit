@@ -11,6 +11,7 @@
 //! `interpolation/`, `page_blocks/`, `shell_expansion/`, the top-level
 //! `normalize`) and are called through these thin stage functions.
 
+pub(crate) mod collection_blocks;
 pub(crate) mod interpolation;
 pub(crate) mod normalize;
 pub(crate) mod page_blocks;

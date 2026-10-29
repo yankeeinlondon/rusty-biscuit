@@ -59,6 +59,14 @@ use std::sync::Arc;
 /// level of the graph.
 #[derive(Debug, Clone)]
 pub struct PreflightGraphEdge {
+    /// Where the directive was repeated, when a `::map` / `::filter` body
+    /// repeated it. A repeated site is matched by this key, never by its
+    /// target text.
+    pub site: Option<ScopedSite>,
+    /// Identity of the explicit `set` values (and their origin) the child
+    /// composes with. Two repeats of one target with different values are
+    /// different children.
+    pub parameters: u64,
     /// The parsed directive that produced this edge. Its `raw_target` keys the
     /// resolution cache; its span is **not** reused for replacement.
     pub directive: transclusion::BlockDirective,
@@ -73,6 +81,33 @@ pub struct PreflightGraphEdge {
     /// flat view shares the same subtree instead of deep-cloning it — for a deep
     /// transclusion tree the old duplication was O(n²) in nodes.
     pub child: Arc<PreflightGraphNode>,
+}
+
+/// Where a repeated directive sits: the authored site and the original items
+/// of the collections that repeated it.
+///
+/// An authored `::file` inside a `::map` body is one site with one copy per
+/// item. Its copies can resolve to the same target bytes with different
+/// parameters, or to different bytes, so the target text cannot identify one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ScopedSite {
+    /// The 1-based file line of the authored directive.
+    pub line: usize,
+    /// The original item positions that produced the copy, outermost first.
+    pub iteration: crate::markdown::compose::expression::iteration::IterationPath,
+}
+
+/// The identity of the explicit values a directive hands its child.
+pub(crate) fn parameters_identity(options: &transclusion::BlockOptions) -> u64 {
+    let overlay = super::cache::hashing::set_overlay_hash(options.set_object.as_ref(), &options.set_properties);
+    if overlay == 0 {
+        return 0;
+    }
+    let origin = match options.values_origin {
+        super::OverrideOrigin::Authored => 0u8,
+        super::OverrideOrigin::Data => 1u8,
+    };
+    super::cache::hashing::combine_options_overlay_hash(overlay, u64::from(origin) + 1)
 }
 
 /// Resolved target for a preflight graph edge.
@@ -103,6 +138,8 @@ pub enum PreflightTargetKind {
 /// [`PreflightGraphEdge`]s and never feed the transclusion resolution cache.
 #[derive(Debug, Clone)]
 pub struct PreflightTargetEdge {
+    /// Where the directive was repeated; see [`PreflightGraphEdge::site`].
+    pub site: Option<ScopedSite>,
     pub kind: PreflightTargetKind,
     /// 1-based line of the directive in its file.
     pub line: usize,
@@ -179,6 +216,17 @@ impl PreflightGraphNode {
     /// are compared after a best-effort canonicalization so a relative directive
     /// target and the stored absolute source still match. Both body-edge
     /// children and frontmatter prologue/epilogue children are searched.
+    /// The edge a repeated directive at `site` was discovered as.
+    pub(crate) fn scoped_edge(&self, site: &ScopedSite) -> Option<&PreflightGraphEdge> {
+        self.edges.iter().find(|edge| edge.site.as_ref() == Some(site))
+    }
+
+    /// The `::code` / `::toc-linking` target a repeated directive at `site`
+    /// was discovered as.
+    pub(crate) fn scoped_target(&self, site: &ScopedSite) -> Option<&PreflightTargetEdge> {
+        self.targets.iter().find(|target| target.site.as_ref() == Some(site))
+    }
+
     pub(crate) fn child_for_source(&self, path: &Path) -> Option<&Arc<PreflightGraphNode>> {
         let want = canonical_key(path);
         self.children.iter().find(|child| {
