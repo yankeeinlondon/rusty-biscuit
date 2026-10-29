@@ -20,7 +20,6 @@ use tracing::{debug, instrument};
 /// `features` is every `--feature` given, top-level and on `render`.
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, fields(command = "render"))]
-#[allow(clippy::too_many_arguments)]
 pub fn run_render(
     input: Option<&PathBuf>,
     output: OutputFormat,
