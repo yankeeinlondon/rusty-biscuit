@@ -5701,7 +5701,6 @@
                   "additionalProperties": false,
                   "properties": {
                     "frontmatter": {
-                      "default": true,
                       "anyOf": [
                         {
                           "type": "null"
@@ -5714,10 +5713,10 @@
                           "const": false,
                           "description": "Leave the frontmatter block byte-for-byte."
                         }
-                      ]
+                      ],
+                      "default": true
                     },
                     "table-layout": {
-                      "default": true,
                       "anyOf": [
                         {
                           "type": "null"
@@ -5730,10 +5729,10 @@
                           "const": false,
                           "description": "Leave table cells as authored."
                         }
-                      ]
+                      ],
+                      "default": true
                     },
                     "fixed-width": {
-                      "default": false,
                       "anyOf": [
                         {
                           "type": "null"
@@ -5749,10 +5748,10 @@
                           "type": "boolean",
                           "description": "false: never re-wrap; true: re-wrap to 120."
                         }
-                      ]
+                      ],
+                      "default": false
                     },
                     "unwrap": {
-                      "default": false,
                       "anyOf": [
                         {
                           "type": "null"
@@ -5765,10 +5764,10 @@
                           "const": false,
                           "description": "Keep authored line breaks (the default)."
                         }
-                      ]
+                      ],
+                      "default": false
                     },
                     "indentation": {
-                      "default": 4,
                       "anyOf": [
                         {
                           "type": "null"
@@ -5789,10 +5788,10 @@
                           "const": 8,
                           "description": "Eight spaces per nested-list level."
                         }
-                      ]
+                      ],
+                      "default": 4
                     },
                     "ordered-lists": {
-                      "default": true,
                       "anyOf": [
                         {
                           "type": "null"
@@ -5805,10 +5804,10 @@
                           "const": false,
                           "description": "Leave list numbers as authored."
                         }
-                      ]
+                      ],
+                      "default": true
                     },
                     "list-padding": {
-                      "default": true,
                       "anyOf": [
                         {
                           "type": "null"
@@ -5821,7 +5820,8 @@
                           "const": false,
                           "description": "Leave blank lines around lists as authored."
                         }
-                      ]
+                      ],
+                      "default": true
                     },
                     "list-item-padding": {
                       "anyOf": [
@@ -5857,7 +5857,6 @@
                       "description": "Blank lines between an item's first line and the blocks nested inside it."
                     },
                     "default-language": {
-                      "default": "text",
                       "anyOf": [
                         {
                           "type": "null"
@@ -5875,7 +5874,8 @@
                           "const": "",
                           "description": "Add no language."
                         }
-                      ]
+                      ],
+                      "default": "text"
                     }
                   }
                 }
@@ -6708,7 +6708,6 @@
       ]
     },
     "prologue": {
-      "default": null,
       "anyOf": [
         {
           "type": "null"
@@ -6724,10 +6723,10 @@
           },
           "description": "Ordered prologue references inserted before the body during transclusion."
         }
-      ]
+      ],
+      "default": null
     },
     "epilogue": {
-      "default": null,
       "anyOf": [
         {
           "type": "null"
@@ -6743,7 +6742,8 @@
           },
           "description": "Ordered epilogue references inserted after the body during transclusion."
         }
-      ]
+      ],
+      "default": null
     },
     "ignore_invalid": {
       "anyOf": [
@@ -6776,7 +6776,6 @@
       "description": "Enables interpolation inside fenced code blocks. Disabled by default so code examples stay literal."
     },
     "initialize": {
-      "description": "actions run before the document composes; shell-free",
       "anyOf": [
         {
           "type": "null"
@@ -6984,7 +6983,8 @@
         {
           "$ref": "#/$defs/md-initialize-bundle"
         }
-      ]
+      ],
+      "description": "actions run before the document composes; shell-free"
     },
     "composed": {
       "anyOf": [

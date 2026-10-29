@@ -824,7 +824,14 @@ fn union_property_to_schema(
 
     // The optional-`file` empty-string arm is allowed only when the union
     // itself is optional.
-    let (any_of, hoisted_default) = union_arm_fragments(name, arms, !required, defs)?;
+    let (mut any_of, hoisted_default) = union_arm_fragments(name, arms, !required, defs)?;
+    // A union with a `null` or `unknown` arm already accepts null, so it needs
+    // no extra `null` arm. Otherwise the null arm leads the one flat
+    // `anyOf: [null, arm1, arm2, ...]` rather than nesting the whole union
+    // under a second anyOf wrapper.
+    if !(required || admits_null) {
+        any_of.insert(0, json!({ "type": "null" }));
+    }
 
     let mut union_schema = Map::new();
     union_schema.insert("anyOf".into(), Value::Array(any_of));
@@ -841,21 +848,7 @@ fn union_property_to_schema(
         union_schema.insert("x-darkmatter-generated".into(), Value::Bool(true));
     }
 
-    // A union with a `null` or `unknown` arm already accepts null, so it needs
-    // no extra `null` arm.
-    let schema = if required || admits_null {
-        Value::Object(union_schema)
-    } else {
-        // Lift the null arm into the existing anyOf array so the output
-        // stays a single-level `anyOf: [null, arm1, arm2, ...]` rather than
-        // nesting the whole union under a second anyOf wrapper.
-        let Some(Value::Array(mut arms)) = union_schema.remove("anyOf") else {
-            unreachable!("the union schema's anyOf is an array")
-        };
-        arms.insert(0, json!({ "type": "null" }));
-        union_schema.insert("anyOf".into(), Value::Array(arms));
-        Value::Object(union_schema)
-    };
+    let schema = Value::Object(union_schema);
     // `generated` suppresses the static `required` entry so authored documents
     // validate cleanly when the host has not yet supplied the value (spec
     // point 1). The non-nullable type semantics of `required` are preserved
@@ -884,7 +877,7 @@ fn union_arm_fragments(
             atom_fragment_without_null_wrap(name, atom, allow_optional_empty_file, defs)?;
         // `atom_fragment_without_null_wrap` always returns a `Value::Object`.
         if let Value::Object(map) = &mut arm_value
-            && let Some(arm_default) = map.remove("default")
+            && let Some(arm_default) = map.shift_remove("default")
         {
             match &hoisted_default {
                 Some(existing) if existing != &arm_default => {
@@ -962,11 +955,11 @@ fn atom_to_schema(
     let mut example_val: Option<Value> = None;
     let mut category_val: Option<Value> = None;
     if let Value::Object(map) = &mut fragment {
-        default_val = map.remove("default");
-        description_val = map.remove("description");
-        generated_val = map.remove("x-darkmatter-generated");
-        example_val = map.remove("x-darkmatter-example");
-        category_val = map.remove(DARKMATTER_CATEGORY_KEYWORD);
+        default_val = map.shift_remove("default");
+        description_val = map.shift_remove("description");
+        generated_val = map.shift_remove("x-darkmatter-generated");
+        example_val = map.shift_remove("x-darkmatter-example");
+        category_val = map.shift_remove(DARKMATTER_CATEGORY_KEYWORD);
     }
 
     let is_optional_scalar_file = matches!(&atom.ty, TypeExpr::Primitive(SimplifiedType::File))
@@ -975,7 +968,7 @@ fn atom_to_schema(
     let mut schema = if is_optional_scalar_file {
         // The bare fragment is already `[{ "const": "" }, file-typed]`.
         // Prepend the null arm to keep a flat, single-level anyOf.
-        let Some(Value::Array(mut arms)) = fragment.as_object_mut().and_then(|map| map.remove("anyOf")) else {
+        let Some(Value::Array(mut arms)) = fragment.as_object_mut().and_then(|map| map.shift_remove("anyOf")) else {
             unreachable!("the optional file fragment's anyOf is an array")
         };
         arms.insert(0, json!({ "type": "null" }));
@@ -983,7 +976,7 @@ fn atom_to_schema(
         m.insert("anyOf".into(), Value::Array(arms));
         // The flattened union is the marked node now; a template still never
         // matches its `null` arm, so marking it defers the same values.
-        if let Some(deferred) = fragment.as_object_mut().and_then(|map| map.remove(DARKMATTER_DEFERRED_KEYWORD)) {
+        if let Some(deferred) = fragment.as_object_mut().and_then(|map| map.shift_remove(DARKMATTER_DEFERRED_KEYWORD)) {
             m.insert(DARKMATTER_DEFERRED_KEYWORD.into(), deferred);
         }
         Value::Object(m)
@@ -1288,11 +1281,11 @@ pub(super) fn suggestion_target_schema(
         fragment
     };
     if let Value::Object(map) = &mut target {
-        map.remove("x-darkmatter-suggest");
-        map.remove("x-darkmatter-example");
-        map.remove("x-darkmatter-generated");
-        map.remove("default");
-        map.remove("description");
+        map.shift_remove("x-darkmatter-suggest");
+        map.shift_remove("x-darkmatter-example");
+        map.shift_remove("x-darkmatter-generated");
+        map.shift_remove("default");
+        map.shift_remove("description");
     }
     Ok(target)
 }
@@ -2351,8 +2344,8 @@ fn check_alphanumeric_values(
     }
     let mut target = fragment.clone();
     if let Value::Object(map) = &mut target {
-        map.remove("default");
-        map.remove("x-darkmatter-suggest");
+        map.shift_remove("default");
+        map.shift_remove("x-darkmatter-suggest");
     }
     let validator = alphanumeric_check_validator(&target)?;
     match values.into_iter().find(|(_, value)| !validator.is_valid(value)) {

@@ -7,8 +7,7 @@
 # classifies this file as a SimplifiedSchema rather than raw JSON Schema
 # (a bare property mapping would validate vacuously).
 #
-# Nested shapes use quoted inline-object literals — YAML-native nested
-# mappings are rejected by the SimplifiedSchema parser today.
+# Reusable shapes are declared in the sibling types mapping below.
 $schema:
     created: date
     last_updated: date(required)

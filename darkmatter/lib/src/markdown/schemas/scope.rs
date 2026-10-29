@@ -256,7 +256,7 @@ pub(crate) fn fold_definitions(receiving: &mut Map<String, Value>, incoming: &mu
     if !matches!(object.get("$defs"), Some(Value::Object(_))) {
         return;
     }
-    let Some(Value::Object(defs)) = object.remove("$defs") else {
+    let Some(Value::Object(defs)) = object.shift_remove("$defs") else {
         unreachable!("checked to be an object");
     };
     let renames = plan_renames(receiving, &defs);

@@ -39,7 +39,6 @@ use crate::validation_timing;
 use crate::work_counters;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::compose::file_resolution_context_identity;
-use darkmatter::markdown::schemas::resolve::expand_named_types;
 use darkmatter::markdown::schemas::triggers::InvalidTriggerFinding;
 use darkmatter::markdown::schemas::{
     SchemaError, SchemaRootKind, SchemaRootState, SchemaRoots, SchemaSourceId, StandaloneSchemaDocument,
@@ -949,7 +948,7 @@ impl OverlayCache {
                 .and_then(|ast| suggestions::inline_schema(text, Some(&ast)))
                 .map_or_else(Vec::new, |schema| {
                     let base_dir = path.parent().unwrap_or(path);
-                    suggestions::reference_lints(&schema, base_dir, None, &schema_roots, context)
+                    suggestions::reference_lints(&schema, None, base_dir, None, &schema_roots, context)
                 }),
         );
         // The registry tracks its envelopes and payload files, and a change to
@@ -1021,26 +1020,27 @@ impl OverlayCache {
             Vec::new()
         };
         let base_dir = path.parent().unwrap_or(path);
-        let named_types = Arc::new(NamedTypeCatalog::build(
-            &model.declaration,
+        let named_types = Arc::new(NamedTypeCatalog::standalone(
+            model,
             base_dir,
             &schema_roots,
             context,
         ));
-        let expanded = match model.schema() {
-            Some(schema) => {
-                expand_named_types(schema, base_dir, Some(path), &schema_roots, context)
-                    .map(|expansion| expansion.imports)
-            }
-            None => Ok(Vec::new()),
-        };
+        let expanded = darkmatter::markdown::schemas::resolve::check_standalone_named_types(
+            model, &schema_roots, context,
+        );
         let (imports, error) = match expanded {
             Ok(imports) => (imports, None),
             Err(error) => (error_dependencies(&error), Some(Arc::new(error))),
         };
-        let suggestions = model.schema().map_or_else(Vec::new, |schema| {
-            suggestions::reference_lints(schema, base_dir, Some(path), &schema_roots, context)
+        let mut suggestions = model.schema().map_or_else(Vec::new, |schema| {
+            suggestions::reference_lints(schema, model.local_types.as_ref(), base_dir, Some(path), &schema_roots, context)
         });
+        if let Some(types) = &model.local_types {
+            suggestions.extend(suggestions::reference_lints(
+                &darkmatter::markdown::schemas::SimplifiedSchema::Single(types.clone()), Some(types), base_dir, Some(path), &schema_roots, context,
+            ));
+        }
         let deps = hash_files(imports.iter().chain(named_types.dependencies()));
         let file_failures = error.as_deref().map(file_failures).unwrap_or_default();
         let resolved = StandaloneNamedTypes { named_types, error, file_failures, suggestions };
@@ -1930,6 +1930,39 @@ mod tests {
                     .is_none(),
                 "escape-bearing ordinary YAML must stay inert: {path:?}"
             );
+        }
+    }
+
+    #[test]
+    fn combined_schema_retains_its_local_types_through_malformed_edits() {
+        for (good, malformed) in [
+            (
+                "$schema:\n  title: label\ntypes:\n  label: string(required)\n",
+                "$schema:\n  title: label\ntypes:\n  label: [\n",
+            ),
+            (
+                "{$schema: {title: label}, types: {label: string}}",
+                "{$schema: {title: label}, types: {label: [}}",
+            ),
+        ] {
+            let state = OverlayState::default();
+            let doc = uri("file:///w/schema.yaml");
+            let path = Path::new("/w/schema.yaml");
+            let roots = [PathBuf::from("/w")];
+            let resolution = crate::context::test_support::resolution_for(path);
+            let first = state.for_document(&doc, good, path, &DmlsConfig::default(), &roots, &resolution).unwrap();
+            let SchemaAuthoringState::Standalone { model: Some(first_model), .. } = &first.schema_authoring else {
+                panic!("valid combined document is standalone");
+            };
+            assert!(first_model.local_types.is_some());
+            let current = state.for_document(&doc, malformed, path, &DmlsConfig::default(), &roots, &resolution)
+                .expect("malformed combined schema stays active");
+            let SchemaAuthoringState::Standalone { model: Some(retained), stale: true, error: Some(_), .. } = &current.schema_authoring else {
+                panic!("last-good model and current failure must be retained");
+            };
+            assert!(Arc::ptr_eq(first_model, retained));
+            let repaired = state.for_document(&doc, good, path, &DmlsConfig::default(), &roots, &resolution).unwrap();
+            assert!(matches!(repaired.schema_authoring, SchemaAuthoringState::Standalone { stale: false, error: None, .. }));
         }
     }
 

@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::extract_frontmatter_block;
-use darkmatter::markdown::schemas::resolve::expand_named_types;
 use darkmatter::markdown::schemas::{
     Constraint, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SuggestionLintProblem,
     TypeExpr,
@@ -76,6 +75,7 @@ pub fn inline_schema(text: &str, ast: Option<&FrontmatterAst>) -> Option<Simplif
 /// to resolve reports nothing here, because resolution reports that failure.
 pub fn reference_lints(
     schema: &SimplifiedSchema,
+    local_types: Option<&SchemaShape>,
     base_dir: &Path,
     defining_file: Option<&Path>,
     schema_roots: &[PathBuf],
@@ -87,7 +87,9 @@ pub fn reference_lints(
         return Vec::new();
     }
     let Ok(expansion) =
-        expand_named_types(schema, base_dir, defining_file, schema_roots, context)
+        darkmatter::markdown::schemas::resolve::expand_named_types_with_locals(
+            schema, local_types, base_dir, defining_file, schema_roots, context,
+        )
     else {
         return Vec::new();
     };

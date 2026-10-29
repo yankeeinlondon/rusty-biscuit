@@ -2,28 +2,28 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "anyOf": [
     {
-      "required": [
-        "title"
-      ],
       "type": "object",
       "additionalProperties": true,
       "properties": {
         "title": {
           "type": "string"
         }
-      }
+      },
+      "required": [
+        "title"
+      ]
     },
     {
-      "required": [
-        "name"
-      ],
       "type": "object",
       "additionalProperties": true,
       "properties": {
         "name": {
           "type": "string"
         }
-      }
+      },
+      "required": [
+        "name"
+      ]
     }
   ]
 }

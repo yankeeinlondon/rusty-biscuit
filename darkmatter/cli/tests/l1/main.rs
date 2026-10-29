@@ -24,6 +24,7 @@ mod compose_collection_controls;
 mod clean;
 mod clean_fidelity;
 mod clean_frontmatter;
+mod frontmatter_key_order;
 mod clean_json;
 mod clean_parity;
 mod clean_rules;

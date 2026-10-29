@@ -103,6 +103,15 @@ pub fn semantic_type_regions(
     regions
 }
 
+/// Complete definitions from both the export and its local type table.
+pub fn standalone_type_regions(model: &StandaloneSchemaDocument) -> Vec<SemanticTypeRegion> {
+    let mut regions = model.schema().map_or_else(Vec::new, |schema| semantic_type_regions(schema, &model.source_map));
+    if let (Some(types), Some(source_map)) = (&model.local_types, &model.local_type_source_map) {
+        regions.extend(semantic_type_regions(&SimplifiedSchema::Single(types.clone()), source_map));
+    }
+    regions
+}
+
 fn collect_semantic_type_regions(
     shape: &SchemaShape,
     parent: &SchemaSourcePath,
@@ -182,10 +191,7 @@ pub fn standalone_semantic_region_covers(state: &SchemaAuthoringState, offset: u
     let SchemaAuthoringState::Standalone { model: Some(model), .. } = state else {
         return false;
     };
-    let Some(schema) = model.schema() else {
-        return false;
-    };
-    semantic_type_regions(schema, &model.source_map)
+    standalone_type_regions(model)
         .iter()
         .any(|region| region.key_span.contains(&offset) || region.definition_span.contains(&offset))
 }
@@ -271,8 +277,8 @@ pub fn frontmatter_authoring(
 /// that is *already known* to be unparseable, on every keystroke. The
 /// recognizer is therefore lexical — one linear scan, no backtracking — and
 /// tolerant of truncated or otherwise broken input. It still refuses ordinary
-/// YAML and raw JSON Schema, which carry top-level keys beyond a sole
-/// `$schema` and never carry `kind: schema`.
+/// YAML and raw JSON Schema, which carry top-level keys beyond `$schema`
+/// and an optional `types` table and never carry `kind: schema`.
 pub fn standalone_envelope_claim(text: &str) -> Option<StandaloneSchemaEnvelope> {
     let top_level = match flow_mapping_start(text) {
         Some(start) => flow_top_level_entries(&text[start + 1..]),
@@ -283,7 +289,9 @@ pub fn standalone_envelope_claim(text: &str) -> Option<StandaloneSchemaEnvelope>
     }) {
         return Some(StandaloneSchemaEnvelope::Tagged);
     }
-    (top_level.len() == 1 && top_level[0].0 == "$schema")
+    (top_level.iter().any(|(key, _)| key == "$schema")
+        && (top_level.len() == 1
+            || (top_level.len() == 2 && top_level.iter().any(|(key, _)| key == "types"))))
         .then_some(StandaloneSchemaEnvelope::Pure)
 }
 

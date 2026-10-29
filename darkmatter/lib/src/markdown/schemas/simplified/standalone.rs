@@ -8,14 +8,15 @@
 //!
 //! Two envelopes are recognized:
 //!
-//! - **Pure**: a YAML mapping whose sole top-level key is `$schema`.
+//! - **Pure**: a YAML mapping with `$schema` and an optional `types` mapping.
 //! - **Tagged**: a YAML mapping containing `kind: schema`, a `types`
-//!   mapping, and optionally a `categories` list (see
+//!   mapping, an optional exported `$schema`, and optionally a `categories` list (see
 //!   [`StandaloneSchemaDocument::categories`]).
 //!
-//! Both mapping envelopes behave identically for `Name@fileref` named
-//! imports. A pure sequence payload is a root-level schema union for
-//! whole-file use only, and a pure scalar payload is a whole-file schema
+//! A separate `types` mapping supplies local names and named imports without
+//! adding document properties. Otherwise mapping payload entries serve both
+//! roles. A sequence export is a root-level schema union for whole-file use,
+//! and a scalar export is a whole-file schema
 //! reference. Every pure payload is parsed by the shared
 //! [`parse_schema_declaration`](super::parse_schema_declaration) authority —
 //! the same parser that classifies an inline `$schema` value — so reference
@@ -41,7 +42,7 @@ use serde_yaml_ng::Value as YamlValue;
 use crate::markdown::schemas::errors::SchemaError;
 
 use super::{
-    Constraint, PropertyAtom, PropertyDef, SchemaDeclaration, SchemaShape, SchemaSourceMap,
+    Constraint, PropertyAtom, PropertyDef, SchemaDeclaration, SchemaShape, SchemaSourceMap, SchemaSourcePath,
     SimplifiedSchema, SuggestionLintProblem, TypeExpr, lint_suggestions,
     signature::duplicate_overload, source::parse_standalone_schema_payload_with_source,
 };
@@ -49,9 +50,9 @@ use super::{
 /// The content envelope used by a standalone SimplifiedSchema document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StandaloneSchemaEnvelope {
-    /// A document whose sole top-level key is `$schema`.
+    /// A document with `$schema` and an optional reusable `types` mapping.
     Pure,
-    /// A document containing `kind: schema` and a `types` mapping.
+    /// A document containing `kind: schema`, `types`, and an optional export.
     Tagged,
 }
 
@@ -83,10 +84,15 @@ pub struct StandaloneSchemaDocument {
     pub envelope: StandaloneSchemaEnvelope,
     /// The shared declaration product for the envelope payload: an inline
     /// schema (mapping or root-union sequence) or a syntax-checked whole-file
-    /// reference. A tagged `types` payload is always an inline schema.
+    /// reference. Without an explicit export, a tagged `types` table is the payload.
     pub declaration: SchemaDeclaration,
     /// Structural authored spans for the parsed schema payload.
     pub source_map: SchemaSourceMap,
+    /// Reusable definitions declared beside an exported `$schema`. These
+    /// supply its local namespace without becoming document properties.
+    pub local_types: Option<SchemaShape>,
+    /// Authored spans of `local_types`, relative to that mapping's root.
+    pub local_type_source_map: Option<SchemaSourceMap>,
     /// Invalid advisory suggestion metadata in declaration order.
     ///
     /// These are lint problems, not errors — the schema is still usable for
@@ -100,6 +106,32 @@ pub struct StandaloneSchemaDocument {
 }
 
 impl StandaloneSchemaDocument {
+    /// The namespace available to local references and named imports. An
+    /// explicit `types` table is independent of the exported properties.
+    pub fn named_types(&self) -> Option<&SchemaShape> {
+        self.local_types.as_ref().or_else(|| match self.schema()? {
+            SimplifiedSchema::Single(shape) => Some(shape),
+            SimplifiedSchema::Union(_) => None,
+        })
+    }
+
+    /// Authored spans of the table returned by [`Self::named_types`].
+    pub fn named_type_source_map(&self) -> &SchemaSourceMap {
+        self.local_type_source_map.as_ref().unwrap_or(&self.source_map)
+    }
+
+    /// Source locations for resolution, keeping exported properties and
+    /// local types distinct when they share a name.
+    pub fn resolution_source_map(&self) -> SchemaSourceMap {
+        let Some(types) = &self.local_type_source_map else {
+            return self.source_map.clone();
+        };
+        let mut map = SchemaSourceMap::default();
+        map.extend_prefixed(&self.source_map, &SchemaSourcePath::root().property("$schema"));
+        map.extend_prefixed(types, &SchemaSourcePath::root().property("types"));
+        map
+    }
+
     /// Borrows the parsed inline schema when the payload is a mapping or a
     /// root-union sequence; `None` when the payload is a whole-file reference.
     pub fn schema(&self) -> Option<&SimplifiedSchema> {
@@ -114,8 +146,8 @@ impl StandaloneSchemaDocument {
 ///
 /// Returns `Ok(None)` for ordinary YAML and raw JSON Schema documents, and an
 /// error for text that is not valid YAML. Once
-/// `kind: schema` claims a tagged document, or `$schema` is the sole top-level
-/// key of a pure document, malformed envelope content is returned as a
+/// `kind: schema` claims a tagged document, or `$schema` with optional `types`
+/// claims an untagged document, malformed envelope content is returned as a
 /// [`SchemaError::SchemaDocument`] instead of falling back to raw JSON Schema.
 ///
 /// Every pure payload — mapping, root-union sequence, or whole-file reference
@@ -160,16 +192,35 @@ pub fn parse_standalone_schema_document(
         .map_err(|error| {
             schema_document_error(path, format!("invalid SimplifiedSchema payload: {error}"))
         })?;
+    let local = if payload_key == "$schema" {
+        map.get("types")
+            .map(|value| parse_standalone_schema_payload_with_source(value, source, "types"))
+            .transpose()
+            .map_err(|error| schema_document_error(path, format!("invalid named types: {error}")))?
+    } else {
+        None
+    };
+    let (local_types, local_type_source_map) = match local {
+        Some(parsed) => match parsed.value {
+            SchemaDeclaration::Schema(SimplifiedSchema::Single(shape)) => (Some(shape), Some(parsed.source_map)),
+            _ => return Err(schema_document_error(path, "`types` must be a mapping")),
+        },
+        None => (None, None),
+    };
     let categories = map
         .get(&categories_key)
         .map(|value| parse_categories(path, value))
         .transpose()?;
     if let SchemaDeclaration::Schema(SimplifiedSchema::Single(shape)) = &parsed.value
         && envelope == StandaloneSchemaEnvelope::Tagged
+        && local_types.is_none()
     {
         check_named_types(path, shape, categories.as_deref())?;
     }
-    let suggestion_lints = match &mut parsed.value {
+    if let Some(shape) = &local_types {
+        check_named_types(path, shape, categories.as_deref())?;
+    }
+    let mut suggestion_lints = match &mut parsed.value {
         SchemaDeclaration::Schema(schema) => {
             lint_suggestions(schema).map_err(|error| {
                 schema_document_error(path, format!("could not lint SimplifiedSchema payload: {error}"))
@@ -178,11 +229,16 @@ pub fn parse_standalone_schema_document(
         // A whole-file reference carries no suggestion metadata to lint.
         SchemaDeclaration::Reference(_) => Vec::new(),
     };
+    if let Some(shape) = &local_types {
+        suggestion_lints.extend(lint_suggestions(&SimplifiedSchema::Single(shape.clone()))?);
+    }
     Ok(Some(StandaloneSchemaDocument {
         path: path.to_path_buf(),
         envelope,
         declaration: parsed.value,
         source_map: parsed.source_map,
+        local_types,
+        local_type_source_map,
         suggestion_lints,
         categories,
     }))
@@ -198,10 +254,7 @@ pub(super) struct RecognizedStandalone {
 impl RecognizedStandalone {
     /// The envelope key holding the payload.
     pub(super) fn payload_key(&self) -> &'static str {
-        match self.envelope {
-            StandaloneSchemaEnvelope::Pure => "$schema",
-            StandaloneSchemaEnvelope::Tagged => "types",
-        }
+        if self.mapping().contains_key("$schema") { "$schema" } else { "types" }
     }
 
     fn mapping(&self) -> &serde_yaml_ng::Mapping {
@@ -213,6 +266,10 @@ impl RecognizedStandalone {
         self.mapping()
             .get(self.payload_key())
             .expect("recognition checked the payload key")
+    }
+
+    pub(super) fn local_types(&self) -> Option<&YamlValue> {
+        (self.payload_key() == "$schema").then(|| self.mapping().get("types")).flatten()
     }
 }
 
@@ -252,13 +309,14 @@ pub(super) fn recognize_standalone(source: &str) -> Result<Option<RecognizedStan
         let unsupported: Vec<String> = map
             .keys()
             .filter_map(YamlValue::as_str)
-            .filter(|key| !matches!(*key, "kind" | "types" | "categories"))
+            .filter(|key| !matches!(*key, "kind" | "types" | "categories" | "$schema"))
             .map(str::to_string)
             .collect();
-        let expected_len = 2 + usize::from(map.contains_key(&categories_key));
+        let expected_len = 2 + usize::from(map.contains_key(&categories_key))
+            + usize::from(map.contains_key(&schema_key));
         if !unsupported.is_empty() || map.len() != expected_len {
             return Err(format!(
-                "tagged schema documents support only `kind`, `types`, and `categories`; \
+                "tagged schema documents support only `kind`, `types`, `$schema`, and `categories`; \
                  found unsupported keys: {}",
                 unsupported.join(", ")
             ));
@@ -270,7 +328,12 @@ pub(super) fn recognize_standalone(source: &str) -> Result<Option<RecognizedStan
             return Err("tagged schema document `types` must be a mapping".into());
         }
         StandaloneSchemaEnvelope::Tagged
-    } else if map.len() == 1 && map.contains_key(&schema_key) {
+    } else if map.contains_key(&schema_key)
+        && (map.len() == 1 || (map.len() == 2 && map.contains_key(&types_key)))
+    {
+        if map.contains_key(&types_key) && !matches!(map.get(&types_key), Some(YamlValue::Mapping(_))) {
+            return Err("`types` must be a mapping".into());
+        }
         StandaloneSchemaEnvelope::Pure
     } else {
         return Ok(None);
