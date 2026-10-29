@@ -21,6 +21,8 @@ pub enum EvaluationMode {
     /// Arguments are evaluated and bound one at a time as the function
     /// needs them (`and`, `or`); see [`super::LazyCall`].
     Lazy,
+    /// Inline callbacks stay unevaluated until the evaluator binds each item.
+    Callback,
 }
 
 /// `numeric_recovery`: when `subject` fails to bind for any reason and a
@@ -105,8 +107,8 @@ pub enum RegistrationError {
     Grammar { function: String, message: String },
     #[error("{function}: a registration describes `function(...)` types only; found `{found}`")]
     NotAFunction { function: String, found: String },
-    /// An executable function whose parameter or result would be a function
-    /// value; function values do not exist at runtime.
+    /// A function-valued result or a parameter outside callback evaluation mode;
+    /// stored function values do not exist at runtime.
     #[error("{function}: overload {} takes or returns a function value at `{path}`, which no call can supply", overload + 1)]
     FunctionValued { function: String, overload: usize, path: String },
     #[error("{function}: overload {}: {source}", overload + 1)]
@@ -296,7 +298,8 @@ impl RegistrationBuilder {
     /// ## Errors
     ///
     /// A [`RegistrationError`]: unparseable or non-function signatures,
-    /// function-valued parameters or results, untranslatable types, rules
+    /// function-valued results or stored parameters, callback parameters outside
+    /// callback evaluation mode, untranslatable types, rules
     /// naming unknown parameters, conflicting rules, an invalid recovery or
     /// lazy registration, two overloads with one binding contract, or an
     /// invalid narrowing fact (on a function that does not return
@@ -310,7 +313,7 @@ impl RegistrationBuilder {
         };
         let mut overloads = Vec::with_capacity(types.len());
         for (overload, ty) in types.iter().enumerate() {
-            let signature = CompiledSignature::compile(&name, ty, resolver).map_err(|source| match source {
+            let signature = CompiledSignature::compile_with_callbacks(&name, ty, resolver, self.evaluation == EvaluationMode::Callback).map_err(|source| match source {
                 TranslateError::FunctionValue { path } => RegistrationError::FunctionValued {
                     function: name.clone(),
                     overload,

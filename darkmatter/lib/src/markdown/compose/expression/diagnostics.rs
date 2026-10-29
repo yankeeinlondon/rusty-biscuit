@@ -160,7 +160,9 @@ impl CallCheck {
             .into_iter()
             .filter_map(|finding| {
                 let severity = call_severity(finding.category, strict)?;
-                let code = if finding.category == ArgumentCategory::Incompatible {
+                let code = if matches!(self.problem, Some(super::call_check::CallProblem::InvalidCallback { .. })) {
+                    super::parser::INVALID_CALLBACK_CODE
+                } else if finding.category == ArgumentCategory::Incompatible {
                     INCOMPATIBLE_CALL_CODE
                 } else {
                     UNCERTAIN_CALL_CODE
@@ -190,7 +192,7 @@ impl CallCheck {
     /// The diagnostic composition rejects the document with: the first
     /// category 5 finding. `None` for a call that is not rejected.
     pub fn rejection_diagnostic(&self) -> Option<ExpressionDiagnostic> {
-        self.diagnostics(false).into_iter().find(|diagnostic| diagnostic.code == INCOMPATIBLE_CALL_CODE)
+        self.diagnostics(false).into_iter().find(|diagnostic| diagnostic.severity == Severity::Error)
     }
 }
 

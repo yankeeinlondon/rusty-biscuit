@@ -543,7 +543,7 @@ impl IncompleteHostCall {
 pub fn incomplete_host_calls(expr: &SpannedExpr) -> Vec<IncompleteHostCall> {
     let mut found = Vec::new();
     super::call_check::visit_call_nodes(expr, &mut |call| {
-        let SpannedExprKind::FunctionCall { name, .. } = &call.kind else {
+        let (SpannedExprKind::FunctionCall { name, .. } | SpannedExprKind::CallbackCall { name, .. }) = &call.kind else {
             return;
         };
         let lower = name.to_ascii_lowercase();

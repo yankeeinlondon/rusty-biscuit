@@ -349,6 +349,7 @@ fn is_structural(error: &MarkdownError) -> bool {
             )
     );
     transclusion_limit
+        || error.iteration_failure().is_some()
         || error.pre_approval_violation().is_some()
         || error.shell_input_violation().is_some()
         // A collection's typing, pattern, ordering, and budget failures end

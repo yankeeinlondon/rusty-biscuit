@@ -68,3 +68,17 @@ fn deny_all_fails_the_category_3_document() {
         assert!(stderr.contains("category 3"), "the severity and message are unchanged: {stderr}");
     }
 }
+
+#[test]
+fn an_invalid_call_in_an_empty_callback_rejects_before_execution() {
+    let fixture = CliProcessFixture::named("compose_callback_call_rejected");
+    let document = fixture.write_file("cwd/doc.md", "Body {{ map([], x => min(true, 5)) }}\n");
+    let output = fixture.command().args(["compose", "--output", "report-json"]).arg(&document).output().unwrap();
+    assert_ne!(output.status.code(), Some(0));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report["document"].is_null(), "{report}");
+    assert!(report["diagnostics"].as_array().unwrap().iter().any(|diagnostic| {
+        diagnostic["code"] == "dm.expression.incompatible_call"
+            && diagnostic["message"].as_str().unwrap().contains("min")
+    }), "{report}");
+}

@@ -174,8 +174,10 @@ fn with_iteration_context(error: &MarkdownError, diagnostics: &mut [Diagnostic])
         }
         current = cause.source();
     }
-    if let MarkdownError::Collection(inner) = innermost(error) {
-        path = path.joined(&inner.iteration_path());
+    match innermost(error) {
+        MarkdownError::Collection(inner) => path = path.joined(&inner.iteration_path()),
+        MarkdownError::Interpolation { cause, .. } => path = path.joined(&cause.callback_path()),
+        _ => {}
     }
     let rendered = path.to_string();
     for diagnostic in diagnostics {
@@ -302,11 +304,13 @@ fn shell_error_diagnostics(error: &ShellExpansionError) -> Vec<Diagnostic> {
 }
 
 fn expression_code(cause: &ExpressionError) -> &'static str {
-    match cause {
+    match cause.without_callbacks() {
+        ExpressionError::IterationLimit(error) => error.kind.code(),
         ExpressionError::Parse(_) | ExpressionError::MalformedLiteralToken(_) => {
             ComposeWarning::EXPRESSION_PARSE_FAILURE_CODE
         }
         ExpressionError::UnknownFunction { .. } => UNKNOWN_FUNCTION_CODE,
+        ExpressionError::InvalidCallback { .. } => super::expression::parser::INVALID_CALLBACK_CODE,
         _ => ComposeWarning::EXPRESSION_EVALUATION_FAILURE_CODE,
     }
 }

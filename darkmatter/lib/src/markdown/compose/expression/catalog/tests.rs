@@ -624,3 +624,32 @@ fn has_binary_and_has_command_share_one_probe() {
         );
     }
 }
+
+#[test]
+fn callback_example_arrows_preserve_nested_calls_patterns_and_quoted_text() {
+    for (call, expected) in [
+        ("filter([1, 2, 3], n => n > 1)", json!([2, 3])),
+        ("filter([1, 2, 3], n -> n > 1)", json!([2, 3])),
+        (r#"map({z: "=>", a: "->"}, {key, value} => value)"#, json!(["=>", "->"])),
+        ("map([[1, 2]], xs => filter(xs, n -> n > 1))", json!([[2]])),
+    ] {
+        let source = format!("kind: schema\ncategories: [Collection]\ntypes:\n  demo: |-\n    function(parameters(void); returns(unknown); category(Collection); example({call} => {expected}))\n");
+        let catalog = load_catalog(&source, "callback-example.yaml", &[]).unwrap();
+        let FunctionExample::Call { call: parsed, expected: parsed_expected, result, .. } = &catalog.descriptors[0].examples[0] else {
+            panic!("an inline example");
+        };
+        assert_eq!(parsed.as_ref(), call);
+        assert_eq!(parsed_expected, &ExampleOutcome::Value(expected.clone()));
+        assert_eq!(result.as_ref(), expected.to_string());
+    }
+    for (example, reason) in [
+        ("filter([1, 2, 3], n =>) => [2, 3]", "not a valid expression"),
+        ("filter([1, 2, 3], n => n > 1) => n", "must be a literal"),
+        ("filter([1, 2, 3], n => n > 1) =>", "must be a literal"),
+    ] {
+        let source = format!("kind: schema\ncategories: [Collection]\ntypes:\n  demo: |-\n    function(parameters(void); returns(unknown); category(Collection); example({example}))\n");
+        let error = load_catalog(&source, "callback-example.yaml", &[]).unwrap_err().to_string();
+        assert!(error.contains("callback-example.yaml"), "{error}");
+        assert!(error.contains(reason), "{example}: {error}");
+    }
+}

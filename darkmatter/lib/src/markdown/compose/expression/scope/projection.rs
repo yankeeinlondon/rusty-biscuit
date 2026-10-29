@@ -267,6 +267,14 @@ impl<'s> DeclaredTypes<'s> {
         self
     }
 
+    /// The host binding view, when the declared owner supplied one.
+    pub fn binding_view(&self) -> Option<&BindingView> {
+        match self.host_roots {
+            HostRoots::View(view) => Some(view),
+            _ => None,
+        }
+    }
+
     /// Types the host's globals by `catalog`, the host catalog its event
     /// registry carries. A host global the catalog does not declare is
     /// typed by Darkmatter's catalog (`err`, `timing`), else `unknown`.

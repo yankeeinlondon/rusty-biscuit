@@ -9,6 +9,7 @@ last_updated: 2026-10-22
 - [Compose](./docs/topics/what-is-composition.md) documents together dynamically
     - Export readable Markdown with portable file links; see [compose output](./docs/cli/compose.md)
     - List documents with [`::file-links`](./docs/inline/file-links.md), using directory context labels and terminal-aware icons
+- Transform expression collections with [inline callbacks](./docs/topics/darkmatter-expressions.md#inline-collection-callbacks), such as `map(people, p => p.name)` and `filter(people, p -> p.active)`
 - Render to [multiple output formats](./docs/topics/output-formats.md)
 - Run [lifecycle events](./docs/topics/lifecycle/index.md) (`initialize`, `composed`, `failed`, `cancelled`, `finalize`) from a document's frontmatter around `md compose`
 - Compose supports body `::shell` expansion, `::shell-block` / `::end-block` multi-command blocks, and top-level frontmatter `$(...)` shell expansion with shared approval and timeout controls

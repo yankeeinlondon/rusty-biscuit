@@ -79,6 +79,10 @@ Shallow destructuring can expose those fields directly:
 ::end-map
 ```
 
+An object pattern requires an object item and every named field. `{key}` accepts
+`{key: null}` because the field exists; it rejects a null item or an object
+without `key`. A null or empty source has no items to bind.
+
 The quoted mapping function is optional and positional. Both `->` and `=>`
 have the same meaning. Its parameter pattern binds the input for evaluating
 the expression, then binds the result for rendering the body; see the map

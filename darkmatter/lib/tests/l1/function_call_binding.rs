@@ -801,3 +801,149 @@ fn constraints_the_lowering_rejects_fail_translation() {
         assert!(shape_from_property_def(&def(text), &NoNamedTypes).is_err(), "{text}");
     }
 }
+
+#[test]
+fn callback_mode_accepts_inline_parameters_but_never_stored_values() {
+    let signature = "function(parameters(xs: unknown[] | object | null, f: function(parameters(x: unknown | null); returns(unknown | null))); returns((unknown | null)[]))";
+    let registration = FunctionRegistration::builder("map", signature)
+        .evaluation(EvaluationMode::Callback).build().unwrap();
+    let callback = registration.overloads()[0].parameters()[1].callback().unwrap();
+    assert_eq!(callback.parameters.as_slice().len(), 1);
+    assert_eq!(registration.evaluation(), EvaluationMode::Callback);
+    assert!(registration.lazy_call().is_none());
+    for value in [json!(null), json!("x => x"), json!({}), json!([]), json!(true), json!(1)] {
+        assert!(!registration.overloads()[0].parameters()[1].binds(&value), "{value}");
+    }
+    let error = FunctionRegistration::builder("make", "function(parameters(void); returns(function(parameters(void); returns(string))))")
+        .evaluation(EvaluationMode::Callback).build().unwrap_err();
+    assert!(matches!(error, RegistrationError::FunctionValued { path, .. } if path == "returns"));
+}
+
+#[test]
+fn callback_mode_rejects_callbacks_nested_in_stored_parameters() {
+    for signature in [
+        "function(parameters(f: function(parameters(x: number); returns(number))[]); returns(number))",
+        "function(parameters(f: {stored: function(parameters(x: number); returns(number))}); returns(number))",
+    ] {
+        let error = FunctionRegistration::builder("apply", signature).evaluation(EvaluationMode::Callback).build();
+        assert!(matches!(error, Err(RegistrationError::FunctionValued { .. })), "{error:?}");
+    }
+}
+
+#[test]
+fn shipped_collection_callback_signatures_are_not_lifecycle_verbs() {
+    use darkmatter::markdown::compose::expression::function_descriptors;
+    use darkmatter::lifecycle::actions::{all_lifecycle_verbs, expression_function_signature, is_known_lifecycle_verb};
+
+    for name in ["map", "filter"] {
+        let descriptors = function_descriptors(name);
+        assert_eq!(descriptors.len(), 1);
+        let descriptor = &descriptors[0];
+        assert_eq!(descriptor.parameters.len(), 2);
+        assert!(!descriptor.accepts_value_arguments());
+        let registration = FunctionRegistration::builder_from_types(name, vec![descriptor.function_type.clone()])
+            .evaluation(EvaluationMode::Callback).build().unwrap();
+        assert!(registration.overloads()[0].parameters()[1].callback().is_some());
+        assert!(registration.overloads()[0].check_return(&json!([null, 1, "x"])).is_ok());
+        assert!(expression_function_signature(name).is_none());
+        assert!(!is_known_lifecycle_verb(name));
+        assert!(!all_lifecycle_verbs().contains(&name));
+        let authored = json!({"composed": [{(name): [[], "x => x"]}]});
+        let mut options = darkmatter::lifecycle::md_host::parse_options(None);
+        options.unknown_verbs = darkmatter::lifecycle::UnknownVerbPolicy::Reject;
+        assert!(darkmatter::lifecycle::parse_lifecycle_config_with(&authored, std::path::Path::new("doc.md"), &options).is_err());
+    }
+}
+
+#[test]
+fn callback_runtime_preserves_order_nulls_patterns_and_nested_scopes() {
+    use darkmatter::markdown::compose::expression::{EvaluationLookup, evaluate, parse};
+    struct Lookup;
+    impl EvaluationLookup for Lookup {
+        fn get(&self, path: &str) -> Option<Value> {
+            (path == "fm.n" || path == "n").then(|| json!(9))
+        }
+    }
+    for (source, expected) in [
+        ("map([1, null, 3], n => n)", json!([1, null, 3])),
+        ("filter([0, null, 2, false, '', [], {}], n -> n)", json!([2])),
+        ("map({b: 2, a: null}, {key, value} => [key, value])", json!([["b", 2], ["a", null]])),
+        ("filter({b: 2, a: null}, entry => entry.value)", json!([{"key": "b", "value": 2}])),
+        ("map([1, 2], n => [map([n + 1], n -> n)[0], local.n, fm.n])", json!([[2, 1, 9], [3, 2, 9]])),
+        ("map([{v: null}], {v} -> v)", json!([null])),
+        ("map(null, {v} => unknown_function(v))", json!([])),
+        ("map(missing, n => unknown_function(n))", json!([])),
+        ("filter([], n => unknown_function(n))", json!([])),
+    ] {
+        assert_eq!(evaluate(&parse(source).unwrap(), &Lookup).unwrap(), expected, "{source}");
+    }
+    assert_eq!(evaluate(&parse("n").unwrap(), &Lookup).unwrap(), json!(9));
+}
+
+#[test]
+fn callback_runtime_binds_scalars_and_preserves_nested_failure_causes() {
+    use darkmatter::markdown::compose::expression::{EvaluationLookup, ExpressionError, evaluate, parse};
+    struct Lookup;
+    impl EvaluationLookup for Lookup { fn get(&self, _: &str) -> Option<Value> { None } }
+    for source in ["map(3, n => n)", "filter('text', n => n)", "map('[1,2]', n => n)", "map(true, n => n)"] {
+        assert!(matches!(evaluate(&parse(source).unwrap(), &Lookup), Err(ExpressionError::Call(_))), "{source}");
+    }
+    let error = evaluate(&parse("map({team: [1]}, {value} => filter(value, n => unknown_function(n)))").unwrap(), &Lookup).unwrap_err();
+    assert!(error.is_authoring_fatal());
+    let message = error.to_string();
+    assert!(message.contains("map[team]") && message.contains("filter[0]") && message.contains("unknown_function"), "{message}");
+    let mut cause: &(dyn std::error::Error + 'static) = &error;
+    while let Some(inner) = cause.source() { cause = inner; }
+    assert!(matches!(cause.downcast_ref::<ExpressionError>().or_else(|| cause.downcast_ref::<Box<ExpressionError>>().map(AsRef::as_ref)), Some(ExpressionError::UnknownFunction { .. })));
+    for source in ["map([null], {key} => key)", "map([{}], {key} => key)", "map([1], fm => fm)"] {
+        assert!(evaluate(&parse(source).unwrap(), &Lookup).is_err(), "{source}");
+    }
+    assert_eq!(evaluate(&parse("map([1], n => n)").unwrap(), &Lookup).unwrap(), json!([1]));
+}
+
+#[test]
+fn callback_runtime_evaluates_source_once_and_stops_at_first_error() {
+    use std::cell::RefCell;
+    use darkmatter::markdown::compose::expression::{EvaluationLookup, evaluate, parse};
+    struct Lookup { reads: RefCell<Vec<String>> }
+    impl EvaluationLookup for Lookup {
+        fn get(&self, path: &str) -> Option<Value> {
+            self.reads.borrow_mut().push(path.into());
+            match path { "items" => Some(json!([1, 2, 3])), "keep" => Some(json!(true)), _ => None }
+        }
+    }
+    let lookup = Lookup { reads: RefCell::new(Vec::new()) };
+    assert_eq!(evaluate(&parse("filter(items, n => keep)").unwrap(), &lookup).unwrap(), json!([1, 2, 3]));
+    assert_eq!(*lookup.reads.borrow(), ["items", "keep", "keep", "keep"]);
+    lookup.reads.borrow_mut().clear();
+    assert!(evaluate(&parse("map(items, n => n == 2 ? unknown_function(n) : keep)").unwrap(), &lookup).is_err());
+    assert_eq!(*lookup.reads.borrow(), ["items", "keep"]);
+}
+
+#[test]
+fn callback_runtime_session_budget_is_shared_and_arrays_do_not_charge_bytes() {
+    use std::{num::NonZeroU64, sync::Arc};
+    use darkmatter::markdown::compose::expression::{BindingView, EvaluationLookup, EvaluationSession, evaluate, parse};
+    use darkmatter::markdown::compose::expression::iteration::IterationLimits;
+    struct Lookup;
+    impl EvaluationLookup for Lookup { fn get(&self, _: &str) -> Option<Value> { None } }
+    let session = EvaluationSession::associate(Arc::new(BindingView::baseline()), &Lookup, []).unwrap()
+        .with_iteration_limits(IterationLimits::new(NonZeroU64::new(4).unwrap(), NonZeroU64::new(1).unwrap()));
+    assert_eq!(evaluate(&parse("map([1, 2], n => filter([n], p => false))").unwrap(), &session).unwrap(), json!([[], []]));
+    assert_eq!(session.iteration_budget().usage().visits, 4);
+    assert_eq!(session.iteration_budget().usage().bytes, 0);
+    let error = evaluate(&parse("map([1], n => n)").unwrap(), &session).unwrap_err();
+    assert!(error.is_authoring_fatal());
+    assert!(error.to_string().contains("visit"));
+}
+
+#[test]
+fn callback_runtime_call_binding_severity_survives_the_wrapper() {
+    use darkmatter::markdown::compose::expression::{EvaluationLookup, ExpressionError, evaluate, parse};
+    struct Lookup;
+    impl EvaluationLookup for Lookup { fn get(&self, _: &str) -> Option<Value> { None } }
+    let error = evaluate(&parse("map([true], n => min(n, 1))").unwrap(), &Lookup).unwrap_err();
+    assert!(matches!(error.without_callbacks(), ExpressionError::Call(_)));
+    assert!(!error.is_authoring_fatal(), "{error}");
+    assert_eq!(error.callback_path().to_string(), "map[0]");
+}

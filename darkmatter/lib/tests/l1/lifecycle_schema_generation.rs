@@ -6,7 +6,7 @@
 //! The projection itself fails on missing side-effect metadata and on a new
 //! name collision, and is deterministic.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use darkmatter::effects::effect_function_descriptors;
 use darkmatter::lifecycle::schema_projection::{
@@ -159,13 +159,13 @@ fn the_generated_regions_are_byte_identical_to_a_regeneration() {
 }
 
 #[test]
-fn the_generated_verbs_are_every_catalog_function_and_side_effect_but_set() {
+fn the_generated_verbs_are_value_accepting_catalog_functions_and_side_effects_but_set() {
     let projection = projection();
     let mut expected: Vec<(VerbOrigin, &str)> = effect_function_descriptors()
         .iter()
         .map(|descriptor| (VerbOrigin::SideEffect, &*descriptor.name))
         .filter(|(_, name)| *name != "set")
-        .chain(expression_function_descriptors().iter().map(|descriptor| (VerbOrigin::ExpressionFunction, &*descriptor.name)))
+        .chain(expression_function_descriptors().iter().filter(|descriptor| descriptor.accepts_value_arguments()).map(|descriptor| (VerbOrigin::ExpressionFunction, &*descriptor.name)))
         .collect();
     expected.sort_unstable();
     expected.dedup();
@@ -178,7 +178,7 @@ fn the_generated_verbs_are_every_catalog_function_and_side_effect_but_set() {
     let recorded: Vec<(&str, VerbOrigin)> =
         projection.collisions.iter().map(|collision| (collision.verb, collision.catalog)).collect();
     assert_eq!(recorded, [("set", VerbOrigin::SideEffect), ("max", VerbOrigin::ExpressionFunction)]);
-    assert!(projection.callback_exclusions.is_empty(), "{:?}", projection.callback_exclusions);
+    assert_eq!(projection.callback_exclusions.iter().map(String::as_str).collect::<BTreeSet<_>>(), BTreeSet::from(["map", "filter"]));
 }
 
 #[test]

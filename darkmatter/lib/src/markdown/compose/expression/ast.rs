@@ -175,6 +175,15 @@ pub enum Expr {
         /// Arguments to the function.
         args: Vec<Expr>,
     },
+    /// A call containing inline callbacks. Callbacks occupy arguments only;
+    /// they are never expression values.
+    CallbackCall {
+        /// Function name.
+        name: String,
+        /// Value and callback arguments in authored order.
+        args: Vec<CallArgument>,
+    },
+
 }
 
 impl fmt::Display for Expr {
@@ -222,6 +231,16 @@ impl fmt::Display for Expr {
             }
             Expr::Comparison { left, op, right } => {
                 write!(f, "{} {} {}", left, op, right)
+            }
+            Expr::CallbackCall { name, args } => {
+                write!(f, "{name}(")?;
+                for (index, arg) in args.iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{arg}")?;
+                }
+                write!(f, ")")
             }
             Expr::FunctionCall { name, args } => {
                 write!(f, "{}(", name)?;
@@ -333,6 +352,15 @@ pub enum SpannedExprKind {
         /// Arguments to the function.
         args: Vec<SpannedExpr>,
     },
+    /// A call containing inline callbacks. Callbacks occupy arguments only;
+    /// they are never expression values.
+    CallbackCall {
+        /// Function name.
+        name: String,
+        /// Value and callback arguments in authored order.
+        args: Vec<SpannedCallArgument>,
+    },
+
 }
 
 impl SpannedExpr {
@@ -396,10 +424,85 @@ impl SpannedExpr {
                 op: *op,
                 right: Box::new(right.erase()),
             },
+            SpannedExprKind::CallbackCall { name, args } => Expr::CallbackCall {
+                name: name.clone(),
+                args: args.iter().map(SpannedCallArgument::erase).collect(),
+            },
             SpannedExprKind::FunctionCall { name, args } => Expr::FunctionCall {
                 name: name.clone(),
                 args: args.iter().map(SpannedExpr::erase).collect(),
             },
+        }
+    }
+}
+
+/// One call argument, preserving the distinction between values and callbacks.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CallArgument {
+    /// An ordinary expression evaluated for its value.
+    Value(Expr),
+    /// An inline callback accepted only by a callback parameter.
+    Callback(Callback),
+}
+
+impl CallArgument {
+    /// The value expression or callback body. Use binding-aware traversal
+    /// when the distinction affects lexical lookup.
+    pub fn expression(&self) -> &Expr {
+        match self {
+            Self::Value(value) => value,
+            Self::Callback(callback) => &callback.body,
+        }
+    }
+}
+
+impl fmt::Display for CallArgument {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Value(value) => write!(f, "{value}"),
+            Self::Callback(callback) => {
+                match &callback.pattern {
+                    BindingPattern::Identifier(name) => write!(f, "{name}")?,
+                    BindingPattern::Fields(fields) => write!(f, "{{{}}}", fields.join(", "))?,
+                }
+                write!(f, " => {}", callback.body)
+            }
+        }
+    }
+}
+
+/// A call argument retaining its authored source spans.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SpannedCallArgument {
+    /// An ordinary value argument.
+    Value(SpannedExpr),
+    /// An inline callback argument.
+    Callback(SpannedCallback),
+}
+
+impl SpannedCallArgument {
+    /// The value expression or callback body; callback bindings remain on
+    /// the enclosing argument for scope-aware consumers.
+    pub fn expression(&self) -> &SpannedExpr {
+        match self {
+            Self::Value(value) => value,
+            Self::Callback(callback) => &callback.body,
+        }
+    }
+
+    /// The complete argument span, including the callback pattern and body.
+    pub fn span(&self) -> SourceSpan {
+        match self {
+            Self::Value(value) => value.span.clone(),
+            Self::Callback(callback) => callback.span(),
+        }
+    }
+
+    /// Drops spans without turning callbacks into values.
+    pub fn erase(&self) -> CallArgument {
+        match self {
+            Self::Value(value) => CallArgument::Value(value.erase()),
+            Self::Callback(callback) => CallArgument::Callback(callback.erase()),
         }
     }
 }
@@ -438,6 +541,14 @@ pub enum SpannedBindingPattern {
 }
 
 impl SpannedBindingPattern {
+    /// The authored declaration of `name`, relative to the parsed expression.
+    pub fn name_span(&self, name: &str) -> Option<&SourceSpan> {
+        match self {
+            Self::Identifier(binding) => (binding.value == name).then_some(&binding.span),
+            Self::Fields(fields) => fields.iter().find(|binding| binding.value == name).map(|binding| &binding.span),
+        }
+    }
+
     /// Drops spans.
     pub fn erase(&self) -> BindingPattern {
         match self {
@@ -461,6 +572,8 @@ pub struct Callback {
 pub struct SpannedCallback {
     /// The parameter pattern.
     pub pattern: SpannedBindingPattern,
+    /// Complete pattern span, including object-pattern braces.
+    pub pattern_span: SourceSpan,
     /// Byte span of the arrow token (`=>` or `->`).
     pub arrow: SourceSpan,
     /// The body expression with its spans.
@@ -468,6 +581,11 @@ pub struct SpannedCallback {
 }
 
 impl SpannedCallback {
+    /// The callback's authored extent, including object-pattern braces.
+    pub fn span(&self) -> SourceSpan {
+        self.pattern_span.start..self.body.span.end
+    }
+
     /// Drops spans; the result is what the compose pipeline evaluates.
     pub fn erase(&self) -> Callback {
         Callback {

@@ -51,7 +51,7 @@
 //! is a variable plus the selectors applied to it, so `fm['key']` and
 //! `state.a[0]` keep the path they read.
 
-use super::ast::{Expr, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind};
+use super::ast::{CallArgument, SpannedCallArgument, Expr, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind};
 use super::scope::{DeclaredTypes, Polarity, TypeScope};
 use crate::markdown::span::SourceSpan;
 
@@ -80,8 +80,11 @@ impl<'a> AbsenceScope<'a> {
     pub(crate) fn handles(&self, path: &str) -> bool {
         self.handles_absence
             || self.facts.is_some_and(|facts| {
-                UNTYPED
-                    .variable_subject(path)
+                (if facts.lexical().is_some() {
+                    facts.subject(&super::Expr::Variable(path.to_string()))
+                } else {
+                    UNTYPED.variable_subject(path)
+                })
                     .is_some_and(|subject| facts.guards_path_or_ancestor(&subject))
             })
     }
@@ -209,12 +212,26 @@ pub fn static_variable_reads_in_scope<'e>(expr: &'e SpannedExpr, locals: &[&str]
 /// This is what a callback contributes to document, context, and host
 /// dependencies; its parameters contribute none.
 pub fn static_callback_reads<'e>(callback: &'e SpannedCallback, outer_locals: &[&str]) -> Vec<StaticVariableRead<'e>> {
+    callback_reads(callback, outer_locals, AbsenceScope::default())
+}
+
+fn callback_reads<'e>(callback: &'e SpannedCallback, outer_locals: &[&str], scope: AbsenceScope<'_>) -> Vec<StaticVariableRead<'e>> {
     let mut locals: Vec<&str> = outer_locals.to_vec();
     match &callback.pattern {
         SpannedBindingPattern::Identifier(name) => locals.push(&name.value),
         SpannedBindingPattern::Fields(fields) => locals.extend(fields.iter().map(|field| field.value.as_str())),
     }
-    static_variable_reads_in_scope(&callback.body, &locals)
+    let facts = scope.facts();
+    let bindings = locals.iter().map(|name| super::scope::TypedLocal::new(*name, super::scope::Shape::Unknown { non_null: false })).collect();
+    let lexical = match facts.lexical() {
+        Some(parent) => parent.child(bindings),
+        None => super::scope::LexicalTypes::new(bindings),
+    };
+    let inner = facts.within(lexical);
+    let mut reads = Vec::new();
+    walk_static(&callback.body, scope.operand().with_facts(&inner), &mut reads);
+    reads.retain(|read| !is_lexical_read(read.path, &locals));
+    reads
 }
 
 fn is_lexical_read(path: &str, locals: &[&str]) -> bool {
@@ -315,6 +332,21 @@ fn walk_access<'e>(expr: &'e Expr, reads: &mut Vec<StaticAccessRead<'e>>) {
             walk_access(then_branch, reads);
             walk_access(else_branch, reads);
         }
+        Expr::CallbackCall { args, .. } => {
+            for arg in args {
+                match arg {
+                    CallArgument::Value(value) => walk_access(value, reads),
+                    CallArgument::Callback(callback) => {
+                        let start = reads.len();
+                        walk_access(&callback.body, reads);
+                        let names: Vec<_> = callback.pattern.names().collect();
+                        let mut free = reads.split_off(start);
+                        free.retain(|read| !is_lexical_read(read.variable, &names));
+                        reads.extend(free);
+                    }
+                }
+            }
+        }
         Expr::FunctionCall { args: items, .. } | Expr::ArrayLiteral(items) => {
             for item in items {
                 walk_access(item, reads);
@@ -394,6 +426,19 @@ pub fn branch_scope<'d>(expr: &SpannedExpr, target: &SourceSpan, site: TypeScope
             };
             let facts = site.assume(&condition.erase(), polarity);
             branch_scope(branch, target, facts)
+        }
+        SpannedExprKind::CallbackCall { args, .. } => {
+            for arg in args {
+                match arg {
+                    SpannedCallArgument::Value(value) if holds(value) => return branch_scope(value, target, site),
+                    SpannedCallArgument::Callback(callback) if holds(&callback.body) => {
+                        let inner = super::call_check::callback_scope(callback, args, &site).unwrap_or_else(|_| site.clone());
+                        return branch_scope(&callback.body, target, inner);
+                    }
+                    _ => {}
+                }
+            }
+            site
         }
         SpannedExprKind::FunctionCall { name, args } => {
             let continues = short_circuit_polarity(name);
@@ -493,6 +538,14 @@ fn walk_static<'e>(
             let false_side = scope.facts().assume(&condition, Polarity::False);
             walk_static(then_branch, scope.with_facts(&true_side), reads);
             walk_static(else_branch, scope.with_facts(&false_side), reads);
+        }
+        SpannedExprKind::CallbackCall { name, args } => {
+            for (index, arg) in args.iter().enumerate() {
+                match arg {
+                    SpannedCallArgument::Value(value) => walk_static(value, scope.call_argument(name, index, args.len()), reads),
+                    SpannedCallArgument::Callback(callback) => reads.extend(callback_reads(callback, &[], scope)),
+                }
+            }
         }
         SpannedExprKind::FunctionCall { name, args } => {
             let continues = short_circuit_polarity(name);
@@ -878,6 +931,7 @@ mod tests {
 
     fn callback(pattern: &str, body: &str) -> SpannedCallback {
         SpannedCallback {
+            pattern_span: 0..pattern.len(),
             pattern: SpannedBindingPattern::Identifier(crate::markdown::span::Spanned::new(pattern.to_string(), 0..pattern.len())),
             arrow: 0..0,
             body: crate::markdown::compose::expression::parse_spanned(body).unwrap(),

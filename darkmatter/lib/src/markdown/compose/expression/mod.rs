@@ -95,7 +95,7 @@ pub use absence::{
     static_variable_reads, static_variable_reads_in_scope,
 };
 pub use ast::{
-    BinaryOp, BindingPattern, Callback, Expr, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind,
+    BinaryOp, BindingPattern, CallArgument, Callback, Expr, SpannedCallArgument, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind,
 };
 pub use binding::{
     Availability, BindingError, BindingView, BindingViewBuilder, EvaluationSession,
@@ -396,11 +396,14 @@ pub trait EvaluationLookup {
     /// that hold no lazy root.
     fn begin_expression_scope(&self) {}
 
+    /// The enclosing request or standalone session's shared collection allowance.
+    fn iteration_budget(&self) -> Option<&iteration::IterationBudget> {
+        None
+    }
+
     /// The innermost lexical scope this lookup reads locals from, if any.
     ///
-    /// The default is `None`: a lookup that holds no callback or iteration
-    /// parameters. [`ScopedLookup`] returns its frame, and delegating lookups
-    /// forward their inner lookup's scope.
+    /// Delegating lookups forward their inner lookup's retained frame.
     fn lexical_scope(&self) -> Option<&std::sync::Arc<LexicalScope>> {
         None
     }
@@ -507,7 +510,7 @@ pub(crate) fn format_json_number(number: &serde_json::Number) -> String {
 /// ## Returns
 ///
 /// - `Ok(Value)` with the evaluated JSON value on success
-/// - `Err(String)` with a human-readable message on evaluation failure
+/// - `Err(ExpressionError)` retaining the typed failure cause
 ///
 /// ## Examples
 ///
@@ -537,7 +540,8 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, E
     // `current` root refreshes at (Q2). The recursion below is
     // inside that scope, so it never reopens it.
     lookup.begin_expression_scope();
-    evaluate_expr(expr, lookup, AbsenceScope::default(), &mut ())
+    let budget = evaluation_budget(lookup);
+    evaluate_expr(expr, lookup, AbsenceScope::default(), &mut (), &budget)
 }
 
 /// [`evaluate`], reporting to `observer` every evaluated read of an unknown
@@ -552,7 +556,15 @@ pub(crate) fn evaluate_observed<L: EvaluationLookup, O: MissingRootObserver>(
     observer: &mut O,
 ) -> Result<Value, ExpressionError> {
     lookup.begin_expression_scope();
-    evaluate_expr(expr, lookup, AbsenceScope::default(), observer)
+    let budget = evaluation_budget(lookup);
+    evaluate_expr(expr, lookup, AbsenceScope::default(), observer, &budget)
+}
+
+fn evaluation_budget<L: EvaluationLookup>(lookup: &L) -> iteration::IterationBudget {
+    lookup.iteration_budget().cloned()
+        .or_else(|| lookup.resolution_context_ref().map(|context| context.iteration.clone()))
+        .or_else(|| lookup.resolution_context().map(|context| context.iteration))
+        .unwrap_or_else(|| iteration::IterationBudget::new(Default::default()))
 }
 
 /// Reports a document-property read of `path` that found no value, unless
@@ -586,6 +598,7 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
     lookup: &L,
     scope: AbsenceScope<'_>,
     observer: &mut O,
+    budget: &iteration::IterationBudget,
 ) -> Result<Value, ExpressionError> {
     let operand = scope.operand();
     match expr {
@@ -600,21 +613,21 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
         Expr::BoolLiteral(b) => Ok(Value::Bool(*b)),
         Expr::ArrayLiteral(items) => items
             .iter()
-            .map(|item| evaluate_expr(item, lookup, operand, observer))
+            .map(|item| evaluate_expr(item, lookup, operand, observer, budget))
             .collect::<Result<Vec<_>, _>>()
             .map(Value::Array),
         Expr::ObjectLiteral(entries) => entries
             .iter()
-            .map(|(key, value)| Ok((key.clone(), evaluate_expr(value, lookup, operand, observer)?)))
+            .map(|(key, value)| Ok((key.clone(), evaluate_expr(value, lookup, operand, observer, budget)?)))
             .collect::<Result<serde_json::Map<_, _>, ExpressionError>>()
             .map(Value::Object),
-        Expr::Paren(inner) => evaluate_expr(inner, lookup, scope, observer),
+        Expr::Paren(inner) => evaluate_expr(inner, lookup, scope, observer, budget),
         Expr::UnaryNot(inner) => {
-            let value = evaluate_expr(inner, lookup, operand, observer)?;
+            let value = evaluate_expr(inner, lookup, operand, observer, budget)?;
             Ok(Value::Bool(!is_truthy(&value)))
         }
         Expr::UnaryMinus(inner) => {
-            let value = evaluate_expr(inner, lookup, operand, observer)?;
+            let value = evaluate_expr(inner, lookup, operand, observer, budget)?;
             if value.is_null() {
                 return Ok(Value::Null);
             }
@@ -625,22 +638,22 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
             })
         }
         Expr::Binary { op, left, right } => {
-            let left = evaluate_expr(left, lookup, operand, observer)?;
-            let right = evaluate_expr(right, lookup, operand, observer)?;
+            let left = evaluate_expr(left, lookup, operand, observer, budget)?;
+            let right = evaluate_expr(right, lookup, operand, observer, budget)?;
             evaluate_binary(*op, &left, &right)
         }
         Expr::Index { base, index } => {
             // Access on a handled value is still that value's absence check.
-            let base = evaluate_expr(base, lookup, scope, observer)?;
-            let index = evaluate_expr(index, lookup, operand, observer)?;
+            let base = evaluate_expr(base, lookup, scope, observer, budget)?;
+            let index = evaluate_expr(index, lookup, operand, observer, budget)?;
             Ok(evaluate_index(&base, &index))
         }
         Expr::MemberAccess { base, name } => {
-            let base = evaluate_expr(base, lookup, scope, observer)?;
+            let base = evaluate_expr(base, lookup, scope, observer, budget)?;
             Ok(evaluate_member(&base, name))
         }
         Expr::Fallback { primary: primary_expr, fallback } => {
-            let primary = evaluate_expr(primary_expr, lookup, scope.absence_check(), observer)?;
+            let primary = evaluate_expr(primary_expr, lookup, scope.absence_check(), observer, budget)?;
             if is_truthy(&primary) {
                 Ok(primary)
             } else if O::OBSERVES {
@@ -648,9 +661,9 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
                 // itself a primary, `b` is handled too. The fallback is read
                 // only when the primary failed, so it gets the false side.
                 let facts = scope.facts().assume(primary_expr, scope::Polarity::False);
-                evaluate_expr(fallback, lookup, scope.with_facts(&facts), observer)
+                evaluate_expr(fallback, lookup, scope.with_facts(&facts), observer, budget)
             } else {
-                evaluate_expr(fallback, lookup, scope, observer)
+                evaluate_expr(fallback, lookup, scope, observer, budget)
             }
         }
         Expr::Ternary {
@@ -658,7 +671,7 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
             then_branch,
             else_branch,
         } => {
-            let condition = evaluate_expr(condition_expr, lookup, scope.absence_check(), observer)?;
+            let condition = evaluate_expr(condition_expr, lookup, scope.absence_check(), observer, budget)?;
             let (branch, polarity) = if is_truthy(&condition) {
                 (then_branch, scope::Polarity::True)
             } else {
@@ -667,14 +680,14 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
             if O::OBSERVES {
                 // The chosen branch reads under its own side's facts only.
                 let facts = scope.facts().assume(condition_expr, polarity);
-                evaluate_expr(branch, lookup, scope.with_facts(&facts), observer)
+                evaluate_expr(branch, lookup, scope.with_facts(&facts), observer, budget)
             } else {
-                evaluate_expr(branch, lookup, scope, observer)
+                evaluate_expr(branch, lookup, scope, observer, budget)
             }
         }
         Expr::Comparison { left, op, right } => {
-            let left = evaluate_expr(left, lookup, operand, observer)?;
-            let right = evaluate_expr(right, lookup, operand, observer)?;
+            let left = evaluate_expr(left, lookup, operand, observer, budget)?;
+            let right = evaluate_expr(right, lookup, operand, observer, budget)?;
 
             let outcome = match op {
                 ComparisonOp::Equal => equality::values_equal(&left, &right),
@@ -690,8 +703,11 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
             };
             Ok(Value::Bool(outcome))
         }
+        Expr::CallbackCall { name, args } => {
+            evaluate_callback_function(name, args, lookup, scope, observer, budget)
+        },
         Expr::FunctionCall { name, args } => {
-            evaluate_function(name, args, lookup, scope, observer)
+            evaluate_function(name, args, lookup, scope, observer, budget)
         }
     }
 }
@@ -814,12 +830,79 @@ pub(crate) fn unknown_function_error(name: &str) -> ExpressionError {
     }
 }
 
+fn evaluate_callback_function<L: EvaluationLookup, O: MissingRootObserver>(
+    name: &str,
+    args: &[CallArgument],
+    lookup: &L,
+    scope: AbsenceScope<'_>,
+    observer: &mut O,
+    budget: &iteration::IterationBudget,
+) -> Result<Value, ExpressionError> {
+    let name = name.to_ascii_lowercase();
+    let registration = functions::function_registration(&name).ok_or_else(|| unknown_function_error(&name))?;
+    registration.check_arity(args.len()).map_err(|error| ExpressionError::Call(Box::new(error)))?;
+    let invalid = |message: String| ExpressionError::InvalidCallback { span: 0..0, message };
+    if registration.evaluation() != EvaluationMode::Callback {
+        return Err(invalid(format!("{name} does not accept inline callbacks")));
+    }
+    let [CallArgument::Value(input), CallArgument::Callback(callback)] = args else {
+        return Err(invalid(format!("{name} requires an iterable and one inline callback")));
+    };
+    check_local_names(callback.pattern.names(), lookup.binding_view())
+        .map_err(|error| invalid(error.to_string()))?;
+    let value = evaluate_expr(input, lookup, scope.call_argument(&name, 0, args.len()), observer, budget)?;
+    let value = registration.bind_callback_value(0, value)
+        .map_err(|error| ExpressionError::Call(Box::new(error)))?;
+    let source = iterable::IterableSource::capture(value)
+        .expect("the registered iterable parameter admits only collections or null");
+    let locals = callback.pattern.names().map(|name| {
+        scope::TypedLocal::new(name, scope::Shape::Unknown { non_null: false })
+    }).collect();
+    let facts = scope.facts();
+    let lexical = match facts.lexical() {
+        Some(parent) => parent.child(locals),
+        None => scope::LexicalTypes::new(locals),
+    };
+    let facts = facts.within(lexical);
+    let body_scope = scope.operand().with_facts(&facts);
+    let mut result = Vec::new();
+    for entry in source.entries() {
+        let path = iteration::IterationPath::empty().pushed(iteration::IterationFrame {
+            collection: name.clone(), position: entry.position(),
+        });
+        budget.reserve_visit(&path).map_err(|error| ExpressionError::IterationLimit(Box::new(error)))?;
+        let wrap = |source| ExpressionError::Callback {
+            function: name.clone(), position: entry.position(), source: Box::new(source),
+        };
+        let bindings = match &callback.pattern {
+            BindingPattern::Identifier(name) => vec![(name.clone(), entry.retained())],
+            BindingPattern::Fields(fields) => fields.iter().map(|field| {
+                entry.field(field).map(|value| (field.clone(), value.into_owned()))
+                    .ok_or_else(|| invalid(format!("item has no field `{field}` required by the callback pattern")))
+            }).collect::<Result<Vec<_>, _>>().map_err(&wrap)?,
+        };
+        let frame = match lookup.lexical_scope() {
+            Some(parent) => parent.child(bindings),
+            None => LexicalScope::new(bindings),
+        };
+        let local = ScopedLookup::new(lookup, frame);
+        let value = evaluate_expr(&callback.body, &local, body_scope, observer, budget).map_err(wrap)?;
+        if name == "map" {
+            result.push(value);
+        } else if is_truthy(&value) {
+            result.push(entry.retained());
+        }
+    }
+    Ok(Value::Array(result))
+}
+
 fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
     name: &str,
     args: &[Expr],
     lookup: &L,
     scope: AbsenceScope<'_>,
     observer: &mut O,
+    budget: &iteration::IterationBudget,
 ) -> Result<Value, ExpressionError> {
     // Only an observer reads absence handling, so a plain evaluation skips
     // the registration lookup per argument.
@@ -828,7 +911,7 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
     };
     let name = name.to_ascii_lowercase();
     if let Some((registration, short_circuit)) = functions::lazy_function(&name) {
-        return evaluate_lazy_function(registration, short_circuit, args, lookup, argument, observer);
+        return evaluate_lazy_function(registration, short_circuit, args, lookup, argument, observer, budget);
     }
     let mut caller_occurrence = None;
     let evaluated: Vec<Value> = if functions::is_context_function(&name) {
@@ -836,18 +919,18 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
         for (index, arg) in args.iter().enumerate() {
             let argument = argument(index);
             if index == 0 {
-                let (value, occurrence) = evaluate_caller_file_argument(arg, lookup, argument, observer)?;
+                let (value, occurrence) = evaluate_caller_file_argument(arg, lookup, argument, observer, budget)?;
                 values.push(value);
                 caller_occurrence = occurrence;
             } else {
-                values.push(evaluate_expr(arg, lookup, argument, observer)?);
+                values.push(evaluate_expr(arg, lookup, argument, observer, budget)?);
             }
         }
         values
     } else {
         args.iter()
             .enumerate()
-            .map(|(index, arg)| evaluate_expr(arg, lookup, argument(index), observer))
+            .map(|(index, arg)| evaluate_expr(arg, lookup, argument(index), observer, budget))
             .collect::<Result<_, _>>()?
     };
     // Prefer the borrowed context (Finding 12) so a read-side function
@@ -894,6 +977,7 @@ fn evaluate_lazy_function<'a, L: EvaluationLookup, O: MissingRootObserver>(
     lookup: &L,
     argument: impl Fn(usize) -> AbsenceScope<'a>,
     observer: &mut O,
+    budget: &iteration::IterationBudget,
 ) -> Result<Value, ExpressionError> {
     let call_error = |error| ExpressionError::Call(Box::new(error));
     registration.check_arity(args.len()).map_err(call_error)?;
@@ -905,7 +989,7 @@ fn evaluate_lazy_function<'a, L: EvaluationLookup, O: MissingRootObserver>(
     // Each operand reads under the facts the earlier operands established.
     let mut facts = argument(0).facts();
     for (index, arg) in args.iter().enumerate() {
-        let value = evaluate_expr(arg, lookup, argument(index).with_facts(&facts), observer)?;
+        let value = evaluate_expr(arg, lookup, argument(index).with_facts(&facts), observer, budget)?;
         let bound = call.bind_next(value).map_err(call_error)?;
         if is_truthy(bound) == stop_on_truthy {
             return Ok(Value::Bool(stop_on_truthy));
@@ -923,12 +1007,13 @@ fn evaluate_caller_file_argument<L: EvaluationLookup, O: MissingRootObserver>(
     lookup: &L,
     scope: AbsenceScope<'_>,
     observer: &mut O,
+    budget: &iteration::IterationBudget,
 ) -> Result<(Value, Option<String>), ExpressionError> {
     match expr {
         Expr::Index { base, index } => {
             let (base_value, base_occurrence) =
-                evaluate_caller_file_argument(base, lookup, scope, observer)?;
-            let index_value = evaluate_expr(index, lookup, scope.operand(), observer)?;
+                evaluate_caller_file_argument(base, lookup, scope, observer, budget)?;
+            let index_value = evaluate_expr(index, lookup, scope.operand(), observer, budget)?;
             let value = evaluate_index(&base_value, &index_value);
             let occurrence = base_occurrence.and_then(|mut occurrence| {
                 selected_array_index(&base_value, &index_value).map(|index| {
@@ -939,8 +1024,8 @@ fn evaluate_caller_file_argument<L: EvaluationLookup, O: MissingRootObserver>(
             });
             Ok((value, occurrence))
         }
-        Expr::Paren(inner) => evaluate_caller_file_argument(inner, lookup, scope, observer),
-        _ => Ok((evaluate_expr(expr, lookup, scope, observer)?, caller_file_occurrence(expr))),
+        Expr::Paren(inner) => evaluate_caller_file_argument(inner, lookup, scope, observer, budget),
+        _ => Ok((evaluate_expr(expr, lookup, scope, observer, budget)?, caller_file_occurrence(expr))),
     }
 }
 

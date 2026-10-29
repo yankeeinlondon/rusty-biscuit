@@ -19,6 +19,7 @@
 use std::sync::Arc;
 
 use super::Shape;
+use crate::markdown::span::SourceSpan;
 use super::projection::{Member, Subject};
 use crate::markdown::compose::expression::binding::{LocalId, next_frame_id};
 use crate::markdown::schemas::DefinitionTable;
@@ -30,6 +31,7 @@ pub struct TypedLocal {
     id: Option<LocalId>,
     path: Vec<Member>,
     shape: Shape,
+    span: Option<SourceSpan>,
 }
 
 impl TypedLocal {
@@ -40,7 +42,14 @@ impl TypedLocal {
             id: None,
             path: Vec::new(),
             shape,
+            span: None,
         }
+    }
+
+    /// Retains the authored declaration when this layer outlives its AST.
+    pub fn with_span(mut self, span: SourceSpan) -> Self {
+        self.span = Some(span);
+        self
     }
 
     /// A new-subject local declared by `definition`.
@@ -56,6 +65,7 @@ impl TypedLocal {
             id: Some(id),
             path: Vec::new(),
             shape,
+            span: None,
         }
     }
 
@@ -68,6 +78,7 @@ impl TypedLocal {
             id: Some(id),
             path: vec![Member::Field(field.into())],
             shape,
+            span: None,
         }
     }
 }
@@ -79,6 +90,7 @@ struct DeclaredLocal {
     /// The member path below `id` this local names; empty for a whole binding.
     path: Vec<Member>,
     shape: Shape,
+    span: Option<SourceSpan>,
 }
 
 /// One immutable layer of declared lexical locals. See the module
@@ -124,6 +136,7 @@ impl LexicalTypes {
                     path: local.path,
                     name: local.name,
                     shape: local.shape,
+                    span: local.span,
                 })
                 .collect(),
             definitions,
@@ -135,6 +148,12 @@ impl LexicalTypes {
     /// by [`TypedLocal::aliasing_field`] is a member of that binding.
     pub fn id_of(&self, name: &str) -> Option<LocalId> {
         self.nearest(name).map(|local| local.id)
+    }
+
+    /// The nearest declaration's expression-relative span. A shadowing local
+    /// without a span never falls through to an outer declaration.
+    pub fn span_of_name(&self, name: &str) -> Option<&SourceSpan> {
+        self.nearest(name).and_then(|local| local.span.as_ref())
     }
 
     /// The declared shape of the nearest local named `name`.

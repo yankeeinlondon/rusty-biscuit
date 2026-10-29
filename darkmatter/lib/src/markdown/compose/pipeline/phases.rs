@@ -661,6 +661,7 @@ fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
         || error.rejected_call().is_some()
         // A policy that blocks the child's warning blocks the document.
         || error.blocked_diagnostics().is_some()
+        || error.iteration_failure().is_some()
         || error.pre_approval_violation().is_some()
         || error.shell_input_violation().is_some()
         || error.shell_span_failure()

@@ -194,7 +194,7 @@ fn parse_in_mode(text: &str, mode: ParseMode) -> Result<SpannedExpr, ExpressionE
         ParseMode::Interpolation => parse_spanned(text),
         ParseMode::Condition => parse_condition_spanned(text),
     }
-    .map_err(|error| ExpressionError::Parse(error.to_string()))
+    .map_err(ExpressionError::from)
 }
 
 fn scan_tree(
@@ -256,8 +256,8 @@ fn scan_leaf(
     Ok(())
 }
 
-/// Reports every definitely unavailable global and unknown function in
-/// `prepared`, in every branch.
+/// Reports unavailable globals, unknown functions, and protected callback
+/// bindings in every branch of `prepared`.
 ///
 /// An `execution-dependent` global is deferred to runtime. Nothing is
 /// evaluated and no provider runs.
@@ -311,6 +311,18 @@ pub fn validate_expression_in_scope(
             ));
         }
     }
+    super::call_check::visit_call_nodes(expr, &mut |call| {
+        let SpannedExprKind::CallbackCall { args, .. } = &call.kind else { return; };
+        for argument in args {
+            let super::ast::SpannedCallArgument::Callback(callback) = argument else { continue; };
+            if let Err(error) = super::check_local_names(callback.pattern.erase().names(), Some(view)) {
+                diagnostics.push((callback.pattern_span.clone(), ExpressionError::InvalidCallback {
+                    span: callback.pattern_span.clone(),
+                    message: error.to_string(),
+                }));
+            }
+        }
+    });
     visit_calls(expr, &mut |name, span| {
         if !functions::is_dispatchable(name) {
             diagnostics.push((span.clone(), unknown_function_error(name)));
@@ -335,12 +347,15 @@ pub fn validate_callback(
     validate_expression_in_scope(&callback.body, view, &locals)
 }
 
-/// Points an unavailable-global error's span at `span` (the leaf range).
+/// Locates binding and callback failures within their string leaf.
 fn relocate(mut error: ExpressionError, span: SourceSpan) -> ExpressionError {
     if let ExpressionError::Binding(binding) = &mut error
         && let BindingError::Unavailable(unavailable) = binding.as_mut()
     {
-        unavailable.span = Some(span);
+        unavailable.span = Some(span.clone());
+    }
+    if let ExpressionError::InvalidCallback { span: located, .. } = &mut error {
+        *located = span;
     }
     error
 }
@@ -385,6 +400,10 @@ fn visit_calls<'e>(expr: &'e SpannedExpr, visit: &mut impl FnMut(&'e str, &'e So
         SpannedExprKind::FunctionCall { name, args } => {
             visit(name, &expr.span);
             args.iter().for_each(|arg| visit_calls(arg, visit));
+        }
+        SpannedExprKind::CallbackCall { name, args } => {
+            visit(name, &expr.span);
+            args.iter().for_each(|arg| visit_calls(arg.expression(), visit));
         }
     }
 }
@@ -461,6 +480,7 @@ mod lexical_tests {
 
     fn callback(body: &str) -> SpannedCallback {
         SpannedCallback {
+            pattern_span: 0..1,
             pattern: SpannedBindingPattern::Identifier(Spanned::new("p".to_string(), 0..1)),
             arrow: 2..4,
             body: parse_spanned(body).unwrap(),
@@ -484,6 +504,23 @@ mod lexical_tests {
     fn an_unknown_function_in_a_callback_body_is_still_reported() {
         let diagnostics = validate_callback(&callback("no_such_fn(p)"), &view(), &[]);
         assert_eq!(diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn inline_callback_validation_checks_nested_calls_and_protected_names_passively() {
+        for arrow in ["=>", "->"] {
+            let text = format!("map([], gone {arrow} gone.value)");
+            let prepared = prepare_value(&serde_json::json!(text), AuthoredMode::Expression(ParseMode::Interpolation)).unwrap();
+            let diagnostics = validate_prepared(&prepared, &view());
+            assert_eq!(diagnostics.len(), 1, "{text}: {diagnostics:?}");
+            assert!(matches!(&diagnostics[0].error, ExpressionError::InvalidCallback { message, .. } if message.contains("gone")));
+            assert_eq!(&text[diagnostics[0].span.clone()], "gone");
+            let text = format!("map([], p {arrow} no_such_fn(p.value))");
+            let expression = parse_spanned(&text).unwrap();
+            let diagnostics = validate_expression(&expression, &view());
+            assert_eq!(diagnostics.len(), 1);
+            assert!(matches!(&diagnostics[0].1, ExpressionError::UnknownFunction { name } if name == "no_such_fn"));
+        }
     }
 
     #[test]

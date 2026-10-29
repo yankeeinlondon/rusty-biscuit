@@ -37,7 +37,7 @@ use std::fmt;
 use serde_json::Value;
 
 use super::absence::branch_scope;
-use super::ast::{SpannedExpr, SpannedExprKind};
+use super::ast::{SpannedCallArgument, SpannedCallback, SpannedExpr, SpannedExprKind};
 use super::call_binding::{
     CallBindingError, CompiledParameter, CompiledSignature, FunctionRegistration, NoNamedTypes, SignatureProblem,
     shape_from_property_def_with_definitions,
@@ -104,6 +104,8 @@ impl fmt::Display for ArgumentCategory {
 /// An argument's design-time type.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ArgumentType {
+    /// Inline syntax accepted only by a function parameter; never a JSON value.
+    Callback,
     /// A literal, judged by its value.
     Literal(Value),
     /// A typed value: the narrowed type of a variable at the call site, a
@@ -150,7 +152,9 @@ impl ArgumentType {
 /// call of their own ([`check_expression_calls`]); typing the call never
 /// suppresses their findings.
 pub fn expression_type(expr: &SpannedExpr, scope: &TypeScope<'_>) -> ScopeShape {
-    if let Some(value) = literal_value(expr) {
+    if let Some(value) = literal_value(expr)
+        && !value.is_array() && !value.is_object()
+    {
         return ScopeShape::of_literal(&value);
     }
     match &expr.kind {
@@ -169,6 +173,26 @@ pub fn expression_type(expr: &SpannedExpr, scope: &TypeScope<'_>) -> ScopeShape 
                 .unwrap_or(ScopeShape::Unknown { non_null: false }),
         ),
         SpannedExprKind::FunctionCall { name, args } => call_returns(name, args.len()),
+        SpannedExprKind::CallbackCall { name, args } => {
+            let Some(SpannedCallArgument::Callback(callback)) = args.get(1) else {
+                return call_returns(name, args.len());
+            };
+            let item = callback_item(args, scope);
+            let Ok(inner) = item.enter_spanned(scope, scope.lexical(), &callback.pattern) else {
+                return call_returns(name, args.len());
+            };
+            let result = if name.eq_ignore_ascii_case("map") {
+                expression_type(&callback.body, &inner)
+            } else if name.eq_ignore_ascii_case("filter") {
+                let kept = inner.assume(&callback.body.erase(), Polarity::True);
+                let rebound = item.enter(&kept, scope.lexical(), &super::BindingPattern::Identifier("__item".into()))
+                    .expect("an identifier accepts every item shape");
+                rebound.type_of(&item.subject()).shape().clone()
+            } else {
+                return call_returns(name, args.len());
+            };
+            ScopeShape::array_of(&result)
+        },
         SpannedExprKind::Fallback { primary, fallback } => {
             let present = expression_type(primary, scope).without_null();
             present.union(&expression_type(fallback, &scope.assume(&primary.erase(), Polarity::False)))
@@ -208,6 +232,7 @@ impl fmt::Display for ArgumentType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Literal(value) => write!(f, "literal {value}"),
+            Self::Callback => f.write_str("inline callback"),
             Self::Unknown | Self::Typed(ScopeShape::Unknown { .. }) => f.write_str("unknown"),
             Self::Typed(ScopeShape::Arms { arms, nullable }) => {
                 let mut parts: Vec<String> = arms.iter().map(type_text).collect();
@@ -255,7 +280,17 @@ pub fn classify_argument_with_definitions(
     parameter: &CompiledParameter,
     definitions: &DefinitionTable,
 ) -> ArgumentCategory {
+    if matches!(source, ArgumentType::Callback) {
+        return if parameter.callback().is_some_and(|callback| {
+            let parameters = callback.parameters.as_slice();
+            parameters.len() == 1 && !parameters[0].optional && !parameters[0].rest
+        }) { ArgumentCategory::Compatible } else { ArgumentCategory::Incompatible };
+    }
+    if parameter.callback().is_some() {
+        return ArgumentCategory::Incompatible;
+    }
     match source {
+        ArgumentType::Callback => unreachable!("callbacks classified above"),
         ArgumentType::Literal(value) => {
             if parameter.binds(value) {
                 ArgumentCategory::Compatible
@@ -634,6 +669,8 @@ pub struct ArgumentCheck {
 /// category 5.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CallProblem {
+    /// A callback pattern cannot bind its projected input or uses a protected name.
+    InvalidCallback { span: SourceSpan, message: String },
     /// No overload takes this many arguments.
     Arity {
         supplied: usize,
@@ -728,7 +765,7 @@ impl CallCheck {
     pub fn findings(&self) -> Vec<CallFinding> {
         if let Some(problem) = &self.problem {
             return vec![CallFinding {
-                span: self.span.clone(),
+                span: match problem { CallProblem::InvalidCallback { span, .. } => span.clone(), _ => self.span.clone() },
                 category: ArgumentCategory::Incompatible,
                 argument: None,
                 message: self.problem_message(problem),
@@ -749,6 +786,7 @@ impl CallCheck {
     fn problem_message(&self, problem: &CallProblem) -> String {
         let function = &self.function;
         match problem {
+            CallProblem::InvalidCallback { message, .. } => message.clone(),
             CallProblem::Arity { supplied, signatures } => format!(
                 "{function}: no signature takes {supplied} argument{}; expected {}",
                 if *supplied == 1 { "" } else { "s" },
@@ -1060,16 +1098,47 @@ fn classify_against(
 pub fn check_expression_calls(expr: &SpannedExpr, site: &TypeScope<'_>) -> Vec<CallCheck> {
     let mut checks = Vec::new();
     visit_call_nodes(expr, &mut |call| {
-        let SpannedExprKind::FunctionCall { name, args } = &call.kind else {
-            return;
+        let local_site = branch_scope(expr, &call.span, site.clone());
+        let (name, types, spans) = match &call.kind {
+            SpannedExprKind::FunctionCall { name, args } => (
+                name,
+                args.iter().map(|arg| ArgumentType::of(arg, &branch_scope(call, &arg.span, local_site.clone()))).collect::<Vec<_>>(),
+                args.iter().map(|arg| arg.span.clone()).collect(),
+            ),
+            SpannedExprKind::CallbackCall { name, args } => (
+                name,
+                args.iter().map(|arg| match arg {
+                    SpannedCallArgument::Value(value) => ArgumentType::of(value, &local_site),
+                    SpannedCallArgument::Callback(_) => ArgumentType::Callback,
+                }).collect(),
+                args.iter().map(|arg| arg.span().clone()).collect(),
+            ),
+            _ => return,
         };
-        let types: Vec<ArgumentType> = args
-            .iter()
-            .map(|arg| ArgumentType::of(arg, &branch_scope(expr, &arg.span, site.clone())))
-            .collect();
-        let spans = args.iter().map(|arg| arg.span.clone()).collect();
-        let definitions = site.definitions();
-        if let Some(check) = check_call_with_definitions(name, &types, call.span.clone(), spans, definitions) {
+        if let Some(mut check) = check_call_with_definitions(name, &types, call.span.clone(), spans, local_site.definitions()) {
+            if let SpannedExprKind::CallbackCall { args, .. } = &call.kind {
+                for (index, arg) in args.iter().enumerate() {
+                    let SpannedCallArgument::Callback(callback) = arg else { continue; };
+                    let accepts_callback = functions::inspect_registration(name, |registration| {
+                        registration.overloads().iter().filter(|signature| signature.accepts_count(args.len()))
+                            .any(|signature| signature.parameter_for(index)
+                                .is_some_and(|parameter| parameter.callback().is_some()))
+                    }).unwrap_or(false);
+                    if check.problem.is_none() && !accepts_callback {
+                        check.problem = Some(CallProblem::InvalidCallback {
+                            span: callback.span(), message: format!("{name}: this argument position does not accept an inline callback"),
+                        });
+                        break;
+                    }
+                    let error = super::check_local_names(callback.pattern.erase().names(), local_site.declared().binding_view())
+                        .err().map(|error| error.to_string())
+                        .or_else(|| callback_scope(callback, args, &local_site).err().map(|error| error.to_string()));
+                    if let Some(message) = error {
+                        check.problem = Some(CallProblem::InvalidCallback { span: callback.pattern_span.clone(), message });
+                        break;
+                    }
+                }
+            }
             checks.push(check);
         }
     });
@@ -1099,6 +1168,9 @@ pub fn check_prepared_calls(prepared: &PreparedValue, site: &TypeScope<'_>) -> V
             }
             check.span = expression.leaf_span(&check.span);
             check.argument_spans = check.argument_spans.iter().map(|span| expression.leaf_span(span)).collect();
+            if let Some(CallProblem::InvalidCallback { span, .. }) = &mut check.problem {
+                *span = expression.leaf_span(span);
+            }
             found.push(PreparedCallCheck {
                 pointer: expression.pointer().to_string(),
                 expression: expression.text().to_string(),
@@ -1143,9 +1215,183 @@ pub(crate) fn visit_call_nodes<'e>(expr: &'e SpannedExpr, visit: &mut impl FnMut
             visit_call_nodes(then_branch, visit);
             visit_call_nodes(else_branch, visit);
         }
+        SpannedExprKind::CallbackCall { args, .. } => {
+            visit(expr);
+            for arg in args {
+                visit_call_nodes(arg.expression(), visit);
+            }
+        }
         SpannedExprKind::FunctionCall { args, .. } => {
             visit(expr);
             args.iter().for_each(|arg| visit_call_nodes(arg, visit));
         }
+    }
+}
+
+/// One invocation has one fresh item identity, independent of identically spelled captures.
+pub(crate) fn callback_item(args: &[SpannedCallArgument], scope: &TypeScope<'_>) -> super::scope::ItemFrame {
+    let shape = args.first().and_then(|arg| match arg {
+        SpannedCallArgument::Value(value) => Some(expression_type(value, scope)),
+        _ => None,
+    }).unwrap_or(ScopeShape::Unknown { non_null: false });
+    let entry = match super::scope::project_source(&shape, scope.definitions()) {
+        super::scope::SourceProjection::Entries(entry) => entry,
+        _ => ScopeShape::Unknown { non_null: false },
+    };
+    super::scope::ItemFrame::new(entry)
+}
+
+pub(crate) fn callback_scope<'d>(callback: &SpannedCallback, args: &[SpannedCallArgument], scope: &TypeScope<'d>) -> Result<TypeScope<'d>, super::scope::PatternMismatch> {
+    callback_item(args, scope).enter_spanned(scope, scope.lexical(), &callback.pattern)
+}
+
+#[cfg(test)]
+mod callback_tests {
+    use super::*;
+    use crate::markdown::compose::expression::{parse_spanned, static_access_reads, static_variable_reads};
+    use crate::markdown::schemas::parse_yaml_schema;
+
+    #[test]
+    fn callback_calls_check_dead_bodies_and_shadow_document_types() {
+        let schema = parse_yaml_schema(&serde_yaml_ng::from_str("tags: boolean(required)").unwrap()).unwrap();
+        let declared = super::super::DeclaredTypes::new(Some(&schema));
+        let scope = TypeScope::unguarded(&declared);
+        for source in ["map([], x => min(true, 5))", "map(null, x -> min(true, 5))"] {
+            let expression = parse_spanned(source).unwrap();
+            let checks = check_expression_calls(&expression, &scope);
+            assert!(checks.iter().any(|check| check.function == "min" && check.is_rejected()), "{source}: {checks:?}");
+        }
+        for source in ["map([1, 2], tags => min(tags, 5))", "map([1], tags -> min(local.tags, 5))"] {
+            let checks = check_expression_calls(&parse_spanned(source).unwrap(), &scope);
+            assert!(checks.iter().all(|check| !check.is_rejected()), "{source}: {checks:?}");
+        }
+    }
+
+    #[test]
+    fn callback_signatures_and_patterns_reject_invalid_calls() {
+        let declared = super::super::DeclaredTypes::new(None);
+        let scope = TypeScope::unguarded(&declared);
+        for source in ["map([1], true)", "map([1])", "map([1], x => x, 3)",
+            "map(42, x => x)", "min(1, x => x)", "map([1], {key} => key)", "map(([1]), {key} => key)", "map([null], {key} => key)",
+            "map([{a: 1}], {missing} => missing)"] {
+            let checks = check_expression_calls(&parse_spanned(source).unwrap(), &scope);
+            assert!(checks.iter().any(CallCheck::is_rejected), "{source}: {checks:?}");
+        }
+        for source in ["map(null, {key} => key)", "map([], {key} => key)",
+            "map({a: 1}, {key,value} => min(value, 2))", "map([{key: null}], {key} => key)", "map([1], x => map([2], x -> min(x, 3)))"] {
+            let checks = check_expression_calls(&parse_spanned(source).unwrap(), &scope);
+            assert!(checks.iter().all(|check| !check.is_rejected()), "{source}: {checks:?}");
+        }
+    }
+
+    #[test]
+    fn callback_read_inventory_keeps_only_free_captures() {
+        let expression = parse_spanned("map(missing, x => map(x.children, {value} -> local.value || x.name || fm.x || absent))").unwrap();
+        let reads = static_variable_reads(&expression);
+        assert_eq!(reads.iter().map(|read| read.path).collect::<Vec<_>>(), ["missing", "fm.x", "absent"]);
+        assert!(reads[0].handles_absence);
+        assert!(!reads[2].handles_absence);
+        let erased = expression.erase();
+        let access = static_access_reads(&erased);
+        assert_eq!(access.iter().map(|read| read.static_path()).collect::<Vec<_>>(), ["missing", "fm.x", "absent"]);
+        let guarded = parse_spanned("present ? map([], p => present.name) : []").unwrap();
+        let guarded_reads = static_variable_reads(&guarded);
+        assert_eq!(guarded_reads[1].path, "present.name");
+        assert!(guarded_reads[1].handles_absence, "the callback keeps its enclosing capture's guard");
+        for source in ["map([null], p => p ? fm.p : null)", "map([null], p => local.p ? fm.p : null)"] {
+            let expression = parse_spanned(source).unwrap();
+            let reads = static_variable_reads(&expression);
+            assert!(!reads.iter().find(|read| read.path == "fm.p").unwrap().handles_absence, "{source}");
+        }
+    }
+
+    #[test]
+    fn callback_result_projection_preserves_members_nulls_and_filter_items() {
+        let declared = super::super::DeclaredTypes::new(None);
+        let scope = TypeScope::unguarded(&declared);
+        for (source, expected) in [
+            ("map([{name: 'Ada'}], p => p.name)", "literal(Ada)"),
+            ("map({Ada: 90}, {value} => value)", "literal(90"),
+            ("map(({Ada: 90}), {value} => value)", "literal(90"),
+            ("filter([{name: 'Ada'}], {name} => name)", "name"),
+            ("map([null], p => p)", "null"),
+            ("filter(map(['./a.md'], x => x), f => is_file_type(f))", "file"),
+            ("filter(map(['./a.md'], x => x), f => file_exists(f))", "file"),
+        ] {
+            let shape = expression_type(&parse_spanned(source).unwrap(), &scope);
+            let text = ArgumentType::Typed(shape).to_string();
+            assert!(text.contains(expected), "{source}: {text}");
+            assert!(text.contains("[]"), "{source}: {text}");
+        }
+    }
+
+    #[test]
+    fn callback_patterns_protect_registered_loop_and_seq_globals() {
+        use super::super::{Availability, BindingView, ScopeId, UnavailabilityReason};
+        let view = BindingView::builder(ScopeId::new("callback"))
+            .declare("seq", "sequence", Availability::Available)
+            .declare("loop", "loop", Availability::Unavailable(UnavailabilityReason::new("host.loop")))
+            .build().unwrap();
+        let declared = super::super::DeclaredTypes::new(None).with_binding_view(&view);
+        let scope = TypeScope::unguarded(&declared);
+        for name in ["seq", "loop"] {
+            let source = format!("map([], {name} => {name})");
+            let checks = check_expression_calls(&parse_spanned(&source).unwrap(), &scope);
+            assert_eq!(checks[0].rejection_diagnostic().unwrap().code, super::super::parser::INVALID_CALLBACK_CODE);
+        }
+    }
+
+    #[test]
+    fn callback_type_frames_retain_binding_spans_after_the_ast_is_dropped() {
+        let declared = super::super::DeclaredTypes::new(None);
+        let scope = TypeScope::unguarded(&declared);
+        let retained = {
+            let expression = parse_spanned("map([], {key,value} => key)").unwrap();
+            let SpannedExprKind::CallbackCall { args, .. } = &expression.kind else { panic!("callback call"); };
+            let SpannedCallArgument::Callback(callback) = &args[1] else { panic!("callback argument"); };
+            callback_scope(callback, args, &scope).unwrap()
+        };
+        let frame = retained.lexical().unwrap();
+        assert_eq!(frame.span_of_name("key"), Some(&(9..12)));
+        assert_eq!(frame.span_of_name("value"), Some(&(13..18)));
+        let shadow = frame.child(vec![super::super::scope::TypedLocal::new("key", ScopeShape::Unknown { non_null: false })]);
+        assert_eq!(shadow.span_of_name("key"), None);
+        assert_eq!(shadow.span_of_name("value"), Some(&(13..18)));
+    }
+
+    #[test]
+    fn callback_declared_arrays_tuples_and_objects_keep_known_types() {
+        let schema = parse_yaml_schema(&serde_yaml_ng::from_str(
+            "people: '{name: string(required), active: boolean(required)}[](required)'\nt: tuple([string, number])\nscores:\n  Ada: number(required)\n  Grace: number(required)\n"
+        ).unwrap()).unwrap();
+        let declared = super::super::DeclaredTypes::new(Some(&schema));
+        let scope = TypeScope::unguarded(&declared);
+        for (source, parts) in [
+            ("map(people, p => p.name)", vec!["string"]),
+            ("filter(people, p => p.active)", vec!["name", "active"]),
+            ("map(t, x => x)", vec!["string", "number"]),
+            ("map(scores, {key,value} => value)", vec!["number"]),
+        ] {
+            let expr = parse_spanned(source).unwrap();
+            let text = ArgumentType::Typed(expression_type(&expr, &scope)).to_string();
+            for part in parts { assert!(text.contains(part), "{source}: {text}"); }
+            assert!(!text.contains("unknown"), "{source}: {text}");
+            assert!(check_expression_calls(&expr, &scope).iter().all(|check| !check.is_rejected()));
+        }
+    }
+
+    #[test]
+    fn callback_nested_scope_restores_outer_binding_and_separates_frontmatter_facts() {
+        let schema = parse_yaml_schema(&serde_yaml_ng::from_str("x: string(required)").unwrap()).unwrap();
+        let declared = super::super::DeclaredTypes::new(Some(&schema));
+        let scope = TypeScope::unguarded(&declared);
+        let source = "is_string(x) ? map([true], x => map([1], x => min(x, 5)) || min(x, 5)) : []";
+        let checks = check_expression_calls(&parse_spanned(source).unwrap(), &scope);
+        let min: Vec<_> = checks.iter().filter(|check| check.function == "min").collect();
+        assert_eq!(min.len(), 2);
+        assert!(!min[0].is_rejected());
+        assert!(min[1].is_rejected());
+        assert_eq!(scope.type_of_expr(&super::super::parse("x").unwrap()).unwrap().shape(),
+            &expression_type(&parse_spanned("x").unwrap(), &scope));
     }
 }

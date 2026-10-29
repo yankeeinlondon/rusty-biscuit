@@ -220,15 +220,27 @@ fn interpolation_completions(
 ) -> Vec<CompletionItem> {
     let frontmatter_keys = frontmatter::expression_property_keys(ctx);
     let host = expressions::host_global_candidates(partial, &host_catalogs(ctx));
-    // The cursor's own scope: the locals of every enclosing collection body,
-    // and none of a closed or later one.
+    // Callback locals extend the enclosing directive scope only at this cursor.
     let candidates = with_site_scope(ctx, Some(token_start), |site| {
-        expressions::scoped_completion_candidates(partial, &frontmatter_keys, host, site)
+        let prefix = &ctx.text[..offset];
+        let start = prefix.rfind("{{").map_or(token_start, |start| start + 2);
+        let scope = expressions::cursor_scope(&ctx.text[start..offset], offset - start, site);
+        expressions::scoped_completion_candidates(partial, &frontmatter_keys, host, &scope)
     });
-    lower_candidates(candidates)
+    let prioritize = candidates.iter().any(|candidate| candidate.kind == expressions::ExprCompletionKind::LocalBinding);
+    let mut items: Vec<_> = lower_candidates(candidates)
         .into_iter()
         .filter_map(|candidate| text_edit_item(ctx, token_start, offset, candidate))
-        .collect()
+        .collect();
+    if prioritize { retain_completion_order(&mut items); }
+    items
+}
+
+/// Preserve lexical proximity when a client otherwise sorts by label.
+pub(super) fn retain_completion_order(items: &mut [CompletionItem]) {
+    for (index, item) in items.iter_mut().enumerate() {
+        item.sort_text = Some(format!("{index:08}"));
+    }
 }
 
 /// One completion candidate before LSP lowering. Pure data so the D3/D4 field
@@ -1103,7 +1115,7 @@ fn expression_diagnostics(
                     out.push(diagnostic(
                         range,
                         DiagnosticSeverity::WARNING,
-                        code::EXPRESSION_MALFORMED,
+                        error.diagnostic_code().unwrap_or(code::EXPRESSION_MALFORMED),
                         source::COMPOSE,
                         format!("malformed expression: {}", error.message),
                     ));

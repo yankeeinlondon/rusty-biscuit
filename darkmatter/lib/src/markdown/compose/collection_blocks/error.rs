@@ -123,7 +123,10 @@ impl CollectionError {
             Self::InvalidCallback { .. } => diagnostics::INVALID_CALLBACK_CODE,
             Self::PatternMismatch { .. } => diagnostics::PATTERN_MISMATCH_CODE,
             Self::InvalidSortKey { .. } => diagnostics::INVALID_SORT_KEY_CODE,
-            Self::CallbackFailed { .. } => diagnostics::CALLBACK_FAILED_CODE,
+            Self::CallbackFailed { cause, .. } => match cause.without_callbacks() {
+                ExpressionError::IterationLimit(error) => error.kind.code(),
+                _ => diagnostics::CALLBACK_FAILED_CODE,
+            },
             Self::Budget { error, .. } => error.kind.code(),
         }
     }
@@ -177,6 +180,7 @@ impl CollectionError {
     pub fn iteration_path(&self) -> IterationPath {
         match self {
             Self::Budget { error, .. } => error.path.clone(),
+            Self::CallbackFailed { site, cause } => site.iteration_path.joined(&cause.callback_path()),
             other => other.site().map(|site| site.iteration_path.clone()).unwrap_or_default(),
         }
     }

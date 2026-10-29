@@ -310,9 +310,8 @@ pub fn family_tokens(text: &str, body_base: usize) -> Vec<RawToken> {
     out
 }
 
-/// F1: one whole-outer-span token per body `{{ … }}` interpolation
-/// (`macro.interpolation`) and per `{{{ … }}}` literal
-/// (`macro.interpolation.inert`).
+/// F1: a whole interpolation or inert-literal span, with callback parameter
+/// and arrow subtokens taking precedence inside active expressions.
 ///
 /// Interpolation and literal regions are mutually exclusive in the scanner, so
 /// the two passes never overlap.
@@ -320,13 +319,16 @@ fn interpolation_tokens(text: &str, body_base: usize) -> Vec<RawToken> {
     let mut out = Vec::new();
     for interpolation in expressions::interpolations(text, body_base) {
         out.push(RawToken {
-            span: interpolation.outer,
+            span: interpolation.outer.clone(),
             token_type: TokenType::Macro,
             modifiers: modifier::INTERPOLATION,
             family: Family::Interpolation,
             structural: 0,
             provenance: "f1.interpolation",
         });
+        if let Ok(parsed) = expressions::parse(&interpolation.text) {
+            out.extend(callback_tokens(&parsed, |span| Some(interpolation.inner.start + span.start..interpolation.inner.start + span.end)));
+        }
     }
     for literal in expressions::literals(text, body_base) {
         out.push(RawToken {
@@ -337,6 +339,29 @@ fn interpolation_tokens(text: &str, body_base: usize) -> Vec<RawToken> {
             structural: 0,
             provenance: "f1.literal",
         });
+    }
+    out
+}
+
+fn callback_tokens(
+    parsed: &darkmatter::markdown::compose::expression::SpannedExpr,
+    project: impl Fn(SourceSpan) -> Option<SourceSpan>,
+) -> Vec<RawToken> {
+    let mut out: Vec<RawToken> = Vec::new();
+    for (_, _, binding, arrow) in expressions::callback_bindings(parsed) {
+        for (span, token_type) in [(binding, TokenType::Variable), (arrow, TokenType::Operator)] {
+            if let Some(span) = project(span) {
+                if out.iter().any(|token| token.span == span) { continue; }
+                out.push(RawToken {
+                    span,
+                    token_type,
+                    modifiers: modifier::INTERPOLATION | if token_type == TokenType::Variable { modifier::READONLY } else { 0 },
+                    family: Family::Interpolation,
+                    structural: 1,
+                    provenance: "callback.binding-or-arrow",
+                });
+            }
+        }
     }
     out
 }
@@ -588,6 +613,18 @@ fn encode_document(ctx: &DocumentContext, range: Option<SourceSpan>) -> Semantic
     let body_base = crate::providers::dsl::body_base(ctx.text);
     let mut raw = interpolation_tokens(ctx.text, body_base);
     raw.extend(directive_tokens(ctx.text, body_base));
+    if let Some(ast) = ctx.overlay.and_then(|overlay| overlay.ast.as_deref()) {
+        for interpolation in expressions::frontmatter_interpolations(ctx.text, ast) {
+            if let Ok(parsed) = expressions::parse(&interpolation.text) {
+                raw.extend(callback_tokens(&parsed, |span| interpolation.project(span)));
+            }
+        }
+        for value in super::frontmatter::expression_values(ctx) {
+            if let Ok(parsed) = expressions::parse_condition(value.expression()) {
+                raw.extend(callback_tokens(&parsed, |span| value.project(span)));
+            }
+        }
+    }
     // F4 is the only family gated by `wiki.enable`; F1/F2 are unaffected.
     if ctx.config.wiki.enable {
         raw.extend(wiki_tokens(ctx.text, body_base));

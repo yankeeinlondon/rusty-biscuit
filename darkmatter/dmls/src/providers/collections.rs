@@ -569,6 +569,7 @@ mod tests {
                 "---\n$schema:\n  team: '{{ name: string(required), active: boolean(required) }}[](required)'\n---\n\n",
                 "::map team \"p => recorded()\" when=\"recorded()\" filter=\"q => recorded()\" sort=\"r => recorded() ? 1 : 2\" until=\"u => recorded()\"\n",
                 "{{{{ recorded() }}}} {{{{ p }}}}\n",
+                "{{{{ map([1], item => recorded()) }}}} {{{{ filter(null, item -> recorded()) }}}}\n",
                 "::shell touch {sentinel}\n",
                 "::file ./missing.md\n",
                 "::filter team \"t => recorded()\" while=\"w => recorded()\"\n",

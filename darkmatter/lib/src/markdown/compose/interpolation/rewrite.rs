@@ -381,7 +381,7 @@ pub(crate) fn interpolate_text_guarded<L: EvaluationLookup>(
                 return Err(LocatedInterpolationError {
                     error: Box::new(interpolation_error(
                         &loc.expression,
-                        ExpressionError::Parse(e.to_string()),
+                        ExpressionError::from(e),
                     )),
                     span: Some(loc.start..loc.end),
                 });
@@ -475,7 +475,7 @@ pub(crate) fn interpolate_value_guarded<L: EvaluationLookup>(
             return Err(failure);
         }
         let expr = parse(&loc.expression).map_err(|e| {
-            located(interpolation_error(&loc.expression, ExpressionError::Parse(e.to_string())))
+            located(interpolation_error(&loc.expression, ExpressionError::from(e)))
         })?;
         // The whole-value path bypasses `interpolate_text`, so it must still run
         // the context-typo check on its single parsed expression — otherwise

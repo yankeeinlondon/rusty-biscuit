@@ -1623,68 +1623,21 @@ fn collect_variable_roots(expr: &Expr, refs: &mut Vec<String>) {
 /// global: it reads the global, not the same-named frontmatter key. An
 /// explicit `fm.<name>` read is still a key reference.
 fn collect_roots(expr: &Expr, refs: &mut Vec<String>, globals: Option<&HostGlobals>) {
-    match expr {
-        Expr::Variable(path) => {
-            if path.starts_with("ctx.") || path.starts_with("env.") {
-                return;
+    use crate::markdown::compose::expression::{AccessStep, static_access_reads};
+    for read in static_access_reads(expr) {
+        let path = read.variable;
+        let explicit = path.starts_with("fm.") || path == "fm";
+        let root = if path == "fm" {
+            match read.steps.first() {
+                Some(AccessStep::Key(key) | AccessStep::Member(key)) => *key,
+                _ => continue,
             }
-            if path == fm_namespace::FRONTMATTER_ROOT {
-                return;
-            }
-            let effective = fm_namespace::strip_fm_prefix(path);
-            let root = effective.split('.').next().unwrap_or(effective);
-            if effective.len() == path.len() && globals.is_some_and(|globals| globals.declares(root)) {
-                return;
-            }
-            if !root.is_empty() {
-                refs.push(root.to_string());
-            }
-        }
-        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
-        Expr::UnaryNot(inner)
-        | Expr::UnaryMinus(inner)
-        | Expr::Paren(inner)
-        | Expr::MemberAccess { base: inner, .. } => collect_roots(inner, refs, globals),
-        Expr::Fallback { primary, fallback } => {
-            collect_roots(primary, refs, globals);
-            collect_roots(fallback, refs, globals);
-        }
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            collect_roots(condition, refs, globals);
-            collect_roots(then_branch, refs, globals);
-            collect_roots(else_branch, refs, globals);
-        }
-        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
-            collect_roots(left, refs, globals);
-            collect_roots(right, refs, globals);
-        }
-        Expr::Index { base, index } => {
-            if let Some(key) = fm_namespace::literal_index_key(base, index) {
-                refs.push(key.to_string());
-                return;
-            }
-            collect_roots(base, refs, globals);
-            collect_roots(index, refs, globals);
-        }
-        Expr::FunctionCall { args, .. } => {
-            for arg in args {
-                collect_roots(arg, refs, globals);
-            }
-        }
-        Expr::ArrayLiteral(items) => {
-            for item in items {
-                collect_roots(item, refs, globals);
-            }
-        }
-        Expr::ObjectLiteral(entries) => {
-            for (_, value) in entries {
-                collect_roots(value, refs, globals);
-            }
-        }
+        } else {
+            path.strip_prefix("fm.").unwrap_or(path).split('.').next().unwrap_or(path)
+        };
+        if root.is_empty() { continue; }
+        if !explicit && (path.starts_with("ctx.") || path.starts_with("env.") || globals.is_some_and(|globals| globals.declares(root))) { continue; }
+        refs.push(root.to_string());
     }
 }
 
@@ -1735,6 +1688,15 @@ fn collect_variable_roots_in_value(value: &Value, refs: &mut Vec<String>, global
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn callback_frontmatter_dependencies_preserve_explicit_reads() {
+        let expr = parse("map(items, p => [p.name, local.p, fm.p, fm['p.name'], outer])").unwrap();
+        let mut roots = Vec::new();
+        collect_variable_roots(&expr, &mut roots);
+        assert_eq!(roots, ["items", "p", "p.name", "outer"]);
+    }
+
     use serde_json::json;
 
     /// [`interpolate_frontmatter_best_effort`] over a frontmatter whose values

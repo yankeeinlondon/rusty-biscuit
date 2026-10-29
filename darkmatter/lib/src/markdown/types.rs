@@ -390,6 +390,24 @@ impl MarkdownError {
         error
     }
 
+    /// A request-fatal iteration exhaustion anywhere in this failure's chain.
+    pub fn iteration_failure(&self) -> Option<&crate::markdown::compose::expression::iteration::IterationError> {
+        use crate::markdown::compose::expression::ExpressionError;
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = current {
+            let expression = error.downcast_ref::<ExpressionError>()
+                .or_else(|| error.downcast_ref::<Box<ExpressionError>>().map(AsRef::as_ref));
+            if let Some(ExpressionError::IterationLimit(limit)) = expression.map(ExpressionError::without_callbacks) {
+                return Some(limit);
+            }
+            if let Some(limit) = error.downcast_ref::<crate::markdown::compose::expression::iteration::IterationError>() {
+                return Some(limit);
+            }
+            current = error.source();
+        }
+        None
+    }
+
     /// The class of the file-reference failure nearest the top of this
     /// error's cause chain, if a file reference failed.
     ///

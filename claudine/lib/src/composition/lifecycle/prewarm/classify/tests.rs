@@ -164,6 +164,8 @@ fn function_calls_are_ineligible_wherever_they_appear() {
         &inputs(),
         &[
             (json!("{{ upper(title) }}"), skip(SkipReason::FunctionCall)),
+            (json!("{{ map([], x => no_such_function(x)) }}"), skip(SkipReason::FunctionCall)),
+            (json!("{{ filter([], {value} -> value) }}"), skip(SkipReason::FunctionCall)),
             // Zero arguments: no variable read, so a root-only check passes it.
             (json!("on {{ date() }}"), skip(SkipReason::FunctionCall)),
             // A read-only function that probes the login shell.

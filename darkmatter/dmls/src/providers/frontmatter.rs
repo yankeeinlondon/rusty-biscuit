@@ -995,12 +995,35 @@ fn expression_candidates(
     let frontmatter_keys = expression_property_keys(ctx);
     let host = expressions::host_global_candidates(token, &crate::providers::dsl::host_catalogs(ctx));
     let lifecycle = event.map(|event| expressions::event_global_candidates(token, event)).unwrap_or_default();
-    expressions::completion_candidates(token, &frontmatter_keys)
-        .into_iter()
-        .chain(lifecycle)
-        .chain(host)
-        .filter_map(|candidate| expr_completion_item(ctx, token_start, offset, candidate))
-        .collect()
+    crate::providers::dsl::with_site_scope(ctx, None, |site| {
+        let prefix = &ctx.text[..offset];
+        let line_start = prefix.rfind('\n').map_or(0, |at| at + 1);
+        let start = prefix.rfind("{{").filter(|at| *at >= line_start).map(|at| at + 2)
+            .or_else(|| prefix[line_start..].find(':').map(|at| line_start + at + 1))
+            .unwrap_or(token_start);
+        let expression = ctx.text[start..offset].trim_start();
+        let expression = expression.strip_prefix(['\'', '"']).unwrap_or(expression);
+        let scope = ctx.overlay.and_then(|overlay| overlay.ast.as_deref()).and_then(|ast| {
+            let index = cursor_scalar(ast, offset)?;
+            let typing = scalar_typing(ctx, index)?;
+            if let Some(value) = expression_value(ast, index, typing) {
+                let decoded = value.decoded_offset(offset)?;
+                return Some(expressions::cursor_scope(value.expression(), decoded, site));
+            }
+            expressions::scalar_interpolations(ctx.text, &ast.entries()[index], index).into_iter().find_map(|value| {
+                if !value.outer_span().contains(&offset) { return None; }
+                let decoded = value.projection().analyzed_offset(offset)?.saturating_sub(value.analyzed_start());
+                Some(expressions::cursor_scope(&value.text, decoded, site))
+            })
+        }).unwrap_or_else(|| expressions::cursor_scope(expression, expression.len(), site));
+        let candidates = expressions::scoped_completion_candidates(token, &frontmatter_keys, lifecycle.into_iter().chain(host), &scope);
+        let prioritize = candidates.iter().any(|candidate| candidate.kind == expressions::ExprCompletionKind::LocalBinding);
+        let mut items: Vec<_> = candidates.into_iter()
+            .filter_map(|candidate| expr_completion_item(ctx, token_start, offset, candidate))
+            .collect();
+        if prioritize { crate::providers::dsl::retain_completion_order(&mut items); }
+        items
+    })
 }
 
 /// Completion inside `event`'s lifecycle stack value: inside an open `{{`

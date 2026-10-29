@@ -136,6 +136,10 @@ impl EvaluationLookup for SiteLookup<'_> {
     fn lexical_scope(&self) -> Option<&std::sync::Arc<LexicalScope>> {
         self.active().lexical_scope()
     }
+
+    fn iteration_budget(&self) -> Option<&IterationBudget> {
+        self.budget.or_else(|| self.inner.iteration_budget())
+    }
 }
 
 /// `error`, raised by the site at `span` of a body, with the provenance a

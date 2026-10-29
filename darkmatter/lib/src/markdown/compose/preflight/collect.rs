@@ -1973,6 +1973,11 @@ fn authored_expressions(markdown: &Markdown) -> Vec<Expr> {
 /// `expression`, outermost first.
 fn visit_calls(expression: &Expr, visit: &mut impl FnMut(&str, &[Expr])) {
     match expression {
+        Expr::CallbackCall { args, .. } => {
+            for arg in args {
+                visit_calls(arg.expression(), visit);
+            }
+        }
         Expr::FunctionCall { name, args } => {
             visit(name, args);
             for argument in args {
@@ -2184,57 +2189,19 @@ fn dynamic_nested_dependency(
 }
 
 fn collect_expression_roots(expression: &Expr, roots: &mut Vec<String>) {
-    match expression {
-        Expr::Variable(path) => {
-            let path = crate::markdown::compose::expression::fm_namespace::strip_fm_prefix(path);
-            if let Some(root) = path.split('.').next()
-                && !root.is_empty()
-            {
-                roots.push(root.to_string());
+    use crate::markdown::compose::expression::{AccessStep, static_access_reads};
+    for read in static_access_reads(expression) {
+        let path = read.variable;
+        let root = if path == "fm" {
+            match read.steps.first() {
+                Some(AccessStep::Key(key) | AccessStep::Member(key)) => *key,
+                _ => continue,
             }
-        }
-        Expr::UnaryNot(inner)
-        | Expr::UnaryMinus(inner)
-        | Expr::Paren(inner)
-        | Expr::MemberAccess { base: inner, .. } => collect_expression_roots(inner, roots),
-        Expr::Fallback { primary, fallback } => {
-            collect_expression_roots(primary, roots);
-            collect_expression_roots(fallback, roots);
-        }
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            collect_expression_roots(condition, roots);
-            collect_expression_roots(then_branch, roots);
-            collect_expression_roots(else_branch, roots);
-        }
-        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
-            collect_expression_roots(left, roots);
-            collect_expression_roots(right, roots);
-        }
-        Expr::Index { base, index } => {
-            if let Some(key) =
-                crate::markdown::compose::expression::fm_namespace::literal_index_key(base, index)
-            {
-                roots.push(key.to_string());
-                return;
-            }
-            collect_expression_roots(base, roots);
-            collect_expression_roots(index, roots);
-        }
-        Expr::FunctionCall { args, .. } | Expr::ArrayLiteral(args) => {
-            for argument in args {
-                collect_expression_roots(argument, roots);
-            }
-        }
-        Expr::ObjectLiteral(entries) => {
-            for (_, value) in entries {
-                collect_expression_roots(value, roots);
-            }
-        }
-        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
+        } else {
+            path.strip_prefix("fm.").unwrap_or(path).split('.').next().unwrap_or(path)
+        };
+        if root.is_empty() { continue; }
+        roots.push(root.to_string());
     }
 }
 

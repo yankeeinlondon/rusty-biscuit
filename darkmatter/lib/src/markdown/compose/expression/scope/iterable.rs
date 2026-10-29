@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use super::projection::item_shape;
 use super::{LexicalTypes, Polarity, Shape, TypeScope, TypedLocal};
-use crate::markdown::compose::expression::ast::{BindingPattern, Callback, SpannedCallback};
+use crate::markdown::compose::expression::ast::{BindingPattern, Callback, SpannedBindingPattern, SpannedCallback};
 use crate::markdown::compose::expression::binding::{LocalId, next_frame_id};
 use crate::markdown::compose::expression::{Expr, expression_type};
 use crate::markdown::schemas::simplified::serialize_property_atom;
@@ -275,10 +275,11 @@ pub fn project_pattern(
         BindingPattern::Identifier(name) => return Ok(vec![(name.clone(), entry.clone())]),
         BindingPattern::Fields(fields) => fields,
     };
-    let Shape::Arms { arms, .. } = entry else {
+    let Shape::Arms { arms, nullable } = entry else {
         return Ok(fields.iter().map(|field| (field.clone(), unknown())).collect());
     };
-    if arms.is_empty() {
+    // An empty source has no item to reject; a null element still must bind.
+    if arms.is_empty() && !nullable {
         return Ok(fields.iter().map(|field| (field.clone(), unknown())).collect());
     }
     let mut found: Vec<Option<Shape>> = vec![None; fields.len()];
@@ -420,6 +421,11 @@ impl ItemFrame {
         Self { entry, id: LocalId::new(next_frame_id(), 0) }
     }
 
+    /// The stable subject of this invocation's original item.
+    pub fn subject(&self) -> super::Subject {
+        super::Subject::local(self.id, &[], "")
+    }
+
     /// The type of one entry.
     pub fn entry(&self) -> &Shape {
         &self.entry
@@ -446,12 +452,40 @@ impl ItemFrame {
         parent: Option<&Arc<LexicalTypes>>,
         pattern: &BindingPattern,
     ) -> Result<TypeScope<'d>, PatternMismatch> {
+        self.enter_pattern(scope, parent, pattern, None)
+    }
+
+    /// Binds the same item while retaining each authored parameter span.
+    ///
+    /// ## Errors
+    ///
+    /// [`PatternMismatch`] when the pattern cannot bind this item type.
+    pub fn enter_spanned<'d>(
+        &self,
+        scope: &TypeScope<'d>,
+        parent: Option<&Arc<LexicalTypes>>,
+        pattern: &SpannedBindingPattern,
+    ) -> Result<TypeScope<'d>, PatternMismatch> {
+        self.enter_pattern(scope, parent, &pattern.erase(), Some(pattern))
+    }
+
+    fn enter_pattern<'d>(
+        &self,
+        scope: &TypeScope<'d>,
+        parent: Option<&Arc<LexicalTypes>>,
+        pattern: &BindingPattern,
+        spanned: Option<&SpannedBindingPattern>,
+    ) -> Result<TypeScope<'d>, PatternMismatch> {
         let projected = project_pattern(pattern, &self.entry, scope.definitions())?;
         let locals = projected
             .into_iter()
-            .map(|(name, shape)| match pattern {
-                BindingPattern::Identifier(_) => TypedLocal::aliasing(name, self.id, shape),
-                BindingPattern::Fields(_) => TypedLocal::aliasing_field(name.clone(), self.id, name, shape),
+            .map(|(name, shape)| {
+                let span = spanned.and_then(|pattern| pattern.name_span(&name)).cloned();
+                let local = match pattern {
+                    BindingPattern::Identifier(_) => TypedLocal::aliasing(name, self.id, shape),
+                    BindingPattern::Fields(_) => TypedLocal::aliasing_field(name.clone(), self.id, name, shape),
+                };
+                match span { Some(span) => local.with_span(span), None => local }
             })
             .collect();
         let layer = match parent {

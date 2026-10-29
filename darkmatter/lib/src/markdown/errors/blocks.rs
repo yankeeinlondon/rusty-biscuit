@@ -311,6 +311,10 @@ pub(crate) fn interpolation_block(
     };
 
     match cause {
+        ExpressionError::Callback { function, position, source: inner } => {
+            interpolation_block(key, expression, source, inner)
+                .hint(format!("Callback: {function}[{position}]"))
+        }
         ExpressionError::FileReference(diagnostic) => {
             let headline = match diagnostic.kind {
                 FileRefFailure::RemoteNotEnabled => "remote reference not enabled",
@@ -540,65 +544,21 @@ fn involved_keys(key: Option<&str>, expression: &str) -> Vec<YamlKeyPath> {
 /// snapshot that names no one key). `fm.<key>` and a literal `fm['<key>']`
 /// name the same key as bare `<key>`.
 fn collect_frontmatter_roots(expr: &Expr, names: &mut Vec<String>) {
-    use crate::markdown::compose::expression::fm_namespace::{
-        FRONTMATTER_ROOT, literal_index_key, strip_fm_prefix,
-    };
-    match expr {
-        Expr::Variable(path) => {
-            if path.starts_with("ctx.") || path.starts_with("env.") || path == FRONTMATTER_ROOT {
-                return;
+    use crate::markdown::compose::expression::{AccessStep, static_access_reads};
+    for read in static_access_reads(expr) {
+        let path = read.variable;
+        let explicit = path.starts_with("fm.") || path == "fm";
+        let root = if path == "fm" {
+            match read.steps.first() {
+                Some(AccessStep::Key(key) | AccessStep::Member(key)) => *key,
+                _ => continue,
             }
-            let effective = strip_fm_prefix(path);
-            let root = effective.split('.').next().unwrap_or(effective);
-            if !root.is_empty() {
-                names.push(root.to_string());
-            }
-        }
-        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
-        Expr::UnaryNot(inner)
-        | Expr::UnaryMinus(inner)
-        | Expr::Paren(inner)
-        | Expr::MemberAccess { base: inner, .. } => collect_frontmatter_roots(inner, names),
-        Expr::Fallback { primary, fallback } => {
-            collect_frontmatter_roots(primary, names);
-            collect_frontmatter_roots(fallback, names);
-        }
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            collect_frontmatter_roots(condition, names);
-            collect_frontmatter_roots(then_branch, names);
-            collect_frontmatter_roots(else_branch, names);
-        }
-        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
-            collect_frontmatter_roots(left, names);
-            collect_frontmatter_roots(right, names);
-        }
-        Expr::Index { base, index } => {
-            if let Some(key) = literal_index_key(base, index) {
-                names.push(key.to_string());
-                return;
-            }
-            collect_frontmatter_roots(base, names);
-            collect_frontmatter_roots(index, names);
-        }
-        Expr::FunctionCall { args, .. } => {
-            for arg in args {
-                collect_frontmatter_roots(arg, names);
-            }
-        }
-        Expr::ArrayLiteral(items) => {
-            for item in items {
-                collect_frontmatter_roots(item, names);
-            }
-        }
-        Expr::ObjectLiteral(entries) => {
-            for (_, value) in entries {
-                collect_frontmatter_roots(value, names);
-            }
-        }
+        } else {
+            path.strip_prefix("fm.").unwrap_or(path).split('.').next().unwrap_or(path)
+        };
+        if root.is_empty() { continue; }
+        if !explicit && (path.starts_with("ctx.") || path.starts_with("env.")) { continue; }
+        names.push(root.to_string());
     }
 }
 

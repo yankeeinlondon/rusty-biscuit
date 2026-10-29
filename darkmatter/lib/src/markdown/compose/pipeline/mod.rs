@@ -212,6 +212,7 @@ impl Markdown {
         if let Some((id, path)) = node {
             runtime.transclusion.enter(id, path, 1)?;
         }
+        options.iteration_budget = Some(runtime.iteration.clone());
         let nested = super::nested::NestedCompose::install(&mut options, runtime, self);
 
         // Outside the closure, so a failure can still hand on what it reported.

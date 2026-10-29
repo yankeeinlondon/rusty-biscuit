@@ -696,6 +696,73 @@ Bindings are local to the scope that introduces them: they never modify
 frontmatter, never leak into a sibling, and are not inherited by a transcluded
 child, which receives values only through its explicit parameters.
 
+## Inline collection callbacks
+
+The shared parser and passive checker accept callbacks in function argument
+positions. Both arrows mean the same thing, and a shallow field pattern binds
+one object item:
+
+```text
+map(people, person => person.name)
+map({Ada: 90, Grace: 70}, {key, value} -> {key, score: value})
+filter(people, person => person.active)
+```
+
+`map` evaluates its body once per item and collects the results. `filter`
+evaluates its predicate once per item and retains the original items whose
+predicate is truthy. Both execute sequentially in source order; the iterable
+is evaluated once before the new local exists. For example,
+`map([1, 2], n => n + 1)` returns `[2, 3]` and
+`filter([0, 2, null], n -> n)` returns `[2]`.
+
+A callback is syntax for a function parameter, never a value that can be stored
+in an array, object, frontmatter property, or returned from another callback.
+Only one input pattern is accepted; nested patterns, defaults, aliases, and
+multiple parameters are errors. The arrow has lower precedence than the body’s
+operators, so `x => x.active ? x.name : 'unknown'` includes the entire ternary.
+
+Callbacks share the directives’ lexical scope: `person` and `local.person`
+refer to the nearest local, while `fm.person` always reads frontmatter.
+A local may shadow another local or a document property, including with null.
+Reserved namespaces and registered host globals cannot be parameters. Leaving
+a callback restores the enclosing scope without changing document properties.
+
+Passive checking projects array and tuple element types and object entry
+`{key: string, value: ...}` types into the pattern. It derives a map result’s
+array element type from the body and preserves the original filter item type,
+including proven predicate refinements. Empty and null inputs still have their
+bodies checked: `map([], x => min(true, 5))` is rejected before execution.
+`map([null], {key} => key)` is rejected because a null item cannot bind an object
+pattern. `map([{key: null}], {key} => key)` has a valid binding, and
+`map(null, {key} => key)` has no items to bind.
+
+Unknown shapes remain runtime checks. A missing iterable is handled by the
+nullable source signature; unrelated missing reads inside a callback still warn.
+
+Results are arrays in source order, with object filters retaining `{key, value}`
+entry objects. Absent, null, and empty sources return `[]` without running the
+callback. Non-null scalars are rejected. Null elements and map results remain
+data. A map result need not satisfy its input pattern.
+
+Callbacks share the enclosing request’s visit allowance (100,000 by default),
+including rejected filter items, nested calls, directives, and child composition.
+A standalone `EvaluationSession` shares its allowance across evaluations. The
+existing positive `ComposeOptions` limit builders and CLI
+`--max-iteration-visits` / `--max-expansion-bytes` controls apply. Expression
+arrays consume no rendered-byte allowance; copying output into a directive
+expansion still consumes its shared 16 MiB default allowance.
+
+A failure stops before later items and names each enclosing function and original
+index or object key, such as `map[team]: filter[0]: …`. Its typed cause and
+authored document location are preserved. Earlier effects are not rolled back.
+Callbacks inherit the enclosing request’s file context, remote permissions,
+timeouts, and host bindings.
+
+DMLS completes innermost locals before document properties inside callback bodies,
+identifies their owner and projected type on hover, and highlights both arrows
+and every pattern binding. Iterable arguments retain the enclosing scope; locals
+disappear after callback exit. These editor operations remain passive.
+
 ## Interpolation vs. Condition Mode
 
 The parser supports two modes. Only `||` differs between them; `&&` is logical
@@ -903,11 +970,13 @@ recent_commits: "recent-commits(generated; required)@darkmatter:functions -> …
 | Math | `min(a, b)` | Returns the smaller of two numbers. | `min(2, 5)` ⇒ `2`<br>`min("4", 5)` ⇒ `4`<br>`min("pear", 5)` ⇒ `error` |
 | Math | `round(x, [fallback])` | Rounds a number or numeric text to the nearest whole number, halfway values away from zero. When `x` is not a number or numeric text, a supplied `fallback` is rounded and returned instead; without one the call is a type error. | `round(3.7)` ⇒ `4`<br>`round("3.7")` ⇒ `4`<br>`round(-2.5)` ⇒ `-3`<br>`round("pear", 2.7)` ⇒ `3`<br>`round("pear")` ⇒ `error` |
 | Collection | `contains(haystack, needle)` | Returns true when the needle occurs in the haystack. Text is searched for a case-sensitive substring; array elements and object values (never keys) are compared by their rendered text, so `4` matches `"4"`. A null needle renders as empty text, and a null haystack is false. | `contains("hello", "ell")` ⇒ `true`<br>`contains([4], "4")` ⇒ `true`<br>`contains({a: "x"}, "a")` ⇒ `false` |
+| Collection | `filter(iterable, callback)` | Retains original items whose callback result is truthy, preserving order. | `filter([1, 2, 3], n => n > 1)` ⇒ `[2, 3]`<br>`filter([1, 2, 3], n -> n > 1)` ⇒ `[2, 3]`<br>`filter({z: 2, a: 1}, {key, value} -> value > 1)` ⇒ `[{key: "z", value: 2}]`<br>`filter([null, false, 0, "", 2], item => item)` ⇒ `[2]`<br>`filter([null], item -> true)` ⇒ `[null]`<br>`filter(null, item => true)` ⇒ `[]`<br>`filter([], item -> true)` ⇒ `[]`<br>`filter([[1], []], items => length(filter(items, n -> n > 0)))` ⇒ `[[1]]`<br>`filter(false, item => true)` ⇒ `error` |
 | Collection | `first(x)` | Returns the first element of a list, or null when the list is empty or null. | `first([1, 2, 3])` ⇒ `1` |
 | Collection | `has_key(obj, key)` | Returns true when the object has the given key; a null object or key is false. | `has_key({a: 1}, "a")` ⇒ `true` |
 | Collection | `keys(obj)` | Returns the keys of a map in the order they were written; a null map has no keys. Its counterpart is `values`. | `keys({b: 1, a: 2})` ⇒ `["b", "a"]` |
 | Collection | `last(x)` | Returns the last element of a list, or null when the list is empty or null. | `last([1, 2, 3])` ⇒ `3` |
 | Collection | `length(val)` | Counts the characters of text, the elements of an array, or the keys of an object; a number counts the characters of its displayed text. A boolean is a type error. | `length("hello")` ⇒ `5`<br>`length("true")` ⇒ `4`<br>`length(2.5)` ⇒ `3`<br>`length({a: 1})` ⇒ `1`<br>`length(true)` ⇒ `error` |
+| Collection | `map(iterable, callback)` | Maps each collection item to its callback result, preserving order and null results. | `map([1, 2, 3], n => n * 2)` ⇒ `[2, 4, 6]`<br>`map([1, "two", null], item -> item)` ⇒ `[1, "two", null]`<br>`map({z: 2, a: 1}, {key, value} => {key, value})` ⇒ `[{key: "z", value: 2}, {key: "a", value: 1}]`<br>`map([1, null], item => null)` ⇒ `[null, null]`<br>`map(null, item => item)` ⇒ `[]`<br>`map([], item -> item)` ⇒ `[]`<br>`map([[1, 2], [3]], items => map(items, n -> n * 2))` ⇒ `[[2, 4], [6]]`<br>`map(["=>", "->"], item => item)` ⇒ `["=>","->"]`<br>`map(1, item => item)` ⇒ `error` |
 | Collection | `values(obj)` | Returns the values of a map in the order their keys were written; a null map has no values. Its counterpart is `keys`. | `values({b: 1, a: 2})` ⇒ `[1, 2]` |
 | String Predicates | `ends_with(x, find)` | Returns true when the text ends with the given suffix (case-sensitive); null is false. | `ends_with("hello", "lo")` ⇒ `true` |
 | String Predicates | `starts_with(x, find)` | Returns true when the text starts with the given prefix (case-sensitive); null is false. | `starts_with("hello", "he")` ⇒ `true` |

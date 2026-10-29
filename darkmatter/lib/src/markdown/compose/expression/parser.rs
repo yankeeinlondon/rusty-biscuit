@@ -18,7 +18,8 @@
 //! postfix        = primary ( "[" expression "]" | "." IDENT )*
 //! primary        = literal | variable | function_call | "(" expression ")"
 //! function_call  = variable "(" args? ")"
-//! args           = expression ("," expression)*
+//! args           = argument ("," argument)*
+//! argument       = expression | pattern ("=>" | "->") expression
 //! literal        = STRING | NUMBER | BOOL
 //! ```
 //!
@@ -59,7 +60,7 @@
 use super::{
     LexerError, ParseMode, Token,
     ast::{
-        BinaryOp, Callback, Expr, SpannedBindingPattern, SpannedCallback, SpannedExpr, SpannedExprKind,
+        BinaryOp, Callback, Expr, SpannedBindingPattern, SpannedCallArgument, SpannedCallback, SpannedExpr, SpannedExprKind,
     },
     lexer::lex_spanned,
 };
@@ -79,6 +80,9 @@ pub struct ParseError {
     /// Byte offset in the input where the error occurred (the start of the
     /// offending token, or the input length at end-of-input).
     pub position: usize,
+
+    /// Whether the error concerns inline callback syntax or placement.
+    pub invalid_callback: bool,
 }
 
 impl fmt::Display for ParseError {
@@ -90,11 +94,24 @@ impl fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 impl ParseError {
+    /// The dedicated callback diagnostic identity, when callback syntax
+    /// caused this failure. Ordinary syntax errors keep the consumer's
+    /// existing expression diagnostic.
+    pub fn diagnostic_code(&self) -> Option<&'static str> {
+        self.invalid_callback.then_some(INVALID_CALLBACK_CODE)
+    }
+
+    fn in_callback(mut self) -> Self {
+        self.invalid_callback = true;
+        self
+    }
+
     /// Creates a new parse error.
     fn new(message: impl Into<String>, position: usize) -> Self {
         Self {
             message: message.into(),
             position,
+            invalid_callback: false,
         }
     }
 
@@ -112,6 +129,7 @@ impl From<LexerError> for ParseError {
         ParseError {
             message: err.message,
             position: err.position,
+            invalid_callback: false,
         }
     }
 }
@@ -180,15 +198,15 @@ impl<'a> Parser<'a> {
     ///
     /// Returns an error for invalid syntax.
     pub fn parse_spanned(&mut self) -> Result<SpannedExpr, ParseError> {
-        let expr = self.parse_expression()?;
+        let has_callback = self.tokens.iter().any(|token| matches!(token.value, Token::Arrow));
+        let expr = self.parse_expression().map_err(|error| {
+            if has_callback { error.in_callback() } else { error }
+        })?;
 
         // Ensure we consumed all input
         if !matches!(self.current(), Token::Eof) {
-            return Err(ParseError::unexpected(
-                "end of expression",
-                self.current(),
-                self.position(),
-            ));
+            let error = ParseError::unexpected("end of expression", self.current(), self.position());
+            return Err(if has_callback { error.in_callback() } else { error });
         }
 
         Ok(expr)
@@ -204,21 +222,34 @@ impl<'a> Parser<'a> {
     /// Returns an error for a malformed pattern, a missing arrow, a missing or
     /// malformed body, or surplus text.
     pub fn parse_callback_spanned(&mut self) -> Result<SpannedCallback, ParseError> {
-        let pattern = self.parse_binding_pattern()?;
-        let arrow = self.expect(&Token::Arrow, "'=>' or '->'")?;
-        let body = self.parse_expression()?;
+        let callback = self.parse_callback_argument().map_err(ParseError::in_callback)?;
         if !matches!(self.current(), Token::Eof) {
             return Err(ParseError::unexpected(
                 "end of callback",
                 self.current(),
                 self.position(),
-            ));
+            ).in_callback());
         }
-        Ok(SpannedCallback {
-            pattern,
-            arrow: arrow.span,
-            body,
-        })
+        Ok(callback)
+    }
+
+    fn parse_callback_argument(&mut self) -> Result<SpannedCallback, ParseError> {
+        let start = self.position();
+        let pattern = self.parse_binding_pattern()?;
+        let pattern_span = start..self.tokens[self.idx - 1].span.end;
+        let arrow = self.expect(&Token::Arrow, "'=>' or '->'")?;
+        let body = self.parse_expression()?;
+        Ok(SpannedCallback { pattern, pattern_span, arrow: arrow.span, body })
+    }
+
+    fn parse_call_argument(&mut self) -> Result<SpannedCallArgument, ParseError> {
+        let saved = self.idx;
+        if self.parse_binding_pattern().is_ok() && matches!(self.current(), Token::Arrow) {
+            self.idx = saved;
+            return self.parse_callback_argument().map(SpannedCallArgument::Callback);
+        }
+        self.idx = saved;
+        self.parse_expression().map(SpannedCallArgument::Value)
     }
 
     /// Parses an identifier or a nonempty, distinct, shorthand field list.
@@ -756,20 +787,28 @@ impl<'a> Parser<'a> {
 
         // Handle empty args
         if !matches!(self.current(), Token::RParen) {
-            args.push(self.parse_expression()?);
+            args.push(self.parse_call_argument()?);
 
             while matches!(self.current(), Token::Comma) {
                 self.advance(); // consume ,
-                args.push(self.parse_expression()?);
+                args.push(self.parse_call_argument()?);
             }
         }
 
         let close = self.expect(&Token::RParen, "')'")?;
         let span = name_start..close.span.end;
-        Ok(SpannedExpr::new(
-            SpannedExprKind::FunctionCall { name, args },
-            span,
-        ))
+        let kind = if args.iter().any(|arg| matches!(arg, SpannedCallArgument::Callback(_))) {
+            SpannedExprKind::CallbackCall { name, args }
+        } else {
+            SpannedExprKind::FunctionCall {
+                name,
+                args: args.into_iter().map(|arg| match arg {
+                    SpannedCallArgument::Value(value) => value,
+                    SpannedCallArgument::Callback(_) => unreachable!("callback arguments were handled above"),
+                }).collect(),
+            }
+        };
+        Ok(SpannedExpr::new(kind, span))
     }
 }
 
@@ -997,7 +1036,6 @@ mod tests {
             for input in [
                 "x => x",
                 "x -> x",
-                "f(x => x)",
                 "[x -> x]",
                 "{a: x => x}",
                 "a ? x => x : 1",
@@ -1009,9 +1047,74 @@ mod tests {
         }
 
         #[test]
-        fn nested_callback_text_in_body_is_rejected() {
+        fn nested_callbacks_require_call_argument_positions() {
             assert!(parse_callback("x => y => y").is_err());
-            assert!(parse_callback("x => f(y -> y)").is_err());
+            assert!(parse_callback("x => f(y -> y)").is_ok());
+        }
+
+        #[test]
+        fn call_arguments_preserve_callback_spans_and_erasure() {
+            let source = "map(items, {key, value} -> value ? key : 'none')";
+            let spanned = parse_spanned(source).unwrap();
+            assert_eq!(spanned.erase(), parse(source).unwrap());
+            let SpannedExprKind::CallbackCall { name, args } = &spanned.kind else {
+                panic!("expected callback call");
+            };
+            assert_eq!(name, "map");
+            assert_eq!(args.len(), 2);
+            assert_eq!(args[0].span(), 4..9);
+            let SpannedCallArgument::Callback(callback) = &args[1] else {
+                panic!("expected callback argument");
+            };
+            assert_eq!(&source[callback.pattern_span.clone()], "{key, value}");
+            assert_eq!(&source[callback.arrow.clone()], "->");
+            assert_eq!(&source[callback.body.span.clone()], "value ? key : 'none'");
+            assert_eq!(&source[args[1].span()], "{key, value} -> value ? key : 'none'");
+        }
+
+        #[test]
+        fn nested_callbacks_and_commas_have_one_grammar() {
+            for source in [
+                "map([1, 2], x => filter([x, 3], y -> y > x))",
+                "map([1], x -> x > 0 ? min(x, 2) : max(x, 3))",
+                "f(x => x, y -> y, 3)",
+                "map([1], my-item->my-item - 1)",
+                "map({a: 1}, {key,value} => {key, value})",
+                "map([1], x => 'a => b -> c')",
+            ] {
+                let parsed = parse_spanned(source).unwrap();
+                assert_eq!(parsed.erase(), parse(source).unwrap(), "{source}");
+                assert!(parse_condition_spanned(source).is_ok(), "{source}");
+                assert_eq!(parse(&parsed.erase().to_string()).unwrap(), parsed.erase(), "{source}");
+            }
+        }
+
+        #[test]
+        fn callbacks_cannot_escape_argument_positions() {
+            for source in [
+                "map([1], x => y => y)",
+                "map([1], x => [y => y])",
+                "map([1], x => {f: y -> y})",
+                "map([1], x => 1 + y => y)",
+                "map([1], x => true ? y => y : 1)",
+                "map([1], (x, y) => x)",
+                "map([1], () -> 1)",
+                "map([1], {} => 1)",
+                "map([1], {x, x} -> x)",
+                "map([1], {x: y} => y)",
+            ] {
+                assert_eq!(parse(source).unwrap_err().diagnostic_code(), Some(INVALID_CALLBACK_CODE), "{source}");
+                assert_eq!(parse_condition(source).unwrap_err().diagnostic_code(), Some(INVALID_CALLBACK_CODE), "{source}");
+            }
+        }
+
+        #[test]
+        fn incomplete_callback_reports_the_shared_parser_location() {
+            for source in ["map([1], x =>", "map([1], {x,", "map([1], x -> )"] {
+                let error = parse_spanned(source).unwrap_err();
+                assert!(error.position <= source.len(), "{source}: {error}");
+                assert_eq!(parse(source).unwrap_err(), error);
+            }
         }
 
         #[test]

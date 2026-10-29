@@ -647,3 +647,69 @@ fn guard_facts_cross_destructured_and_object_spellings_in_editor_diagnostics() {
     assert!(collection_codes(&found[1]).is_empty(), "{:#?}", found[1]);
     assert_eq!(collection_codes(&found[2]), ["dm.collection.untyped_map_source"], "{:#?}", found[2]);
 }
+
+#[test]
+fn callback_expression_protocol_scopes_hover_completion_and_tokens() {
+    let workspace = LspWorkspace::new();
+    let text = concat!(
+        "---\n$schema:\n  result: expression\n  p: string\n",
+        "result: 'map([1], p -> p)'\np: document\n---\n\n",
+        "{{ map([{name: 'outer'}], p => [map([1], p -> p), p.name, fm.p]) }}\n",
+        "{{ map([1], n => n) }}\n",
+        "{{ map({z: 1}, {key, value} -> [key, value]) }}\n",
+        "{{ map([1], p => ) }}\n",
+        "{{ [map([1], p => p), p] }}\n",
+    );
+    let mut session = Session::open(&workspace, text);
+    let inner = text.find("p -> p),").unwrap() + 5;
+    let hover = session.hover(inner);
+    assert!(hover.contains("Local `p`: `literal(1.0)`"), "{hover}");
+    assert!(hover.contains("Parameter of `map`"), "{hover}");
+    let outer = text.find("p.name").unwrap() + 1;
+    let hover = session.hover(outer);
+    assert!(hover.contains("Local `p.name`: `literal(outer)`"), "{hover}");
+    let fm = text.find("fm.p").unwrap() + 1;
+    assert!(session.hover(fm).contains("frontmatter `p`"));
+    assert!(session.completion(fm + 2).iter().any(|item| item["label"] == "fm.p"));
+    let outside = text.find("), p]").unwrap() + 3;
+    assert!(session.hover(outside).contains("frontmatter `p`"));
+    assert!(!session.completion(outside + 1).iter().any(|item| item["label"] == "local.p"));
+    let incomplete = text.find("p => )").unwrap() + 5;
+    let items = session.completion(incomplete);
+    assert!(items.iter().any(|item| item["label"] == "p" && item["kind"] == 6), "{items:?}");
+    let p_index = items.iter().position(|item| item["label"] == "p").unwrap();
+    let fm_index = items.iter().position(|item| item["label"] == "result").unwrap();
+    assert!(p_index < fm_index, "locals precede document properties");
+    assert!(items[p_index]["sortText"].as_str().unwrap() < items[fm_index]["sortText"].as_str().unwrap());
+    let fm_body = text.find("p -> p)'" ).unwrap() + 5;
+    assert!(session.hover(fm_body).contains("Local `p`: `literal(1.0)`"));
+    assert!(session.completion(fm_body + 1).iter().any(|item| item["label"] == "p" && item["detail"].as_str().is_some_and(|detail| detail.contains("literal(1.0)"))));
+    let tokens = session.tokens();
+    for (needle, length, kind) in [("n =>", 1, 2), ("=> n", 2, 6), ("-> p)'", 2, 6), ("key, value} ->", 3, 2), ("value} ->", 5, 2)] {
+        let at = text.find(needle).unwrap();
+        let (line, character) = position(text, at);
+        assert!(tokens.iter().any(|token| token.0 == line && token.1 == character && token.2 == length && token.3 == kind), "missing {needle}: {tokens:?}");
+    }
+    session.shutdown();
+}
+
+macro_rules! callback_projected_diagnostic {
+    ($name:ident, $text:expr) => {
+        #[test]
+        fn $name() {
+            let text = $text;
+            let workspace = LspWorkspace::new();
+            let session = Session::open(&workspace, text);
+            let at = text.find("min(p, 5)").unwrap() + 4;
+            let start = position(text, at);
+            let end = position(text, at + 1);
+            assert_eq!(session.ranges("dm.expression.incompatible_call"), vec![((u64::from(start.0), u64::from(start.1)), (u64::from(end.0), u64::from(end.1)))], "{:#?}", session.diagnostics);
+            session.shutdown();
+        }
+    };
+}
+
+callback_projected_diagnostic!(callback_frontmatter_diagnostic_projects_escaped_scalar,
+    "---\nresult: \"{{ map([true], p => \\\"é\\\" == \\\"é\\\" ? min(p, 5) : 0) }}\"\n---\n");
+callback_projected_diagnostic!(callback_frontmatter_diagnostic_projects_multiline_scalar,
+    "---\nresult: |\n  {{ map([true],\n      p -> min(p, 5)) }}\n---\n");

@@ -601,13 +601,17 @@ impl<'a> EvaluationSession<'a> {
         I: IntoIterator<Item = (String, RuntimeBinding<'a>)>,
     {
         let entries = check_registration(&view, runtime)?;
+        let iteration = document.iteration_budget().cloned()
+            .or_else(|| document.resolution_context_ref().map(|context| context.iteration.clone()))
+            .or_else(|| document.resolution_context().map(|context| context.iteration))
+            .unwrap_or_else(|| super::iteration::IterationBudget::new(Default::default()));
         Ok(Self {
             view,
             document,
             runtime: entries,
             cache: Mutex::new(HashMap::new()),
             resolution_context: None,
-            iteration: super::iteration::IterationBudget::new(Default::default()),
+            iteration,
         })
     }
 
@@ -627,7 +631,8 @@ impl<'a> EvaluationSession<'a> {
         self
     }
 
-    /// The session-owned visit and expansion counters.
+    /// The session's visit and expansion counters, inherited from its enclosing
+    /// lookup when one already owns an allowance.
     pub fn iteration_budget(&self) -> &super::iteration::IterationBudget {
         &self.iteration
     }
@@ -942,6 +947,10 @@ impl EvaluationLookup for EvaluationSession<'_> {
 
     fn lexical_scope(&self) -> Option<&Arc<LexicalScope>> {
         self.document.lexical_scope()
+    }
+
+    fn iteration_budget(&self) -> Option<&super::iteration::IterationBudget> {
+        Some(&self.iteration)
     }
 }
 
@@ -1291,6 +1300,10 @@ impl EvaluationLookup for ScopedLookup<'_> {
     fn lexical_scope(&self) -> Option<&Arc<LexicalScope>> {
         Some(&self.scope)
     }
+
+    fn iteration_budget(&self) -> Option<&super::iteration::IterationBudget> {
+        self.inner.iteration_budget()
+    }
 }
 
 #[cfg(test)]
@@ -1520,6 +1533,26 @@ mod lexical_tests {
         assert!(matches!(session.resolve("gone"), Err(ExpressionError::Binding(_))));
         let scoped = ScopedLookup::new(&session, LexicalScope::new(vec![("gone".into(), json!("local"))]));
         assert!(matches!(scoped.resolve("gone"), Err(ExpressionError::Binding(_))));
+    }
+
+    #[test]
+    fn callback_sessions_and_scopes_share_the_enclosing_budget() {
+        use super::super::iteration::{IterationLimits, IterationPath};
+        use std::num::NonZeroU64;
+
+        let document = doc();
+        let view = Arc::new(BindingView::builder(ScopeId::new("budget")).build().unwrap());
+        let outer = EvaluationSession::associate(Arc::clone(&view), &document, [])
+            .unwrap()
+            .with_iteration_limits(IterationLimits::default().with_max_visits(NonZeroU64::new(1).unwrap()));
+        let scoped = ScopedLookup::new(&outer, LexicalScope::new(vec![("x".into(), json!(1))]));
+        let inner = EvaluationSession::associate(view, &scoped, []).unwrap();
+        let path = IterationPath::empty();
+        inner.iteration_budget().reserve_visit(&path).unwrap();
+        assert_eq!(outer.iteration_budget().usage().visits, 1);
+        let failure = outer.iteration_budget().reserve_visit(&path).unwrap_err();
+        assert_eq!(failure.used, 1);
+        assert_eq!(inner.iteration_budget().reserve_visit(&path).unwrap_err(), failure);
     }
 
     #[test]

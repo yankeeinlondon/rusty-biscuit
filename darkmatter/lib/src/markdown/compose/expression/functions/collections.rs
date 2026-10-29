@@ -8,6 +8,8 @@ use crate::markdown::coercion::ValueKind;
 use crate::markdown::compose::expression::call_binding::BoundCall;
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
+    FunctionBinding::callback("map"),
+    FunctionBinding::callback("filter"),
     FunctionBinding::pure("first", &[], first),
     FunctionBinding::pure("last", &[], last),
     FunctionBinding::pure("has_key", &["haskey"], has_key),

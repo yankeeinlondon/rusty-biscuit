@@ -503,3 +503,70 @@ fn text_an_earlier_stage_inserted_stays_data_in_every_copy() {
     let document = "---\n$schema:\n  data: string[](required)\ndata: [a, b]\ncmd: echo DATA\nreplace:\n  PRODUCED: \"{{ cmd }}\"\n---\n::map data\n- {{i}} PRODUCED\n::end-map\n";
     assert_eq!(composed(document), "- a echo DATA\n- b echo DATA\n");
 }
+
+#[test]
+fn callback_runtime_composition_shares_expression_and_directive_visits() {
+    let document = "---\n$schema:\n  data: number[](required)\ndata: [1, 2]\n---\n::map data\n{{ map([i], n => n) }}\n::end-map\n{{ filter(data, n -> false) }}\n";
+    assert_eq!(compose_configured(document, |o| o.with_max_iteration_visits(limit(6))).unwrap(), "[1] [2] []");
+    let error = compose_configured(document, |o| o.with_max_iteration_visits(limit(5))).unwrap_err();
+    assert_eq!(codes(&error), ["dm.iteration.visit_limit"], "{error}");
+    let diagnostics = error_diagnostics(&error);
+    assert!(diagnostics[0].source.is_some());
+}
+
+#[test]
+fn callback_runtime_real_file_reads_use_the_enclosing_document_context() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join("person.md"), "---\nname: Ada\n---\n").unwrap();
+    let document = "{{ map(find_files('./person.md'), file => frontmatter(file).name) }}\n";
+    let output = compose_with_options(dir.path(), document, |o| o).unwrap();
+    assert_eq!(output, "[\"Ada\"]\n");
+    let error = compose_with_options(dir.path(), "{{ map(['./missing.md'], file => frontmatter(file)) }}", |o| o).unwrap_err();
+    let MarkdownError::Interpolation { cause, .. } = &error else { panic!("{error:?}") };
+    assert!(matches!(cause.as_ref(), darkmatter::markdown::compose::expression::ExpressionError::Callback { .. }));
+    let darkmatter::markdown::compose::expression::ExpressionError::FileReference(diagnostic) = cause.without_callbacks() else { panic!("{cause:?}") };
+    assert_eq!(diagnostic.reference, "./missing.md");
+    assert!(cause.is_authoring_fatal());
+    assert!(error_diagnostics(&error)[0].source.is_some());
+}
+
+#[test]
+fn callback_runtime_composition_preserves_free_capture_absence_observations() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("doc.md");
+    let text = "{{ map([true], p => p ? missing : null) }}";
+    std::fs::write(&path, text).unwrap();
+    let options = ComposeOptions::new_with_context(ComposeContext::capture_for_content(dir.path(), "")).with_source_file(path.clone());
+    let (_, report) = Markdown::try_from(path.as_path()).unwrap().compose_with(&crate::request_support::request_at(dir.path(), options)).unwrap();
+    assert!(report.warnings.iter().any(|warning| warning.message.contains("missing")), "{:?}", report.warnings);
+}
+
+#[test]
+fn callback_runtime_child_exhaustion_cannot_be_hidden_by_a_fallback() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join("child.md"), "{{ map([1, 2], n => n) }}").unwrap();
+    let child = compose_with_options(dir.path(), "::file ./child.md\n", |o| o.with_max_iteration_visits(limit(1))).unwrap_err();
+    assert_eq!(codes(&child), ["dm.iteration.visit_limit"]);
+    let nested = r#"{{ as_markdown("{{ map([1, 2], n => n) }}") || 'hidden' }}"#;
+    let error = compose_with_options(dir.path(), nested, |o| o.with_max_iteration_visits(limit(1))).unwrap_err();
+    assert_eq!(codes(&error), ["dm.iteration.visit_limit"], "{error}");
+    assert!(error.iteration_failure().is_some());
+}
+
+#[test]
+fn callback_runtime_nested_failure_reports_every_original_position() {
+    let error = failed("{{ map({team: [1]}, {value} => filter(value, n => frontmatter('./missing.md'))) }}");
+    let diagnostic = &error_diagnostics(&error)[0];
+    assert_eq!(diagnostic.iteration_path.to_string(), "map[team] → filter[0]");
+    assert!(diagnostic.source.is_some());
+    let MarkdownError::Interpolation { cause, .. } = error else { panic!("{error:?}") };
+    assert!(matches!(cause.without_callbacks(), darkmatter::markdown::compose::expression::ExpressionError::FileReference(_)));
+}
+
+#[test]
+fn callback_runtime_schema_tuples_and_yaml_representations_keep_their_values() {
+    for values in ["[Ada, 2]", "[Ada, '2']"] {
+        let text = format!("---\n$schema:\n  pair: tuple([string, number])\npair: {values}\n---\n{{{{ map(pair, item => item) }}}}");
+        assert_eq!(composed(&text), "[\"Ada\",2]", "{values}");
+    }
+}

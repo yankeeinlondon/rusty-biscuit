@@ -292,6 +292,9 @@ pub struct ComposeOptions {
     /// compositions, and explicit nested composition.
     pub(crate) iteration_limits: super::super::expression::iteration::IterationLimits,
 
+    /// Installed by the pipeline and shared with every expression context.
+    pub(crate) iteration_budget: Option<super::super::expression::iteration::IterationBudget>,
+
     /// Whether `@`-prefixed paths resolve to the git repository root.
     /// Default: true.
     pub(crate) resolve_repo_root: bool,
@@ -965,6 +968,7 @@ impl ComposeOptions {
             allow_untyped_map_variables: false,
             allow_untyped_filter_variables: false,
             iteration_limits: Default::default(),
+            iteration_budget: None,
             resolve_repo_root: true,
             source_derivation: SourceDerivation::Ordinary,
             source_opening: None,
@@ -1764,6 +1768,7 @@ impl ComposeOptions {
         context.caller_file_provenance = self.caller_file_provenance.clone();
         context.nested_compose = self.nested_compose.clone();
         context.host_globals = self.host_globals.clone();
+        context.iteration = self.expression_iteration_budget();
         context
     }
 
@@ -1810,7 +1815,18 @@ impl ComposeOptions {
         context.current = self.current_authority();
         context.caller_file_provenance = self.caller_file_provenance.clone();
         context.host_globals = self.host_globals.clone();
+        context.iteration = self.expression_iteration_budget();
         context
+    }
+
+    fn expression_iteration_budget(&self) -> super::super::expression::iteration::IterationBudget {
+        if self.nested_compose.is_discovery() {
+            super::super::expression::iteration::IterationBudget::discovery(self.iteration_limits)
+        } else {
+            self.iteration_budget.clone().unwrap_or_else(|| {
+                super::super::expression::iteration::IterationBudget::new(self.iteration_limits)
+            })
+        }
     }
 
     fn context_values_for_resolution(&self) -> serde_json::Map<String, serde_json::Value> {
@@ -2920,6 +2936,8 @@ impl ComposeOptions {
             allow_untyped_map_variables,
             allow_untyped_filter_variables,
             iteration_limits,
+            // Runtime counters are execution state; their limits are identity above.
+            iteration_budget: _,
             resolve_repo_root,
             source_derivation,
             source_opening,
@@ -3820,6 +3838,33 @@ mod tests {
 
     /// Without a fallback set, the resolution context leaves the field as
     /// `None` — preserving the legacy document-only resolution behavior.
+    #[test]
+    fn callback_context_adapters_share_request_budget_and_discovery_is_free() {
+        use super::super::super::expression::iteration::{IterationBudget, IterationLimits, IterationPath};
+        use std::num::NonZeroU64;
+
+        let directory = tempfile::tempdir().unwrap();
+        let context = biscuit_file::FileResolutionContext::new(directory.path());
+        let mut request = test_request_in(ComposeOptions::new(), context);
+        let limits = IterationLimits::default().with_max_visits(NonZeroU64::new(1).unwrap());
+        let budget = IterationBudget::new(limits);
+        request.iteration_budget = Some(budget.clone());
+        request.iteration_limits = limits;
+        let body = request.expression_resolution_context(&request.remote_fetch_runtime());
+        let frontmatter = request.frontmatter_resolution_context();
+        let path = IterationPath::empty();
+        body.iteration.reserve_visit(&path).unwrap();
+        assert_eq!(frontmatter.iteration.usage().visits, 1);
+        assert_eq!(budget.usage().visits, 1);
+
+        request.nested_compose = super::super::super::nested::NestedComposeSlot::discover();
+        let discovery = request.frontmatter_resolution_context();
+        discovery.iteration.reserve_visit(&path).unwrap();
+        discovery.iteration.reserve_visit(&path).unwrap();
+        assert_eq!(budget.usage().visits, 1, "preflight does not consume execution visits");
+        assert!(frontmatter.iteration.reserve_visit(&path).is_err());
+    }
+
     #[test]
     fn frontmatter_resolution_context_without_fallback_is_none() {
         let options = test_request(ComposeOptions::new());

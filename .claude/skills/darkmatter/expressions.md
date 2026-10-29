@@ -313,3 +313,35 @@ fall through for a missing member; `local.x` and bare `x` are the same subject,
 root, `null`, or a registered global, and a host may not register `local`.
 Expression-level `map()`/`filter()` functions are not shipped; only the
 shared substrate is.
+
+## Inline callback argument infrastructure
+
+`Expr::CallbackCall` / `SpannedExprKind::CallbackCall` hold `CallArgument` /
+`SpannedCallArgument` (`Value` or `Callback`); ordinary value-only calls keep
+`FunctionCall`. Both arrows use the existing shared pattern parser. Callbacks
+are never value expressions. `SpannedCallback` keeps `pattern_span`, `arrow`,
+and body spans. `ParseError::diagnostic_code()` identifies callback syntax errors.
+
+`call_check::callback_scope` enters an `ItemFrame` projected from the iterable;
+`branch_scope` applies it before typing nested bodies. Free-read inventories
+exclude bound bare and `local.*` reads, retaining explicit `fm.*` captures.
+The registry’s callback evaluation mode permits direct function parameters and
+rejects stored/nested callable values and function returns. Catalog descriptors’
+`accepts_value_arguments()` excludes callback-taking functions from lifecycle verbs.
+`evaluate_callback_function` executes registered callbacks serially after binding
+the iterable with `bind_callback_value`; callbacks never become JSON placeholders.
+`ScopedLookup` retains locals and forwards the request authority. Evaluation passes
+one `IterationBudget` through recursion; `EvaluationSession` shares it across calls,
+and pipeline-installed resolution contexts use the request counter (discovery
+counters charge nothing). Expression arrays charge visits, never rendered bytes.
+`ExpressionError::Callback` retains each original index/key and typed source;
+`without_callbacks` exposes the underlying cause without discarding the wrappers.
+DMLS cursor scopes use `branch_scope`, including projected callback locals;
+completion prioritizes locals only in the body, hover names the callback owner,
+and semantic tokens project patterns and either arrow through scalar mappings.
+
+Passive callback frames retain declaration locations through
+`ItemFrame::enter_spanned`, `TypedLocal::with_span`, and
+`LexicalTypes::span_of_name`. These are expression-relative byte ranges and
+survive dropping the parsed callback; a shadowing binding without a span does
+not borrow an outer binding’s location.
