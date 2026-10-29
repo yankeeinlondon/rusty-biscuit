@@ -754,7 +754,7 @@ fn d13_alphanumeric_checks(cases: &mut Vec<Case>) {
 /// schema, once.
 fn x3_recursive_translation(cases: &mut Vec<Case>) {
     cases.push(Case::new("X3/recursive_translation", "frozen-recursive", true, || {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/recursive_schema_frozen");
+        let dir = biscuit_test_harness::manifest_dir!().join("tests/fixtures/recursive_schema_frozen");
         let mut wiring = serde_yaml_ng::Mapping::new();
         for event in ["initialize", "start", "blocked", "success", "failure", "finalize"] {
             wiring.insert(event.into(), "stack@./lifecycle-recursive.yaml".into());

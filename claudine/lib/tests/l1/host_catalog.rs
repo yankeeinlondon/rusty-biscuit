@@ -328,7 +328,7 @@ matrix! {
 /// than functions; [`lifecycle_artifact`] keeps it fresh.
 #[test]
 fn claudine_ships_no_host_function_catalog_and_no_facts_artifact() {
-    let schemas = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../schemas");
+    let schemas = biscuit_test_harness::manifest_dir!().join("../schemas");
     let mut catalogs = Vec::new();
     let mut artifacts = Vec::new();
     for entry in std::fs::read_dir(&schemas).expect("claudine/schemas is readable") {
