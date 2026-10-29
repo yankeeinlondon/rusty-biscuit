@@ -1,5 +1,10 @@
 # release-plz in CI
 
+To release a package in this repository, start with [Releasing a version](../releases.md).
+It explains the developer's steps, version choices, changelogs, and internal dependencies.
+This page is a general explanation of the tool; its examples do not describe which publishing
+features Rusty Biscuit has enabled.
+
 A guide to [release-plz](https://release-plz.dev), the Rust release-automation tool, for someone
 who knows Rust and the basics of GitHub Actions but has never used it.
 
