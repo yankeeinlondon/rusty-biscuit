@@ -1,5 +1,5 @@
 ---
-kind: topic
+kind: canonical-documentation
 area: schema
 tags:
     - schema
@@ -66,7 +66,7 @@ Then there the more esoteric or "meta" types like:
 
 - `schema` and `expression`
 
-The full list of _types_ can be found at: [`SimplifiedSchema` Types](./schemas/schema-types.md) but for now here's a simple example of using _types_ to define a schema:
+The full list of _types_ can be found at: [`SimplifiedSchema` Types](./definition.md#types) but for now here's a simple example of using _types_ to define a schema:
 
 ```yaml
 $schema:
@@ -84,7 +84,7 @@ A **constraint** is the a way to further _constrain_ a base type. There are some
 - `required` -  can be used for any property and indicates that the property is a required property (aka, can not have a `null` value); the exception is a type that itself admits `null` (`null`, `unknown`, or a union with such an arm), which stays optional (see [Null-Admitting Properties](./definition.md#null-admitting-properties))
 - `length` - can be used with _some_ types like `string` or any array type but would not be allowed with a type like `boolean`
 
-For a full list of the _constraints_ available (and what _types_ can use them), you can read: [`SimplifiedSchema` Constraints](./schema-constraints.md) but here's an update of our example that takes advantage of constraints:
+For a full list of the _constraints_ available (and what _types_ can use them), you can read: [`SimplifiedSchema` Constraints](./definition.md#universal-constraints) but here's an update of our example that takes advantage of constraints:
 
 ```yaml
 $schema:
@@ -171,6 +171,20 @@ You can also write `address@this` if you prefer to make that explicit; both
 forms mean the same thing. A type from another file needs its source:
 `address@./address-types.yaml`.
 
+Darkmatter's own reusable types are reached with the reserved source
+`darkmatter:<stem>` instead of a path, so a schema in any repository can use
+them without knowing where Darkmatter is installed:
+
+```yaml
+kind: schema
+types:
+    notice: communicate@darkmatter:lifecycle   # one say/info/warn/… action
+```
+
+See [Reserved Darkmatter References](./definition.md#reserved-darkmatter-references-namedarkmatterstem)
+for the rules, and [Lifecycle Event Typing](./definition.md#lifecycle-event-typing)
+for the lifecycle types Darkmatter ships.
+
 Because every entry is also a property, keep helper types that should not
 become document properties in a separate file and import them by name. A
 document that uses `recipient: address@./address-types.yaml` gains a
@@ -225,9 +239,11 @@ Do not define the variant as `draft_owner: owner`: an alias inherits
 An inherited `generated` keeps its usual meaning. It does not create a value
 provider. Checking an authored document, as `md schema validate` and DMLS do,
 accepts a missing generated property even when it is required, because the host
-supplies the value later. Validation of the effective values at run time
-enforces `required` and checks supplied values as usual (see
-[Universal Constraints](./definition.md#universal-constraints)).
+supplies the value later. Runtime checks use two phases: launch requires an
+inherited `required` value immediately only when it is also `eager`;
+completion requires it after the work finishes. Supplied values are checked
+at both phases. A type that admits `null` remains optional regardless of
+these markers. See [Universal Constraints](./definition.md#universal-constraints).
 
 To make an exported schema apply automatically, place its definition in one of the five [schema roots](./definition.md#schema-roots), searched in this order:
 
@@ -239,7 +255,7 @@ To make an exported schema apply automatically, place its definition in one of t
 
 `{root}` is the document's file tree root: the root of its repository when it is in one, otherwise the tree it was opened in (often the document's own folder). `md` searches these folders only for a document in a repository; DMLS searches them for any document inside an open workspace folder. Package and package area are the document's, not those of the directory you launched from. `schemas/` folders anywhere else, such as `{package-root}/docs/schemas`, are not searched. An earlier folder shadows a file of the same name in every later one.
 
-Today only a `kind: trigger-schema` file in these folders applies automatically (see [Repository Trigger Schemas](./definition.md#repository-trigger-schemas)). Any other schema file there is used when a document names it with a bare `$schema`, such as `$schema: claudine.yaml`. The automatic application of an exported standalone schema described next is not implemented yet.
+Today only a `kind: schema-trigger` file in these folders applies automatically (see [Repository Trigger Schemas](./definition.md#repository-trigger-schemas)). Any other schema file there is used when a document names it with a bare `$schema`, such as `$schema: claudine.yaml`. The automatic application of an exported standalone schema described next is not implemented yet.
 
 Recognized standalone schemas with an exported `$schema` augment the Darkmatter baseline within their discovery scope. Automatically discovered package-area and package schemas do not apply to sibling scopes. The `SCHEMAS_DIR` folder and `~/schemas` are in every document's roots, so their definitions can apply to documents in any repository; they add to the package, package-area, and `{root}` folders rather than replacing them. Types-only libraries remain available for imports without automatically applying a schema. Arbitrary YAML files are not schema inputs.
 
@@ -275,6 +291,8 @@ $schema:
 ```
 
 Just like a normal schema definition a schema trigger will be _active_ when it's located in one of the directories mentioned in the last section. However, in this case _active_ means that the matching is active. When there is a match then the schema will be merged into the base schema.
+
+A trigger's schema can use named types, including [recursive ones](#recursive-types), like any other schema. Its stored definitions (recursive types, and [shared](./definition.md#shared-named-types) structured ones) are merged beside the document's own; a type named `item` in both stays two separate types.
 
 #### Passive Activation Expressions
 
@@ -317,7 +335,7 @@ For the matching model and its implementation status, read [Schema Triggers in D
 ### Schemas for Global Variables
 
 Every global variable has a schema, including `fm`, `ctx`, `current`, `env`,
-`err`, and `tracking`. Darkmatter's built-in definitions start in
+`err`, and `timing`. Darkmatter's built-in definitions start in
 [`darkmatter.yaml`](../../../schemas/darkmatter.yaml), which imports reusable
 named types from its `partials` directory. `ctx` and `current` share the same
 context type, so both expose properties such as `cwd` directly.
@@ -400,6 +418,64 @@ There is a _variant_ of an enumeration which we will call a "suggestion" which p
 
 ### Union Types
 
+A union says a property may hold one of several types. Write it with `|`, as
+in TypeScript, or as a YAML list; both mean the same thing:
+
+```yaml
+$schema:
+    id: "string | number"
+    width:
+      - literal(auto)
+      - number(min(1))
+```
+
+`[]` binds tighter than `|`, so `string | number[]` is a string or a list of
+numbers; group with parentheses for a list whose items may be either:
+`(string | number)[]`. A list whose positions each have their own type is a
+`tuple`, such as `point: "tuple([number, number])"`.
+
+A value that already matches an option is kept as written: `"4"` against
+`string | number` stays the text `"4"`. Otherwise Darkmatter converts it into
+the one option it can reach: `"1"` against `number(min(5)) | boolean` becomes
+`true`, because `1` fails `min(5)`. The order of the options never matters.
+The full rule, including how ties are settled, is in
+[Choosing a Union Option](./definition.md#choosing-a-union-option); the
+grammar is in [The `|` Operator and Grouping](./definition.md#the--operator-and-grouping)
+and [Tuples](./definition.md#tuples).
+
+### Recursive Types
+
+Some data nests to a depth you cannot know in advance: a tree of sections, a
+list of steps where a step can hold more steps. Describe it with a named type
+that refers to itself:
+
+```yaml
+$schema:
+    step: "{ say: string(required), then: step[](required) }"
+    plan: step(required)
+plan:
+    say: start
+    then:
+        - say: check
+          then: []      # an empty list ends this branch
+```
+
+Every level is checked against `step`, however deep the document goes, and
+an error deep in the tree still points at its own line. Types can also refer
+to each other, in one file or across files with `Name@file`.
+
+One rule keeps recursion meaningful: each cycle must pass through a **child
+value**, meaning an object property, a dictionary value, a list item, or a
+tuple slot. `step` above recurses through the list items of `then`, so it is
+fine. `a: b` with `b: a`, or `a: [a, string]`, never reaches a child value
+and is a schema error that names each reference in the cycle.
+
+The definition describes the value. Whether a property using it is
+`required`, `eager`, or nullable is decided where the type is used, so
+`plan: step(required)` and `draft: step` can share one definition. See
+[Recursive Named Types](./definition.md#recursive-named-types) for the full
+rules.
+
 ### Examples: using Inline Syntax
 
 #### The Basics
@@ -438,7 +514,7 @@ There are two primary types of grammar files which are distinguished by their `k
 
 - Schema Definition Files (`kind: schema`)
     
-    A tagged schema file has exactly two keys, `kind: schema` and a `types` mapping; any other key is a schema-document error. Its `types` entries are both the schema's properties and its named types, exactly like the entries of a pure `$schema` file (see [External Schemas](#external-schemas)):
+    A tagged schema file has `kind: schema`, a `types` mapping, and optionally a [`categories:` list](./definition.md#categories) that names the documentation categories its types may use; any other key is a schema-document error. Its `types` entries are both the schema's properties and its named types, exactly like the entries of a pure `$schema` file (see [External Schemas](#external-schemas)):
     
   ```yaml
   kind: schema

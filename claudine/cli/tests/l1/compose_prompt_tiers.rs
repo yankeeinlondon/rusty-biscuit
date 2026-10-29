@@ -179,6 +179,10 @@ mod local_root_file_wins_over_user_prompt_tier_when_the_local_tree_is_home {
 
     fn assert_local_root_wins(prefix: &str, repository: bool) {
         let (fixture, launch) = stage_at(prefix, &[], repository);
+        fixture.seed_inline_metadata_schema(
+            include_str!("../../../schemas/inline-compose.yaml"),
+            include_str!("../../../schemas/document.yaml"),
+        );
         assert_eq!(launch, fixture.home());
         write(&launch.join("probe.md"), "Tier=[local-root]\n");
         let stdout = compose_dry_run(&fixture, &launch, "@probe.md");
@@ -275,6 +279,10 @@ mod nested_magic_reference_in_another_repository_resolves_from_the_launch_tree {
     fn assert_form_resolves(form: &str) {
         let (_, winner) = ROWS.iter().find(|(row, _)| *row == form).expect("a listed row");
         let (fixture, launch) = stage("prompt-tiers-nested-other-repo", true);
+        fixture.seed_inline_metadata_schema(
+            include_str!("../../../schemas/inline-compose.yaml"),
+            include_str!("../../../schemas/document.yaml"),
+        );
         let other = fixture.cwd().join("other");
         std::fs::create_dir_all(&other).unwrap();
         assert!(init_git_repo(&other), "git init failed at {}", other.display());

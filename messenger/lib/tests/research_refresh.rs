@@ -7,6 +7,9 @@
 //! shipped roster, schemas, and fleet prompt plus the accepted-fleet fixture.
 #![cfg(feature = "research")]
 
+#[path = "support/research_snapshot.rs"]
+mod research_snapshot;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -95,9 +98,14 @@ impl Repo {
 
     /// The fleet fixture published as a snapshot (no review records).
     fn published() -> Self {
-        let repo = Self::new();
-        generate(&repo.loader, &BTreeMap::new(), &day("2026-09-17"), Options::default()).expect("initial generation");
-        repo
+        let seed = Self::new();
+        let snapshot = research_snapshot::snapshot(seed.root(), "published", |root| {
+            let loader = research_loader(Workspace::new(root).expect("absolute"));
+            generate(&loader, &BTreeMap::new(), &day("2026-09-17"), Options::default()).expect("initial generation");
+        });
+        let dir = tempfile::tempdir().expect("tempdir");
+        research_snapshot::copy_tree(&snapshot, dir.path());
+        Self { loader: research_loader(Workspace::new(dir.path()).expect("absolute")), dir }
     }
 
     fn root(&self) -> &Path {
@@ -834,8 +842,31 @@ fn a_verified_unchanged_renewal_is_accepted_without_a_changelog_entry() {
     assert_eq!(repo.run(&run).decision.expect("decision").kind, "renewal");
 }
 
+macro_rules! renewal_refusal_tests {
+    ($($test:ident => $case:literal),+ $(,)?) => {
+        const TESTED_RENEWAL_CASES: &[&str] = &[$($case),+];
+        $(
+            #[test]
+            fn $test() {
+                assert_renewal_is_refused($case);
+            }
+        )+
+    };
+}
+
+renewal_refusal_tests! {
+    automatic_renewal_refuses_a_failed_source_check => "failed check",
+    automatic_renewal_refuses_an_added_source => "source added",
+    automatic_renewal_refuses_changed_prose => "prose changed",
+    automatic_renewal_refuses_a_curated_source_change => "curated change",
+}
+
 #[test]
-fn automatic_renewal_is_refused_unless_everything_substantive_is_unchanged_and_rechecked() {
+fn every_automatic_renewal_refusal_case_has_a_test() {
+    assert_eq!(TESTED_RENEWAL_CASES, ["failed check", "source added", "prose changed", "curated change"]);
+}
+
+fn assert_renewal_is_refused(selected: &str) {
     let repo = Repo::published();
     reviewed_discord(&repo, "2026-09-18");
     let accepted = repo.read(&document(PlatformId::Discord)).expect("doc");
@@ -854,26 +885,26 @@ fn automatic_renewal_is_refused_unless_everything_substantive_is_unchanged_and_r
         ("prose changed", prose, vec![], false, "explanatory prose changed"),
         ("curated change", dated.clone(), vec![], true, "curated-source change"),
     ];
-    for (name, candidate, inaccessible, add, reason) in cases {
-        let run = repo.prepare(PlatformId::Discord, &day(on));
-        let agent = Agent { repo: &repo, run: &run };
-        let mut checks = agent.checks(on, &inaccessible);
-        if name == "source added" {
-            checks["checks"].as_array_mut().expect("checks").push(
-                json!({ "url": "https://docs.example.com/discord/extra", "checked_on": on, "outcome": "checked", "finding": "New limits page." }),
-            );
-        }
-        let report = agent.complete(&candidate, &checks, add, &day(on));
-        assert!(report.passed, "{name}: {:#?}", report.stages);
-        let refused = reasons(renew(&repo, &run, on).expect_err(name));
-        assert!(refused.iter().any(|r| r.contains(reason)), "{name}: {refused:?}");
-        reject(&repo, run.run_id.as_str(), "maintainer", "test case", &day(on)).expect("reject");
+    let (name, candidate, inaccessible, add, reason) = cases.into_iter()
+        .find(|(name, ..)| *name == selected).expect("named refusal case");
+    let run = repo.prepare(PlatformId::Discord, &day(on));
+    let agent = Agent { repo: &repo, run: &run };
+    let mut checks = agent.checks(on, &inaccessible);
+    if name == "source added" {
+        checks["checks"].as_array_mut().expect("checks").push(
+            json!({ "url": "https://docs.example.com/discord/extra", "checked_on": on, "outcome": "checked", "finding": "New limits page." }),
+        );
     }
+    let report = agent.complete(&candidate, &checks, add, &day(on));
+    assert!(report.passed, "{name}: {:#?}", report.stages);
+    let refused = reasons(renew(&repo, &run, on).expect_err(name));
+    assert!(refused.iter().any(|r| r.contains(reason)), "{name}: {refused:?}");
+    reject(&repo, run.run_id.as_str(), "maintainer", "test case", &day(on)).expect("reject");
     // A rejected run never reaches the CHANGELOG and cannot be promoted.
     let changelog = repo.read(CHANGELOG).expect("changelog");
     assert_eq!(changelog.matches("\n## ").count(), 1, "{changelog}");
     let rejected = repo.state().list().into_iter().filter_map(|(_, _, r)| r.ok()).filter(|r| r.status == RunStatus::Rejected).count();
-    assert_eq!(rejected, 4);
+    assert_eq!(rejected, 1);
 }
 
 /// Review-1 regression: `2026-09-31` once parsed, so an impossible `checked_on`
@@ -908,22 +939,135 @@ fn an_impossible_evidence_date_cannot_qualify_an_unchanged_renewal() {
     assert_eq!(repo.read(&document(PlatformId::Discord)).as_deref(), Some(accepted.as_str()), "nothing is published");
 }
 
+macro_rules! initial_stage_tests {
+    ($($test:ident => $platform:expr),+ $(,)?) => {
+        const TESTED_INITIAL_PLATFORMS: &[PlatformId] = &[$($platform),+];
+        $(
+            #[test]
+            fn $test() {
+                let repo = Repo::bare();
+                let on = day("2026-09-18");
+                let run = repo.prepare($platform, &on);
+                assert_eq!(repo.run(&run).selected_because, ["forced", "missing"]);
+                let agent = Agent { repo: &repo, run: &run };
+                let report = agent.complete(&renewed($platform, "2026-09-18"), &agent.checks("2026-09-18", &[]), false, &on);
+                assert!(report.passed, "{:#?}", report.stages);
+                let persisted = repo.run(&run);
+                assert_eq!(persisted.status, RunStatus::AwaitingReview);
+                assert!(persisted.stages.iter().all(|stage| stage.status == StageStatus::Complete));
+                for name in ["validation.json", "delta.json"] {
+                    assert!(agent.dir().join(name).is_file(), "{name}");
+                }
+            }
+        )+
+    };
+}
+
+initial_stage_tests! {
+    initial_discord_stages_persist_their_checks => PlatformId::Discord,
+    initial_slack_stages_persist_their_checks => PlatformId::Slack,
+    initial_telegram_stages_persist_their_checks => PlatformId::Telegram,
+    initial_whatsapp_stages_persist_their_checks => PlatformId::WhatsApp,
+    initial_signal_stages_persist_their_checks => PlatformId::Signal,
+}
+
 #[test]
-fn an_initial_publication_promotes_every_platform_together() {
-    let repo = Repo::bare();
-    let on = "2026-09-18";
-    let mut runs = Vec::new();
-    for platform in PlatformId::ALL {
-        let run = repo.prepare(*platform, &day(on));
-        assert_eq!(repo.run(&run).selected_because, ["forced", "missing"]);
-        let agent = Agent { repo: &repo, run: &run };
-        let report = agent.complete(&renewed(*platform, on), &agent.checks(on, &[]), false, &day(on));
-        assert!(report.passed, "{platform}: {:#?}", report.stages);
-        runs.push(run);
+fn every_initial_platform_has_a_stage_persistence_test() {
+    assert_eq!(TESTED_INITIAL_PLATFORMS, PlatformId::ALL);
+}
+
+fn initial_conclusions(value: &Value, evidence: &str, out: &mut Vec<Value>) {
+    match value {
+        Value::Object(fields) => {
+            if let Some(id) = fields.get("id").and_then(Value::as_str) {
+                let (kind, verdict) = if id.starts_with("src.") {
+                    ("source", "unresolved")
+                } else if id.starts_with("gap.") {
+                    ("gap", "supported")
+                } else {
+                    ("fact", "supported")
+                };
+                out.push(json!({ "kind": kind, "subject": id, "verdict": verdict,
+                    "evidence": [evidence], "finding": "Initial fixture evidence." }));
+            }
+            for field in fields.values() {
+                initial_conclusions(field, evidence, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                initial_conclusions(item, evidence, out);
+            }
+        }
+        _ => {}
     }
+}
+
+fn initial_fleet_fixture() -> (Repo, Vec<RunRecord>) {
+    let seed = Repo::bare();
+    let snapshot = research_snapshot::snapshot(seed.root(), "initial-fleet-ready", |root| {
+        let repo = Repo::bare();
+        let on = "2026-09-18";
+        let contract = select::current_contract(repo.loader.workspace()).unwrap();
+        for platform in PlatformId::ALL {
+            use messenger::research::refresh::state::{RUN_FORMAT, RunId, StageResult};
+            let record = RunRecord {
+                format: RUN_FORMAT.to_string(),
+                run_id: RunId::generate(&day(on), *platform),
+                platform_id: *platform,
+                created: day(on),
+                status: RunStatus::AwaitingReview,
+                selected_because: vec!["forced".into(), "missing".into()],
+                limits: LIMITS,
+                baseline: None,
+                researched_under: contract.clone(),
+                recovery_attempts: 0,
+                ledger_runs: 0,
+                invocations: 0,
+                launched: false,
+                runner: None,
+                stages: Stage::ALL.iter().map(|stage| StageResult {
+                    stage: *stage, status: StageStatus::Complete, findings: Vec::new(),
+                }).collect(),
+                stop_reason: None,
+                decision: None,
+            };
+            let run = PreparedRun {
+                run_id: record.run_id.clone(), platform_id: *platform,
+                run_dir: format!("messenger/.research-state/runs/{platform}/{}", record.run_id),
+                stages: Stage::ALL.to_vec(), commands: Vec::new(),
+            };
+            let agent = Agent { repo: &repo, run: &run };
+            // These are publication inputs, not a replay of check-run. The
+            // per-platform tests above exercise its real durable stage writes.
+            let candidate = renewed(run.platform_id, on);
+            agent.discovery();
+            agent.reconcile(&candidate, &agent.checks(on, &[]));
+            agent.sources(false);
+            let markdown = darkmatter::markdown::Markdown::try_from_content(candidate).unwrap();
+            let metadata = serde_json::to_value(markdown.frontmatter().as_map()).unwrap();
+            let mut conclusions = Vec::new();
+            initial_conclusions(&metadata, &format!("src.{}.docs", run.platform_id), &mut conclusions);
+            conclusions.push(json!({ "kind": "prose", "subject": "body", "verdict": "unresolved",
+                "evidence": [], "finding": "Initial fixture prose." }));
+            agent.write("outputs/evidence-review.json", &json!({ "reviewer": "fake-reviewer", "conclusions": conclusions }).to_string());
+            fs::write(agent.dir().join("run.json"), serde_json::to_vec(&record).unwrap()).unwrap();
+        }
+        research_snapshot::copy_tree(repo.root(), root);
+    });
+    let dir = tempfile::tempdir().expect("tempdir");
+    research_snapshot::copy_tree(&snapshot, dir.path());
+    let repo = Repo { loader: research_loader(Workspace::new(dir.path()).expect("absolute")), dir };
+    let runs = repo.state().list().into_iter().map(|(_, _, run)| run.expect("ready fixture run")).collect();
+    (repo, runs)
+}
+
+#[test]
+fn an_incomplete_initial_fleet_refuses_publication_without_writes() {
+    let (repo, runs) = initial_fleet_fixture();
     let before = repo.tree();
-    // One platform alone cannot form the first snapshot.
-    match approve(&repo, &[&runs[0]], on) {
+    let approval = Approve::Human { by: Maintainer::new("maintainer").unwrap() };
+    match promote::promote(&repo.loader, &[runs[0].run_id.to_string()], &approval, &day("2026-09-18"), Options::default()) {
         Err(RefreshError::Generate(inner)) => match *inner {
             GenerateError::Refused { missing, .. } => assert_eq!(missing.len(), 4),
             other => panic!("expected a refused generation, got {other}"),
@@ -931,17 +1075,31 @@ fn an_initial_publication_promotes_every_platform_together() {
         other => panic!("expected a refused generation, got {other:?}"),
     }
     assert_eq!(repo.tree(), before, "nothing is published");
-    assert_eq!(repo.run(&runs[0]).status, RunStatus::AwaitingReview);
-    // Renewal cannot accept an initial baseline.
-    assert!(reasons(renew(&repo, &runs[1], on).expect_err("initial")).iter().any(|r| r.contains("initial baseline")));
+    assert_eq!(repo.state().load(runs[0].run_id.as_str()).unwrap().status, RunStatus::AwaitingReview);
+}
 
-    let refs: Vec<&PreparedRun> = runs.iter().collect();
-    let promoted = approve(&repo, &refs, on).expect("initial publication");
+#[test]
+fn an_initial_fleet_cannot_be_accepted_as_a_renewal() {
+    let (repo, runs) = initial_fleet_fixture();
+    let before = repo.tree();
+    let error = promote::promote(&repo.loader, &[runs[1].run_id.to_string()], &Approve::Renewal, &day("2026-09-18"), Options::default())
+        .expect_err("initial");
+    assert!(reasons(error).iter().any(|r| r.contains("initial baseline")));
+    assert_eq!(repo.tree(), before);
+}
+
+#[test]
+fn an_initial_publication_promotes_every_platform_together() {
+    let (repo, runs) = initial_fleet_fixture();
+    let ids: Vec<String> = runs.iter().map(|run| run.run_id.to_string()).collect();
+    let approval = Approve::Human { by: Maintainer::new("maintainer").unwrap() };
+    let promoted = promote::promote(&repo.loader, &ids, &approval, &day("2026-09-18"), Options::default())
+        .expect("initial publication");
     assert_eq!(promoted.len(), 5);
     let changelog = repo.read(CHANGELOG).expect("changelog");
     assert_eq!(changelog.matches("initial baseline, approved by maintainer").count(), 5, "{changelog}");
-    assert!(runs.iter().all(|run| repo.run(run).status == RunStatus::Accepted));
-    assert_eq!(check(&repo.loader, &day(on)).expect("check"), None);
+    assert!(runs.iter().all(|run| repo.state().load(run.run_id.as_str()).unwrap().status == RunStatus::Accepted));
+    assert_eq!(check(&repo.loader, &day("2026-09-18")).expect("check"), None);
 }
 
 #[test]
@@ -1552,39 +1710,58 @@ fn the_run_record_matrix_is_typed_for_every_load_bearing_field() {
     assert_eq!(repo.run(&run).status, RunStatus::Active);
 }
 
+macro_rules! promotion_interruption_tests {
+    ($($name:ident => $point:expr),+ $(,)?) => {
+        const TESTED_PROMOTION_POINTS: &[Point] = &[$($point),+];
+        $(
+            #[test]
+            fn $name() {
+                assert_interrupted_promotion_recovers($point);
+            }
+        )+
+    };
+}
+
+promotion_interruption_tests! {
+    promotion_interrupted_before_staging => Point::BeforeStaging,
+    promotion_interrupted_during_staging => Point::DuringStaging,
+    promotion_interrupted_staged_without_journal => Point::StagedNoJournal,
+    promotion_interrupted_before_selection => Point::BeforeSelection,
+    promotion_interrupted_replacing_an_artifact => Point::MidReplacement(1),
+    promotion_interrupted_before_manifest => Point::BeforeManifest,
+    promotion_interrupted_after_selection => Point::AfterSelection,
+    promotion_interrupted_before_cleanup => Point::BeforeCleanup,
+}
+
 #[test]
-fn an_interrupted_promotion_recovers_to_one_consistent_snapshot_and_completes_on_retry() {
-    let points = [
-        Point::BeforeStaging,
-        Point::DuringStaging,
-        Point::StagedNoJournal,
-        Point::BeforeSelection,
-        Point::MidReplacement(1),
-        Point::BeforeManifest,
-        Point::AfterSelection,
-        Point::BeforeCleanup,
-    ];
-    for point in points {
-        let repo = Repo::published();
-        let old = read_verified(repo.loader.workspace()).expect("old").manifest;
-        let run = repo.prepare(PlatformId::Discord, &day("2026-09-18"));
-        let agent = Agent { repo: &repo, run: &run };
-        agent.complete(&raised("2026-09-18"), &agent.checks("2026-09-18", &[]), false, &day("2026-09-18"));
-        let ids = [run.run_id.to_string()];
-        let approval = Approve::Human { by: Maintainer::new("maintainer").expect("a named maintainer") };
-        let options = Options { interrupt_at: Some(point), ..Options::default() };
-        assert!(promote::promote(&repo.loader, &ids, &approval, &day("2026-09-18"), options).is_err(), "{point}");
-        assert_eq!(repo.run(&run).status, RunStatus::AwaitingReview, "{point}: not accepted before publication completes");
-        publish::recover(repo.loader.workspace(), Options::default()).expect("recover");
-        let selected = read_verified(repo.loader.workspace()).expect("a consistent snapshot").manifest;
-        let rolled_forward = selected != old;
-        promote::promote(&repo.loader, &ids, &approval, &day("2026-09-18"), Options::default()).expect("retry");
-        assert_eq!(repo.run(&run).status, RunStatus::Accepted, "{point}");
-        assert_eq!(repo.read(&document(PlatformId::Discord)).expect("doc"), raised("2026-09-18"), "{point}");
-        let changelog = repo.read(CHANGELOG).expect("changelog");
-        assert_eq!(changelog.matches(&format!("(run {})", run.run_id)).count(), 1, "{point} rolled forward: {rolled_forward}");
-        assert_eq!(check(&repo.loader, &day("2026-09-18")).expect("check"), None, "{point}");
-    }
+fn every_promotion_interruption_stage_has_a_test() {
+    assert_eq!(TESTED_PROMOTION_POINTS, &[
+        Point::BeforeStaging, Point::DuringStaging, Point::StagedNoJournal,
+        Point::BeforeSelection, Point::MidReplacement(1), Point::BeforeManifest,
+        Point::AfterSelection, Point::BeforeCleanup,
+    ]);
+}
+
+fn assert_interrupted_promotion_recovers(point: Point) {
+    let repo = Repo::published();
+    let old = read_verified(repo.loader.workspace()).expect("old").manifest;
+    let run = repo.prepare(PlatformId::Discord, &day("2026-09-18"));
+    let agent = Agent { repo: &repo, run: &run };
+    agent.complete(&raised("2026-09-18"), &agent.checks("2026-09-18", &[]), false, &day("2026-09-18"));
+    let ids = [run.run_id.to_string()];
+    let approval = Approve::Human { by: Maintainer::new("maintainer").expect("a named maintainer") };
+    let options = Options { interrupt_at: Some(point), ..Options::default() };
+    assert!(promote::promote(&repo.loader, &ids, &approval, &day("2026-09-18"), options).is_err(), "{point}");
+    assert_eq!(repo.run(&run).status, RunStatus::AwaitingReview, "{point}: not accepted before publication completes");
+    publish::recover(repo.loader.workspace(), Options::default()).expect("recover");
+    let selected = read_verified(repo.loader.workspace()).expect("a consistent snapshot").manifest;
+    let rolled_forward = selected != old;
+    promote::promote(&repo.loader, &ids, &approval, &day("2026-09-18"), Options::default()).expect("retry");
+    assert_eq!(repo.run(&run).status, RunStatus::Accepted, "{point}");
+    assert_eq!(repo.read(&document(PlatformId::Discord)).expect("doc"), raised("2026-09-18"), "{point}");
+    let changelog = repo.read(CHANGELOG).expect("changelog");
+    assert_eq!(changelog.matches(&format!("(run {})", run.run_id)).count(), 1, "{point} rolled forward: {rolled_forward}");
+    assert_eq!(check(&repo.loader, &day("2026-09-18")).expect("check"), None, "{point}");
 }
 
 // ---- retention -----------------------------------------------------------------------

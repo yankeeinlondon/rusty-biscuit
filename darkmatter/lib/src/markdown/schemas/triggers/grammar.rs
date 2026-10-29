@@ -1,6 +1,6 @@
-//! Match-expression AST and parser for trigger schemas.
+//! Match-expression AST and parser for schema triggers.
 //!
-//! A trigger schema's `match:` payload is a small boolean tree over
+//! A schema trigger's `match:` payload is a small boolean tree over
 //! frontmatter property conditions plus a dollar-reserved `$path` predicate.
 //! The tree mirrors JSON Schema's `allOf` / `anyOf` / `not`, with a
 //! first-class `min-match` (N-of-M) combinator.
@@ -11,14 +11,20 @@
 //! constraints that resolve files, import types, load examples, provide
 //! defaults, or mark generated values (see [`is_match_safe_constraint`]).
 //!
-//! ## Outer-OR arms
+//! ## AND at the top level, OR in a `group`
 //!
-//! `match:` accepts two forms, mirroring the root `$schema` union convention:
+//! `match:` accepts two forms:
 //!
-//! - **Mapping** → a single match expression.
-//! - **Sequence** → a list of arm mappings, logically OR'd.
+//! - **Mapping** → one match expression; sibling property conditions AND.
+//! - **List** → condition mappings that must all hold (AND).
 //!
-//! See [`parse_match_arms`] for the entry point.
+//! OR is always an explicit `group:` mapping whose list entries are
+//! alternatives. A list entry that is itself a list is rejected rather than
+//! read as a group, and the removed `any:` combinator is a
+//! [`SchemaError::TriggerRenamed`] naming `group`. Every message names the
+//! field it is about, written from `match` down (`match[1].group[0]`).
+//!
+//! See [`parse_match_conditions`] for the entry point.
 
 use biscuit_file::{FileReference, FileReferenceKind, GlobReference, GlobReferenceError};
 use serde_yaml_ng::Value as YamlValue;
@@ -33,7 +39,12 @@ use crate::markdown::schemas::simplified::{
 /// cannot be condition-matched in v1 (the combinator interpretation wins).
 /// Future non-property predicates stay dollar-prefixed so this reserved set
 /// never grows.
-pub const COMBINATOR_KEYS: &[&str] = &["all", "any", "none", "min-match"];
+pub const COMBINATOR_KEYS: &[&str] = &["all", "group", "none", "min-match"];
+
+/// Combinator keys removed without an alias, each with its replacement. A
+/// mapping holding one is a [`SchemaError::TriggerRenamed`], never a property
+/// condition on a key of that name.
+const RENAMED_COMBINATORS: &[(&str, &str)] = &[("any", "group")];
 
 /// The single dollar-reserved predicate key currently in the grammar.
 pub const PATH_KEY: &str = "$path";
@@ -45,10 +56,11 @@ pub const PATH_KEY: &str = "$path";
 /// the trigger activates. No I/O, no validator compilation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MatchExpr {
-    /// Every child condition must hold (`all:`).
+    /// Every child condition must hold (`all:`, a top-level `match:` list, or
+    /// a mapping's sibling conditions).
     All(Vec<MatchExpr>),
-    /// At least one child must hold (`any:`).
-    Any(Vec<MatchExpr>),
+    /// At least one child must hold (`group:`).
+    Group(Vec<MatchExpr>),
     /// No child may hold (`none:`).
     None(Vec<MatchExpr>),
     /// N-of-M: at least `count` children must hold (`min-match:`).
@@ -136,36 +148,35 @@ impl PathGlobs {
         Ok(Self { patterns, compiled })
     }
 
-    fn from_yaml(value: &YamlValue) -> Result<Self, SchemaError> {
+    fn from_yaml(at: &str, value: &YamlValue) -> Result<Self, SchemaError> {
         let patterns = match value {
             YamlValue::String(s) => vec![s.clone()],
             YamlValue::Sequence(items) => {
                 let mut out = Vec::with_capacity(items.len());
-                for item in items {
+                for (index, item) in items.iter().enumerate() {
                     match item {
                         YamlValue::String(s) => out.push(s.clone()),
                         other => {
-                            return Err(SchemaError::TriggerMatch {
-                                message: format!(
-                                    "$path glob list items must be strings, got {}",
-                                    yaml_kind(other)
-                                ),
-                            });
+                            return Err(located(
+                                &format!("{at}[{index}]"),
+                                format!("$path glob list items must be strings, got {}", yaml_kind(other)),
+                            ));
                         }
                     }
                 }
                 out
             }
             other => {
-                return Err(SchemaError::TriggerMatch {
-                    message: format!(
+                return Err(located(
+                    at,
+                    format!(
                         "$path must be a glob string or a sequence of glob strings, got {}",
                         yaml_kind(other)
                     ),
-                });
+                ));
             }
         };
-        Self::new(patterns)
+        Self::new(patterns).map_err(|error| relocate(at, error))
     }
 }
 
@@ -238,87 +249,119 @@ fn path_error(pattern: Option<&str>, reason: &str) -> SchemaError {
     }
 }
 
-/// The outer `match:` payload: one or more OR'd arms.
+/// The `match:` payload: top-level conditions that must all hold (AND).
+///
+/// A mapping `match:` is one condition; a list holds one per entry.
 #[derive(Debug, Clone, PartialEq)]
-pub struct MatchArms(pub Vec<MatchExpr>);
+pub struct MatchConditions(pub Vec<MatchExpr>);
 
-/// Parses the `match:` value into one or more OR'd arms.
+impl MatchConditions {
+    /// Whether every top-level condition holds for `frontmatter` and the
+    /// document in `subject`. See [`super::matcher::matches`].
+    #[must_use]
+    pub fn matches(&self, frontmatter: &serde_json::Value, subject: &super::matcher::PathSubject<'_>) -> bool {
+        self.0.iter().all(|condition| super::matcher::matches(condition, frontmatter, subject))
+    }
+
+    /// The conditions as the single expression they combine into.
+    #[must_use]
+    pub fn to_expr(&self) -> MatchExpr {
+        MatchExpr::All(self.0.clone())
+    }
+}
+
+/// Parses the `match:` value into its top-level AND'd conditions.
 ///
-/// - **Mapping** → a single arm.
-/// - **Sequence** → a list of arms, logically OR'd.
+/// - **Mapping** → one condition.
+/// - **List** → one condition per entry; each entry is a mapping.
 ///
-/// Each arm is a single match expression parsed by [`parse_match_expr`].
-pub fn parse_match_arms(value: &YamlValue) -> Result<MatchArms, SchemaError> {
+/// ## Errors
+///
+/// [`SchemaError::TriggerMatch`] naming the field for any other shape, an
+/// empty list or mapping, or an entry that is itself a list;
+/// [`SchemaError::TriggerRenamed`] for `any:`; and the property-condition
+/// errors of the type-expression grammar.
+pub fn parse_match_conditions(value: &YamlValue) -> Result<MatchConditions, SchemaError> {
     match value {
-        YamlValue::Mapping(_) => {
-            let expr = parse_match_expr(value)?;
-            Ok(MatchArms(vec![expr]))
-        }
+        YamlValue::Mapping(_) => Ok(MatchConditions(vec![parse_match_expr("match", value)?])),
         YamlValue::Sequence(items) => {
             if items.is_empty() {
-                return Err(SchemaError::TriggerMatch {
-                    message: "`match:` sequence must have at least one arm".into(),
-                });
+                return Err(located("match", "a `match:` list must have at least one condition".into()));
             }
-            let mut arms = Vec::with_capacity(items.len());
-            for (idx, item) in items.iter().enumerate() {
-                let arm = parse_match_expr(item).map_err(|mut err| {
-                    annotate_arm(&mut err, idx);
-                    err
-                })?;
-                arms.push(arm);
-            }
-            Ok(MatchArms(arms))
+            let conditions = items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| parse_list_entry(&format!("match[{index}]"), item))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(MatchConditions(conditions))
         }
-        other => Err(SchemaError::TriggerMatch {
-            message: format!(
-                "`match:` must be a mapping or a sequence of arm mappings, got {}",
-                yaml_kind(other)
-            ),
-        }),
+        other => Err(located(
+            "match",
+            format!("`match:` must be a mapping or a list of condition mappings, got {}", yaml_kind(other)),
+        )),
     }
 }
 
-fn annotate_arm(err: &mut SchemaError, idx: usize) {
-    if let SchemaError::TriggerMatch { message } = err {
-        *message = format!("match arm[{idx}]: {message}");
+/// A [`SchemaError::TriggerMatch`] whose message starts with the field `at`.
+fn located(at: &str, message: String) -> SchemaError {
+    SchemaError::TriggerMatch { message: format!("`{at}`: {message}") }
+}
+
+/// Re-locates an unlocated [`SchemaError::TriggerMatch`] at `at`; any other
+/// error, or one already located, is returned unchanged.
+fn relocate(at: &str, error: SchemaError) -> SchemaError {
+    match error {
+        SchemaError::TriggerMatch { message } if !message.starts_with('`') => located(at, message),
+        other => other,
     }
 }
 
-/// Parses a single match expression (one arm) from a YAML mapping.
+/// Parses one entry of a condition list. A list entry is never read as an
+/// OR group: alternatives are spelled `group:`.
+fn parse_list_entry(at: &str, item: &YamlValue) -> Result<MatchExpr, SchemaError> {
+    if item.is_sequence() {
+        return Err(located(
+            at,
+            "a list entry cannot itself be a list; write the alternatives as a `group:` mapping".into(),
+        ));
+    }
+    parse_match_expr(at, item)
+}
+
+/// Parses a single match expression from a YAML mapping at field `at`.
 ///
 /// A mapping's keys are partitioned into **structural** keys (combinators
-/// `all`/`any`/`none`/`min-match` plus the `$path` predicate) and
+/// `all`/`group`/`none`/`min-match` plus the `$path` predicate) and
 /// **property-condition** keys (everything else). A mapping must be entirely
 /// one category:
 ///
 /// - All structural → sibling keys AND'd into an [`MatchExpr::All`].
 /// - All property-conditions → implicit `all` of the property conditions.
 /// - Mixed → load error ([`SchemaError::TriggerMixedMapping`]).
-fn parse_match_expr(value: &YamlValue) -> Result<MatchExpr, SchemaError> {
-    let map = value.as_mapping().ok_or_else(|| SchemaError::TriggerMatch {
-        message: format!(
-            "a match arm must be a mapping, got {}",
-            yaml_kind(value)
-        ),
-    })?;
+fn parse_match_expr(at: &str, value: &YamlValue) -> Result<MatchExpr, SchemaError> {
+    let map = value
+        .as_mapping()
+        .ok_or_else(|| located(at, format!("a match condition must be a mapping, got {}", yaml_kind(value))))?;
     // An empty mapping would parse as `all([])`, which is always true: under
     // `none:` it silently makes a trigger unmatchable, under `all:` it hides a
     // dropped condition.
     if map.is_empty() {
-        return Err(SchemaError::TriggerMatch {
-            message: "a match condition mapping must have at least one key".into(),
-        });
+        return Err(located(at, "a match condition mapping must have at least one key".into()));
     }
 
     let mut structural_keys: Vec<&str> = Vec::new();
     let mut property_keys: Vec<&str> = Vec::new();
     for key in map.keys() {
         let Some(k) = key.as_str() else {
-            return Err(SchemaError::TriggerMatch {
-                message: "match arm keys must be strings".into(),
-            });
+            return Err(located(at, "match condition keys must be strings".into()));
         };
+        if let Some((_, replacement)) = RENAMED_COMBINATORS.iter().find(|(removed, _)| *removed == k) {
+            return Err(SchemaError::TriggerRenamed {
+                field: format!("{at}.{k}"),
+                found: format!("{k}:"),
+                replacement: format!("{replacement}:"),
+            });
+        }
         if is_structural_key(k) {
             structural_keys.push(k);
         } else {
@@ -336,14 +379,9 @@ fn parse_match_expr(value: &YamlValue) -> Result<MatchExpr, SchemaError> {
     if !structural_keys.is_empty() {
         // Sibling structural keys are AND'd.
         let mut children = Vec::with_capacity(structural_keys.len());
-        for key in map.keys() {
+        for (key, val) in map {
             let k = key.as_str().expect("key string checked above");
-            if !is_structural_key(k) {
-                continue;
-            }
-            let val = map.get(key).expect("key present");
-            let child = parse_structural_entry(k, val)?;
-            children.push(child);
+            children.push(parse_structural_entry(&format!("{at}.{k}"), k, val)?);
         }
         if children.len() == 1 {
             return Ok(children.into_iter().next().expect("one child"));
@@ -353,10 +391,9 @@ fn parse_match_expr(value: &YamlValue) -> Result<MatchExpr, SchemaError> {
 
     // All property-conditions → implicit all.
     let mut conditions = Vec::with_capacity(property_keys.len());
-    for key in map.keys() {
+    for (key, val) in map {
         let k = key.as_str().expect("key string checked above");
-        let val = map.get(key).expect("key present");
-        let atom = parse_property_condition_atom(k, val)?;
+        let atom = parse_property_condition_atom(k, val).map_err(|error| relocate(&format!("{at}.{k}"), error))?;
         conditions.push(MatchExpr::Property {
             name: k.to_string(),
             atom,
@@ -370,98 +407,80 @@ fn is_structural_key(key: &str) -> bool {
     COMBINATOR_KEYS.contains(&key) || key == PATH_KEY
 }
 
-/// Parses one structural entry: a combinator body or the `$path` predicate.
-fn parse_structural_entry(key: &str, value: &YamlValue) -> Result<MatchExpr, SchemaError> {
+/// Parses one structural entry at field `at`: a combinator body or the
+/// `$path` predicate.
+fn parse_structural_entry(at: &str, key: &str, value: &YamlValue) -> Result<MatchExpr, SchemaError> {
     match key {
-        "all" => Ok(MatchExpr::All(parse_child_list(key, value)?)),
-        "any" => Ok(MatchExpr::Any(parse_child_list(key, value)?)),
-        "none" => Ok(MatchExpr::None(parse_child_list(key, value)?)),
-        "min-match" => Ok(parse_min_match(value)?),
-        "$path" => Ok(MatchExpr::Path(PathGlobs::from_yaml(value)?)),
-        other => Err(SchemaError::TriggerMatch {
-            message: format!("unknown structural key `{other}`"),
-        }),
+        "all" => Ok(MatchExpr::All(parse_child_list(at, value)?)),
+        "group" => Ok(MatchExpr::Group(parse_child_list(at, value)?)),
+        "none" => Ok(MatchExpr::None(parse_child_list(at, value)?)),
+        "min-match" => Ok(parse_min_match(at, value)?),
+        "$path" => Ok(MatchExpr::Path(PathGlobs::from_yaml(at, value)?)),
+        other => Err(located(at, format!("unknown structural key `{other}`"))),
     }
 }
 
-/// Parses the `min-match:` mapping: `{ count: N, of: [...] }`.
-fn parse_min_match(value: &YamlValue) -> Result<MatchExpr, SchemaError> {
-    let map = value.as_mapping().ok_or_else(|| SchemaError::TriggerMatch {
-        message: format!("`min-match:` must be a mapping, got {}", yaml_kind(value)),
-    })?;
+/// Parses the `min-match:` mapping at field `at`: `{ count: N, of: [...] }`.
+fn parse_min_match(at: &str, value: &YamlValue) -> Result<MatchExpr, SchemaError> {
+    let map = value
+        .as_mapping()
+        .ok_or_else(|| located(at, format!("`min-match:` must be a mapping, got {}", yaml_kind(value))))?;
     let mut count: Option<usize> = None;
     let mut of: Option<Vec<MatchExpr>> = None;
     for (k, v) in map {
-        let key = k.as_str().ok_or_else(|| SchemaError::TriggerMatch {
-            message: "`min-match:` keys must be strings".into(),
-        })?;
+        let key = k
+            .as_str()
+            .ok_or_else(|| located(at, "`min-match:` keys must be strings".into()))?;
         match key {
             "count" => {
-                count = Some(parse_count(v)?);
+                count = Some(parse_count(&format!("{at}.count"), v)?);
             }
             "of" => {
-                of = Some(parse_child_list("min-match.of", v)?);
+                of = Some(parse_child_list(&format!("{at}.of"), v)?);
             }
             other => {
-                return Err(SchemaError::TriggerMatch {
-                    message: format!(
-                        "`min-match:` supports only `count` and `of`, found `{other}`"
-                    ),
-                });
+                return Err(located(at, format!("`min-match:` supports only `count` and `of`, found `{other}`")));
             }
         }
     }
-    let count = count.ok_or_else(|| SchemaError::TriggerMatch {
-        message: "`min-match:` requires a `count`".into(),
-    })?;
-    let children = of.ok_or_else(|| SchemaError::TriggerMatch {
-        message: "`min-match:` requires an `of` list".into(),
-    })?;
-    if children.is_empty() {
-        return Err(SchemaError::TriggerMatch {
-            message: "`min-match.of:` must have at least one child".into(),
-        });
-    }
+    let count = count.ok_or_else(|| located(&format!("{at}.count"), "`min-match:` requires a `count`".into()))?;
+    let children = of.ok_or_else(|| located(&format!("{at}.of"), "`min-match:` requires an `of` list".into()))?;
     if count == 0 {
-        return Err(SchemaError::TriggerMatch {
-            message: "`min-match.count:` must be at least 1".into(),
-        });
+        return Err(located(&format!("{at}.count"), "`min-match.count:` must be at least 1".into()));
     }
     if count > children.len() {
-        return Err(SchemaError::TriggerMatch {
-            message: format!(
+        return Err(located(
+            &format!("{at}.count"),
+            format!(
                 "`min-match.count:` ({count}) cannot exceed the number of children ({})",
                 children.len()
             ),
-        });
+        ));
     }
     Ok(MatchExpr::MinMatch { count, of: children })
 }
 
-fn parse_count(value: &YamlValue) -> Result<usize, SchemaError> {
+fn parse_count(at: &str, value: &YamlValue) -> Result<usize, SchemaError> {
     value
         .as_u64()
         .and_then(|n| usize::try_from(n).ok())
-        .ok_or_else(|| SchemaError::TriggerMatch {
-            message: "`min-match.count:` requires a non-negative integer".into(),
-        })
+        .ok_or_else(|| located(at, format!("`min-match.count:` requires a positive integer, got {}", yaml_kind(value))))
 }
 
-/// Parses a combinator's child list (a sequence of arm mappings).
-fn parse_child_list(context: &str, value: &YamlValue) -> Result<Vec<MatchExpr>, SchemaError> {
-    let items = value.as_sequence().ok_or_else(|| SchemaError::TriggerMatch {
-        message: format!("`{context}:` must be a sequence of mappings, got {}", yaml_kind(value)),
-    })?;
+/// Parses a combinator's child list at field `at` (a list of condition
+/// mappings).
+fn parse_child_list(at: &str, value: &YamlValue) -> Result<Vec<MatchExpr>, SchemaError> {
+    let items = value
+        .as_sequence()
+        .ok_or_else(|| located(at, format!("must be a list of condition mappings, got {}", yaml_kind(value))))?;
     if items.is_empty() {
-        return Err(SchemaError::TriggerMatch {
-            message: format!("`{context}:` must have at least one child"),
-        });
+        return Err(located(at, "must have at least one child".into()));
     }
-    let mut out = Vec::with_capacity(items.len());
-    for item in items {
-        out.push(parse_match_expr(item)?);
-    }
-    Ok(out)
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| parse_list_entry(&format!("{at}[{index}]"), item))
+        .collect()
 }
 
 /// Parses a property-condition value into a match-safe [`PropertyAtom`],
@@ -476,7 +495,7 @@ fn parse_property_condition_atom(name: &str, value: &YamlValue) -> Result<Proper
         PropertyDef::Union(_) => Err(SchemaError::TriggerMatch {
             message: format!(
                 "property `{name}` in a match condition may not be a property-level union; use \
-                 nested `any:` instead"
+                 a `group:` of conditions instead"
             ),
         }),
     }
@@ -656,7 +675,7 @@ mod tests {
     #[test]
     fn parses_implicit_all_of_properties() {
         let v = yaml("prompt: string(required)\nsections: object");
-        let arms = parse_match_arms(&v).unwrap();
+        let arms = parse_match_conditions(&v).unwrap();
         assert_eq!(arms.0.len(), 1);
         match &arms.0[0] {
             MatchExpr::All(children) => {
@@ -672,11 +691,11 @@ mod tests {
             "{}",
             "[{}]",
             "all:\n  - prompt: string(required)\n  - {}",
-            "any:\n  - {}",
+            "group:\n  - {}",
             "all:\n  - prompt: string(required)\n  - none:\n      - {}",
             "min-match:\n  count: 1\n  of:\n    - {}",
         ] {
-            let err = parse_match_arms(&yaml(input)).expect_err(input);
+            let err = parse_match_conditions(&yaml(input)).expect_err(input);
             assert!(
                 err.to_string().contains("must have at least one key"),
                 "{input}: {err}"
@@ -687,26 +706,26 @@ mod tests {
     #[test]
     fn parses_all_combinator() {
         let v = yaml("all:\n  - prompt: string(required)\n  - sections: object");
-        let arms = parse_match_arms(&v).unwrap();
+        let arms = parse_match_conditions(&v).unwrap();
         assert!(matches!(&arms.0[0], MatchExpr::All(_)));
     }
 
     #[test]
-    fn parses_any_combinator() {
+    fn parses_group_combinator() {
         let v = yaml(
-            "any:\n  - initialize: object(required)\n  - success: object(required)",
+            "group:\n  - initialize: object(required)\n  - success: object(required)",
         );
-        let arms = parse_match_arms(&v).unwrap();
+        let arms = parse_match_conditions(&v).unwrap();
         match &arms.0[0] {
-            MatchExpr::Any(children) => assert_eq!(children.len(), 2),
-            other => panic!("expected Any, got {other:?}"),
+            MatchExpr::Group(children) => assert_eq!(children.len(), 2),
+            other => panic!("expected Group, got {other:?}"),
         }
     }
 
     #[test]
     fn parses_none_combinator() {
         let v = yaml("none:\n  - kind: enum(schema; required)");
-        let arms = parse_match_arms(&v).unwrap();
+        let arms = parse_match_conditions(&v).unwrap();
         assert!(matches!(&arms.0[0], MatchExpr::None(_)));
     }
 
@@ -715,7 +734,7 @@ mod tests {
         let v = yaml(
             "min-match:\n  count: 2\n  of:\n    - a: string(required)\n    - b: string(required)\n    - c: string(required)",
         );
-        let arms = parse_match_arms(&v).unwrap();
+        let arms = parse_match_conditions(&v).unwrap();
         match &arms.0[0] {
             MatchExpr::MinMatch { count, of } => {
                 assert_eq!(*count, 2);
@@ -726,25 +745,25 @@ mod tests {
     }
 
     #[test]
-    fn parses_outer_or_sequence() {
+    fn parses_top_level_list_as_conditions() {
         let v = yaml(
             "- kind: enum(prompt; required)\n- all:\n    - prompt: string(required)",
         );
-        let arms = parse_match_arms(&v).unwrap();
+        let arms = parse_match_conditions(&v).unwrap();
         assert_eq!(arms.0.len(), 2);
     }
 
     #[test]
     fn rejects_mixed_mapping() {
         let v = yaml("all:\n  - prompt: string(required)\nprompt: string");
-        let err = parse_match_arms(&v).unwrap_err();
+        let err = parse_match_conditions(&v).unwrap_err();
         assert!(matches!(err, SchemaError::TriggerMixedMapping { .. }));
     }
 
     #[test]
     fn rejects_forbidden_default_constraint() {
         let v = yaml("title: string(default(hello))");
-        let err = parse_match_arms(&v).unwrap_err();
+        let err = parse_match_conditions(&v).unwrap_err();
         assert!(matches!(
             err,
             SchemaError::TriggerForbiddenConstraint { .. }
@@ -754,7 +773,7 @@ mod tests {
     #[test]
     fn rejects_forbidden_eager_file() {
         let v = yaml("doc: file(eager)");
-        let err = parse_match_arms(&v).unwrap_err();
+        let err = parse_match_conditions(&v).unwrap_err();
         assert!(matches!(
             err,
             SchemaError::TriggerForbiddenConstraint { .. }
@@ -764,7 +783,7 @@ mod tests {
     #[test]
     fn rejects_imported_type() {
         let v = yaml("value: type@./types.yaml");
-        let err = parse_match_arms(&v).unwrap_err();
+        let err = parse_match_conditions(&v).unwrap_err();
         assert!(matches!(
             err,
             SchemaError::TriggerForbiddenConstraint { .. }
@@ -774,21 +793,21 @@ mod tests {
     #[test]
     fn allows_bare_file_as_string_shape() {
         let v = yaml("doc: file");
-        let arms = parse_match_arms(&v).unwrap();
+        let arms = parse_match_conditions(&v).unwrap();
         assert_eq!(arms.0.len(), 1);
     }
 
     #[test]
     fn allows_enum_pattern_and_required() {
         let v = yaml("kind: enum(prompt, schema; required)\ntitle: string(pattern(^Hello))");
-        let arms = parse_match_arms(&v).unwrap();
+        let arms = parse_match_conditions(&v).unwrap();
         assert_eq!(arms.0.len(), 1);
     }
 
     #[test]
     fn parses_path_predicate_single() {
         let v = yaml("$path: \"prompts/**/*.md\"");
-        let arms = parse_match_arms(&v).unwrap();
+        let arms = parse_match_conditions(&v).unwrap();
         match &arms.0[0] {
             MatchExpr::Path(globs) => assert_eq!(globs.patterns, vec!["prompts/**/*.md".to_string()]),
             other => panic!("expected Path, got {other:?}"),
@@ -798,7 +817,7 @@ mod tests {
     #[test]
     fn parses_path_predicate_list() {
         let v = yaml("$path:\n  - \"**/*.md\"\n  - \"!**/_*.md\"");
-        let arms = parse_match_arms(&v).unwrap();
+        let arms = parse_match_conditions(&v).unwrap();
         match &arms.0[0] {
             MatchExpr::Path(globs) => {
                 assert_eq!(globs.patterns.len(), 2);
@@ -813,7 +832,7 @@ mod tests {
         let v = yaml(
             "min-match:\n  count: 0\n  of:\n    - a: string(required)",
         );
-        let err = parse_match_arms(&v).unwrap_err();
+        let err = parse_match_conditions(&v).unwrap_err();
         assert!(matches!(err, SchemaError::TriggerMatch { .. }));
     }
 
@@ -822,7 +841,7 @@ mod tests {
         let v = yaml(
             "min-match:\n  count: 5\n  of:\n    - a: string(required)\n    - b: string(required)",
         );
-        let err = parse_match_arms(&v).unwrap_err();
+        let err = parse_match_conditions(&v).unwrap_err();
         assert!(matches!(err, SchemaError::TriggerMatch { .. }));
     }
 
@@ -830,7 +849,8 @@ mod tests {
     fn reserved_property_names_are_structural() {
         // A property named `all` is interpreted as the combinator.
         assert!(is_structural_key("all"));
-        assert!(is_structural_key("any"));
+        assert!(is_structural_key("group"));
+        assert!(!is_structural_key("any"), "`any` is a renamed key, not a combinator");
         assert!(is_structural_key("none"));
         assert!(is_structural_key("min-match"));
         assert!(is_structural_key("$path"));
@@ -842,7 +862,7 @@ mod tests {
         // A key literally named `all` is the combinator, not a property
         // condition. This is the documented v1 limitation.
         let v = yaml("all:\n  - prompt: string(required)");
-        let arms = parse_match_arms(&v).unwrap();
+        let arms = parse_match_conditions(&v).unwrap();
         match &arms.0[0] {
             MatchExpr::All(children) => assert_eq!(children.len(), 1),
             other => panic!("expected All combinator, got {other:?}"),
@@ -850,13 +870,13 @@ mod tests {
     }
 
     #[test]
-    fn type_contradiction_in_any_defeats_arm() {
-        // `any: [kind: enum(x), kind: string(required)]` where `kind: 42`:
+    fn type_contradiction_in_group_defeats_condition() {
+        // `group: [kind: enum(x), kind: string(required)]` where `kind: 42`:
         // the enum arm is defeated (42 is not a string), the string arm is
         // defeated (42 is not a string) → any fails. This is the type-
         // contradiction defeat even in the presence of a non-required guard.
         let v = yaml("kind: string");
-        let arms = parse_match_arms(&v).unwrap();
+        let arms = parse_match_conditions(&v).unwrap();
         // Guard: `kind` absent passes; `kind: 42` defeats.
         let expr = &arms.0[0];
         let fm_pass = serde_yaml_ng::to_value(serde_yaml_ng::Mapping::new()).unwrap();
@@ -871,21 +891,21 @@ mod tests {
     #[test]
     fn path_normalization_bare_basename_glob() {
         let v = yaml("$path: SKILL.md");
-        let arms = parse_match_arms(&v).unwrap();
+        let arms = parse_match_conditions(&v).unwrap();
         assert!(matches!(&arms.0[0], MatchExpr::Path(_)));
     }
 
     #[test]
     fn path_normalization_double_star_glob() {
         let v = yaml("$path: \"docs/**/*.md\"");
-        let arms = parse_match_arms(&v).unwrap();
+        let arms = parse_match_conditions(&v).unwrap();
         assert!(matches!(&arms.0[0], MatchExpr::Path(_)));
     }
 
     #[test]
     fn path_normalization_negation() {
         let v = yaml("$path:\n  - \"**/*.md\"\n  - \"!**/_*.md\"");
-        let arms = parse_match_arms(&v).unwrap();
+        let arms = parse_match_conditions(&v).unwrap();
         assert!(matches!(&arms.0[0], MatchExpr::Path(_)));
     }
 }

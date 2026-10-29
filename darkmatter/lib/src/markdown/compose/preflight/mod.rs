@@ -34,7 +34,7 @@ pub mod lifecycle;
 
 pub use approval::approval_set;
 pub use collect::{collect_frontmatter_shell_commands, collect_shell_commands};
-pub use lifecycle::{ComposePreflightApprovals, PreflightApprovalStats};
+pub use lifecycle::{ComposePreflightApprovals, ExtraShellSources, PreflightApprovalStats};
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::transclusion;
@@ -254,7 +254,10 @@ pub struct ComposePreflightReport {
     /// each placeholder's timing, the site's resolved bytes when it may run
     /// as them, and whether it can be approved only as a template.
     pub candidates: Vec<ShellCandidate>,
-    /// Non-fatal warnings raised during collection.
+    /// The schema triggers the walk skipped as invalid
+    /// (`dm.schema.invalid_trigger`), once per trigger, in discovery order.
+    /// The walk's other warnings stand in for what the compose pass reports
+    /// and are not kept.
     pub warnings: Vec<ComposeWarning>,
     /// ICMP probes the document graph could send, in discovery order and
     /// deduplicated. Collecting them sends no packet; each record carries the
@@ -306,9 +309,26 @@ impl ComposePreflightReport {
 /// document's frontmatter `$(...)` commands, so it is checked against those
 /// alone; walking the body graph there would dereference transclusions the
 /// projection exists to leave unread.
+///
+/// The full-document walk's skipped-trigger warnings are handed to `report`
+/// (each trigger once, after those it already carries) before membership is
+/// judged, so composition reports a trigger found only in a child it then
+/// skips, and a rejection carries it. A failed walk leaves its warnings in
+/// the request's pre-flight failure sink, which this gate drains into
+/// `report` for the failure to carry.
+///
+/// ## Errors
+///
+/// [`MarkdownError::BlockedDiagnostics`](crate::markdown::MarkdownError::BlockedDiagnostics)
+/// when a warning in `report`, the walk's included, blocks under the
+/// request's policy: judged before membership, so a denied trigger stops the
+/// document before any command runs. Otherwise
+/// [`ShellExpansionError::NotPreApproved`] for the first command the set
+/// does not authorize, or the walk's own failure.
 pub(crate) fn validate_pre_approved(
     markdown: &Markdown,
     options: &crate::markdown::compose::ComposeRequest,
+    report: &mut crate::markdown::compose::ComposeReport,
 ) -> MarkdownResult<()> {
     let Some(ref approved) = options.pre_approved_commands else {
         return Ok(());
@@ -318,7 +338,10 @@ pub(crate) fn validate_pre_approved(
     let (entries, candidates) = if options.is_frontmatter_surface_only() {
         collect::frontmatter_shell_commands(markdown, options)?
     } else {
-        let collected = collect::collect_effects(markdown, options)?;
+        let collected = collect::collect_effects(markdown, options)
+            .inspect_err(|_| report.add_trigger_warnings(options.take_preflight_failure_warnings()))?;
+        report.add_trigger_warnings(collected.trigger_warnings);
+        crate::markdown::compose::pipeline::stop_if_blocked(report, options, None)?;
         (collected.entries, collected.candidates)
     };
     if let Some((command, origin, source_file)) = first_unapproved(&entries, &candidates, approved) {
@@ -411,11 +434,45 @@ impl Markdown {
         Ok(ComposePreflightReport {
             entries: collected.entries,
             candidates: collected.candidates,
-            warnings: Vec::new(),
+            warnings: collected.trigger_warnings,
             icmp_probes: collected.icmp,
             preflight_graph: collected.graph,
             deferred_context: collected.capabilities,
         })
+    }
+}
+
+/// The warnings a failed discovery-pass document had reported, shared by
+/// every clone of a request so the caller can report them beside the
+/// failure ([`ComposeOptions::take_preflight_failure_warnings`](crate::markdown::compose::ComposeOptions::take_preflight_failure_warnings)).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PreflightFailureWarnings(
+    std::sync::Arc<std::sync::Mutex<Vec<crate::markdown::compose::ComposeWarning>>>,
+);
+
+impl PreflightFailureWarnings {
+    /// Keeps a failed document's warnings, after any already kept.
+    pub(crate) fn record(&self, warnings: Vec<crate::markdown::compose::ComposeWarning>) {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).extend(warnings);
+    }
+
+    /// Keeps a document's warnings ahead of those its failed descendants
+    /// kept, as the compose pass orders a failed parent's.
+    pub(crate) fn prepend(&self, warnings: Vec<crate::markdown::compose::ComposeWarning>) {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).splice(0..0, warnings);
+    }
+
+    /// Drains the kept warnings, each skipped trigger once, where first kept.
+    pub(crate) fn take(&self) -> Vec<crate::markdown::compose::ComposeWarning> {
+        let kept = std::mem::take(&mut *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+        let mut warnings: Vec<crate::markdown::compose::ComposeWarning> = Vec::with_capacity(kept.len());
+        for warning in kept {
+            let trigger = warning.invalid_trigger_source();
+            if trigger.is_none() || !warnings.iter().any(|earlier| earlier.invalid_trigger_source() == trigger) {
+                warnings.push(warning);
+            }
+        }
+        warnings
     }
 }
 

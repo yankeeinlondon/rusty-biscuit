@@ -41,7 +41,7 @@ use super::matcher::{self, PathSubject};
 pub struct TriggerEvaluation<'a> {
     /// The evaluated trigger.
     pub trigger: &'a LoadedTrigger,
-    /// Whether the trigger matched (any arm held).
+    /// Whether the trigger matched (every top-level condition held).
     pub matched: bool,
     /// The first defeating condition for a non-matching trigger, for the
     /// `md schema triggers` trace. `None` when the trigger matched.
@@ -60,25 +60,26 @@ pub struct TriggerTrace {
     pub triggers: Vec<TriggerTraceEntry>,
 }
 
-/// One trigger's arm-by-arm trace.
+/// One trigger's condition-by-condition trace.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct TriggerTraceEntry {
     /// The trigger envelope's schema-root file or bundle document.
     pub source: TriggerSource,
-    /// Whether any arm matched.
+    /// Whether every top-level condition matched.
     pub matched: bool,
-    /// Results in authored arm order.
-    pub arms: Vec<TriggerArmTrace>,
+    /// Results in authored order: one per `match:` list entry, or one for a
+    /// mapping `match:`.
+    pub conditions: Vec<TriggerConditionTrace>,
 }
 
-/// One authored match arm's result.
+/// One authored top-level condition's result.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct TriggerArmTrace {
-    /// Zero-based authored arm index.
+pub struct TriggerConditionTrace {
+    /// Zero-based authored condition index.
     pub index: usize,
-    /// Whether this arm matched.
+    /// Whether this condition matched.
     pub matched: bool,
-    /// First defeating condition when the arm did not match.
+    /// First defeating condition when this one did not match.
     pub defeat: Option<String>,
 }
 
@@ -112,27 +113,27 @@ pub fn trace_registry(
         .iter()
         .map(|trigger| {
             let subject = subject_for(registry, trigger, document);
-            let arms = trigger
+            let conditions = trigger
                 .envelope
-                .match_arms
+                .conditions
                 .0
                 .iter()
                 .enumerate()
-                .map(|(index, arm)| {
-                    let matched = matcher::matches(arm, frontmatter, &subject);
-                    TriggerArmTrace {
+                .map(|(index, condition)| {
+                    let matched = matcher::matches(condition, frontmatter, &subject);
+                    TriggerConditionTrace {
                         index,
                         matched,
                         defeat: (!matched)
-                            .then(|| matcher::first_defeat(arm, frontmatter, &subject))
+                            .then(|| matcher::first_defeat(condition, frontmatter, &subject))
                             .flatten(),
                     }
                 })
                 .collect::<Vec<_>>();
             TriggerTraceEntry {
                 source: trigger.source.clone(),
-                matched: arms.iter().any(|arm| arm.matched),
-                arms,
+                matched: conditions.iter().all(|condition| condition.matched),
+                conditions,
             }
         })
         .collect();
@@ -163,18 +164,15 @@ pub fn evaluate_registry<'a>(
         .iter()
         .map(|trigger| {
             let subject = subject_for(registry, trigger, document);
-            let arms = &trigger.envelope.match_arms;
-            let matched = arms
-                .0
-                .iter()
-                .any(|arm| matcher::matches(arm, frontmatter, &subject));
+            let conditions = &trigger.envelope.conditions;
+            let matched = conditions.matches(frontmatter, &subject);
             let defeat = if matched {
                 None
             } else {
-                arms.0
+                conditions
+                    .0
                     .iter()
-                    .filter_map(|arm| matcher::first_defeat(arm, frontmatter, &subject))
-                    .next()
+                    .find_map(|condition| matcher::first_defeat(condition, frontmatter, &subject))
             };
             TriggerEvaluation {
                 trigger,
@@ -212,6 +210,10 @@ pub(crate) struct ResolvedPayload {
     /// projections see the properties validation layers in. `None` for a raw
     /// JSON Schema payload, which has no SimplifiedSchema projection.
     pub shape: Option<std::sync::Arc<crate::markdown::schemas::SchemaShape>>,
+    /// The cyclic named types `shape` reaches through
+    /// [`TypeExpr::Ref`](crate::markdown::schemas::simplified::TypeExpr::Ref);
+    /// empty for a raw payload or one that does not recurse.
+    pub definitions: std::sync::Arc<crate::markdown::schemas::simplified::DefinitionTable>,
     /// Dependency edges: the payload file + its imports + its examples
     /// (sorted, deduplicated). Empty for an embedded trigger.
     pub dependencies: Vec<PathBuf>,
@@ -222,6 +224,22 @@ pub(crate) struct ResolvedPayload {
     pub searched: Vec<PathBuf>,
     /// Non-fatal findings produced while resolving payload references.
     pub advisories: Vec<super::super::SchemaAdvisory>,
+}
+
+impl ResolvedPayload {
+    /// The stand-in for a matcher-only trigger (no `$schema`): no schema, no
+    /// dependencies. Effective-schema assembly layers nothing for such a
+    /// trigger, so `json_schema` is never read.
+    fn matcher_only() -> Self {
+        Self {
+            json_schema: std::sync::Arc::new(Value::Object(serde_json::Map::new())),
+            shape: None,
+            definitions: std::sync::Arc::default(),
+            dependencies: Vec::new(),
+            searched: Vec::new(),
+            advisories: Vec::new(),
+        }
+    }
 }
 
 /// Resolves a trigger's `$schema` payload, enforcing the merge-compatibility
@@ -235,7 +253,7 @@ pub(crate) struct ResolvedPayload {
 ///
 /// ## Cycle detection
 ///
-/// A payload that resolves to a trigger-schema envelope file (directly or
+/// A payload that resolves to a schema-trigger envelope file (directly or
 /// through an import chain) is a hard load error. Directly referencing a
 /// `*.trigger.yaml` as a payload is always wrong — the payload should reference
 /// the schema file, not the activation metadata.
@@ -250,6 +268,7 @@ pub(crate) fn resolve_trigger_payload(
     schema_roots: &[PathBuf],
     context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedPayload, SchemaError> {
+    let _resolve = crate::markdown::schemas::timings::stage(crate::markdown::schemas::ValidationStage::Resolve);
     let source = match (&trigger.source, trigger.bundle) {
         (TriggerSource::File(path), _) => path,
         (TriggerSource::Embedded { name, .. }, Some(bundle)) => {
@@ -262,14 +281,16 @@ pub(crate) fn resolve_trigger_payload(
             });
         }
     };
-    let payload = trigger.envelope.payload.as_ref().ok_or_else(|| {
-        SchemaError::TriggerPayloadNotMergeable {
-            path: source.clone(),
-            payload: "<none>".into(),
-            reason: "trigger envelope has no `$schema:` payload".into(),
-        }
-    })?;
+    let Some(payload) = trigger.envelope.payload.as_ref() else {
+        return Ok(ResolvedPayload::matcher_only());
+    };
     file_payload_memo::resolve(source, payload, schema_roots, context)
+}
+
+/// Empties the process-wide trigger payload memo (see
+/// [`crate::markdown::schemas::reset_process_caches_for_bench`]).
+pub(crate) fn reset_process_caches() {
+    file_payload_memo::clear();
 }
 
 /// [`resolve_trigger_payload`] for a schema-root file, uncached.
@@ -280,13 +301,32 @@ fn resolve_file_payload(
     context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedPayload, SchemaError> {
     let base_dir = source.parent().unwrap_or_else(|| Path::new("."));
-    let resolved = resolve::resolve_yaml_schema_with_roots(payload, base_dir, schema_roots, context)?;
+    // The trigger file owns an inline payload's named types, so its
+    // definitions never share keys with the document's or another trigger's.
+    let resolved = resolve::resolve_yaml_schema_owned_by(
+        payload,
+        resolve::InlineOwner::Trigger(source),
+        base_dir,
+        schema_roots,
+        context,
+    )?;
 
     // Cycle detection: the payload must not resolve to a trigger envelope.
     check_payload_cycles(source, &resolved)?;
 
+    // The file that authored the resolved schema, for a gate rejection to
+    // name: through an alias chain (`$schema: ./alias.yaml` whose own
+    // `$schema` names `./raw.json`) the resolver attributes the schema to
+    // the last file, so that file is named, not merely the first one read.
+    let payload_path = match payload {
+        YamlValue::String(_) => resolved.origin.file().map(Path::to_path_buf),
+        _ => None,
+    };
+
     // Merge-compatibility gate: must be a simple-object schema.
-    enforce_merge_compatible(source, payload, &resolved.json_schema)?;
+    enforce_merge_compatible(source, payload, payload_path.as_deref(), &resolved.json_schema)?;
+    let json_schema = std::sync::Arc::new(resolved.json_schema);
+    enforce_compiles(source, payload, payload_path, &json_schema)?;
 
     // Collect dependency edges: the payload file(s) + imports + examples.
     let mut deps: Vec<PathBuf> = resolved
@@ -301,7 +341,8 @@ fn resolve_file_payload(
 
     Ok(ResolvedPayload {
         shape: payload_shape(resolved.simplified),
-        json_schema: std::sync::Arc::new(resolved.json_schema),
+        definitions: resolved.definitions,
+        json_schema,
         dependencies: deps,
         searched: resolved.searched,
         advisories: resolved.advisories,
@@ -396,6 +437,10 @@ mod file_payload_memo {
 
     /// Least recently used first.
     static ENTRIES: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
+
+    pub(super) fn clear() {
+        ENTRIES.lock().expect("trigger payload memo poisoned").clear();
+    }
 
     pub(super) fn resolve(
         source: &Path,
@@ -693,15 +738,12 @@ fn resolve_embedded_payload(
     bundle: EmbeddedSchemaBundle,
     name: &str,
 ) -> Result<(ResolvedPayload, Vec<PathBuf>), SchemaError> {
+    let _resolve = crate::markdown::schemas::timings::stage(crate::markdown::schemas::ValidationStage::Resolve);
     let importer = bundle.virtual_path(name);
     let importer_path = PathBuf::from(&importer);
-    let payload = trigger.envelope.payload.as_ref().ok_or_else(|| {
-        SchemaError::TriggerPayloadNotMergeable {
-            path: importer_path.clone(),
-            payload: "<none>".into(),
-            reason: "trigger envelope has no `$schema:` payload".into(),
-        }
-    })?;
+    let Some(payload) = trigger.envelope.payload.as_ref() else {
+        return Ok((ResolvedPayload::matcher_only(), Vec::new()));
+    };
     let resolved = bundle.with_documents(|documents| match payload {
         YamlValue::String(reference) => {
             let target = crate::markdown::schemas::embedded::resolve_bundle_path(
@@ -731,6 +773,7 @@ fn resolve_embedded_payload(
         YamlValue::Sequence(_) => Err(SchemaError::TriggerPayloadNotMergeable {
             path: importer_path.clone(),
             payload: describe_payload(payload),
+            payload_path: None,
             reason: "a root union is not an object schema. Root unions and non-object schemas \
                      are rejected as trigger payloads"
                 .into(),
@@ -743,10 +786,13 @@ fn resolve_embedded_payload(
         }),
     })?;
     let (resolved, reads) = resolved;
-    enforce_merge_compatible(&importer_path, payload, &resolved.json_schema)?;
+    enforce_merge_compatible(&importer_path, payload, None, &resolved.json_schema)?;
+    let json_schema = std::sync::Arc::new(resolved.json_schema);
+    enforce_compiles(&importer_path, payload, None, &json_schema)?;
     let payload = ResolvedPayload {
         shape: payload_shape(resolved.simplified),
-        json_schema: std::sync::Arc::new(resolved.json_schema),
+        definitions: resolved.definitions,
+        json_schema,
         dependencies: Vec::new(),
         searched: Vec::new(),
         advisories: resolved.advisories,
@@ -754,37 +800,70 @@ fn resolve_embedded_payload(
     Ok((payload, reads))
 }
 
+/// Rejects a payload whose JSON Schema cannot be compiled into a validator,
+/// before its trigger is installed: a later layer could otherwise hide the bad
+/// property when the merged schema compiles. The structural validator is
+/// built through the shared validator cache, so an unchanged payload is
+/// compiled once per process, not once per document pass.
+fn enforce_compiles(
+    trigger_source: &Path,
+    payload: &YamlValue,
+    payload_path: Option<PathBuf>,
+    json_schema: &std::sync::Arc<Value>,
+) -> Result<(), SchemaError> {
+    let cache = &*crate::markdown::schemas::SHARED_VALIDATOR_CACHE;
+    let hash = cache.shared_schema_hash(json_schema);
+    match cache.structural_validator_hashed(json_schema, hash) {
+        Ok(_) => Ok(()),
+        Err(error) => Err(SchemaError::TriggerPayloadCompile {
+            path: trigger_source.to_path_buf(),
+            payload: describe_payload(payload),
+            payload_path,
+            message: match error {
+                SchemaError::BuildValidator { message } => message,
+                other => other.to_string(),
+            },
+        }),
+    }
+}
+
 /// Rejects payloads that are root unions, non-objects, or otherwise not
 /// merge-compatible. The contract is [`validate_simple_object_schema`].
 fn enforce_merge_compatible(
     trigger_source: &Path,
     payload: &YamlValue,
+    payload_path: Option<&Path>,
     json_schema: &Value,
 ) -> Result<(), SchemaError> {
     let payload_desc = describe_payload(payload);
-    let json_obj = json_schema.as_object().ok_or_else(|| {
-        SchemaError::TriggerPayloadNotMergeable {
+    if !json_schema.is_object() {
+        return Err(SchemaError::TriggerPayloadNotMergeable {
             path: trigger_source.to_path_buf(),
-            payload: payload_desc.clone(),
+            payload: payload_desc,
+            payload_path: payload_path.map(Path::to_path_buf),
             reason: "payload did not resolve to a JSON object".into(),
-        }
-    })?;
-    validate_simple_object_schema(json_obj).map_err(|err| {
+        });
+    }
+    let label = format!("the payload `{payload_desc}`");
+    validate_simple_object_schema(json_schema, &label).map_err(|err| {
+        // A reference error already says what is wrong with the payload's
+        // definitions; the shape hint applies to the root-shape errors.
         let reason = match &err {
-            SchemaError::Baseline { message, .. } => message.clone(),
+            SchemaError::Baseline { message, .. } => format!(
+                "{message}. Root unions and non-object schemas are rejected as trigger payloads"
+            ),
             _ => err.to_string(),
         };
         SchemaError::TriggerPayloadNotMergeable {
             path: trigger_source.to_path_buf(),
             payload: payload_desc,
-            reason: format!(
-                "{reason}. Root unions and non-object schemas are rejected as trigger payloads"
-            ),
+            payload_path: payload_path.map(Path::to_path_buf),
+            reason,
         }
     })
 }
 
-/// Checks whether any file the payload resolved to is a trigger-schema
+/// Checks whether any file the payload resolved to is a schema-trigger
 /// envelope (direct self-reference or referencing another trigger file).
 fn check_payload_cycles(
     trigger: &Path,
@@ -818,20 +897,22 @@ fn check_payload_cycles(
     Ok(())
 }
 
-/// Returns `true` when `path`'s contents claim the `kind: trigger-schema`
-/// envelope. I/O errors and malformed YAML return `Ok(false)` — they are not
-/// the cycle detector's concern (the resolver surfaces those separately).
+/// Returns `true` when `path`'s contents claim the `kind: schema-trigger`
+/// envelope, valid or not: a claimed envelope that discovery skips as invalid
+/// is still a trigger file, never a schema. An unreadable file returns
+/// `Ok(false)` — it is not the cycle detector's concern (the resolver
+/// surfaces it separately) — as does unclaimed YAML, malformed or not.
 fn file_claims_trigger_envelope(path: &Path) -> Result<bool, SchemaError> {
     let Ok(content) = std::fs::read_to_string(path) else {
         return Ok(false);
     };
     match parse_trigger_envelope_from_str(&content) {
-        Ok(Some(_)) => Ok(true),
-        Ok(None) | Err(_) => Ok(false),
+        Ok(Some(_)) | Err(_) => Ok(true),
+        Ok(None) => Ok(false),
     }
 }
 
-/// Checks whether the document `$schema` resolved to a trigger-schema file.
+/// Checks whether the document `$schema` resolved to a schema-trigger file.
 /// Directly referencing a trigger envelope as a document schema is an error —
 /// trigger schemas activate by placement and match, never by reference.
 ///
@@ -909,7 +990,7 @@ mod tests {
         fs::write(path, content).unwrap();
     }
 
-    const TRIGGER_WITH_PAYLOAD: &str = "kind: trigger-schema\n\
+    const TRIGGER_WITH_PAYLOAD: &str = "kind: schema-trigger\n\
         match:\n  prompt: string(required)\n\
         $schema: claudine.yaml\n";
     const PAYLOAD: &str = "$schema:\n  model: string(required)\n";
@@ -929,7 +1010,7 @@ mod tests {
     fn make_trigger(content: &str, source: &Path) -> LoadedTrigger {
         let envelope = parse_trigger_envelope_from_str(content)
             .expect("envelope should parse")
-            .expect("content should claim trigger-schema");
+            .expect("content should claim schema-trigger");
         LoadedTrigger {
             source: TriggerSource::File(source.to_path_buf()),
             envelope,
@@ -951,7 +1032,7 @@ mod tests {
         );
         write(
             &root.join("schemas/b.trigger.yaml"),
-            "kind: trigger-schema\nmatch:\n  title: string(required)\n$schema: other.yaml\n",
+            "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema: other.yaml\n",
         );
         write(&root.join("schemas/claudine.yaml"), PAYLOAD);
         write(&root.join("schemas/other.yaml"), PAYLOAD);
@@ -1021,12 +1102,12 @@ mod tests {
         let source = root.join("schemas/union.trigger.yaml");
         write(
             &source,
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n\
              $schema:\n  - model: string(required)\n  - title: string(required)\n",
         );
 
         let trigger = make_trigger(
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n\
              $schema:\n  - model: string(required)\n  - title: string(required)\n",
             &source,
         );
@@ -1038,20 +1119,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_payload_with_no_schema() {
+    fn a_trigger_with_no_schema_is_matcher_only() {
         let repo = repo_fixture();
         let root = repo.path();
         let source = root.join("schemas/empty.trigger.yaml");
 
         let trigger = make_trigger(
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n",
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n",
             &source,
         );
-        let err = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
-        assert!(
-            matches!(err, SchemaError::TriggerPayloadNotMergeable { .. }),
-            "missing payload must be rejected: {err:?}"
-        );
+        let payload = resolve_trigger_payload(&trigger, &[root.join("schemas")], &biscuit_file::FileResolutionContext::new(root))
+            .expect("a matcher-only trigger loads");
+        assert!(payload.dependencies.is_empty() && payload.shape.is_none(), "{payload:?}");
     }
 
     // ── Cycle detection ─────────────────────────────────────────────────
@@ -1065,12 +1144,12 @@ mod tests {
         let source = root.join("schemas/self.trigger.yaml");
         write(
             &source,
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n\
              $schema: self.trigger.yaml\n",
         );
 
         let trigger = make_trigger(
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n\
              $schema: self.trigger.yaml\n",
             &source,
         );
@@ -1089,7 +1168,7 @@ mod tests {
         let a_source = root.join("schemas/a.trigger.yaml");
         write(
             &a_source,
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n\
              $schema: b.trigger.yaml\n",
         );
         write(
@@ -1099,7 +1178,7 @@ mod tests {
         write(&root.join("schemas/claudine.yaml"), PAYLOAD);
 
         let trigger = make_trigger(
-            "kind: trigger-schema\nmatch:\n  prompt: string(required)\n\
+            "kind: schema-trigger\nmatch:\n  prompt: string(required)\n\
              $schema: b.trigger.yaml\n",
             &a_source,
         );

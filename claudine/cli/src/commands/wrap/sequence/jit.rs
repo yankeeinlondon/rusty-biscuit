@@ -16,6 +16,9 @@
 //! Preflight*), so a `sequence: $(ls)` that would enumerate differently mid-run
 //! does not change the plan under execution.
 
+use claudine::composition::preflight::checks::{LIFECYCLE_SHELL_AUDIT, claudine_preflight, run_check};
+use darkmatter::lifecycle::preflight::CheckStage;
+use darkmatter::lifecycle::run::EntryReason;
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -230,8 +233,10 @@ pub(super) fn compose_step_selecting(
         } else {
             composition::CompositionMode::ChainedDocument
         },
+        ctx.invocation.trigger_findings(),
     )?;
     emit_dropped_optional_warnings(&pre.dropped_optionals);
+    crate::commands::compose::emit_trigger_warnings(ctx.invocation.trigger_findings(), ctx.shared.silent);
     let step_source = pre.source;
     // Pre-validation may drop invalid optional keys; the rest keep their origin.
     let step_overrides =
@@ -296,13 +301,15 @@ pub(super) fn compose_step_selecting(
 
     // Lifecycle preparation has its own mode settlement; share the invocation
     // cache while keeping document approvals fixed by the validation probe.
-    let lifecycle_preflight = composition::resolve_shell_approvals(
-        None,
-        None,
-        &approval_options,
-        Some(&prepared.lifecycle),
-        Some(&prepared.resolved_path),
-    )?;
+    let lifecycle_preflight = run_check(claudine_preflight(), LIFECYCLE_SHELL_AUDIT, CheckStage::InRun, EntryReason::Initial, || {
+        composition::resolve_shell_approvals(
+            None,
+            None,
+            &approval_options,
+            Some(&prepared.lifecycle),
+            Some(&prepared.resolved_path),
+        )
+    })?;
     approved.extend(lifecycle_preflight.approved_commands);
 
     Ok(StepComposition { prepared, approved })

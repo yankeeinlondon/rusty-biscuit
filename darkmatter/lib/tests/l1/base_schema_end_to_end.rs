@@ -23,6 +23,7 @@ const CLAUDINE_BUNDLE: EmbeddedSchemaBundle = EmbeddedSchemaBundle::new(
     &[
         ("action.yaml", include_str!("../../../../claudine/schemas/action.yaml")),
         ("claudine.yaml", include_str!("../../../../claudine/schemas/claudine.yaml")),
+        ("document.yaml", include_str!("../../../../claudine/schemas/document.yaml")),
         ("inline-compose.yaml", include_str!("../../../../claudine/schemas/inline-compose.yaml")),
         ("lifecycle.yaml", include_str!("../../../../claudine/schemas/lifecycle.yaml")),
         ("linking.yaml", include_str!("../../../../claudine/schemas/linking.yaml")),
@@ -324,24 +325,24 @@ fn schema_document_transcludes_same_file_as_library_source() {
         .canonicalize()
         .expect("schema docs path must exist");
     let schema_path = manifest_dir!()
-        .join("../docs/schemas/darkmatter.yaml")
+        .join("../schemas/partials/fm.yaml")
         .canonicalize()
         .expect("schema YAML path must exist");
     let doc = std::fs::read_to_string(&doc_path).expect("schema docs must be readable");
 
     assert!(
-        doc.contains("::code ./darkmatter.yaml"),
-        "schema docs must transclude the neighboring schema source"
+        doc.contains("::code ../../schemas/partials/fm.yaml"),
+        "schema docs must transclude the catalog's `fm` partial"
     );
     let transclusion_path = doc_path
         .parent()
         .expect("schema docs must have a parent")
-        .join("darkmatter.yaml")
+        .join("../../schemas/partials/fm.yaml")
         .canonicalize()
         .expect("transclusion target must exist");
     assert_eq!(transclusion_path, schema_path);
 
-    // The authored file imports Content Policy's editor schema; the disk
+    // The authored partial imports Content Policy's editor schema; the disk
     // resolver reads it from the checkout, the library from its embedded copy.
     let policy_path = biscuit_file::canonicalize_simplified(
         &manifest_dir!().join("../../content-policy/schemas/content-policy.yaml"),
@@ -351,16 +352,31 @@ fn schema_document_transcludes_same_file_as_library_source() {
         include_str!("../../../../content-policy/schemas/content-policy.yaml"),
         content_policy::EDITOR_SCHEMA
     );
-    // A `\\?\` spelling from `canonicalize` on Windows is not a file reference.
-    let schema_file = biscuit_file::canonicalize_simplified(&schema_path).expect("schema YAML path");
-    let schema_dir = schema_file.parent().expect("schema YAML must have a parent");
-    let reference = YamlValue::String(schema_file.to_string_lossy().into_owned());
+    // The baseline is the catalog's `fm` declaration, resolved from the
+    // catalog's directory as the catalog declares it.
+    let catalog_path = biscuit_file::canonicalize_simplified(&manifest_dir!().join("../schemas/darkmatter.yaml"))
+        .expect("catalog path");
+    let catalog_dir = catalog_path.parent().expect("the catalog has a parent");
+    let declaration: YamlValue = serde_yaml_ng::from_str("fm: fm@./partials/fm.yaml").expect("declaration");
     let from_disk =
-        resolve_yaml_schema(&reference, schema_dir, &crate::request_support::context_at(schema_dir))
+        resolve_yaml_schema(&declaration, catalog_dir, &crate::request_support::context_at(catalog_dir))
             .expect("the authored baseline resolves from disk");
-    assert_eq!(from_disk.imports, [policy_path]);
-    assert_eq!(from_disk.simplified, Some(darkmatter_base_schema()));
-    assert_eq!(from_disk.json_schema, darkmatter_base_json_schema());
+    assert!(from_disk.imports.contains(&policy_path), "{:?}", from_disk.imports);
+    // The disk catalog's baseline stores the same shared types the embedded
+    // one does; their identities name different sources, so compare the
+    // lowered schemas.
+    let catalog = darkmatter::markdown::schemas::catalog::GlobalCatalog::from_file(
+        &catalog_path,
+        darkmatter::markdown::schemas::catalog::DARKMATTER_GLOBALS,
+        &crate::request_support::context_at(catalog_dir),
+    )
+    .expect("the authored catalog loads from disk");
+    let (from_disk, definitions) = catalog.baseline().expect("the catalog declares `fm`");
+    assert!(!definitions.is_empty(), "the disk baseline stores its shared types");
+    assert_eq!(
+        darkmatter::markdown::schemas::to_json_schema_with_definitions(&from_disk, &definitions).expect("lowers"),
+        darkmatter_base_json_schema()
+    );
 }
 
 #[test]
@@ -424,8 +440,9 @@ fn base_schema_ctx_is_darkmatter_owned_generated_context() {
 
 /// The baseline's `style.markdown` declarations agree with the runtime rule
 /// validator (`markdown::cleanup::rules`) on every legal and illegal shape,
-/// so DMLS validation and cleanup never disagree about a setting. Quoted
-/// numerals are not coerced into rule values.
+/// so DMLS validation and cleanup never disagree about a setting. Both bind
+/// a value through the one conversion engine first, so `"80"` is `80` and
+/// `5` is `"5"` to each of them.
 #[test]
 fn base_style_markdown_schema_agrees_with_the_rule_validator() {
     let control = "style:\n  markdown:\n    frontmatter: false\n    table-layout: false\n    \
@@ -443,15 +460,15 @@ fn base_style_markdown_schema_agrees_with_the_rule_validator() {
         ("fixed-width", "0", false),
         ("fixed-width", "1001", false),
         ("fixed-width", "80.5", false),
-        ("fixed-width", "\"80\"", false),
+        ("fixed-width", "\"80\"", true),
         ("fixed-width", "[80]", false),
         ("indentation", "preserve", true),
         ("indentation", "4", true),
         ("indentation", "8", true),
         ("indentation", "3", false),
-        ("indentation", "\"4\"", false),
+        ("indentation", "\"4\"", true),
         ("indentation", "\"\"", false),
-        ("unwrap", "\"true\"", false),
+        ("unwrap", "\"true\"", true),
         ("unwrap", "[true]", false),
         ("list-item-padding", "none", true),
         ("list-item-padding", "two", false),
@@ -461,10 +478,10 @@ fn base_style_markdown_schema_agrees_with_the_rule_validator() {
         ("default-language", "plain", true),
         ("default-language", "[sh]", false),
         ("default-language", "{}", false),
-        ("default-language", "5", false),
+        ("default-language", "5", true),
         ("list-item-padding", "1", false),
-        ("list-padding", "\"false\"", false),
-        ("fixed-width", "\"true\"", false),
+        ("list-padding", "\"false\"", true),
+        ("fixed-width", "\"true\"", true),
         ("bogus-rule", "true", false),
     ];
     let mut disagreements = Vec::new();

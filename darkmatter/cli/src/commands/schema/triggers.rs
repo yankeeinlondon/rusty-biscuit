@@ -7,6 +7,7 @@ use biscuit_terminal::terminal::Terminal;
 use renderable::markdown::code_span;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
+use crate::commands::trigger_findings::emit_warnings;
 use crate::io::{DocumentOutsideRepository, open_argument};
 use crate::request::MdRequest;
 use darkmatter::markdown::schemas::{
@@ -15,7 +16,11 @@ use darkmatter::markdown::schemas::{
 };
 use std::path::Path;
 
-/// Prints the five schema roots, shadowing, and arm-by-arm trigger results.
+/// Prints the five schema roots, shadowing, the triggers discovery skipped as
+/// invalid, and condition-by-condition trigger results.
+///
+/// Each skipped trigger's `dm.schema.invalid_trigger` warning is written to
+/// stderr; stdout lists only its source.
 pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
     // The argument resolves first, so a tree escape or malformed reference is
     // `InvalidReference` rather than a later missing-repository error.
@@ -63,6 +68,25 @@ pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
         );
     }
 
+    // The warning itself (with its reason) goes to stderr like every other
+    // command's; the trace names only which triggers were skipped, so the
+    // warning is not delivered twice.
+    emit_warnings(registry.findings(), &terminal);
+    emit(&terminal, "<bold>Skipped invalid triggers:</bold>".to_string());
+    if registry.findings().is_empty() {
+        emit(&terminal, "- <dim>none</dim>".to_string());
+    }
+    for finding in registry.findings() {
+        emit(
+            &terminal,
+            format!(
+                "- {} <dim>[{}]</dim>",
+                Prose::escape_text(&finding.source().to_string()),
+                finding.code()
+            ),
+        );
+    }
+
     emit(&terminal, "<bold>Triggers:</bold>".to_string());
     if trace.triggers.is_empty() {
         emit(&terminal, "- <dim>none</dim>".to_string());
@@ -70,16 +94,18 @@ pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
     for trigger in &trace.triggers {
         let status = if trigger.matched { "<green>matched</green>" } else { "<red>not matched</red>" };
         emit(&terminal, format!("- {} — {status}", Prose::escape_text(&trigger.source.to_string())));
-        for arm in &trigger.arms {
-            let result = if arm.matched {
+        for condition in &trigger.conditions {
+            let result = if condition.matched {
                 "<green>matched</green>".to_string()
             } else {
                 format!(
                     "<red>defeated</red>: {}",
-                    Prose::escape_text_outside_code_spans(arm.defeat.as_deref().unwrap_or("condition did not match"))
+                    Prose::escape_text_outside_code_spans(
+                        condition.defeat.as_deref().unwrap_or("condition did not match")
+                    )
                 )
             };
-            emit(&terminal, format!("  - arm {} — {result}", arm.index + 1));
+            emit(&terminal, format!("  - condition {} — {result}", condition.index + 1));
         }
     }
     Ok(())

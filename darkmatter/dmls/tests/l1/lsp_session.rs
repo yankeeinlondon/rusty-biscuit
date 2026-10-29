@@ -570,8 +570,22 @@ fn server_rescan_fallback_tracks_unopened_files_on_save() {
     fixture.shutdown();
 }
 
+/// Whether `diagnostic` is the skipped-trigger warning DMLS publishes on the
+/// trigger file named `trigger_file_name`.
+fn is_invalid_trigger_warning(diagnostic: &Value, trigger_file_name: &str) -> bool {
+    diagnostic["code"] == json!("dm.schema.invalid_trigger")
+        && diagnostic["severity"] == json!(2)
+        && diagnostic["source"] == json!("darkmatter.schema")
+        && diagnostic["message"].as_str().is_some_and(|message| {
+            message.starts_with("ignoring invalid schema trigger ")
+                && message.contains(trigger_file_name)
+        })
+}
+
+/// A trigger whose payload disappears is skipped, not retained: the consumer
+/// loses the trigger's property and the open envelope gets one warning.
 #[test]
-fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
+fn trigger_payload_failure_drops_the_trigger_and_warns_on_the_envelope() {
     let workspace = LspWorkspace::new();
     // A repository, so the open envelope's own context has the workspace as
     // its tree root and `schemas/` as a schema root: its refresh reports the
@@ -588,7 +602,7 @@ fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
     let payload_path = schemas.join("prompt.yaml");
     let document_path = workspace.path().join("prompt.md");
     let envelope =
-        "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+        "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
     let payload = "$schema:\n  model: string(required)\n";
     let document = "---\nprompt: hello\n---\n\nBody\n";
     std::fs::write(&envelope_path, envelope).unwrap();
@@ -634,32 +648,35 @@ fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
     );
 
     let envelope_diagnostics = fixture.wait_for_diagnostics(envelope_uri.as_str());
-    assert!(
-        envelope_diagnostics.iter().any(|diagnostic| {
-            diagnostic["code"] == json!("dm.schema.prepare")
-                && diagnostic["source"] == json!("darkmatter.schema")
-                && diagnostic["message"]
-                    .as_str()
-                    .is_some_and(|message| message.contains("prompt.trigger.yaml"))
-        }),
-        "the failed scan must publish a schema-load diagnostic on the envelope: \
+    assert_eq!(
+        envelope_diagnostics
+            .iter()
+            .filter(|diagnostic| is_invalid_trigger_warning(diagnostic, "prompt.trigger.yaml"))
+            .count(),
+        1,
+        "the skipping scan must publish exactly one invalid-trigger warning on the envelope: \
          {envelope_diagnostics:?}"
     );
-
-    let retained = fixture.wait_for_diagnostics(document_uri.as_str());
     assert!(
-        retained.iter().any(|diagnostic| {
-            diagnostic["code"] == json!("dm.schema.missing_required")
-                && diagnostic["message"]
-                    .as_str()
-                    .is_some_and(|message| message.contains("model"))
-        }),
-        "the consumer must retain the prior effective schema after payload removal: {retained:?}"
+        !envelope_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare")),
+        "a parseable envelope must not carry a schema-load error: {envelope_diagnostics:?}"
+    );
+
+    let dropped = latest_diagnostics(&mut fixture, document_uri.as_str());
+    assert!(
+        !requires_model(&dropped),
+        "the skipped trigger's property must no longer apply to the consumer: {dropped:?}"
     );
 
     fixture.shutdown();
 }
 
+/// Removing an unopened trigger's payload publishes a file-level
+/// invalid-trigger warning on the envelope and drops the trigger from its
+/// consumer; restoring the payload clears the warning and the trigger applies
+/// again.
 fn closed_trigger_envelope_diagnostic_round_trip(client_watched: bool) {
     let workspace = LspWorkspace::new();
     let schemas = workspace.path().join("schemas");
@@ -673,7 +690,7 @@ fn closed_trigger_envelope_diagnostic_round_trip(client_watched: bool) {
     let payload_path = schemas.join("prompt.yaml");
     let document_path = workspace.path().join("prompt.md");
     let envelope =
-        "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+        "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
     let payload = "$schema:\n  model: string(required)\n";
     let document = "---\nprompt: hello\n---\n\nBody\n";
     std::fs::write(&envelope_path, envelope).unwrap();
@@ -716,19 +733,18 @@ fn closed_trigger_envelope_diagnostic_round_trip(client_watched: bool) {
     }
 
     let failed = fixture.wait_for_diagnostics(envelope_uri.as_str());
-    assert!(
-        failed.iter().any(|diagnostic| {
-            diagnostic["code"] == json!("dm.schema.prepare")
-                && diagnostic["source"] == json!("darkmatter.schema")
-        }),
-        "an unopened envelope must receive the failed registry diagnostic: {failed:?}"
-    );
-    let retained = fixture.wait_for_diagnostics(document_uri.as_str());
-    assert!(
-        retained
+    assert_eq!(
+        failed
             .iter()
-            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.missing_required")),
-        "the consumer must retain its last-good trigger schema: {retained:?}"
+            .filter(|diagnostic| is_invalid_trigger_warning(diagnostic, "prompt.trigger.yaml"))
+            .count(),
+        1,
+        "an unopened envelope must receive one invalid-trigger warning: {failed:?}"
+    );
+    let dropped = latest_diagnostics(&mut fixture, document_uri.as_str());
+    assert!(
+        !requires_model(&dropped),
+        "the consumer must stop applying the skipped trigger's schema: {dropped:?}"
     );
 
     std::fs::write(&payload_path, payload).unwrap();
@@ -747,6 +763,11 @@ fn closed_trigger_envelope_diagnostic_round_trip(client_watched: bool) {
     assert!(
         repaired.is_empty(),
         "repair must clear the unopened envelope: {repaired:?}"
+    );
+    let restored = latest_diagnostics(&mut fixture, document_uri.as_str());
+    assert!(
+        requires_model(&restored),
+        "repair must restore the trigger's property on the consumer: {restored:?}"
     );
 
     fixture.shutdown();
@@ -771,7 +792,7 @@ fn repairing_trigger_payload_clears_open_envelope_immediately() {
     let payload_path = schemas.join("prompt.yaml");
     let document_path = workspace.path().join("prompt.md");
     let envelope =
-        "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+        "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
     let document = "---\nprompt: hello\n---\n\nBody\n";
     std::fs::write(&envelope_path, envelope).unwrap();
     std::fs::write(&document_path, document).unwrap();
@@ -787,8 +808,8 @@ fn repairing_trigger_payload_clears_open_envelope_immediately() {
     assert!(
         failed
             .iter()
-            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare")),
-        "the open envelope must receive its trigger-load diagnostic: {failed:?}"
+            .any(|diagnostic| is_invalid_trigger_warning(diagnostic, "prompt.trigger.yaml")),
+        "the open envelope must receive its invalid-trigger warning: {failed:?}"
     );
     let _ = fixture.wait_for_diagnostics(document_uri.as_str());
 
@@ -839,8 +860,8 @@ fn saving_an_open_trigger_buffer_updates_consumers_and_unsaved_edits_do_not() {
     std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
     let envelope_path = schemas.join("prompt.trigger.yaml");
     let document_path = workspace.path().join("prompt.md");
-    let envelope = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
-    let retargeted = "kind: trigger-schema\nmatch:\n  task: string(required)\n$schema: prompt.yaml\n";
+    let envelope = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+    let retargeted = "kind: schema-trigger\nmatch:\n  task: string(required)\n$schema: prompt.yaml\n";
     let document = "---\nprompt: hello\n---\n\nBody\n";
     std::fs::write(&envelope_path, envelope).unwrap();
     std::fs::write(schemas.join("prompt.yaml"), "$schema:\n  model: string(required)\n").unwrap();
@@ -895,8 +916,8 @@ fn open_trigger_failure_transfer_round_trip(envelope_first: bool) {
     let payload_a_path = schemas.join("a.yaml");
     let payload_b_path = schemas.join("b.yaml");
     let document_path = workspace.path().join("consumer.md");
-    let envelope_a = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: a.yaml\n";
-    let envelope_b = "kind: trigger-schema\nmatch:\n  other: string(required)\n$schema: b.yaml\n";
+    let envelope_a = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: a.yaml\n";
+    let envelope_b = "kind: schema-trigger\nmatch:\n  other: string(required)\n$schema: b.yaml\n";
     let document = "---\nprompt: hello\n---\n\nBody\n";
     std::fs::write(&envelope_a_path, envelope_a).unwrap();
     std::fs::write(&envelope_b_path, envelope_b).unwrap();
@@ -921,8 +942,8 @@ fn open_trigger_failure_transfer_round_trip(envelope_first: bool) {
     assert!(
         failed_a
             .iter()
-            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare")),
-        "envelope A must initially own the trigger-load diagnostic: {failed_a:?}"
+            .any(|diagnostic| is_invalid_trigger_warning(diagnostic, "a.trigger.yaml")),
+        "envelope A must initially own the invalid-trigger warning: {failed_a:?}"
     );
 
     std::fs::write(&payload_a_path, "$schema:\n  alpha: string\n").unwrap();
@@ -955,9 +976,9 @@ fn open_trigger_failure_transfer_round_trip(envelope_first: bool) {
             .is_some_and(|diagnostics| {
                 diagnostics
                     .iter()
-                    .any(|diagnostic| diagnostic["code"] == json!("dm.schema.prepare"))
+                    .any(|diagnostic| is_invalid_trigger_warning(diagnostic, "b.trigger.yaml"))
             }),
-        "envelope B must receive transferred trigger-load ownership immediately: {failed_b:?}"
+        "envelope B must receive the invalid-trigger warning immediately: {failed_b:?}"
     );
 
     fixture.shutdown();
@@ -2755,14 +2776,15 @@ fn function_completion_shape() {
         .find(|item| item["textEdit"]["newText"] == json!("length"))
         .expect("`len` offers `length` with bare-name insertion");
 
-    // D4: untyped signature label, typed-signature detail (fallible → `| error`),
-    // eager Markdown documentation, bare-name insertion.
+    // D4: untyped signature label, typed-signature detail (`| error` exactly
+    // when fallible), eager Markdown documentation, bare-name insertion.
     let descriptor = expressions::function_descriptor("length").unwrap();
     assert_eq!(length["label"], json!(descriptor.signature));
     assert_eq!(length["detail"], json!(descriptor.typed_signature()));
-    assert!(
+    assert_eq!(
         length["detail"].as_str().unwrap().ends_with("| error"),
-        "fallible typed signature must carry `| error`: {length:?}"
+        descriptor.fallible,
+        "typed signature carries `| error` exactly when fallible: {length:?}"
     );
     assert_eq!(length["documentation"]["kind"], json!("markdown"));
     assert_eq!(
@@ -3027,20 +3049,21 @@ fn git_catalog_descriptors_reach_lsp_completion_and_hover() {
 
     let git_functions: Vec<_> = expressions::function_descriptors()
         .iter()
-        .filter(|descriptor| descriptor.category == "Git")
+        .filter(|descriptor| &*descriptor.category == "Git")
         .collect();
     assert_eq!(
         git_functions
             .iter()
-            .map(|descriptor| descriptor.signature)
+            .map(|descriptor| &*descriptor.signature)
             .collect::<Vec<_>>(),
+        // Alphabetical within the category, overloads in authored order.
         [
-            "predict_conflicts(branch)",
             "branch_exists_on_remote()",
             "branch_exists_on_remote(branch)",
             "branch_exists_on_remote(branch, remote)",
-            "remote_vendor([remote])",
+            "predict_conflicts(branch)",
             "recent_commits(count)",
+            "remote_vendor([remote])",
         ],
         "the shipped Git function signature set changed"
     );
@@ -3979,13 +4002,14 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
             .all(|diagnostic| diagnostic["code"] != json!("dm.schema.constraint")),
         "the generic keyword failure is replaced: {diagnostics:?}"
     );
+    // The unknown constraint token, not the whole value.
     assert_eq!(
         specialized[0]["range"]["start"],
-        json!({ "line": 3, "character": 12 })
+        json!({ "line": 3, "character": 19 })
     );
     assert_eq!(
         specialized[0]["range"]["end"],
-        json!({ "line": 3, "character": 24 })
+        json!({ "line": 3, "character": 23 })
     );
 
     fixture.shutdown();
@@ -3993,9 +4017,9 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
 
 /// A block-sequence `type-definition` value's span starts at its first `-`,
 /// partway into the line. The malformed arm after it is still ranged exactly,
-/// because the locator reads the slice from the start of that line with
-/// every item's authored column intact; read from the `-`, the first item
-/// would seem to continue onto the second.
+/// at its unknown constraint token, because the value is read from the start
+/// of that line with every item's authored column intact; read from the `-`,
+/// the first item would seem to continue onto the second.
 #[test]
 fn a_malformed_arm_after_the_first_block_sequence_item_is_ranged_exactly() {
     let workspace = LspWorkspace::new();
@@ -4025,8 +4049,8 @@ fn a_malformed_arm_after_the_first_block_sequence_item_is_ranged_exactly() {
     assert_eq!(
         definition_errors[0]["range"],
         json!({
-            "start": { "line": 5, "character": 4 },
-            "end": { "line": 5, "character": 21 }
+            "start": { "line": 5, "character": 12 },
+            "end": { "line": 5, "character": 17 }
         }),
         "{diagnostics:#?}"
     );
@@ -5402,12 +5426,16 @@ fn meta_schema_standalone_block_plain_flow_indicator_retains_last_good() {
         }),
     );
 
+    // The unsupported `description` key makes the envelope itself invalid, so
+    // the current buffer's diagnostic is the classifier's envelope error, not
+    // the definition inside it.
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic["code"] == json!("dm.schema.invalid_type_definition")),
-        "the current malformed definition owns diagnostics: {diagnostics:?}"
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.document_malformed")
+                && diagnostic["message"].as_str().is_some_and(|message| message.contains("description"))
+        }),
+        "the current malformed envelope owns diagnostics: {diagnostics:?}"
     );
 
     let labels = completion_labels(&mut fixture, uri.as_str(), 3, 9);
@@ -5657,14 +5685,22 @@ fn meta_schema_standalone_flow_completion_locates_the_cursor_structurally() {
     fixture.shutdown();
 }
 
-/// Writes the shipped baseline three directories below `workspace`, as in
-/// the repository, so its `../../../content-policy/schemas/content-policy.yaml`
-/// import finds `policy`. The baseline's directory is not named `schemas`, so
-/// DMLS does not also read the buffer as a trigger-schema candidate.
-fn write_shipped_baseline_layout(workspace: &LspWorkspace, baseline: &str, policy: &str) -> std::path::PathBuf {
-    let path = workspace.path().join("darkmatter/docs/baseline/darkmatter.yaml");
+/// Writes the shipped baseline's `fm` partial and the sibling partials it
+/// imports three directories below `workspace`, as in the repository, so its
+/// `../../../content-policy/schemas/content-policy.yaml` import finds
+/// `policy`. The partials' directory is not named `schemas`, so DMLS does not
+/// also read the buffer as a schema-trigger candidate.
+fn write_shipped_baseline_layout(
+    workspace: &LspWorkspace,
+    baseline: &str,
+    siblings: [(&str, &str); 2],
+    policy: &str,
+) -> std::path::PathBuf {
+    let path = workspace.path().join("darkmatter/docs/baseline/fm.yaml");
     let policy_path = workspace.path().join("content-policy/schemas/content-policy.yaml");
-    for (target, text) in [(&path, baseline), (&policy_path, policy)] {
+    let siblings = siblings.map(|(name, text)| (path.with_file_name(name), text));
+    let files = [(path.clone(), baseline), (policy_path, policy)].into_iter().chain(siblings);
+    for (target, text) in files {
         std::fs::create_dir_all(target.parent().expect("parent")).unwrap();
         std::fs::write(target, text).unwrap();
     }
@@ -5675,10 +5711,14 @@ fn write_shipped_baseline_layout(workspace: &LspWorkspace, baseline: &str, polic
 fn meta_schema_phase7_shipped_schema_provider_path() {
     let workspace = LspWorkspace::new();
     let shipped =
-        biscuit_test_harness::manifest_dir!().join("../docs/schemas/darkmatter.yaml");
+        biscuit_test_harness::manifest_dir!().join("../schemas/partials/fm.yaml");
     let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
     let policy = include_str!("../../../../content-policy/schemas/content-policy.yaml");
-    let path = write_shipped_baseline_layout(&workspace, &text, policy);
+    let siblings = [
+        ("style.yaml", include_str!("../../../schemas/partials/style.yaml")),
+        ("context-variables.yaml", include_str!("../../../schemas/partials/context-variables.yaml")),
+    ];
+    let path = write_shipped_baseline_layout(&workspace, &text, siblings, policy);
 
     let schema_line = text
         .lines()
@@ -5698,7 +5738,9 @@ fn meta_schema_phase7_shipped_schema_provider_path() {
 
     let hover = hover_markup(&mut fixture, uri.as_str(), schema_line, schema_column);
     assert!(hover.contains("Type: **type-definition**"), "{hover}");
-    assert!(hover.contains("Declares: **schema**"), "{hover}");
+    // The baseline's `$schema` member sits inside the partial's `fm` type,
+    // whose definition the hover describes.
+    assert!(hover.contains("Declares: **object**"), "{hover}");
 
     fixture.shutdown();
 }
@@ -5707,10 +5749,14 @@ fn meta_schema_phase7_shipped_schema_provider_path() {
 fn meta_schema_phase6_shipped_schema_activation_and_current_error() {
     let workspace = LspWorkspace::new();
     let shipped =
-        biscuit_test_harness::manifest_dir!().join("../docs/schemas/darkmatter.yaml");
+        biscuit_test_harness::manifest_dir!().join("../schemas/partials/fm.yaml");
     let text = std::fs::read_to_string(&shipped).expect("read shipped Darkmatter schema");
     let policy = include_str!("../../../../content-policy/schemas/content-policy.yaml");
-    let path = write_shipped_baseline_layout(&workspace, &text, policy);
+    let siblings = [
+        ("style.yaml", include_str!("../../../schemas/partials/style.yaml")),
+        ("context-variables.yaml", include_str!("../../../schemas/partials/context-variables.yaml")),
+    ];
+    let path = write_shipped_baseline_layout(&workspace, &text, siblings, policy);
 
     let mut fixture = LspFixture::start(&workspace);
     fixture.initialize(neovim_like_initialize_params(workspace.path()));
@@ -6367,11 +6413,8 @@ fn vocabulary_link_resolves_from_a_document_outside_the_topic_directory() {
     let items = items.as_array().expect("completion array");
     let documented: Vec<&Value> = items
         .iter()
-        .filter(|item| {
-            item["label"]
-                .as_str()
-                .is_some_and(|label| label.starts_with("pr_list("))
-        })
+        // The query overload links its vocabulary; `pr_list(count)` takes none.
+        .filter(|item| item["label"] == json!("pr_list(query)"))
         .collect();
     assert!(
         !documented.is_empty(),
@@ -6951,7 +6994,7 @@ const OPERAND_DOC: &str = concat!(
     "iteration-1: 3\n",
     "f1: known - fm_bin\n",
     "f2: \"known ? fm_then : known\"\n",
-    "f3: lower(fm_arg)\n",
+    "f3: abs(fm_arg)\n",
     "f4: known || fm_rhs\n",
     "f5: \"fm_quiet ? fm_quiet : is_null(fm_other)\"\n",
     "f6: 'foo--bar'\n",
@@ -6960,7 +7003,7 @@ const OPERAND_DOC: &str = concat!(
     "\n",
     "B1: {{ known - bin_op }}\n",
     "B2: {{ known ? then_b : else_b }}\n",
-    "B3: {{ lower(fn_arg) }}\n",
+    "B3: {{ abs(fn_arg) }}\n",
     "B4: {{ known || rhs_var }}\n",
     "B5: {{ is_empty(lower(nested)) }}\n",
     "S1: {{ quiet1 || \"d\" }} {{ quiet2 ? quiet2 : \"none\" }} {{ is_null(quiet3) }} {{ isEmpty(quiet4) }}\n",
@@ -7019,7 +7062,9 @@ fn undeclared_property_fires_in_every_operand_position_at_warning_severity() {
         (span_on(OPERAND_DOC, "f1:", "fm_bin"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "f2:", "fm_then"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "f3:", "fm_arg"), "darkmatter.frontmatter"),
-        (span_on(OPERAND_DOC, "f4:", "fm_rhs"), "darkmatter.frontmatter"),
+        // `f4`'s `known || fm_rhs` is the condition grammar's `or`, whose
+        // operands bind `unknown | null`, so `fm_rhs` is handled; `B4`'s body
+        // `||` is a fallback, whose right-hand side is not.
         (span_on(OPERAND_DOC, "f6:", "foo--bar"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "f7:", "a- b"), "darkmatter.frontmatter"),
         (span_on(OPERAND_DOC, "B1:", "bin_op"), "darkmatter.compose"),
@@ -7518,7 +7563,7 @@ fn a_frontmatter_less_document_never_reports_undeclared_properties() {
 }
 
 /// The 2026-10-17 incident file (`schemas/feature-review.yaml` mid-edit) with
-/// its first comment line replaced by a `kind: trigger-schema` claim and one
+/// its first comment line replaced by a `kind: schema-trigger` claim and one
 /// character before the line-17 error replaced by a non-BMP character, so the
 /// error stays at character column 93 while its UTF-8 and UTF-16 offsets
 /// differ from each other and from the character count.
@@ -7526,7 +7571,7 @@ fn claimed_incident_envelope() -> String {
     let incident = include_str!("../../../lib/tests/fixtures/triggers/feature-review-incident.yaml");
     let mut lines: Vec<String> = incident.split('\n').map(str::to_string).collect();
     assert!(lines[0].starts_with('#'), "{}", lines[0]);
-    lines[0] = "kind: trigger-schema".to_string();
+    lines[0] = "kind: schema-trigger".to_string();
     assert!(lines[16].contains("every finding"), "{}", lines[16]);
     lines[16] = lines[16].replacen("every finding", "😀very finding", 1);
     lines.join("\n")
@@ -7603,7 +7648,7 @@ fn an_unclaimed_unparseable_schema_root_file_gets_no_trigger_diagnostic() {
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     assert!(
         diagnostics.iter().all(|diagnostic| {
-            !diagnostic["message"].as_str().unwrap_or_default().contains("trigger-schema")
+            !diagnostic["message"].as_str().unwrap_or_default().contains("schema-trigger")
         }),
         "{diagnostics:#?}"
     );

@@ -170,8 +170,8 @@ fn embed_mermaid_font_feature_sets_the_html_page_option() {
     let with = parse(&["--feature", "embed-mermaid-font", "doc.md"]).unwrap();
     let without = parse(&["doc.md"]).unwrap();
 
-    assert!(html_page(&md, &with, None, &with.features).unwrap().embed_mermaid_font());
-    assert!(!html_page(&md, &without, None, &without.features).unwrap().embed_mermaid_font());
+    assert!(html_page(&md, &with, None, false, &with.features).unwrap().embed_mermaid_font());
+    assert!(!html_page(&md, &without, None, false, &without.features).unwrap().embed_mermaid_font());
 }
 
 #[test]
@@ -183,10 +183,10 @@ fn no_frontmatter_key_turns_on_embedding() {
     let plain = Markdown::try_from_content(MERMAID_DOC).unwrap();
     let cli = parse(&["doc.md"]).unwrap();
 
-    assert!(!html_page(&with_keys, &cli, None, &cli.features).unwrap().embed_mermaid_font());
+    assert!(!html_page(&with_keys, &cli, None, false, &cli.features).unwrap().embed_mermaid_font());
     assert_eq!(
-        html_artifact(&with_keys, &cli, None, &cli.features).unwrap().content,
-        html_artifact(&plain, &cli, None, &cli.features).unwrap().content
+        html_artifact(&with_keys, &cli, None, false, &cli.features).unwrap().content,
+        html_artifact(&plain, &cli, None, false, &cli.features).unwrap().content
     );
 }
 

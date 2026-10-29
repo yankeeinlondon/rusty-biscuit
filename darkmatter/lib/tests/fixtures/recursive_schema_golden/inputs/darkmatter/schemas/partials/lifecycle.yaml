@@ -1,0 +1,588 @@
+# Darkmatter's neutral lifecycle action definitions: the shape of every verb
+# Darkmatter's lifecycle parser knows, including the verbs only a host
+# provides a service for (`say`, `retry`, `proxy`, `prep`, `break`, ...), and
+# the four action categories built from them. Types only: this file never
+# applies to a document. Host profiles select from it; the `md` profile is
+# md-lifecycle.yaml, and a host's own schemas reference these types with the
+# reserved namespace (`communicate@darkmatter:lifecycle`).
+#
+# Each verb has a short form (`<verb>-short`) and, except `set` and the
+# generated verbs, a closed long form (`<verb>-long`). A category type holds
+# exactly one verb, whose value is its short or long form. A bundle holds
+# several verbs in short form only, plus `when` and `no_error`. The
+# side-effect and expression-function verbs are listed one key per name with
+# untyped values; the lifecycle parser checks their arguments. Tests keep the
+# keys aligned with the parser's verb inventory and Darkmatter's catalogs.
+#
+# `initialize-bundle` has no `shell`: initialization is shell-free under every
+# host.
+kind: schema
+types:
+    interpolation: "string(pattern(^\\s*\\x7b\\x7b[\\s\\S]*\\x7d\\x7d\\s*$)) -> a whole-value {{ … }} interpolation"
+    count:
+        - "number(integer; min(0)) -> a count"
+        - interpolation
+    say-short: "string -> speak the text aloud through text-to-speech"
+    say-long: "{ text: string(required), no_error: boolean }"
+    speak-short: "string -> alias of say"
+    speak-long: "{ text: string(required), no_error: boolean }"
+    effect-short: "string -> play the named sound effect from the effect catalog"
+    effect-long: "{ text: string(required), no_error: boolean }"
+    message-short: "string -> send the text to the configured messaging routes"
+    message-long: "{ text: string(required), no_error: boolean }"
+    notify-short: "string -> show the text as a desktop notification"
+    notify-long: "{ text: string(required), no_error: boolean }"
+    stderr-short: "string -> write the text to standard error"
+    stderr-long: "{ text: string(required), no_error: boolean }"
+    stdout-short: "string -> write the text to standard output"
+    stdout-long: "{ text: string(required), no_error: boolean }"
+    info-short: "string -> print the text as an informational status line"
+    info-long: "{ text: string(required), no_error: boolean }"
+    warn-short: "string -> print the text as a warning status line"
+    warn-long: "{ text: string(required), no_error: boolean }"
+    success-short: "string -> print the text as a success status line"
+    success-long: "{ text: string(required), no_error: boolean }"
+    stop-short:
+        - null
+        - "unknown[](max(0)) -> stop the remaining actions of this stack"
+    stop-long: "{ no_error: boolean }"
+    skip-short:
+        - null
+        - "unknown[](max(0)) -> skip the provider run (the parser allows skip only in initialize)"
+    skip-long: "{ no_error: boolean }"
+    error-short:
+        - null
+        - "unknown[](max(0))"
+        - "string -> fail the run with this reason"
+    error-long: "{ reason: string, no_error: boolean }"
+    proxy-short: "string -> hand the run to the target prompt: a file reference such as @prompts/next.md or a whole-value interpolation"
+    proxy-long: "{ target: string(required), with: object, no_error: boolean }"
+    retry-short:
+        - null
+        - "unknown[](max(0))"
+        - "count -> re-read and re-run the document at most this many times"
+    retry-long: "{ max_attempts: count, delay: string, backoff: enum(fixed, exponential), with: object, no_error: boolean }"
+    resume-short: "string -> send this follow-up message into the live session"
+    resume-long: "{ message: string(required), max_attempts: count, no_error: boolean }"
+    defer-short: "string -> planned: defer the run by this delay; the parser accepts it but the runtime does not run it yet"
+    defer-long: "{ delay: string(required), reason: string, no_error: boolean }"
+    break-short:
+        - null
+        - "unknown[](max(0))"
+        - "string -> end the nearest enclosing loop with this reason (an empty string is an empty reason); a break outside every loop fails its event"
+    break-long: "{ reason: string, code: number(integer; min(0); max(255)), no_error: boolean }"
+    prep-short: "string(not-empty) -> run the target (a file reference such as @prompts/setup.md or a whole-value interpolation), then continue with the next action; a target that fails fails this event"
+    prep-long: "{ target: string(not-empty; required), with: object, no_error: boolean }"
+    shell-short: "shell -> run a shell command (never in initialize)"
+    shell-long: "{ command: shell(required), on_error: string, no_error: boolean }"
+    set-short: "object -> assign runtime values: a mapping of destinations to values (no long form, no no_error)"
+    side-effect-verb: "unknown -> Darkmatter side effect; the parser checks its arguments"
+    expression-function-verb: "unknown -> Darkmatter expression function; the parser checks its arguments"
+    communicate:
+        say:
+            - say-short
+            - say-long
+        speak:
+            - speak-short
+            - speak-long
+        effect:
+            - effect-short
+            - effect-long
+        message:
+            - message-short
+            - message-long
+        notify:
+            - notify-short
+            - notify-long
+        stderr:
+            - stderr-short
+            - stderr-long
+        stdout:
+            - stdout-short
+            - stdout-long
+        info:
+            - info-short
+            - info-long
+        warn:
+            - warn-short
+            - warn-long
+        success:
+            - success-short
+            - success-long
+        $constraints:
+            min-keys: 1
+            max-keys: 1
+    flow:
+        stop:
+            - stop-short
+            - stop-long
+        skip:
+            - skip-short
+            - skip-long
+        error:
+            - error-short
+            - error-long
+        proxy:
+            - proxy-short
+            - proxy-long
+        retry:
+            - retry-short
+            - retry-long
+        resume:
+            - resume-short
+            - resume-long
+        defer:
+            - defer-short
+            - defer-long
+        break:
+            - break-short
+            - break-long
+        prep:
+            - prep-short
+            - prep-long
+        $constraints:
+            min-keys: 1
+            max-keys: 1
+    shell:
+        shell:
+            - shell-short
+            - shell-long
+        $constraints:
+            min-keys: 1
+            max-keys: 1
+    expression:
+        set: set-short
+        append_frontmatter: side-effect-verb
+        append_jsonl: side-effect-verb
+        append_line: side-effect-verb
+        decrement_frontmatter: side-effect-verb
+        delete_frontmatter: side-effect-verb
+        ensure_dir: side-effect-verb
+        ensure_file: side-effect-verb
+        http_post: side-effect-verb
+        increment_frontmatter: side-effect-verb
+        merge_frontmatter: side-effect-verb
+        prepend_frontmatter: side-effect-verb
+        set_frontmatter: side-effect-verb
+        abs: expression-function-verb
+        absolute: expression-function-verb
+        and: expression-function-verb
+        as_csv: expression-function-verb
+        as_json: expression-function-verb
+        as_json5: expression-function-verb
+        as_line_separated: expression-function-verb
+        as_markdown: expression-function-verb
+        as_ordered_list: expression-function-verb
+        as_space_separated: expression-function-verb
+        as_tsv: expression-function-verb
+        as_unordered_list: expression-function-verb
+        basename: expression-function-verb
+        basename_without_index: expression-function-verb
+        branch_exists_on_remote: expression-function-verb
+        camel_case: expression-function-verb
+        can_execute: expression-function-verb
+        capitalize: expression-function-verb
+        cicd: expression-function-verb
+        cicd_list: expression-function-verb
+        code_link: expression-function-verb
+        contains: expression-function-verb
+        date: expression-function-verb
+        date_delta: expression-function-verb
+        decrement_file_index: expression-function-verb
+        dir_leading: expression-function-verb
+        dirname: expression-function-verb
+        ends_with: expression-function-verb
+        ensure_leading: expression-function-verb
+        ensure_trailing: expression-function-verb
+        ext: expression-function-verb
+        file_exists: expression-function-verb
+        file_index: expression-function-verb
+        file_trailing: expression-function-verb
+        find_files: expression-function-verb
+        find_first_index: expression-function-verb
+        find_last_index: expression-function-verb
+        first: expression-function-verb
+        frontmatter: expression-function-verb
+        has_agentic_cli: expression-function-verb
+        has_alias: expression-function-verb
+        has_binary: expression-function-verb
+        has_builtin_function: expression-function-verb
+        has_command: expression-function-verb
+        has_key: expression-function-verb
+        has_local_skill: expression-function-verb
+        has_skill: expression-function-verb
+        has_user_function: expression-function-verb
+        increment_file_index: expression-function-verb
+        ipv4: expression-function-verb
+        ipv6: expression-function-verb
+        is_array: expression-function-verb
+        is_date: expression-function-verb
+        is_date_time: expression-function-verb
+        is_date_time_utc: expression-function-verb
+        is_date_utc: expression-function-verb
+        is_empty: expression-function-verb
+        is_indexed_file: expression-function-verb
+        is_integer: expression-function-verb
+        is_negative: expression-function-verb
+        is_null: expression-function-verb
+        is_number: expression-function-verb
+        is_object: expression-function-verb
+        is_positive: expression-function-verb
+        is_string: expression-function-verb
+        is_this_month: expression-function-verb
+        is_this_month_utc: expression-function-verb
+        is_this_year: expression-function-verb
+        is_this_year_utc: expression-function-verb
+        is_today: expression-function-verb
+        is_today_utc: expression-function-verb
+        is_tomorrow: expression-function-verb
+        is_tomorrow_utc: expression-function-verb
+        is_yesterday: expression-function-verb
+        is_yesterday_utc: expression-function-verb
+        join: expression-function-verb
+        kebab_case: expression-function-verb
+        keys: expression-function-verb
+        last: expression-function-verb
+        length: expression-function-verb
+        link: expression-function-verb
+        lower: expression-function-verb
+        markdown_body_empty: expression-function-verb
+        markdown_title: expression-function-verb
+        max: expression-function-verb
+        min: expression-function-verb
+        newer_than: expression-function-verb
+        number: expression-function-verb
+        older_than: expression-function-verb
+        or: expression-function-verb
+        package: expression-function-verb
+        package_area: expression-function-verb
+        parent_dir: expression-function-verb
+        pascal_case: expression-function-verb
+        ping: expression-function-verb
+        ping_under: expression-function-verb
+        pr: expression-function-verb
+        pr_list: expression-function-verb
+        predict_conflicts: expression-function-verb
+        recent_commits: expression-function-verb
+        relative: expression-function-verb
+        remote_vendor: expression-function-verb
+        replace: expression-function-verb
+        replace_first: expression-function-verb
+        replace_last: expression-function-verb
+        round: expression-function-verb
+        snake_case: expression-function-verb
+        starts_with: expression-function-verb
+        terminal: expression-function-verb
+        title_case: expression-function-verb
+        trim: expression-function-verb
+        try_frontmatter: expression-function-verb
+        upper: expression-function-verb
+        validate_schema: expression-function-verb
+        values: expression-function-verb
+        without_date: expression-function-verb
+        $constraints:
+            min-keys: 1
+            max-keys: 1
+    bundle:
+        say: say-short
+        speak: speak-short
+        effect: effect-short
+        message: message-short
+        notify: notify-short
+        stderr: stderr-short
+        stdout: stdout-short
+        info: info-short
+        warn: warn-short
+        success: success-short
+        stop: stop-short
+        skip: skip-short
+        error: error-short
+        proxy: proxy-short
+        retry: retry-short
+        resume: resume-short
+        defer: defer-short
+        break: break-short
+        prep: prep-short
+        shell: shell-short
+        set: set-short
+        append_frontmatter: side-effect-verb
+        append_jsonl: side-effect-verb
+        append_line: side-effect-verb
+        decrement_frontmatter: side-effect-verb
+        delete_frontmatter: side-effect-verb
+        ensure_dir: side-effect-verb
+        ensure_file: side-effect-verb
+        http_post: side-effect-verb
+        increment_frontmatter: side-effect-verb
+        merge_frontmatter: side-effect-verb
+        prepend_frontmatter: side-effect-verb
+        set_frontmatter: side-effect-verb
+        abs: expression-function-verb
+        absolute: expression-function-verb
+        and: expression-function-verb
+        as_csv: expression-function-verb
+        as_json: expression-function-verb
+        as_json5: expression-function-verb
+        as_line_separated: expression-function-verb
+        as_markdown: expression-function-verb
+        as_ordered_list: expression-function-verb
+        as_space_separated: expression-function-verb
+        as_tsv: expression-function-verb
+        as_unordered_list: expression-function-verb
+        basename: expression-function-verb
+        basename_without_index: expression-function-verb
+        branch_exists_on_remote: expression-function-verb
+        camel_case: expression-function-verb
+        can_execute: expression-function-verb
+        capitalize: expression-function-verb
+        cicd: expression-function-verb
+        cicd_list: expression-function-verb
+        code_link: expression-function-verb
+        contains: expression-function-verb
+        date: expression-function-verb
+        date_delta: expression-function-verb
+        decrement_file_index: expression-function-verb
+        dir_leading: expression-function-verb
+        dirname: expression-function-verb
+        ends_with: expression-function-verb
+        ensure_leading: expression-function-verb
+        ensure_trailing: expression-function-verb
+        ext: expression-function-verb
+        file_exists: expression-function-verb
+        file_index: expression-function-verb
+        file_trailing: expression-function-verb
+        find_files: expression-function-verb
+        find_first_index: expression-function-verb
+        find_last_index: expression-function-verb
+        first: expression-function-verb
+        frontmatter: expression-function-verb
+        has_agentic_cli: expression-function-verb
+        has_alias: expression-function-verb
+        has_binary: expression-function-verb
+        has_builtin_function: expression-function-verb
+        has_command: expression-function-verb
+        has_key: expression-function-verb
+        has_local_skill: expression-function-verb
+        has_skill: expression-function-verb
+        has_user_function: expression-function-verb
+        increment_file_index: expression-function-verb
+        ipv4: expression-function-verb
+        ipv6: expression-function-verb
+        is_array: expression-function-verb
+        is_date: expression-function-verb
+        is_date_time: expression-function-verb
+        is_date_time_utc: expression-function-verb
+        is_date_utc: expression-function-verb
+        is_empty: expression-function-verb
+        is_indexed_file: expression-function-verb
+        is_integer: expression-function-verb
+        is_negative: expression-function-verb
+        is_null: expression-function-verb
+        is_number: expression-function-verb
+        is_object: expression-function-verb
+        is_positive: expression-function-verb
+        is_string: expression-function-verb
+        is_this_month: expression-function-verb
+        is_this_month_utc: expression-function-verb
+        is_this_year: expression-function-verb
+        is_this_year_utc: expression-function-verb
+        is_today: expression-function-verb
+        is_today_utc: expression-function-verb
+        is_tomorrow: expression-function-verb
+        is_tomorrow_utc: expression-function-verb
+        is_yesterday: expression-function-verb
+        is_yesterday_utc: expression-function-verb
+        join: expression-function-verb
+        kebab_case: expression-function-verb
+        keys: expression-function-verb
+        last: expression-function-verb
+        length: expression-function-verb
+        link: expression-function-verb
+        lower: expression-function-verb
+        markdown_body_empty: expression-function-verb
+        markdown_title: expression-function-verb
+        max: expression-function-verb
+        min: expression-function-verb
+        newer_than: expression-function-verb
+        number: expression-function-verb
+        older_than: expression-function-verb
+        or: expression-function-verb
+        package: expression-function-verb
+        package_area: expression-function-verb
+        parent_dir: expression-function-verb
+        pascal_case: expression-function-verb
+        ping: expression-function-verb
+        ping_under: expression-function-verb
+        pr: expression-function-verb
+        pr_list: expression-function-verb
+        predict_conflicts: expression-function-verb
+        recent_commits: expression-function-verb
+        relative: expression-function-verb
+        remote_vendor: expression-function-verb
+        replace: expression-function-verb
+        replace_first: expression-function-verb
+        replace_last: expression-function-verb
+        round: expression-function-verb
+        snake_case: expression-function-verb
+        starts_with: expression-function-verb
+        terminal: expression-function-verb
+        title_case: expression-function-verb
+        trim: expression-function-verb
+        try_frontmatter: expression-function-verb
+        upper: expression-function-verb
+        validate_schema: expression-function-verb
+        values: expression-function-verb
+        without_date: expression-function-verb
+        when: "expression -> run the bundle only when this condition holds"
+        no_error: "boolean -> keep the stack running when one of these actions fails"
+    initialize-bundle:
+        say: say-short
+        speak: speak-short
+        effect: effect-short
+        message: message-short
+        notify: notify-short
+        stderr: stderr-short
+        stdout: stdout-short
+        info: info-short
+        warn: warn-short
+        success: success-short
+        stop: stop-short
+        skip: skip-short
+        error: error-short
+        proxy: proxy-short
+        retry: retry-short
+        resume: resume-short
+        defer: defer-short
+        break: break-short
+        prep: prep-short
+        set: set-short
+        append_frontmatter: side-effect-verb
+        append_jsonl: side-effect-verb
+        append_line: side-effect-verb
+        decrement_frontmatter: side-effect-verb
+        delete_frontmatter: side-effect-verb
+        ensure_dir: side-effect-verb
+        ensure_file: side-effect-verb
+        http_post: side-effect-verb
+        increment_frontmatter: side-effect-verb
+        merge_frontmatter: side-effect-verb
+        prepend_frontmatter: side-effect-verb
+        set_frontmatter: side-effect-verb
+        abs: expression-function-verb
+        absolute: expression-function-verb
+        and: expression-function-verb
+        as_csv: expression-function-verb
+        as_json: expression-function-verb
+        as_json5: expression-function-verb
+        as_line_separated: expression-function-verb
+        as_markdown: expression-function-verb
+        as_ordered_list: expression-function-verb
+        as_space_separated: expression-function-verb
+        as_tsv: expression-function-verb
+        as_unordered_list: expression-function-verb
+        basename: expression-function-verb
+        basename_without_index: expression-function-verb
+        branch_exists_on_remote: expression-function-verb
+        camel_case: expression-function-verb
+        can_execute: expression-function-verb
+        capitalize: expression-function-verb
+        cicd: expression-function-verb
+        cicd_list: expression-function-verb
+        code_link: expression-function-verb
+        contains: expression-function-verb
+        date: expression-function-verb
+        date_delta: expression-function-verb
+        decrement_file_index: expression-function-verb
+        dir_leading: expression-function-verb
+        dirname: expression-function-verb
+        ends_with: expression-function-verb
+        ensure_leading: expression-function-verb
+        ensure_trailing: expression-function-verb
+        ext: expression-function-verb
+        file_exists: expression-function-verb
+        file_index: expression-function-verb
+        file_trailing: expression-function-verb
+        find_files: expression-function-verb
+        find_first_index: expression-function-verb
+        find_last_index: expression-function-verb
+        first: expression-function-verb
+        frontmatter: expression-function-verb
+        has_agentic_cli: expression-function-verb
+        has_alias: expression-function-verb
+        has_binary: expression-function-verb
+        has_builtin_function: expression-function-verb
+        has_command: expression-function-verb
+        has_key: expression-function-verb
+        has_local_skill: expression-function-verb
+        has_skill: expression-function-verb
+        has_user_function: expression-function-verb
+        increment_file_index: expression-function-verb
+        ipv4: expression-function-verb
+        ipv6: expression-function-verb
+        is_array: expression-function-verb
+        is_date: expression-function-verb
+        is_date_time: expression-function-verb
+        is_date_time_utc: expression-function-verb
+        is_date_utc: expression-function-verb
+        is_empty: expression-function-verb
+        is_indexed_file: expression-function-verb
+        is_integer: expression-function-verb
+        is_negative: expression-function-verb
+        is_null: expression-function-verb
+        is_number: expression-function-verb
+        is_object: expression-function-verb
+        is_positive: expression-function-verb
+        is_string: expression-function-verb
+        is_this_month: expression-function-verb
+        is_this_month_utc: expression-function-verb
+        is_this_year: expression-function-verb
+        is_this_year_utc: expression-function-verb
+        is_today: expression-function-verb
+        is_today_utc: expression-function-verb
+        is_tomorrow: expression-function-verb
+        is_tomorrow_utc: expression-function-verb
+        is_yesterday: expression-function-verb
+        is_yesterday_utc: expression-function-verb
+        join: expression-function-verb
+        kebab_case: expression-function-verb
+        keys: expression-function-verb
+        last: expression-function-verb
+        length: expression-function-verb
+        link: expression-function-verb
+        lower: expression-function-verb
+        markdown_body_empty: expression-function-verb
+        markdown_title: expression-function-verb
+        max: expression-function-verb
+        min: expression-function-verb
+        newer_than: expression-function-verb
+        number: expression-function-verb
+        older_than: expression-function-verb
+        or: expression-function-verb
+        package: expression-function-verb
+        package_area: expression-function-verb
+        parent_dir: expression-function-verb
+        pascal_case: expression-function-verb
+        ping: expression-function-verb
+        ping_under: expression-function-verb
+        pr: expression-function-verb
+        pr_list: expression-function-verb
+        predict_conflicts: expression-function-verb
+        recent_commits: expression-function-verb
+        relative: expression-function-verb
+        remote_vendor: expression-function-verb
+        replace: expression-function-verb
+        replace_first: expression-function-verb
+        replace_last: expression-function-verb
+        round: expression-function-verb
+        snake_case: expression-function-verb
+        starts_with: expression-function-verb
+        terminal: expression-function-verb
+        title_case: expression-function-verb
+        trim: expression-function-verb
+        try_frontmatter: expression-function-verb
+        upper: expression-function-verb
+        validate_schema: expression-function-verb
+        values: expression-function-verb
+        without_date: expression-function-verb
+        when: "expression -> run the bundle only when this condition holds"
+        no_error: "boolean -> keep the stack running when one of these actions fails"

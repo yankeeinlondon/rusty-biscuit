@@ -26,7 +26,7 @@ const REQUEST_CANCELED: i32 = -32800;
 /// `ServerCancelled`.
 const SERVER_CANCELLED: i32 = -32802;
 
-const ENVELOPE: &str = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+const ENVELOPE: &str = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
 const PAYLOAD: &str = "$schema:\n  model: string(required)\n";
 const DOC: &str = "---\nprompt: hello\n---\n\n# Heading\n\nBody.\n";
 const PLAIN: &str = "# Plain\n\nNo frontmatter.\n";
@@ -179,10 +179,15 @@ fn a_held_preparation_leaves_edits_cancellation_and_other_requests_running() {
     fixture.open_registry_gate();
     fixture.shutdown();
 
+    // 502's elapsed time includes the held preparation, so on a loaded host it
+    // crosses `SLOW_THRESHOLD` and completes as a `slow request` instead.
     let completion = |id: &str| -> String {
+        // A request over the timing threshold logs `slow request` instead,
+        // which a loaded host can push either of these over.
         let lines: Vec<String> = logs
-            .matching("request complete")
+            .lines()
             .into_iter()
+            .filter(|line| line.contains("request complete") || line.contains("slow request"))
             .filter(|line| line.contains(&format!(" id={id} ")))
             .collect();
         assert_eq!(lines.len(), 1, "{:#?}", logs.lines());

@@ -27,8 +27,8 @@ fn repo_schemas_dir() -> std::path::PathBuf {
 }
 
 /// A `.yaml` file in `schemas/` is a plain schema unless it carries a `kind`
-/// naming a different envelope (e.g. `memory.yaml` is `kind: schema-trigger`,
-/// discovered by placement, not by the standalone-schema recognizer). Files
+/// naming a different envelope (a `kind: schema-trigger` file is discovered by
+/// placement, not by the standalone-schema recognizer). Files
 /// with no `kind`, or `kind: schema`, are the plain schemas under test.
 fn is_plain_schema(source: &str) -> bool {
     let Ok(value) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source) else {
@@ -61,7 +61,7 @@ fn repo_root_schemas_all_classify_as_standalone_schemas() {
     for path in &paths {
         let source = fs::read_to_string(path).expect("read schema artifact");
         if !is_plain_schema(&source) {
-            // `memory.yaml` (kind: schema-trigger) is not a standalone schema.
+            // A `kind: schema-trigger` file is not a standalone schema.
             continue;
         }
         let document = parse_standalone_schema_document(&source, path)

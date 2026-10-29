@@ -21,7 +21,7 @@
 //! ## Coverage #4 — blocked-first-iteration edge case
 //!
 //! A looping document whose pre-flight fails on the first iteration routes to
-//! `blocked` → `finalize`, then with the default `fail_fast: true` exits
+//! `blocked` → `finalize`, then the failed pass exits
 //! **before** the loop gate (no `gate` marker, no iteration).
 //!
 //! ## Loop-path lifecycle wiring (Finding 5, fixed)

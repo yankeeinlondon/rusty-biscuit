@@ -1,5 +1,6 @@
 //! Request-scoped launch and repository evidence for Claudine invocations.
 
+use crate::diagnostics::DiagnosticSnapshotExt;
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
@@ -815,6 +816,7 @@ struct InvocationInner {
     hardware: OnceLock<Result<HardwareInfo, Arc<sniff::SniffError>>>,
     gpus: OnceLock<Vec<GpuInfo>>,
     work: InvocationWork,
+    trigger_findings: crate::composition::TriggerFindings,
 }
 
 /// Everything in an invocation that reads one document's environment.
@@ -1021,6 +1023,9 @@ impl InvocationContext {
     #[must_use]
     pub fn enter_document(&self, environment: DocumentEnvironment) -> Self {
         let launch = &self.inner.launch_document;
+        // `vars`, its copy for the snapshot, and the launch snapshot and
+        // file-resolution context, whose maps `with_env` then discards.
+        crate::note_work!(EnvironmentMapCopy, 4);
         let vars = environment.vars().clone();
         let document = DocumentScope {
             snapshot: launch.snapshot.clone().with_env(vars.clone()),
@@ -1254,12 +1259,19 @@ impl InvocationContext {
                 hardware: OnceLock::new(),
                 gpus: OnceLock::new(),
                 work,
+                trigger_findings: crate::composition::TriggerFindings::default(),
             }),
         })
     }
 
     pub fn launch_cwd(&self) -> &Path {
         &self.inner.launch_cwd
+    }
+
+    /// The schema triggers discovery skipped as invalid anywhere in this
+    /// invocation, shared by every document view, so each is shown once.
+    pub fn trigger_findings(&self) -> &crate::composition::TriggerFindings {
+        &self.inner.trigger_findings
     }
 
     pub fn home_dir(&self) -> Option<&Path> {

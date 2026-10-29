@@ -14,7 +14,7 @@
 ### Core Functions
 
 ```rust
-use biscuit_hash::{xx_hash, xx_hash_bytes, xx_hash_variant, HashVariant};
+use biscuit_hash::{xx_hash, xx_hash_bytes, xx_hash_variant, HashVariant, XxHasher};
 
 /// Direct hash of a string (XXH64)
 pub fn xx_hash(data: &str) -> u64;
@@ -24,7 +24,15 @@ pub fn xx_hash_bytes(data: &[u8]) -> u64;
 
 /// Hash with content normalization
 pub fn xx_hash_variant(data: &str, variants: Vec<HashVariant>) -> u64;
+
+/// Streaming XXH64: implements `std::hash::Hasher` and `std::fmt::Write`;
+/// any split of the same bytes digests like `xx_hash_bytes` of the whole
+pub struct XxHasher;
 ```
+
+Use `XxHasher` instead of `std::collections::hash_map::DefaultHasher` when
+fingerprinting content fed in pieces, or when streaming a `Debug`/`Display`
+rendering with `write!` so the text is never built.
 
 ### HashVariant Enum
 

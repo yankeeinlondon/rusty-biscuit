@@ -1,0 +1,15 @@
+# scenario: guarded-shell-null
+# doc: guarded-shell-null.md
+# given: invoked as `claudine compose --claude guarded-shell-null.md` from the directory holding the fixture documents
+# given: shell approval is only the template rule `template trace-shell start {{ string }}`, so the guarded shell runs as its template and reads `note` when it starts
+# given: the guard is true, then a `set` in the selected branch clears `note` before the shell
+# given: the reached shell fails with a missing-value evaluation error (`MissingValue`, `err.code` the generic `composition.failed`) before anything launches
+# given: the provider never launches
+event initialize
+event start
+state note=
+event failure
+err composition.failed
+event finalize
+err composition.failed
+exit 1

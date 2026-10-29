@@ -369,7 +369,7 @@ impl LedgerMut<'_> {
         &mut self,
         target: ResolvedProxyTarget,
     ) -> Result<HopApproval, HopRejection> {
-        if self.0.chain.len() >= MAX_PROXY_HOPS {
+        if crate::composition::lifecycle::policy::proxy_budget_exhausted(self.0.chain.len()) {
             return Err(HopRejection::BudgetExhausted);
         }
         if !proxy_handoff_allowed(&self.0.chain, target.path()) {

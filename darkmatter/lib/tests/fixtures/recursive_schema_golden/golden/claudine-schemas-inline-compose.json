@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "prompt": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "the prompt sent to the agent; inline-compose requires it once caller overlays are applied"
+    },
+    "hash": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "description": "stored shorthand hash; managed by Darkmatter and Claudine's completion"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "enum": [
+                    "fm",
+                    "body",
+                    "simple",
+                    "structured",
+                    "detailed"
+                  ]
+                }
+              ],
+              "default": "simple",
+              "description": "hash resolution stored in longhand form"
+            },
+            "value": {
+              "description": "stored hash payload"
+            },
+            "ignored": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ],
+              "description": "extra frontmatter keys ignored during hash computation"
+            }
+          }
+        }
+      ]
+    },
+    "last_updated": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "format": "date"
+        }
+      ],
+      "description": "managed content-change date in YYYY-MM-DD form; stamped by Claudine's completion"
+    }
+  }
+}

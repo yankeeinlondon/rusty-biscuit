@@ -1,0 +1,59 @@
+[
+  {
+    "at": "loop block key",
+    "hover": {
+      "contents": {
+        "kind": "markdown",
+        "value": "**`loop`**\n\nType: **object**\n\n\n\nrun the prompt repeatedly; beside `sequence:`, the sequence's loop"
+      },
+      "range": {
+        "start": {
+          "line": 123,
+          "character": 0
+        },
+        "end": {
+          "line": 123,
+          "character": 4
+        }
+      }
+    }
+  },
+  {
+    "at": "loop until expression",
+    "hover": {
+      "contents": {
+        "kind": "markdown",
+        "value": "**Expression**\n\n`phase >= total_phases`\n\nStatic value: `{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}` (from frontmatter `phase`)"
+      },
+      "range": {
+        "start": {
+          "line": 124,
+          "character": 12
+        },
+        "end": {
+          "line": 124,
+          "character": 33
+        }
+      }
+    }
+  },
+  {
+    "at": "break reason key",
+    "hover": {
+      "contents": {
+        "kind": "markdown",
+        "value": "**`reason`**\n\nType: **string**\n\nItem `loop.gate[0].then[3]` matches alternative 2 of 7:\n- **object** with `stop`, `skip`, `error`, `proxy`, `retry`, `resume`, `defer`, `break`, `prep`"
+      },
+      "range": {
+        "start": {
+          "line": 142,
+          "character": 20
+        },
+        "end": {
+          "line": 142,
+          "character": 26
+        }
+      }
+    }
+  }
+]

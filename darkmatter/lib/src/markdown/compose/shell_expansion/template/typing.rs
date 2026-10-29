@@ -2,19 +2,27 @@
 //! separate from the validator that checks each value at run time.
 //!
 //! Only a bare top-level property (`dir`, `fm.dir`) reads its declared type,
-//! from the owning document's `EffectiveSchema.simplified`. Every other
+//! from the owning document's `EffectiveSchema.simplified` through the shared
+//! declared layer. Every other
 //! expression, an undeclared name, a reserved root, and a document without a
 //! typed projection fall back to `string`, which accepts any present scalar.
+//!
+//! A hole is typed at its site's [`TypeScope`]: when an enclosing guard
+//! narrows the subject it reads, the narrowed type becomes the approval type
+//! and a [`HoleRefinement`] the value must also pass, beside the original
+//! validator.
 
-use crate::markdown::compose::expression::{Expr, FmPath, fm_namespace_path, parse, reserved_root_descriptors};
-use crate::markdown::schemas::completion::alternative_accepts;
+use crate::markdown::compose::expression::scope::{Declaration, VariableClass};
+use crate::markdown::compose::expression::{Expr, GuardOrigin, TypeScope, parse};
+use crate::markdown::schemas::completion::alternative_accepts_in;
+use crate::markdown::schemas::simplified::query::{reachable_definitions, resolved_alternatives};
 use crate::markdown::schemas::simplified::serialize_property_atom;
 use crate::markdown::schemas::{
-    Constraint, PropertyAtom, PropertyDef, SchemaArm, SimplifiedSchema, SimplifiedType, TypeExpr,
-    flattened_alternatives, is_string_like,
+    Constraint, DefinitionTable, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr, is_string_like,
 };
 use serde_json::Value;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 /// A placeholder's type: what an approval matches and what a value must pass.
 #[derive(Debug, Clone, PartialEq)]
@@ -22,6 +30,35 @@ pub struct HoleType {
     pub approval: ApprovalType,
     pub validator: HoleValidator,
     pub provenance: TypeProvenance,
+    /// The guard-narrowed type at the hole's site, when a guard narrowed it.
+    /// The approval type follows it, so a value is checked against it as
+    /// well as against [`validator`](Self::validator) before it fills.
+    pub refinement: Option<Box<HoleRefinement>>,
+}
+
+/// A hole's type as the guards enclosing its site narrowed it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HoleRefinement {
+    /// The non-null alternatives that remain.
+    pub definition: PropertyDef,
+    /// The guards that narrowed the declaration.
+    pub guards: Vec<GuardOrigin>,
+    /// The recursive definitions `definition` reaches, so a remaining
+    /// recursive alternative is judged by its body after the scope is gone.
+    pub definitions: DefinitionTable,
+}
+
+impl HoleRefinement {
+    /// Whether `value` is one of the remaining alternatives, constraints
+    /// included. Never coerces.
+    pub fn accepts(&self, value: &Value) -> bool {
+        definition_accepts(&self.definition, &self.definitions, value)
+    }
+
+    /// The narrowed type as written in a schema.
+    pub fn text(&self) -> String {
+        declaration_text(&self.definition)
+    }
 }
 
 /// The type a template approval records for a hole.
@@ -53,8 +90,13 @@ pub struct StringLikeType {
 pub enum HoleValidator {
     /// Any present scalar: string, number, or boolean.
     FallbackScalar,
-    /// The property's resolved declaration, constraints included.
-    Declared(Box<PropertyDef>),
+    /// The property's resolved declaration, constraints included, with the
+    /// recursive definitions it reaches: a validator is checked at fill time,
+    /// after the scope that typed it is gone, so it owns them.
+    Declared {
+        definition: Box<PropertyDef>,
+        definitions: Arc<DefinitionTable>,
+    },
 }
 
 /// Why a hole has the type it has.
@@ -62,8 +104,9 @@ pub enum HoleValidator {
 pub enum TypeProvenance {
     /// A bare top-level property with a declaration.
     BareProperty { name: String },
-    /// A bare property, but the document has no typed projection (a raw JSON
-    /// Schema, no schema, or a root union whose arms disagree on it).
+    /// A bare property whose projected type is `unknown`: the document has
+    /// no schema, or a root-union arm or raw JSON Schema layer leaves it
+    /// untyped.
     NoProjection,
     /// A bare property the schema does not declare.
     Undeclared,
@@ -160,16 +203,19 @@ impl HoleType {
             approval: ApprovalType::BroadString,
             validator: HoleValidator::FallbackScalar,
             provenance,
+            refinement: None,
         }
     }
 
     /// The type as the approval prompt shows it after the placeholder's name:
     /// the approval type, plus `(validated as …)` when the value is checked
-    /// against a declaration the approval type does not name.
+    /// against a type the approval type does not name: the guard refinement
+    /// when there is one, otherwise the declaration.
     ///
     /// ## Examples
     ///
     /// ```
+    /// use darkmatter::markdown::compose::expression::{DeclaredTypes, TypeScope};
     /// use darkmatter::markdown::compose::shell_expansion::template::project_hole;
     /// use darkmatter::markdown::schemas::{PropertyDef, SchemaShape, SimplifiedSchema};
     /// use darkmatter::markdown::schemas::simplified::grammar::parse_type_expr;
@@ -178,16 +224,24 @@ impl HoleType {
     /// let count = PropertyDef::Single(parse_type_expr("count", "number(min(1))").unwrap());
     /// shape.properties.insert("count".into(), count);
     /// let schema = SimplifiedSchema::Single(shape);
-    /// let hole = project_hole("count", Some(&schema), &[]);
+    /// let declared = DeclaredTypes::new(Some(&schema));
+    /// let hole = project_hole("count", &TypeScope::unguarded(&declared));
     /// assert_eq!(hole.display_type(), "string (validated as number(min(1)))");
     /// ```
     pub fn display_type(&self) -> String {
         let approval = self.approval.text().to_string();
-        match (&self.approval, &self.validator) {
-            (ApprovalType::BroadString, HoleValidator::Declared(def)) if !is_plain_string(def) => {
-                format!("{approval} (validated as {})", declaration_text(def))
-            }
-            _ => approval,
+        if self.approval != ApprovalType::BroadString {
+            return approval;
+        }
+        let validated = match (&self.refinement, &self.validator) {
+            (Some(refinement), _) => &refinement.definition,
+            (None, HoleValidator::Declared { definition, .. }) => definition.as_ref(),
+            (None, HoleValidator::FallbackScalar) => return approval,
+        };
+        if is_plain_string(validated) {
+            approval
+        } else {
+            format!("{approval} (validated as {})", declaration_text(validated))
         }
     }
 }
@@ -196,103 +250,103 @@ impl HoleValidator {
     /// Whether `value` passes this validator. Never coerces: a number fails an
     /// `alphanumeric` declaration. Ordinary constraints (`min`, `pattern`, …)
     /// are enforced. Null, arrays, and objects never pass the fallback.
+    /// A declaration passes a value one of its non-array alternatives accepts,
+    /// a recursive alternative judged by its definition's body.
     pub fn accepts(&self, value: &Value) -> bool {
         match self {
             Self::FallbackScalar => matches!(value, Value::String(_) | Value::Number(_) | Value::Bool(_)),
-            Self::Declared(def) => flattened_alternatives(def)
-                .into_iter()
-                .filter(|alternative| !alternative.is_array)
-                .any(|alternative| alternative_accepts(alternative.atom, value)),
+            Self::Declared { definition, definitions } => definition_accepts(definition, definitions, value),
         }
     }
 }
 
-/// Types the placeholder expression `expression` for a command owned by a
-/// document whose schema projection is `schema`.
+/// Whether a non-array alternative of `def` accepts `value`, a reference
+/// replaced by its body's alternatives. A reference `definitions` lacks
+/// accepts nothing.
+fn definition_accepts(def: &PropertyDef, definitions: &DefinitionTable, value: &Value) -> bool {
+    resolved_alternatives(def, definitions)
+        .into_iter()
+        .filter(|alternative| !alternative.is_array)
+        .any(|alternative| alternative_accepts_in(alternative.atom, value, definitions))
+}
+
+/// The definitions `def` reaches in `definitions`, transitively, so a
+/// validator can own them. An alternative reaching a missing definition
+/// contributes nothing and so accepts nothing.
+fn reached_definitions(def: &PropertyDef, definitions: &DefinitionTable) -> DefinitionTable {
+    let atoms = match def {
+        PropertyDef::Single(atom) => std::slice::from_ref(atom),
+        PropertyDef::Union(atoms) => atoms.as_slice(),
+    };
+    let mut reached = DefinitionTable::default();
+    for table in atoms.iter().filter_map(|atom| reachable_definitions(atom, definitions)) {
+        for (key, definition) in table.iter() {
+            reached.insert(key.clone(), definition.body.clone(), definition.origin.clone());
+        }
+    }
+    reached
+}
+
+/// Types the placeholder expression `expression` at a site whose types are
+/// `scope`: the declaration from the owner's shared declared layer, narrowed
+/// by every guard `scope` carries.
 ///
-/// `host_globals` names the roots a host injects (Claudine's `loop`, `outputs`,
-/// …); a bare read of one is a reserved-root read, not a property.
-pub fn project_hole(expression: &str, schema: Option<&SimplifiedSchema>, host_globals: &[&str]) -> HoleType {
-    let Some(name) = bare_property(expression, host_globals) else {
-        let provenance = if reads_reserved_root(expression, host_globals) {
-            TypeProvenance::ReservedRoot
-        } else {
-            TypeProvenance::NotBareProperty
-        };
-        return HoleType::fallback(provenance);
+/// The declared layer's host roots (Claudine's `loop`, `outputs`, …) make a
+/// bare read of one a reserved-root read, not a property. The broad `string`
+/// approval applies after the scope lookup: a guard that narrows a subject
+/// to a non-string type still approves as `{{ string }}`, and the narrowed
+/// type travels as the hole's [`HoleRefinement`].
+pub fn project_hole(expression: &str, scope: &TypeScope<'_>) -> HoleType {
+    let Ok(expr) = parse(expression) else {
+        return HoleType::fallback(TypeProvenance::NotBareProperty);
     };
-    let Some(schema) = schema else {
-        return HoleType::fallback(TypeProvenance::NoProjection);
+    project_hole_expr(&expr, scope)
+}
+
+/// [`project_hole`] for an expression already parsed.
+pub fn project_hole_expr(expr: &Expr, scope: &TypeScope<'_>) -> HoleType {
+    let mut hole = declared_hole(expr, scope);
+    if let Some(narrowed) = scope.type_of_expr(expr).filter(|ty| ty.is_refined())
+        && let Some(definition) = narrowed.narrowed_definition()
+    {
+        hole.approval = ApprovalType::for_declaration(&definition);
+        hole.refinement = Some(Box::new(HoleRefinement {
+            definitions: reached_definitions(&definition, scope.declared().definitions()),
+            definition,
+            guards: narrowed.refinements().to_vec(),
+        }));
+    }
+    hole
+}
+
+/// The hole type `expr` has before any guard.
+fn declared_hole(expr: &Expr, scope: &TypeScope<'_>) -> HoleType {
+    let declared = scope.declared();
+    let Expr::Variable(path) = expr else {
+        return HoleType::fallback(TypeProvenance::NotBareProperty);
     };
-    match declaration(schema, &name) {
+    let name = match declared.classify_variable(path) {
+        VariableClass::Document { key, rest: "" } => key,
+        VariableClass::Namespace { .. } | VariableClass::Host { .. } => {
+            return HoleType::fallback(TypeProvenance::ReservedRoot);
+        }
+        VariableClass::Document { .. } | VariableClass::WholeFrontmatter => {
+            return HoleType::fallback(TypeProvenance::NotBareProperty);
+        }
+    };
+    match declared.declaration(name) {
         Declaration::Found(def) => HoleType {
             approval: ApprovalType::for_declaration(&def),
-            validator: HoleValidator::Declared(Box::new(def)),
-            provenance: TypeProvenance::BareProperty { name },
+            validator: HoleValidator::Declared {
+                definitions: Arc::new(reached_definitions(&def, declared.definitions())),
+                definition: Box::new(def.into_owned()),
+            },
+            provenance: TypeProvenance::BareProperty { name: name.to_string() },
+            refinement: None,
         },
         Declaration::Undeclared => HoleType::fallback(TypeProvenance::Undeclared),
-        Declaration::Ambiguous => HoleType::fallback(TypeProvenance::NoProjection),
+        Declaration::NoProjection => HoleType::fallback(TypeProvenance::NoProjection),
     }
-}
-
-enum Declaration {
-    Found(PropertyDef),
-    Undeclared,
-    Ambiguous,
-}
-
-/// A root union contributes a declaration only when every arm that declares
-/// the property declares it identically.
-fn declaration(schema: &SimplifiedSchema, name: &str) -> Declaration {
-    match schema {
-        SimplifiedSchema::Single(shape) => shape
-            .properties
-            .get(name)
-            .cloned()
-            .map_or(Declaration::Undeclared, Declaration::Found),
-        SimplifiedSchema::Union(arms) => {
-            let mut found: Option<&PropertyDef> = None;
-            for arm in arms {
-                let SchemaArm::Inline(shape) = arm else {
-                    return Declaration::Ambiguous;
-                };
-                match (shape.properties.get(name), found) {
-                    (Some(def), Some(previous)) if def != previous => return Declaration::Ambiguous,
-                    (Some(def), _) => found = Some(def),
-                    (None, _) => {}
-                }
-            }
-            found.cloned().map_or(Declaration::Undeclared, Declaration::Found)
-        }
-    }
-}
-
-/// The property a bare top-level read names: `dir` or `fm.dir`.
-fn bare_property(expression: &str, host_globals: &[&str]) -> Option<String> {
-    let Ok(Expr::Variable(path)) = parse(expression) else {
-        return None;
-    };
-    let name = match fm_namespace_path(&path) {
-        Some(FmPath::Member(rest)) => rest,
-        Some(FmPath::Whole) => return None,
-        None if is_root_name(&path, host_globals) => return None,
-        None => path.as_str(),
-    };
-    (!name.contains('.')).then(|| name.to_string())
-}
-
-fn reads_reserved_root(expression: &str, host_globals: &[&str]) -> bool {
-    match parse(expression) {
-        Ok(Expr::Variable(path)) => {
-            let root = path.split('.').next().unwrap_or_default();
-            is_root_name(root, host_globals) && fm_namespace_path(&path).is_none()
-        }
-        _ => false,
-    }
-}
-
-fn is_root_name(name: &str, host_globals: &[&str]) -> bool {
-    host_globals.contains(&name) || reserved_root_descriptors().iter().any(|root| root.name == name)
 }
 
 fn is_plain_string(def: &PropertyDef) -> bool {

@@ -61,7 +61,7 @@ fn frontmatter_mutation_in_start_is_visible_to_later_events() {
     // Composed base frontmatter (the original value the harness would carry
     // immutably) and the shared live cell seeded from it.
     let base = map(json!({"status": "pending"}));
-    let live = std::sync::Mutex::new(base.clone());
+    let live = std::sync::Mutex::new(base.clone().into());
 
     let (dir, engine) = temp_engine();
     std::fs::write(dir.path().join("t.md"), "---\nstatus: pending\n---\nbody\n").unwrap();

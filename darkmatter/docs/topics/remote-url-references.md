@@ -41,7 +41,7 @@ Remote reads use the shared `biscuit-file` fetch primitive and its
 allowed before any request is issued.
 
 ```bash
-md compose doc.md --allow-host example.com
+md compose doc.md --allow host=example.com
 ```
 
 The CLI currently accepts exact host names. Library callers configure
@@ -59,7 +59,7 @@ transport cache when a cache root is configured. The store lives at
 documents are never persisted. A cache root never authorizes a host.
 
 ```bash
-md compose doc.md --allow-host example.com --cache-root .
+md compose doc.md --allow host=example.com --cache-root .
 ```
 
 Response `Cache-Control` outranks everything below: a `no-store` response is

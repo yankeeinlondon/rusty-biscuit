@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "code": {
+      "type": "string",
+      "x-darkmatter-suggest": [
+        "composition.invalid_file_reference",
+        "cap.plan_limit",
+        "timeout.step_silence"
+      ],
+      "description": "a stable dotted syntax that identifies the error",
+      "x-darkmatter-generated": true
+    },
+    "category": {
+      "enum": [
+        "composition",
+        "cap",
+        "timeout",
+        "provider",
+        "document",
+        "vcs",
+        "io",
+        "config",
+        "usage",
+        "runaway",
+        "auth",
+        "internal"
+      ],
+      "x-darkmatter-generated": true
+    },
+    "disposition": {
+      "enum": [
+        "transient",
+        "throttled",
+        "correctable",
+        "needs_input",
+        "unrecoverable"
+      ],
+      "x-darkmatter-generated": true
+    },
+    "severity": {
+      "enum": [
+        "info",
+        "warning",
+        "error"
+      ],
+      "x-darkmatter-generated": true
+    },
+    "origin": {
+      "enum": [
+        "provider",
+        "author",
+        "caller",
+        "environment",
+        "internal"
+      ],
+      "x-darkmatter-generated": true
+    },
+    "msg": {
+      "type": "string",
+      "x-darkmatter-generated": true
+    },
+    "is_transient": {
+      "type": "boolean",
+      "x-darkmatter-generated": true
+    }
+  }
+}

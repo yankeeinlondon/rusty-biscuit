@@ -347,8 +347,10 @@ fn a_missing_name_in_an_inline_schema_is_a_schema_definition_error_at_the_refere
     fixture.shutdown();
 }
 
+/// A block scalar is inside the source-aware grammar, so a reference written
+/// in one is ranged on its own name.
 #[test]
-fn a_block_scalar_reference_falls_back_to_the_property_entry() {
+fn a_block_scalar_reference_is_ranged_on_its_name() {
     let workspace = LspWorkspace::new();
     let text = "---\n$schema:\n  title: >-\n    nope\n---\n\nBody\n";
     let file = write(&workspace, "block.md", text);
@@ -360,8 +362,8 @@ fn a_block_scalar_reference_falls_back_to_the_property_entry() {
     assert_eq!(named.len(), 1, "{diagnostics:?}");
     assert_eq!(
         named[0]["range"],
-        range_of(text, ">-\n    nope\n", 0),
-        "the `title` value holds the reference: {:?}",
+        range_of(text, "nope", 0),
+        "the reference inside the block scalar: {:?}",
         named[0]
     );
     fixture.shutdown();
@@ -388,17 +390,31 @@ fn a_multi_hop_contradiction_names_the_reference_and_both_declarations() {
     assert_eq!(named.len(), 1, "{diagnostics:?}");
     assert_eq!(named[0]["range"], range_of(&document.text, "title_base", 0));
     assert!(named[0]["message"].as_str().unwrap().contains("contradictory"), "{:?}", named[0]);
-    let related: Vec<(Value, Value)> = named[0]["relatedInformation"]
+    let related: Vec<(Value, Value, Value)> = named[0]["relatedInformation"]
         .as_array()
         .expect("related declarations")
         .iter()
-        .map(|related| (related["location"]["uri"].clone(), related["location"]["range"].clone()))
+        .map(|related| {
+            (
+                related["location"]["uri"].clone(),
+                related["location"]["range"].clone(),
+                related["message"].clone(),
+            )
+        })
         .collect();
     assert_eq!(
         related,
         vec![
-            (json!(canonical_uri(&types.path)), range_of(&types.text, "min(10)", 0)),
-            (json!(document.uri), range_of(&document.text, "max(5)", 0)),
+            (
+                json!(canonical_uri(&types.path)),
+                range_of(&types.text, "min(10)", 0),
+                json!("`min(10)` is declared here"),
+            ),
+            (
+                json!(document.uri),
+                range_of(&document.text, "max(5)", 0),
+                json!("`max(5)` is declared here"),
+            ),
         ]
     );
     fixture.shutdown();
@@ -440,8 +456,25 @@ fn a_standalone_contradiction_and_a_mixed_cycle_are_schema_definition_errors() {
     let named = named_type_diagnostics(&diagnostics);
     assert_eq!(named.len(), 1, "{diagnostics:?}");
     let message = named[0]["message"].as_str().unwrap();
-    assert!(message.contains("import cycle"), "{message}");
-    assert!(message.contains("b -> a -> b"), "the chain through both spellings: {message}");
+    assert!(message.contains("never descends into a child value"), "{message}");
+    assert!(message.contains("b -> `a`") && message.contains("a -> `b`"), "both spellings: {message}");
+    // Ranged on the first reference of the cycle, the other one related.
+    let span = |needle: &str, skip: usize| {
+        let start = offset_of(&cycle.text, needle) + skip;
+        let (start_line, start_character) = position(&cycle.text, start);
+        let (end_line, end_character) = position(&cycle.text, start + 1);
+        json!({
+            "start": { "line": start_line, "character": start_character },
+            "end": { "line": end_line, "character": end_character },
+        })
+    };
+    assert_eq!(named[0]["range"], span("a@this", 0), "{:?}", named[0]);
+    assert_eq!(
+        named[0]["relatedInformation"][0]["location"],
+        json!({ "uri": canonical_uri(&cycle.path), "range": span("a: b", 3) }),
+        "{:?}",
+        named[0]
+    );
 
     fixture.shutdown();
 }
@@ -538,6 +571,38 @@ fn editing_an_imported_definition_refreshes_every_assistance_without_reopening()
         "restoring the definition clears the cached failure: {diagnostics:?}"
     );
 
+    fixture.shutdown();
+}
+
+/// A conflict reported through a referenced schema still watches the file
+/// of every participant, including one the document never names: fixing the
+/// far declaration clears the document's diagnostic without reopening it.
+#[test]
+fn a_wrapped_conflict_watches_every_participant_file() {
+    let workspace = LspWorkspace::new();
+    let types = write(&workspace, "types.yaml", "kind: schema\ntypes:\n  label: number(min(10))\n");
+    write(&workspace, "outer.yaml", "kind: schema\ntypes:\n  title: 'label(max(5))@./types.yaml'\n");
+    let document = write(&workspace, "doc.md", "---\n$schema: ./outer.yaml\ntitle: 3\n---\n\nBody\n");
+    let conflicts = |diagnostics: &[Value]| {
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["message"].as_str().is_some_and(|message| message.contains("contradictory")))
+            .count()
+    };
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(workspace.path()));
+    open(&fixture, &document);
+    let diagnostics = fixture.wait_for_diagnostics(&document.uri);
+    assert_eq!(conflicts(&diagnostics), 1, "{diagnostics:?}");
+
+    std::fs::write(&types.path, "kind: schema\ntypes:\n  label: number(min(1))\n").unwrap();
+    fixture.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({ "changes": [{ "uri": types.uri, "type": 2 }] }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(&document.uri);
+    assert_eq!(conflicts(&diagnostics), 0, "editing the far participant refreshes: {diagnostics:?}");
     fixture.shutdown();
 }
 
@@ -728,6 +793,39 @@ fn a_marker_before_the_array_suffix_prepares_and_a_value_constraint_there_is_rep
     assert!(message.contains("`max`") && message.contains("union-typed"), "{message}");
     let related = named[0]["relatedInformation"].as_array().expect("the definition");
     assert_eq!(related[0]["location"]["uri"], json!(canonical_uri(&types.path)));
+
+    fixture.shutdown();
+}
+
+/// An import target that is not YAML at all reports its YAML error, as a
+/// diagnostic and in hover on the reference, instead of reading as a file
+/// that exports nothing.
+#[test]
+fn a_reference_into_a_file_that_is_not_yaml_reports_the_yaml_error() {
+    let workspace = LspWorkspace::new();
+    write(&workspace, "types.yaml", "kind: schema\nkind: schema\ntypes:\n  shared: string\n");
+    let document = write(
+        &workspace,
+        "doc.md",
+        "---\n$schema:\n  count: 'shared@./types.yaml'\n---\n\nBody\n",
+    );
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(workspace.path()));
+    open(&fixture, &document);
+
+    let diagnostics = fixture.wait_for_diagnostics(&document.uri);
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("not valid YAML"))),
+        "the import target's YAML error is a diagnostic: {diagnostics:?}"
+    );
+
+    let hover = request_at(&mut fixture, "textDocument/hover", &document, offset_of(&document.text, "shared@"));
+    let markup = hover["contents"]["value"].as_str().unwrap_or_default();
+    assert!(markup.contains("not valid YAML"), "hover names why the target is unusable: {hover}");
+    assert!(markup.contains("duplicate entry"), "{markup}");
+    assert_eq!(hover["range"], range_of(&document.text, "shared", 0));
 
     fixture.shutdown();
 }

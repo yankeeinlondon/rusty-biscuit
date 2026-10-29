@@ -22,7 +22,7 @@
 //!
 //! ```
 //! use claudine::composition::CompositionError;
-//! use claudine::diagnostics::{DiagnosticSnapshot, RestoredDiagnostic};
+//! use claudine::diagnostics::{DiagnosticSnapshot, DiagnosticSnapshotExt, RestoredDiagnostic};
 //!
 //! let snapshot =
 //!     DiagnosticSnapshot::from_diagnostic(&CompositionError::FileNotFound("a.md".into()));
@@ -62,7 +62,7 @@ const UNKNOWN_CODE_FALLBACK: &str = "internal.bug";
 ///
 /// Carries the snapshot verbatim; the facet accessors read the catalog row for
 /// its `code` rather than re-parsing the owned facet strings, which is the
-/// same derivation [`DiagnosticSnapshot::from_code`] uses.
+/// same derivation [`DiagnosticSnapshot::from_code`](super::DiagnosticSnapshotExt::from_code) uses.
 #[derive(Debug)]
 pub struct RestoredDiagnostic {
     snapshot: DiagnosticSnapshot,

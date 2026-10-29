@@ -190,6 +190,34 @@ fn os_json_snapshot() {
     assert_sorted_json_snapshot!("os_json_summary", normalized_os_summary(&stdout));
 }
 
+/// JSON output keeps alphabetical keys at every depth, whether or not
+/// `serde_json/preserve_order` is unified into the build.
+#[test]
+fn json_output_keys_are_sorted_at_every_depth() {
+    fn assert_sorted(value: &Value, path: &str) {
+        match value {
+            Value::Object(map) => {
+                let keys: Vec<&String> = map.keys().collect();
+                let mut sorted = keys.clone();
+                sorted.sort();
+                assert_eq!(keys, sorted, "keys at `{path}` are not sorted");
+                for (key, child) in map {
+                    assert_sorted(child, &format!("{path}/{key}"));
+                }
+            }
+            Value::Array(items) => {
+                for (index, child) in items.iter().enumerate() {
+                    assert_sorted(child, &format!("{path}/{index}"));
+                }
+            }
+            _ => {}
+        }
+    }
+    let stdout = run_stdout(&["os", "--json"]);
+    let json: Value = serde_json::from_str(&stdout).expect("valid JSON");
+    assert_sorted(&json, "");
+}
+
 // ============================================================================
 // Phase 8 — monorepo topology CLI snapshots
 // ============================================================================

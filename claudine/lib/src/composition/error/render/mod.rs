@@ -46,6 +46,7 @@ impl BlockError for CompositionError {
             // Lifecycle authoring / evaluation family.
             CompositionError::LifecycleInvalid { .. }
             | CompositionError::LifecycleNestedSpanInLiteral { .. }
+            | CompositionError::LifecycleCallRejected { .. }
             | CompositionError::LifecycleEvaluationError { .. }
             | CompositionError::RemovedValidationKey { .. }
             | CompositionError::RemovedGrammar { .. }
@@ -62,6 +63,7 @@ impl BlockError for CompositionError {
             | CompositionError::LifecycleWrongArity { .. }
             | CompositionError::LifecycleShortFormRemoved { .. }
             | CompositionError::LifecycleActionPlacement { .. }
+            | CompositionError::LifecycleRenamedEvent { .. }
             | CompositionError::LifecycleMultipleLifecycleActions { .. }
             | CompositionError::LifecycleActionOrder { .. }
             | CompositionError::LifecycleInvalidArgs { .. }
@@ -452,6 +454,7 @@ impl Diagnostic for CompositionError {
             | CompositionError::LifecycleSayConflict(_)
             | CompositionError::LifecycleUnknownEffect(..)
             | CompositionError::LifecycleNestedSpanInLiteral { .. }
+            | CompositionError::LifecycleCallRejected { .. }
             | CompositionError::LifecycleStackInvalidShape { .. }
             | CompositionError::LifecycleWhenExpressionInvalid { .. }
             | CompositionError::LifecycleActionInvalidShortForm { .. }
@@ -459,6 +462,7 @@ impl Diagnostic for CompositionError {
             | CompositionError::LifecycleUnknownVerb { .. }
             | CompositionError::LifecycleWrongArity { .. }
             | CompositionError::LifecycleActionPlacement { .. }
+            | CompositionError::LifecycleRenamedEvent { .. }
             | CompositionError::LifecycleActionOrder { .. }
             | CompositionError::LifecycleMultipleLifecycleActions { .. }
             | CompositionError::LifecycleInvalidArgs { .. }
@@ -775,6 +779,12 @@ impl Diagnostic for CompositionError {
                 base["property"] = json!(property);
                 base["message"] = json!(format!("action `{action}` is not valid here"));
             }
+            CompositionError::LifecycleRenamedEvent {
+                authored, replacement, ..
+            } => {
+                base["property"] = json!(authored);
+                base["message"] = json!(format!("this host names the event `{replacement}`"));
+            }
             CompositionError::LifecycleErrNotAvailable {
                 property, event, ..
             } => {
@@ -867,6 +877,7 @@ impl Diagnostic for CompositionError {
             CompositionError::LifecycleSayConflict(property)
             | CompositionError::LifecycleUnknownEffect(property, _)
             | CompositionError::LifecycleNestedSpanInLiteral { property, .. }
+            | CompositionError::LifecycleCallRejected { property, .. }
             // These two cardinality errors carry no dedicated `message` field,
             // so synthesize one from the `#[error]` rendering like the other
             // message-less lifecycle variants above.

@@ -1,0 +1,8 @@
+# scenario: retry-in-initialize-root-sequence
+# doc: retry-in-initialize-root-sequence.md
+# given: invoked as `claudine sequence --claude --yolo retry-in-initialize-root-sequence.md` from the directory holding the fixture documents
+# given: the root sequence's initialize returns retry with one extra attempt
+# given: the retry raises LifecycleSetupPhaseRecoveryUnsupported (event initialize, action retry) and ends the run with no catch event and no finalize
+# given: no task runs and no provider launches
+event seq:initialize
+exit 1

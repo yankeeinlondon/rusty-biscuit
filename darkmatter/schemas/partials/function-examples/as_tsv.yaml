@@ -1,0 +1,5 @@
+kind: example
+invocation: 'as_tsv(["a", "b", "c"])'
+returns: "a\tb\tc"
+description: |-
+    `as_tsv` joins a list into tab-separated text: one row of columns.

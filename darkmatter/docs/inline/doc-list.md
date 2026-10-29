@@ -1,10 +1,12 @@
 ---
 status: future
-kind: canonical
+kind: canonical-documentation
 type: compose
 subtype: inline
 ---
 # The `doc-list` Directive
+
+This directive is planned; the syntax below describes its intended behavior.
 
 The `doc-list` directive allows you add a real-time query to identify documents in your repo (or file tree if not in a repo).
 

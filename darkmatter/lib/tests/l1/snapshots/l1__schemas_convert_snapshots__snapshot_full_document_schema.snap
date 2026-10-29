@@ -3,6 +3,7 @@ source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: convert_yaml(yaml)
 ---
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": true,
   "properties": {
@@ -105,6 +106,5 @@ expression: convert_yaml(yaml)
   "required": [
     "title",
     "slug"
-  ],
-  "$schema": "https://json-schema.org/draft/2020-12/schema"
+  ]
 }

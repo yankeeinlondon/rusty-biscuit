@@ -23,8 +23,8 @@
 //!   [`ExpressionError::FileReference`].
 //! - An unrecognized function name is [`ExpressionError::UnknownFunction`] — the
 //!   sole authoring-fatal variant in lenient mode.
-//! - Wrong argument count / type are [`ExpressionError::Arity`] /
-//!   [`ExpressionError::ArgType`].
+//! - A call that does not bind to its declared signatures, or a handler result
+//!   that breaks its return type, is [`ExpressionError::Call`].
 //! - The recursive-descent parser stays string-typed behind
 //!   [`ExpressionError::Parse`].
 //! - The long tail of pure builtins not yet individually classified is carried
@@ -200,38 +200,6 @@ impl ProviderFailureKind {
     }
 }
 
-/// The expected argument count for an [`ExpressionError::Arity`] error.
-///
-/// Models the three arity shapes the builtins express today: an exact count
-/// (`"requires 1 argument"`), an open lower bound (`"requires at least 1
-/// argument"`), and an inclusive range (`"requires 1 or 2 arguments"`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ArityBound {
-    /// Exactly `n` arguments.
-    Exact(usize),
-    /// At least `n` arguments.
-    AtLeast(usize),
-    /// Between `min` and `max` arguments, inclusive.
-    Range(usize, usize),
-}
-
-impl std::fmt::Display for ArityBound {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fn plural(n: usize) -> &'static str {
-            if n == 1 {
-                "argument"
-            } else {
-                "arguments"
-            }
-        }
-        match self {
-            ArityBound::Exact(n) => write!(f, "{n} {}", plural(*n)),
-            ArityBound::AtLeast(n) => write!(f, "at least {n} {}", plural(*n)),
-            ArityBound::Range(min, max) => write!(f, "{min} or {max} arguments"),
-        }
-    }
-}
-
 /// A typed expression-evaluation error (Layer A: the *what*).
 ///
 /// Flat by design (§3): the where (frontmatter key vs body, on-disk vs
@@ -262,30 +230,6 @@ pub enum ExpressionError {
     UnknownFunction {
         /// The unrecognized function name.
         name: String,
-    },
-
-    /// A builtin was called with the wrong number of arguments.
-    #[error("{function}() requires {expected}, got {actual}")]
-    Arity {
-        /// The builtin's name.
-        function: &'static str,
-        /// The argument count the builtin expects.
-        expected: ArityBound,
-        /// The argument count actually supplied.
-        actual: usize,
-    },
-
-    /// A builtin argument had the wrong type.
-    #[error("{function}() argument {index}: expected {expected}, got {actual_type}")]
-    ArgType {
-        /// The builtin's name.
-        function: &'static str,
-        /// The zero-based index of the rejected argument.
-        index: usize,
-        /// The expected type domain (`"numeric"`, `"string"`, `"array"`).
-        expected: &'static str,
-        /// The type actually supplied.
-        actual_type: &'static str,
     },
 
     /// A parse failure. The recursive-descent parser stays string-typed (§4); a
@@ -347,11 +291,11 @@ pub enum ExpressionError {
     },
 
     /// A call that breaks a function's specified contract where the
-    /// specification requires a compose error: an argument outside the
-    /// documented domain (`recent_commits(0)`), a name outside a closed set, or
-    /// a required effect the host cannot perform. Unlike [`Other`](Self::Other)
-    /// and [`ArgType`](Self::ArgType), it is never demoted to a warning or
-    /// replaced by a fallback value on any surface.
+    /// specification requires a compose error and the declared signature
+    /// cannot express the rule (an argument out of a domain the type does
+    /// not bound, or a required effect the host cannot perform). Unlike
+    /// [`Other`](Self::Other) and a [`Call`](Self::Call) type error, it is never
+    /// demoted to a warning or replaced by a fallback value on any surface.
     #[error("{function}(): {message}")]
     ContractViolation {
         /// The function's canonical name.
@@ -420,6 +364,19 @@ pub enum ExpressionError {
         /// The full unresolvable path, root included.
         path: String,
     },
+
+    /// A function call that did not bind to any of the function's declared
+    /// signatures (type, arity, or ambiguous overload), or a handler result
+    /// that breaks its declared return type (implementation contract). The
+    /// handler is never entered for a call that did not bind.
+    #[error("{0}")]
+    Call(Box<super::call_binding::CallBindingError>),
+
+    /// A call the design-time check proves wrong (category 5), found before
+    /// any expression of the document was evaluated. Always fatal: the
+    /// document is rejected whichever branch the call is in.
+    #[error("{}", .0.rejection_message())]
+    CallCheck(Box<super::call_check::CallCheck>),
 
     /// A binding failure: a read of a global the host declared unavailable in
     /// this scope, or an invalid host registration. Never resolved by falling
@@ -523,6 +480,14 @@ impl ExpressionError {
     /// - [`Binding`] — an unavailable global must never render as an empty
     ///   value or a same-named document property.
     ///
+    /// - [`Call`] of kind `ImplementationContract` — a handler returned a value
+    ///   its declared return type rejects, a Darkmatter defect. A call that does
+    ///   not bind (type, arity, ambiguous overload) is not fatal here, like the
+    ///   arity and arg-type errors it replaces.
+    ///
+    /// - [`CallCheck`] — a call the design-time check proves wrong rejects the
+    ///   document before evaluation, so no lenient surface may keep it.
+    ///
     /// Every other variant (arity, arg-type, parse, arithmetic, generic
     /// [`Other`], …) is demoted to a `ComposeWarning` in lenient body
     /// interpolation. [`RemoteNotEnabled`] is
@@ -540,6 +505,8 @@ impl ExpressionError {
     /// [`ReservedRootPathUnknown`]: ExpressionError::ReservedRootPathUnknown
     /// [`MalformedLiteralToken`]: ExpressionError::MalformedLiteralToken
     /// [`Binding`]: ExpressionError::Binding
+    /// [`Call`]: ExpressionError::Call
+    /// [`CallCheck`]: ExpressionError::CallCheck
     /// [`Other`]: ExpressionError::Other
     /// [`Malformed`]: FileRefFailure::Malformed
     /// [`NotFound`]: FileRefFailure::NotFound
@@ -554,6 +521,12 @@ impl ExpressionError {
             ExpressionError::ReservedRootPathUnknown { .. } => true,
             ExpressionError::MalformedLiteralToken(_) => true,
             ExpressionError::Binding(_) => true,
+            ExpressionError::CallCheck(_) => true,
+            // A broken return contract is a Darkmatter defect; a call that
+            // does not bind keeps the old arity/arg-type severity.
+            ExpressionError::Call(error) => {
+                error.kind() == super::call_binding::CallErrorKind::ImplementationContract
+            }
             ExpressionError::ContextNotCaptured { .. }
             | ExpressionError::FunctionContextNotCaptured { .. }
             | ExpressionError::ContextProjectionInvariant { .. }
@@ -738,27 +711,6 @@ mod tests {
         }
 
         #[test]
-        fn arity_is_not_authoring_fatal() {
-            let err = ExpressionError::Arity {
-                function: "length",
-                expected: ArityBound::Exact(1),
-                actual: 0,
-            };
-            assert!(!err.is_authoring_fatal());
-        }
-
-        #[test]
-        fn arg_type_is_not_authoring_fatal() {
-            let err = ExpressionError::ArgType {
-                function: "min",
-                index: 0,
-                expected: "numeric",
-                actual_type: "string",
-            };
-            assert!(!err.is_authoring_fatal());
-        }
-
-        #[test]
         fn parse_is_not_authoring_fatal() {
             let err = ExpressionError::Parse("unexpected token".to_string());
             assert!(!err.is_authoring_fatal());
@@ -847,41 +799,6 @@ mod tests {
                 name: "unknown_fn".to_string(),
             };
             assert_eq!(err.to_string(), "Unknown function: unknown_fn");
-        }
-
-        #[test]
-        fn arity_display_contains_requires() {
-            let exact = ExpressionError::Arity {
-                function: "length",
-                expected: ArityBound::Exact(1),
-                actual: 0,
-            };
-            assert_eq!(exact.to_string(), "length() requires 1 argument, got 0");
-
-            let at_least = ExpressionError::Arity {
-                function: "min",
-                expected: ArityBound::AtLeast(1),
-                actual: 0,
-            };
-            assert!(at_least.to_string().contains("requires at least 1 argument"));
-
-            let range = ExpressionError::Arity {
-                function: "number",
-                expected: ArityBound::Range(1, 2),
-                actual: 0,
-            };
-            assert!(range.to_string().contains("requires 1 or 2 arguments"));
-        }
-
-        #[test]
-        fn arg_type_display_names_domain() {
-            let err = ExpressionError::ArgType {
-                function: "min",
-                index: 0,
-                expected: "numeric",
-                actual_type: "string",
-            };
-            assert!(err.to_string().contains("numeric"), "{err}");
         }
 
         #[test]

@@ -1,0 +1,17 @@
+# scenario: retry-exhausted
+# doc: retry-exhausted.md
+# given: invoked as `claudine compose --claude retry-exhausted.md` from the directory holding the fixture documents
+# given: every launch exits 1 with no result
+# given: failure returns retry with one extra attempt; the second failure finds the budget spent
+event initialize
+event start
+work fresh 1
+event failure
+err provider.exited
+event start
+work fresh 1
+event failure
+err provider.exited
+event finalize
+err provider.exited
+exit 1

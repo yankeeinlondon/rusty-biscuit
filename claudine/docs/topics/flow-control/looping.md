@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Composition Looping
 
 The idea of a "loop" is a fundamental [flow control](./flow-control.md) primitive. In Claudine we support _looping_ for Markdown (and YAML) authors with the `loop` frontmatter property. This property serves as both a [lifecycle event](./lifecycle.md) while also acting as a [flow control](./flow-control.md) device.
@@ -255,7 +259,7 @@ In addition to the _mutation operations_ above, which change real state, the loo
 | `loop.last_output`    | text, array, or dictionary | The result of a pass: a document's captured stdout, a sequence's array of that pass's child results, a group's dictionary of leg results. In the body and in `start`: the **previous** pass's (`""`, `[]`, or `{}` on pass 1). In the pass's terminal event and `finalize`, the gate, the condition, and actions: the pass that **just finished**. |
 | `loop.last_exit_code` | number  | **Process exit code** of a prompt run (Unix-style: `0` = success, non-zero = failure), with the same timing as `loop.last_output`. `0` before any pass. **Narrow utility — read the note below before using.** |
 
-Read them in any of three spellings: dotted (`loop.count`), bracketed (`loop['count']`), or bare `loop` for the whole object. They can be used in the body, in compose-time frontmatter values, in your `while`/`until` expression, in your mutation operations, in the `start`, `success`, `failure`, and `finalize` lifecycle events of an iteration, and in the `loop:` block's own gate concerns.
+Read them in any of three spellings: dotted (`loop.count`), bracketed (`loop['count']`), or bare `loop` for the whole object. Wherever you read them (the condition, a lifecycle event, the body, or a frontmatter value), a dotted read copies only that one value. So `loop.count` stays cheap however large `loop.last_output` is. Bare `loop` and the bracketed spelling build the whole object, `loop.last_output` included, at most once per lifecycle evaluation or per composition. Each evaluation reads the current pass's values (the condition reads the pass that just finished); nothing is carried over from an earlier one. They can be used in the body, in compose-time frontmatter values, in your `while`/`until` expression, in your mutation operations, in the `start`, `success`, `failure`, and `finalize` lifecycle events of an iteration, and in the `loop:` block's own gate concerns.
 
 ```md
 ---
@@ -479,7 +483,8 @@ A loop has no fail-fast switch (see [Frontmatter shape](#frontmatter-shape)), an
 | An `error` in `success` that nothing recovers | The loop ends; the error names the pass and the reason. |
 | The pass cannot complete (for example, a refused `proxy`: missing target, cycle, hop limit) | The loop ends with that error, reported once. |
 | An explicit `error` in the gate | The loop owner fails with `LifecycleLoopGateFailed`, naming the pass; the condition is not read. |
-| The condition cannot be parsed or evaluated, or an action fails | The loop owner fails with `LoopEvaluationFailed`, naming the `loop:` key and the pass; nothing of the action is committed. |
+| The condition cannot be parsed or evaluated, or an action cannot be staged | The loop owner fails with `LoopEvaluationFailed`, naming the `loop:` key and the pass; nothing of the action is committed. |
+| A container action is refused when writing runtime state | `LoopActionWriteRefused` names the action and the pass; the staged writes are not committed. |
 
 To keep repeating past a failure, recover it in the pass's own `failure` event (`retry`), and to tolerate a group leg's failure, use the group's `fail_fast: false`.
 

@@ -1155,8 +1155,7 @@ fn decode_markdown_metadata(value: &str) -> Option<LinkMarkdownMetadataPackage> 
 }
 
 fn generate_popover_id(url: &str, display: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = biscuit_hash::XxHasher::new();
     url.hash(&mut hasher);
     display.hash(&mut hasher);
     format!("popover-{:x}", hasher.finish())
@@ -1223,6 +1222,15 @@ mod tests {
     use super::*;
     use crate::render::stylesheet::{CssSizing, CssSizingProp};
     use serial_test::serial;
+
+    #[test]
+    fn popover_ids_are_stable_and_keep_url_and_display_apart() {
+        let id = generate_popover_id("https://a.example", "docs");
+        assert_eq!(id, generate_popover_id("https://a.example", "docs"));
+        assert!(id.starts_with("popover-"), "{id}");
+        assert_ne!(generate_popover_id("ab", "c"), generate_popover_id("a", "bc"));
+        assert_ne!(id, generate_popover_id("https://a.example", "other"));
+    }
 
     struct ScopedEnv {
         key: String,

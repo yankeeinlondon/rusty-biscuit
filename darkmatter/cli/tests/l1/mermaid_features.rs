@@ -56,7 +56,7 @@ fn page_for(args: &[&str], doc: &str) -> (darkmatter::layout::DarkmatterPage, Ma
     // A default-layout page detects color from the process, not from `term`,
     // unless its depth is set: pin it so `NO_COLOR` or `TERM=dumb` cannot
     // strip the highlighting these tests assert.
-    let page = terminal_page(&md, None, &cli, &term, &dispatched_features(&cli))
+    let page = terminal_page(&md, None, &cli, &term, false, &dispatched_features(&cli))
         .expect("terminal page")
         .with_color_depth(ColorDepth::TrueColor);
     (page, md)

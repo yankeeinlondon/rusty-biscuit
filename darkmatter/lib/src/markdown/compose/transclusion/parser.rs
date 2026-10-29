@@ -376,11 +376,13 @@ fn format_raw_for_error(raw: &str, was_quoted: bool) -> String {
     }
 }
 
-/// Parses `raw` as a JSON5 value, returning the underlying JSON value.
+/// Parses `raw` as a JSON5 value, returning the underlying JSON value. A
+/// non-finite number (`Infinity`, `NaN`, `1e400`) is an error, never `null`.
 fn parse_json5_value(raw: &str) -> Result<Value, String> {
-    biscuit_file::Json5::from_str(raw)
-        .map(|j| j.value().clone())
-        .map_err(|e| e.to_string())
+    let json5 = biscuit_file::Json5::from_str(raw).map_err(|e| e.to_string())?;
+    crate::markdown::numeric::reject_non_finite_json5(&json5)
+        .map_err(|reason| format!("a number is {reason}"))?;
+    Ok(json5.value().clone())
 }
 
 fn apply_option(
@@ -626,6 +628,15 @@ mod tests {
         assert_eq!(props[2], ("meta", serde_json::json!({"x": 1})));
         assert_eq!(props[3], ("x", Value::Null));
         assert_eq!(props[4], ("ok", Value::Bool(true)));
+    }
+
+    #[test]
+    fn set_property_non_finite_number_is_an_error_not_null() {
+        for value in ["Infinity", "NaN", "1e400"] {
+            let content = format!("::file ./foo.md set.n={value}\n");
+            let error = parse_directives(&content, dummy_ctx(&content)).expect_err(value);
+            assert!(error.to_string().contains("a number is not finite"), "{error}");
+        }
     }
 
     #[test]

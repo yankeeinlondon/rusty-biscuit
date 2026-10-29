@@ -27,15 +27,15 @@ use crate::providers::frontmatter::ExpressionValue;
 
 /// The static Claudine lifecycle layout DMLS mirrors (see the module docs).
 ///
-/// Paths are the authored YAML paths Claudine's parser names
+/// Paths are the authored YAML paths the lifecycle parser names
 /// (`failure[0].else[1].shell.command`): a stack is a list of items or a
 /// dictionary of verbs, an item may guard `then`/`else` bodies that are stacks
 /// again, and `loop:` holds either loose verbs or a `gate:` list.
 pub(crate) mod lifecycle {
     use crate::overlay::FmPathSegment::{self, Index, Key};
 
-    /// The seven top-level frontmatter keys holding lifecycle stacks, in
-    /// Claudine's `LifecycleSignal::ALL` order.
+    /// The seven top-level frontmatter keys Claudine's schema authors as
+    /// lifecycle stacks, in `LifecycleSignal::ALL` order.
     pub(crate) const EVENT_KEYS: [&str; 7] =
         ["initialize", "start", "success", "blocked", "failure", "finalize", "loop"];
 
@@ -43,8 +43,9 @@ pub(crate) mod lifecycle {
     /// verbs never carries `when`, `then`, or `else`.
     pub(crate) const STRUCTURAL_ITEM_KEYS: [&str; 4] = ["when", "then", "else", "no_error"];
 
-    /// The `loop:` keys Claudine's looping parser owns (its
-    /// `LOOP_ITERATION_KEYS`); every other key but `gate` is a loose verb.
+    /// The `loop:` keys Claudine's looping parser owns (Darkmatter's
+    /// `lifecycle::LOOP_ITERATION_KEYS`); every other key but `gate` is a
+    /// loose verb.
     pub(crate) const LOOP_ITERATION_KEYS: [&str; 7] =
         ["while", "until", "action", "actions", "max", "fail_fast", "on_rate_limit"];
 
@@ -102,6 +103,13 @@ pub(crate) mod lifecycle {
     /// `set`/`with` data included — other than a guard and a `no_error` flag.
     pub(crate) fn is_single_pass_value(path: &[FmPathSegment<'_>]) -> bool {
         classify(path) == Some(Surface::SinglePass)
+    }
+
+    /// Whether `rest`, a path below a stack's root key, is an item's `when`
+    /// guard at any nesting depth. The stack grammar is the same under every
+    /// host; which root keys hold stacks is the caller's question.
+    pub(crate) fn is_stack_predicate(rest: &[FmPathSegment<'_>]) -> bool {
+        stack(rest) == Some(Surface::Predicate)
     }
 
     /// Whether `path` is a lifecycle predicate: an item's `when` at any

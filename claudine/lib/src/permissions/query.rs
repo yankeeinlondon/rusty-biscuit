@@ -1136,14 +1136,19 @@ fn tokenize_command_words(raw: &str) -> Vec<String> {
     let mut chars = raw.chars().peekable();
     let mut in_single = false;
     let mut in_double = false;
+    // Whether the current word holds a quoted run: `""` and `''` are words
+    // even when empty, as in a shell, so an empty argument is never dropped.
+    let mut quoted = false;
 
     while let Some(ch) = chars.next() {
         match ch {
             '\'' if !in_double => {
                 in_single = !in_single;
+                quoted = true;
             }
             '"' if !in_single => {
                 in_double = !in_double;
+                quoted = true;
             }
             '\\' if !in_single => {
                 if let Some(next) = chars.next() {
@@ -1151,15 +1156,16 @@ fn tokenize_command_words(raw: &str) -> Vec<String> {
                 }
             }
             c if c.is_whitespace() && !in_single && !in_double => {
-                if !current.is_empty() {
+                if !current.is_empty() || quoted {
                     words.push(std::mem::take(&mut current));
+                    quoted = false;
                 }
             }
             _ => current.push(ch),
         }
     }
 
-    if !current.is_empty() {
+    if !current.is_empty() || quoted {
         words.push(current);
     }
 

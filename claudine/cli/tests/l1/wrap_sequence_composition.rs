@@ -5,6 +5,8 @@
 
 use std::fs;
 use crate::common;
+#[cfg(unix)]
+use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider, provider_info};
 use common::{CliProcessFixture, strip_ansi, write_executable};
 
 /// End-to-end: for every wrapped provider, verify that
@@ -19,35 +21,40 @@ use common::{CliProcessFixture, strip_ansi, write_executable};
 mod sequence_composition_dry_run_for_every_provider {
     use super::*;
 
-    /// The providers this regression guard covers, one test each.
-    const ROWS: [&str; 7] = ["claude", "codex", "gemini", "kimi", "opencode", "qwen", "goose"];
-
     macro_rules! provider_tests {
-        ($($test:ident => $slug:literal),* $(,)?) => {
-            $(#[test] fn $test() { assert_sequence_dry_run_composes($slug); })*
+        ($($test:ident => $provider:ident),* $(,)?) => {
+            $(#[test] fn $test() { assert_sequence_dry_run_composes(Provider::$provider); })*
 
+            /// A provider added to the compiled set must get its own test.
             #[test]
             fn every_row_has_a_listed_test() {
-                assert_eq!(ROWS, [$($slug),*]);
+                assert_eq!([$(Provider::$provider),*].as_slice(), PROVIDERS_DISPLAY_ORDER.as_slice());
             }
         };
     }
 
     provider_tests! {
-        claude => "claude",
-        codex => "codex",
-        gemini => "gemini",
-        kimi => "kimi",
-        opencode => "opencode",
-        qwen => "qwen",
-        goose => "goose",
+        claude => Claude,
+        codex => Codex,
+        gemini => Gemini,
+        goose => Goose,
+        kimi => KimiCode,
+        opencode => OpenCode,
+        qwen => QwenCode,
+        kilo => Kilo,
+        pi => Pi,
+        antigravity => Antigravity,
     }
 
-    fn assert_sequence_dry_run_composes(provider_slug: &str) {
+    fn assert_sequence_dry_run_composes(provider: Provider) {
+        let provider_slug = provider.as_slug();
         let fixture = CliProcessFixture::named("wrap-sequence-composition");
         fixture.seed_user_config();
 
-        write_executable(&fixture.bin_dir().join(provider_slug), "#!/bin/sh\nexit 0\n");
+        write_executable(
+            &fixture.bin_dir().join(provider_info(provider).binary),
+            "#!/bin/sh\nexit 0\n",
+        );
 
         let compose_file = fixture.cwd().join("compose.md");
         fs::write(

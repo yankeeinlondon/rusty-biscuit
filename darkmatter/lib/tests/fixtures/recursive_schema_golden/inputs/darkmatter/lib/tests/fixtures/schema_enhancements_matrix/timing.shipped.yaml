@@ -1,0 +1,8 @@
+# The `timing` type: durations the runtime observed. Every field is optional;
+# an unmeasured duration is null.
+kind: schema
+types:
+    timing:
+        document_ms: "number(integer; min(0); generated) -> Wall-clock duration of the current document's composition, in milliseconds, or null when not collected."
+        total_ms: "number(integer; min(0); generated) -> Wall-clock duration of the whole run so far, in milliseconds, or null when not captured."
+        step_ms: "number(integer; min(0); generated) -> Wall-clock duration of the current sequence step, in milliseconds; null outside a sequence or when not collected."

@@ -1,5 +1,6 @@
 //! lifecycle ordering harness-loop tests.
 
+use claudine::composition::LifecycleRunGuardExt;
 use super::*;
 
 #[test]

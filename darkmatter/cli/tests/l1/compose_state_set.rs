@@ -28,6 +28,20 @@ fn test_compose_state_requires_json_object() {
 }
 
 #[test]
+fn test_compose_non_finite_json5_number_is_an_error_not_null() {
+    for (flag, value) in [("--state", "{ n: Infinity }"), ("--set", "{ n: 1e400 }"), ("--set", "{ n: NaN }")] {
+        let fixture = CliProcessFixture::named("test_compose_non_finite_json5_number_is_an_error_not_null");
+        fixture
+            .command()
+            .args(["compose", "-", flag, value])
+            .write_stdin("# {{ n }}")
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("a number is not finite"));
+    }
+}
+
+#[test]
 fn test_compose_with_set_overwrites_frontmatter() {
     let fixture = CliProcessFixture::named("test_compose_with_set_overwrites_frontmatter");
     fixture
@@ -381,7 +395,7 @@ fn test_set_overlay_permissive_invalid_warns() {
         .command()
         .arg("compose")
         .arg(dir.path().join("parent.md"))
-        .arg("--allow-invalid-frontmatter-assignment")
+        .args(["--allow", "invalid-frontmatter-assignment"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Bob"))
@@ -428,7 +442,7 @@ fn test_set_overlay_permissive_reassigned_warns_and_rightmost_wins() {
         .command()
         .arg("compose")
         .arg(dir.path().join("parent.md"))
-        .arg("--allow-reassigned-frontmatter-property")
+        .args(["--allow", "reassigned-frontmatter-property"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Mary"))

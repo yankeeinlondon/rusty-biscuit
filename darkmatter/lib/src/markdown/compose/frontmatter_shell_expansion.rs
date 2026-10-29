@@ -456,6 +456,33 @@ fn parse_shell_suffixes(
     Ok(parsed)
 }
 
+/// The command inside a whole-value `$( … )` frontmatter value, located in
+/// the value that held it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthoredShellCommand<'a> {
+    /// The trimmed text between `$(` and its closing parenthesis.
+    pub command: &'a str,
+    /// Where `command` sits in the original, untrimmed value.
+    pub span: std::ops::Range<usize>,
+    /// Whether the command is a top-level ternary, which is never a template.
+    pub conditional: bool,
+}
+
+/// Extracts the authored command of a whole-value `$( … )` frontmatter value
+/// without parsing it as a template, or `None` when `value` is not such a
+/// value. Trailing suffixes are not validated here.
+pub fn authored_shell_command<'a>(value: &'a str, key: &str, ctx: &SourceContext) -> Option<AuthoredShellCommand<'a>> {
+    let rest = value.trim().strip_prefix("$(")?;
+    let close = find_unquoted_closing_paren(rest, key, ctx).ok()?;
+    let command = rest[..close].trim();
+    let start = command.as_ptr() as usize - value.as_ptr() as usize;
+    Some(AuthoredShellCommand {
+        command,
+        span: start..start + command.len(),
+        conditional: split_top_level_ternary(command).is_some(),
+    })
+}
+
 /// The authored command inside a whole-value `$( … )` frontmatter value,
 /// parsed as a template, or `None` when `value` is not such a value.
 ///
@@ -470,15 +497,13 @@ pub fn authored_shell_template(
         crate::markdown::compose::shell_expansion::template::TemplateGrammarError>,
 )> {
     use crate::markdown::compose::shell_expansion::template::{TemplateGrammarError, parse_authored};
-    let rest = value.trim().strip_prefix("$(")?;
-    let close = find_unquoted_closing_paren(rest, key, ctx).ok()?;
-    let inner = rest[..close].trim();
-    let template = if split_top_level_ternary(inner).is_some() {
+    let authored = authored_shell_command(value, key, ctx)?;
+    let template = if authored.conditional {
         Err(TemplateGrammarError::Conditional)
     } else {
-        parse_authored(inner)
+        parse_authored(authored.command)
     };
-    Some((inner.to_string(), template))
+    Some((authored.command.to_string(), template))
 }
 
 /// Parses a single frontmatter string value for shell expression.
@@ -1315,10 +1340,10 @@ fn unparsed_template(
 }
 
 /// What frontmatter shell expansion needs to run a `$( … )` value as a
-/// template: the document's schema projection, which types its placeholders,
+/// template: the document's effective schema, which types its placeholders,
 /// and the authored document, for diagnostics that must not show a value.
 pub(crate) struct FrontmatterTemplates {
-    pub schema: Option<crate::markdown::schemas::SimplifiedSchema>,
+    pub effective: Option<crate::markdown::schemas::EffectiveSchema>,
     pub ctx: SourceContext,
 }
 
@@ -1389,7 +1414,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
             .with_resolution_context(Some(resolution_context.clone()))
     });
     let hole_evaluator = hole_state.as_ref().map(crate::markdown::compose::shell_expansion::template::LookupEvaluator::new);
-    let scope = templates.map(|templates| SiteScope::new(options, templates.schema.clone()));
+    let scope = templates.map(|templates| SiteScope::new(options, templates.effective.clone()));
 
     for (index, candidate) in candidates.iter().enumerate() {
         let site = match (templates, &hole_evaluator, &scope) {
@@ -1857,7 +1882,9 @@ fn template_site<'e>(
         key: candidate.key.clone(),
         line: candidate.line,
     };
-    scope.site(&authored, template, origin, templates.ctx.clone(), evaluator, frame)
+    // A standalone `$( … )` value is unguarded: a body block that later
+    // reads the key grants it nothing.
+    scope.site(&authored, template, origin, templates.ctx.clone(), evaluator, frame, &[])
 }
 
 /// The directive one frontmatter pipeline runs as.

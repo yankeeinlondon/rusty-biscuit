@@ -1,6 +1,8 @@
 //! Tests for lifecycle configuration parsing and validation.
 
 use super::*;
+use super::actions::{LifecycleControlAction, WithOverlay};
+use crate::composition::error::ActionExprError;
 use serde_json::json;
 use std::sync::Mutex;
 
@@ -133,6 +135,7 @@ fn make_guard<'a>(
 mod action_shape_control;
 mod audio_emission;
 mod break_prep;
+mod call_check;
 mod diagnostics;
 mod container_runtime;
 mod grammar;

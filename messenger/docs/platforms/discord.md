@@ -123,6 +123,45 @@ Requests include `?wait=true` so Discord returns the created message object inst
 - `raw_id` — the Discord message snowflake
 - `message_ref` — `DiscordWebhook { webhook_id, channel_id, message_id, thread_id }`
 
+#### Long messages
+
+Discord rejects a webhook `content` longer than 2000 characters (Unicode
+characters, not bytes). The webhook adapter does not fail on a longer message:
+it splits the rendered `content` into consecutive posts of at most 2000
+characters each and sends them in order to the same channel or thread.
+
+```text
+send("…5,000 characters…")  →  POST #1 (≤2000)  →  POST #2 (≤2000)  →  POST #3 (rest + embed + files)
+```
+
+Where a post breaks, in order of preference:
+
+1. at a paragraph boundary (a blank line outside a code block);
+2. at a line boundary;
+3. mid-line, at a character boundary, when a single line is over the limit.
+
+A multi-byte character is never cut. A fenced code block that spans posts is
+closed at the end of one post and reopened, with its original opening line
+such as ` ```rust `, at the start of the next, so each post renders as a valid
+code block. The embed of a `Message::summarized` body and any attachments are
+sent with the final post, after all of the text.
+
+The receipt of a multi-post send identifies the **first** post: `raw_id` and
+`message_ref.message_id` are its id. Two metadata keys record every post and
+are absent when the message fit in one post:
+
+| Metadata key | Value |
+|--------------|-------|
+| `post_count` | number of posts, e.g. `"3"` |
+| `post_message_ids` | comma-separated ids of every post, in delivery order |
+
+If a later post fails, `send` returns that error and does not attempt the
+remaining posts. The posts already sent stay in the channel, so retrying the
+whole message repeats them.
+
+The bot adapter (`DiscordProvider`) does not split long messages yet; a
+`content` over 2000 characters fails there with a Discord `400` error.
+
 ## Markdown Rendering
 
 Discord Markdown is a near pass-through from CommonMark:

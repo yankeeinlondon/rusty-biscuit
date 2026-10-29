@@ -307,7 +307,7 @@ before/after table is in
 ```json
 {
   "type": "call",
-  "when": "ctx.today != ''",
+  "when": "!is_empty(ctx.today)",
   "command": "daily-check",
   "mapper": { "type": "exit_code" }
 }

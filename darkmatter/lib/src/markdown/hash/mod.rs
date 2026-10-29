@@ -153,3 +153,18 @@ pub(super) fn hash_content_with_policy(content: &str, strict: bool) -> u64 {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::markdown::Markdown;
+
+    /// The non-strict frontmatter hash is persisted in documents, so it must
+    /// not depend on the written order of nested keys now that maps keep it.
+    #[test]
+    fn non_strict_frontmatter_hash_ignores_nested_key_order() {
+        let written: Markdown = "---\nmeta:\n  z: 1\n  a: 2\n---\nbody\n".into();
+        let sorted: Markdown = "---\nmeta:\n  a: 2\n  z: 1\n---\nbody\n".into();
+        assert_eq!(written.hash_frontmatter(false), sorted.hash_frontmatter(false));
+        assert_ne!(written.hash_frontmatter(true), sorted.hash_frontmatter(true));
+    }
+}

@@ -280,9 +280,9 @@ fn exhausted_remediation_fails_finalize_and_preserves_findings() {
 
     let config = parse_lifecycle_config(&frontmatter, &fleet_path())
         .expect("materialized fleet lifecycle parses");
-    let frontmatter = frontmatter
-        .as_object()
-        .expect("materialized frontmatter is an object");
+    let frontmatter = &darkmatter::markdown::compose::SharedFrontmatter::from(
+        frontmatter.as_object().expect("materialized frontmatter is an object").clone(),
+    );
     let effect_engine = EffectEngine::builder()
         .mutation_root(dir.path())
         .auto_rehash(false)

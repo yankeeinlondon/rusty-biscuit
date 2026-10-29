@@ -203,6 +203,9 @@ mod yaml_frontmatter {
 
         step_when_true_runs_the_step: edit(FIRST, "  - name: first\n    when: \"true\"\n") => Expect::Runs(3);
         step_when_false_skips_the_step: edit(FIRST, "  - name: first\n    when: \"false\"\n") => Expect::Runs(2);
+        // Strict equality: an absent value is `null`, never `''`.
+        step_when_absent_not_equal_to_empty_runs_the_step: edit(FIRST, "  - name: first\n    when: \"missing != ''\"\n") => Expect::Runs(3);
+        step_when_absent_not_equal_to_null_skips_the_step: edit(FIRST, "  - name: first\n    when: \"missing != null\"\n") => Expect::Runs(2);
         step_when_that_raises_fails_the_step: edit(FIRST, "  - name: first\n    when: \"nope(1)\"\n") => Expect::FailsAfter { effects: 0, says: "Unknown function: nope" };
         step_when_null_is_rejected: edit(FIRST, "  - name: first\n    when: null\n") => Expect::Rejects { file: "seq.md", says: WHEN_NOT_STRING };
         step_when_boolean_is_rejected: edit(FIRST, "  - name: first\n    when: false\n") => Expect::Rejects { file: "seq.md", says: WHEN_NOT_STRING };

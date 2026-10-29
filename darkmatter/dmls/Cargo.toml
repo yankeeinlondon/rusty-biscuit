@@ -89,6 +89,13 @@ test-toolkit = { path = "../../tools/test-toolkit" }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 wait-timeout = "0.2"
 
+# Anchor A3 of the 2026-10-25-pipeline-work-reduction spike: one in-process
+# edit loop's work counts, allocations, and wall time. Reads the Darkmatter
+# work counters the dev-dependency enables.
+[[bench]]
+name = "pipeline_work_a3"
+harness = false
+
 # One test binary per execution contract (tier × exact `required-features`),
 # declared explicitly: `autotests = false` above, so a `tests/` file reaches a
 # binary only through one of these roots (`2026-09-21-consolidated-test-binaries`).
@@ -118,6 +125,8 @@ source-inputs = [
   "darkmatter/cli/tests/common/source_scan.rs",
   "darkmatter/lib/tests/common/clean_parity/mod.rs",
   "darkmatter/lib/tests/common/entry_point_parity/mod.rs",
+  "darkmatter/lib/tests/common/type_scope_cases.rs",
+  "darkmatter/lib/tests/common/type_scope_guard.rs",
   "darkmatter/lib/tests/content_policy_fixtures/mod.rs",
   "darkmatter/lib/tests/position_fixtures/mod.rs",
   "darkmatter/lib/tests/union_fixtures/mod.rs",

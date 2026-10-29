@@ -6,6 +6,7 @@
 use super::runtime::ComposeContext;
 use super::ContextMergeDiagnostic;
 use super::merge::CtxMergeError;
+use super::shared_frontmatter::SharedFrontmatter;
 use crate::markdown::compose::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
 use crate::markdown::frontmatter::MergeStrategy;
 use serde_json::Value;
@@ -164,8 +165,9 @@ pub(crate) fn coerce_named_object(path: &str, value: &Value, keys: &[String]) ->
 /// 4. Environment variables (accessible via `env.*` paths)
 #[derive(Debug, Clone)]
 pub struct EffectiveState {
-    /// Merged frontmatter + external state, in receiving-document key order.
-    data: serde_json::Map<String, Value>,
+    /// Merged frontmatter + external state. Shares its base with the
+    /// [`SharedFrontmatter`] a builder was given when no merge was needed.
+    data: SharedFrontmatter,
 
     /// Runtime context for `ctx.*` lookups.
     context: ComposeContext,
@@ -204,7 +206,7 @@ impl EffectiveState {
         external_state: Option<&Value>,
         context: ComposeContext,
     ) -> Self {
-        let data = match external_state.and_then(Value::as_object) {
+        let data: SharedFrontmatter = match external_state.and_then(Value::as_object) {
             Some(external_obj) => {
                 let merged = deep_merge(
                     &Value::Object(frontmatter.clone()),
@@ -212,11 +214,11 @@ impl EffectiveState {
                     ConflictWinner::Base,
                 );
                 match merged {
-                    Value::Object(obj) => obj,
-                    _ => frontmatter.clone(),
+                    Value::Object(obj) => obj.into(),
+                    _ => frontmatter.clone().into(),
                 }
             }
-            None => frontmatter.clone(),
+            None => frontmatter.clone().into(),
         };
 
         Self {
@@ -255,7 +257,7 @@ impl EffectiveState {
         // Reserved `fm` namespace — intercepted before normal key lookup, so
         // `fm.*` always reads the document, even for a reserved-looking key.
         if let Some(fm_path) = super::super::expression::fm_namespace::fm_namespace_path(path) {
-            return self.get_fm(path, fm_path);
+            return self.get_fm(fm_path);
         }
 
         // The `ctx` and `env` namespaces, their exact roots included, so a
@@ -281,15 +283,15 @@ impl EffectiveState {
 
     /// The document's own value at an `fm` path: everything but `ctx` reads
     /// `data`, and `ctx` reads [`Self::document_ctx`].
-    fn get_fm(&self, path: &str, fm_path: super::super::expression::fm_namespace::FmPath<'_>) -> Option<Value> {
-        use super::super::expression::fm_namespace::{FmPath, resolve_fm_namespace_in_object};
+    fn get_fm(&self, fm_path: super::super::expression::fm_namespace::FmPath<'_>) -> Option<Value> {
+        use super::super::expression::fm_namespace::FmPath;
         match fm_path {
             FmPath::Member(rest) => {
                 let mut segments = rest.split('.');
-                if segments.next() != Some("ctx") {
-                    return resolve_fm_namespace_in_object(path, &self.data);
-                }
-                let mut current = self.document_ctx.as_ref()?;
+                let mut current = match segments.next()? {
+                    "ctx" => self.document_ctx.as_ref()?,
+                    key => self.data.get(key)?,
+                };
                 for segment in segments {
                     current = current.as_object()?.get(segment)?;
                 }
@@ -372,14 +374,14 @@ impl EffectiveState {
             None => String::new(),
             Some(Value::Null) => String::new(),
             Some(Value::String(s)) => s,
-            Some(Value::Number(n)) => n.to_string(),
+            Some(Value::Number(n)) => super::super::expression::format_json_number(&n),
             Some(Value::Bool(b)) => b.to_string(),
             Some(v) => v.to_string(),
         }
     }
 
-    /// Returns the underlying data map.
-    pub fn data(&self) -> &serde_json::Map<String, Value> {
+    /// Returns the merged document data, `ctx` materialized.
+    pub fn data(&self) -> &SharedFrontmatter {
         &self.data
     }
 
@@ -626,7 +628,7 @@ impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
 /// Builder for creating effective state with specific merge strategies.
 #[derive(Debug, Clone)]
 pub struct EffectiveStateBuilder {
-    frontmatter: serde_json::Map<String, Value>,
+    frontmatter: SharedFrontmatter,
     external_state: Option<Value>,
     merge_strategy: MergeStrategy,
     replace_parent_wins: bool,
@@ -641,7 +643,7 @@ impl EffectiveStateBuilder {
     /// Creates a new builder with empty frontmatter.
     pub fn new() -> Self {
         Self {
-            frontmatter: serde_json::Map::new(),
+            frontmatter: SharedFrontmatter::default(),
             external_state: None,
             merge_strategy: MergeStrategy::PreferExternal,
             replace_parent_wins: false,
@@ -656,6 +658,17 @@ impl EffectiveStateBuilder {
     /// Sets the frontmatter data. Its key order is the order of the built state.
     #[must_use]
     pub fn with_frontmatter(mut self, frontmatter: serde_json::Map<String, Value>) -> Self {
+        self.frontmatter = frontmatter.into();
+        self
+    }
+
+    /// Sets the frontmatter data from a shared view. Its iteration order is the
+    /// order of the built state.
+    ///
+    /// Without external state, the built state shares the view's base rather
+    /// than copying it: only `ctx` and the view's own writes are owned.
+    #[must_use]
+    pub fn with_shared_frontmatter(mut self, frontmatter: SharedFrontmatter) -> Self {
         self.frontmatter = frontmatter;
         self
     }
@@ -742,26 +755,30 @@ impl EffectiveStateBuilder {
         // callers that read runtime context pass the request's.
         let context = self.context.unwrap_or_else(ComposeContext::capture_minimal);
 
-        let frontmatter_value = Value::Object(self.frontmatter.clone());
-        let external_value = self
+        let external = self
             .external_state
             .as_ref()
             .and_then(Value::as_object)
-            .cloned()
-            .map(Value::Object)
-            .unwrap_or(Value::Object(serde_json::Map::new()));
-
-        // The document is always the base, so its keys keep their authored
-        // positions; the strategy only picks which side wins a conflict.
-        let winner = match self.merge_strategy {
-            MergeStrategy::PreferDocument => ConflictWinner::Base,
-            MergeStrategy::PreferExternal | MergeStrategy::ErrorOnConflict => ConflictWinner::Overlay,
-        };
-        let merged = deep_merge(&frontmatter_value, &external_value, winner);
-
-        let mut data = match merged {
-            Value::Object(obj) => obj,
-            _ => self.frontmatter.clone(),
+            .filter(|external| !external.is_empty());
+        // Merging an empty external object yields the frontmatter itself under
+        // every strategy, so that case keeps the shared view uncopied.
+        let mut data = match external {
+            None => self.frontmatter.clone(),
+            Some(external) => {
+                let frontmatter_value = Value::Object(self.frontmatter.to_map());
+                let external_value = Value::Object(external.clone());
+                // The document is always the base, so its keys keep their
+                // authored positions; the strategy only picks which side wins
+                // a conflict.
+                let winner = match self.merge_strategy {
+                    MergeStrategy::PreferDocument => ConflictWinner::Base,
+                    MergeStrategy::PreferExternal | MergeStrategy::ErrorOnConflict => ConflictWinner::Overlay,
+                };
+                match deep_merge(&frontmatter_value, &external_value, winner) {
+                    Value::Object(obj) => SharedFrontmatter::from(obj),
+                    _ => self.frontmatter.clone(),
+                }
+            }
         };
 
         if self.replace_parent_wins {
@@ -1502,11 +1519,11 @@ mod tests {
                 .unwrap();
 
             assert_eq!(
-                map_keys(state.data()),
+                map_keys(&state.data().to_map()),
                 ["z", "shared", "a", "b_ext", "m_ext", "ctx"],
                 "{strategy:?}"
             );
-            assert_eq!(object_keys(&state.data()["shared"]), ["y", "b", "c"], "{strategy:?}");
+            assert_eq!(object_keys(&state.data().to_map()["shared"]), ["y", "b", "c"], "{strategy:?}");
             let (a, b) = match strategy {
                 MergeStrategy::PreferDocument => ("doc-a", "doc"),
                 _ => ("ext-a", "ext"),
@@ -1521,8 +1538,8 @@ mod tests {
         let (document, external) = doc_and_external();
         let state = EffectiveState::new(&document, Some(&external), test_context());
 
-        assert_eq!(map_keys(state.data()), ["z", "shared", "a", "b_ext", "m_ext"]);
-        assert_eq!(object_keys(&state.data()["shared"]), ["y", "b", "c"]);
+        assert_eq!(map_keys(&state.data().to_map()), ["z", "shared", "a", "b_ext", "m_ext"]);
+        assert_eq!(object_keys(&state.data().to_map()["shared"]), ["y", "b", "c"]);
         assert_eq!(state.get("a"), Some(json!("doc-a")));
         assert_eq!(state.get("shared.b"), Some(json!("doc")));
         assert_eq!(state.get("shared.c"), Some(json!(3)));
@@ -1575,5 +1592,89 @@ mod tests {
         assert_eq!(object_keys(&merged["nested"]), ["y", "b", "c"]);
         assert_eq!(merged["A"], json!("parent"));
         assert_eq!(merged["nested"]["b"], json!("parent"));
+    }
+}
+
+#[cfg(test)]
+mod shared_frontmatter_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn seed() -> SharedFrontmatter {
+        let Value::Object(map) = json!({
+            "title": "Release",
+            "sequence": [{ "id": "one" }, { "id": "two" }],
+            "cleared": "set",
+            "ctx": { "custom": "authored" },
+            "replace": { "NAME": "doc" }
+        }) else {
+            unreachable!()
+        };
+        SharedFrontmatter::from(map)
+    }
+
+    #[test]
+    fn a_state_built_from_a_view_shares_its_base_and_owns_only_ctx_and_writes() {
+        let seed = seed();
+        let mut view = seed.clone();
+        view.insert("cleared".to_string(), Value::Null);
+        view.insert("seq".to_string(), json!({ "index": 1 }));
+
+        let state = EffectiveStateBuilder::new()
+            .with_shared_frontmatter(view)
+            .with_context(ComposeContext::fixed_for_testing())
+            .build()
+            .unwrap();
+
+        assert!(state.data().shares_base_with(&seed));
+        assert_eq!(state.data().owned_len(), 3, "cleared, seq, and the materialized ctx");
+        assert_eq!(state.get("title"), Some(json!("Release")));
+        assert_eq!(state.get("sequence"), Some(json!([{ "id": "one" }, { "id": "two" }])));
+        assert_eq!(state.get("cleared"), Some(Value::Null));
+        assert_eq!(state.get("seq.index"), Some(json!(1)));
+        assert_eq!(state.get("ctx.custom"), Some(json!("authored")));
+        assert_eq!(state.get("ctx.today"), Some(json!("2024-06-15")));
+        assert_eq!(state.get("fm.ctx"), Some(json!({ "custom": "authored" })));
+        assert_eq!(state.get_replace_map().and_then(|map| map.get("NAME")), Some(&json!("doc")));
+        assert_eq!(seed.get("ctx"), Some(&json!({ "custom": "authored" })), "the seed is never written");
+    }
+
+    /// The uncopied path and the merge path must agree for every builder
+    /// input a caller can combine with a view.
+    #[test]
+    fn a_view_builds_the_same_state_as_its_materialized_map() {
+        let mut view = seed();
+        view.remove("title");
+        view.insert("added".to_string(), json!({ "nested": true }));
+        let external = json!({ "title": "external", "replace": { "OTHER": "x" }, "added": { "more": 1 } });
+        let cases: [(Option<Value>, MergeStrategy, bool); 5] = [
+            (None, MergeStrategy::PreferExternal, false),
+            (Some(json!({})), MergeStrategy::PreferDocument, false),
+            (Some(external.clone()), MergeStrategy::PreferExternal, false),
+            (Some(external.clone()), MergeStrategy::PreferDocument, false),
+            (Some(external), MergeStrategy::PreferExternal, true),
+        ];
+
+        for (external, strategy, parent_wins) in cases {
+            let build = |builder: EffectiveStateBuilder| {
+                let builder = builder
+                    .with_merge_strategy(strategy)
+                    .with_replace_parent_wins(parent_wins)
+                    .with_context(ComposeContext::fixed_for_testing());
+                match &external {
+                    Some(external) => builder.with_external_state(external.clone()),
+                    None => builder,
+                }
+                .build()
+                .unwrap()
+            };
+            let shared = build(EffectiveStateBuilder::new().with_shared_frontmatter(view.clone()));
+            let flat = build(EffectiveStateBuilder::new().with_frontmatter(view.to_map()));
+
+            let label = format!("{external:?} {strategy:?} {parent_wins}");
+            assert_eq!(shared.data(), flat.data(), "{label}");
+            assert_eq!(shared.get("fm"), flat.get("fm"), "{label}");
+            assert_eq!(shared.get("title"), flat.get("title"), "{label}");
+        }
     }
 }

@@ -8,12 +8,14 @@
 pub mod catalog;
 mod error;
 mod fs_write;
+mod types;
 mod verbs;
 
 pub use catalog::{
     effect_descriptors, EffectDescriptor, EffectSafety, EFFECT_DESCRIPTORS,
 };
 pub use error::EffectError;
+pub use types::{effect_function_catalog, effect_function_descriptors, effect_registration};
 
 use std::path::{Path, PathBuf};
 

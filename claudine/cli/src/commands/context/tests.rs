@@ -3,9 +3,11 @@
 use super::effects::group_effect_descriptors;
 use super::expressions::{render_expression_table, show_examples};
 use super::format::{
-    format_context_value_type, format_example, format_effect_example, format_safety, format_value,
+    format_context_value_type, format_effect_example, format_function_examples, format_safety,
+    format_value,
 };
 use super::*;
+use darkmatter::catalog::Described;
 use crate::commands::context_render::{
     configure_shared_table, context_column_widths, function_first_column_width, inline_code_text,
     render_context_section, render_table_resilient, render_table_within_contract, report_column,
@@ -220,34 +222,33 @@ fn shared_property_type_widths_across_sections() {
     );
 }
 
-/// The expression report groups the complete function catalog by metadata
-/// category — each category emitted exactly once, even though the catalog is
-/// physically laid out by implementation grouping (so `Math` and `Collection`
-/// appear in non-adjacent runs). Within each category the signatures must
-/// follow the descriptors' stable `order`, not catalog position.
+/// The expression report groups the function catalog by the categories in the
+/// catalog's `categories:` list order, each category emitted once, with its
+/// functions alphabetical by canonical name and every overload listed exactly
+/// once under its canonical name.
 #[test]
-fn expression_groups_consolidate_categories_in_metadata_order() {
-    use std::collections::HashSet;
-
+fn expression_groups_follow_category_list_order_and_sort_alphabetically() {
+    let catalog = expression_function_catalog();
     let groups = group_expression_descriptors();
 
-    let mut seen = HashSet::new();
-    for (category, _) in &groups {
-        assert!(
-            seen.insert(*category),
-            "category `{category}` emitted more than once",
-        );
-    }
+    let listed: Vec<&str> = catalog
+        .categories
+        .iter()
+        .map(|category| &*category.name)
+        .filter(|name| groups.iter().any(|(group, _)| group == name))
+        .collect();
+    let emitted: Vec<&str> = groups.iter().map(|(category, _)| *category).collect();
+    assert_eq!(emitted, listed, "categories must follow the `categories:` list order");
 
     for (category, functions) in &groups {
-        let orders: Vec<usize> = functions.iter().map(|f| f.order).collect();
-        let mut expected = orders.clone();
-        expected.sort_unstable();
-        assert_eq!(
-            orders, expected,
-            "category `{category}` signatures must follow metadata order; got {orders:?}",
-        );
+        let names: Vec<&str> = functions.iter().map(|f| &*f.name).collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted, "category `{category}` must list functions alphabetically");
     }
+
+    let rendered: usize = groups.iter().map(|(_, functions)| functions.len()).sum();
+    assert_eq!(rendered, catalog.descriptors.len(), "every overload renders exactly once");
 }
 
 /// The expression report's `Example` column follows the documented "where
@@ -372,19 +373,34 @@ fn format_value_renders_arrays_plainly() {
     );
 }
 
+/// A function's `Example` cell shows every example, one per line: inline ones
+/// as `call ⇒ result`, a display-only one with its reason, and file-form ones
+/// with the file's invocation and returns, a tab shown as a visible `\t`.
 #[test]
-fn format_example_renders_tabs_as_visible_literals() {
+fn function_examples_render_both_forms_one_per_line() {
     let mut term = Terminal::new_optimistic(140);
     term.color_depth = biscuit_terminal::discovery::detection::ColorDepth::None;
     term.is_tty = false;
-    let descriptor = darkmatter::markdown::compose::expression::expression_function_descriptors()
-        .iter()
-        .find(|descriptor| descriptor.signature == "as_tsv(list)")
-        .expect("as_tsv descriptor");
+    let overloads = |name: &str| {
+        darkmatter::markdown::compose::expression::function_descriptors(name)
+    };
 
-    let rendered = format_example(descriptor.example.as_ref(), &term);
-    assert_eq!(rendered, r#"as_tsv(items) → 1\t2\t3"#);
-    assert!(!rendered.contains('\t'));
+    let tsv = format_function_examples(&overloads("as_tsv")[0], &term);
+    assert!(
+        tsv.lines().any(|line| line
+            == r#"as_tsv(["a", "b", "c"]) ⇒ "a\tb\tc" (from function-examples/as_tsv.yaml)"#),
+        "{tsv}"
+    );
+    assert!(!tsv.contains('\t'));
+
+    let code_link = format_function_examples(&overloads("code_link")[0], &term);
+    assert!(
+        code_link.contains("⇒") && code_link.contains("(display only: "),
+        "{code_link}"
+    );
+
+    let is_array = format_function_examples(&overloads("is_array")[0], &term);
+    assert!(is_array.lines().any(|line| line == "is_array([1, 2, 3]) ⇒ true"), "{is_array}");
 }
 
 /// Verify that expression and side-effect reports render without
@@ -417,9 +433,9 @@ fn reports_render_within_140ch_contract_at_wide_terminals() {
 
         for func in functions {
             table.add_row(vec![
-                inline_code_text(func.signature, &term).into(),
-                inline_code_text(func.description, &term).into(),
-                format_example(func.example.as_ref(), &term).into(),
+                inline_code_text(&func.signature, &term).into(),
+                inline_code_text(&func.description, &term).into(),
+                format_function_examples(func, &term).into(),
             ]);
         }
 
@@ -458,7 +474,7 @@ fn reports_render_within_140ch_contract_at_wide_terminals() {
                 table.add_row(vec![
                     inline_code_text(effect.signature, &term).into(),
                     inline_code_text(effect.description, &term).into(),
-                    format_effect_example(effect.example.as_ref(), &term).into(),
+                    format_effect_example(effect.example(), &term).into(),
                     format_safety(effect.safety, &term).into(),
                 ]);
             }

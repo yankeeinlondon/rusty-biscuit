@@ -176,7 +176,10 @@ fn union_item_with_extra_key_alone_keeps_its_key() {
 /// The sharp case for the schema walk: `name` is a string in *every* `entry`
 /// arm and the mistyped scalar is the document's only raw problem, so a walk
 /// that read `items.anyOf` as one object arm would prove and auto-apply the
-/// quote. A tagged item whose tag names the arm is likewise never quoted.
+/// quote. Both arms read `1.20` as the same text `"1.2"`, so the conversion
+/// engine converts it and composition reports nothing; cleanup still leaves
+/// the item untouched. A tagged item whose tag names the arm is likewise
+/// never quoted.
 #[test]
 fn mistyped_scalar_inside_union_item_is_not_quoted() {
     let fixture = Fixture::new();
@@ -192,7 +195,7 @@ fn mistyped_scalar_inside_union_item_is_not_quoted() {
         "a single raw problem opens the auto-apply gate: {raw:?}"
     );
     let paths = assert_unrepaired_and_reported(&fixture, &untagged);
-    assert_eq!(paths, ["/entries/0/name"]);
+    assert!(paths.is_empty(), "{paths:?}");
 
     let tagged = format!("{SCHEMA}steps:\n  - kind: shell\n    run: 1.20\n");
     let effective = fixture.effective(&tagged);

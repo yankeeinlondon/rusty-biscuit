@@ -1,14 +1,21 @@
+---
+kind: canonical-documentation
+---
+
 # Pre-Flight Shell Approval
 
-Before the compose pipeline executes any shell command, every command must pass through a security approval flow. This pre-flight check ensures that no malicious or accidentally harmful command runs without explicit authorization.
+A shell template lets you approve a command whose arguments may change between runs. For example, `template just clean --out {{ string }}/build` permits the same command structure with a different output directory. Each value is checked before it fills one argument; it cannot add shell syntax.
+
+Every command still passes through pre-flight approval. This page explains exact, program-wide, and typed-template rules, what the approval prompt offers, and the checks that remain when an approved command runs.
 
 ## Why This Exists
 
-Shell commands can appear in three places during Darkmatter composition:
+Shell commands can appear in these places during Darkmatter composition:
 
 1. **`::shell` directives** — inline shell expansion in the document body
 2. **`::shell-block` / `::end-block` directives** — multi-command sequential execution
 3. **Frontmatter `$(cmd)` expressions** — shell expansion in top-level frontmatter string values
+4. **Lifecycle actions** — `shell` and whole-value `$( … )` commands in lifecycle `set` actions; see [Lifecycle](../topics/lifecycle/index.md). Initialization remains shell-free.
 
 Without pre-flight approval, an unguarded shell directive could execute destructive or unintended commands during what should be a safe document composition.
 
@@ -118,7 +125,7 @@ Collecting them sends no packet: discovery records the plan and answers `null`.
 A probe inside `as_markdown` content is discovered the same way, because that
 content is walked as a child of the document that named it.
 
-The grant itself comes from `--allow-host` (`ComposeOptions::with_allowed_host`),
+The grant itself comes from `--allow host=HOST` (`ComposeOptions::with_allowed_host`),
 which is one entry point for two disjoint policies:
 
 - An **exact IP literal** grants ICMP to that address and, as before, HTTP to
@@ -221,8 +228,8 @@ operator, or ordered redirection changes it. For example, `tool "{{ x }}"`
 and `tool {{ x }}` share a shape; `tool prefix-{{ x }}` needs a rule retaining
 that literal prefix. Adjacent holes such as `{{ x }}{{ y }}` stay in one word.
 
-Only a bare top-level property (`out` or `fm.out`) gets its declaration from
-the effective schema of the document that owns the command. Named declarations
+Before considering guard refinements, only a bare top-level property (`out`
+or `fm.out`) gets its declaration from the effective schema of the document that owns the command. Named declarations
 resolve there, including in a transcluded child with its own schema. Other
 expressions (`env.OUT`, `last(seq.outputs)`, `out || 'dist'`), undeclared properties,
 and schemas without a SimplifiedSchema projection use a broad `string` hole.
@@ -243,9 +250,10 @@ A `template` hole holds one type with its options and nothing else:
 `{{ string }}` or a narrower string-like type such as
 `{{ alphanumeric(allow-slashes) }}`. A literal containing spaces, quotes,
 braces, or shell characters is double-quoted, with `\\`, `\"`, `\{`, `\}`,
-`\n`, `\r`, and `\t` as escapes; `"{{ x }}"` inside quotes is literal text, so
-write it `"\{\{ x \}\}"`. A line the loader cannot read is skipped with a
-warning naming the file and line, and the other rules still load. These
+`\n`, `\r`, and `\t` as escapes. To store literal braces rather than a
+placeholder, escape them: `"\{\{ x \}\}"` represents the literal argument
+`{{ x }}`. Unescaped braces inside a quoted rule literal are rejected.
+A line the loader cannot read is skipped with a warning naming the file and line, and the other rules still load. These
 template lines are skipped:
 
 | Line | Why |
@@ -293,14 +301,45 @@ With `exact ls a b/build` this runs `ls` with the two arguments `a` and
 `b/build`. With `template ls {{ string }}/build` it runs `ls` with the one
 argument `a b/build`.
 
+A single argument can still select a program option. For example, a value
+beginning with `-` may be treated as a flag by its program. Use `--` before
+value arguments where the program supports it, and choose a restrictive type
+when approving a reusable operation.
+
+When the bytes are split into words, a quoted empty word (`""` or `''`) is
+one empty argument, and the exact key spells it `""`. An unquoted placeholder
+that resolves to an empty string adds no word, as in a shell:
+
+```md
+---
+msg: ""
+---
+::shell git commit -m "{{ msg }}"
+::shell git commit -m {{ msg }}
+```
+
+The first line's exact key is `git commit -m ""`, and `git` receives an empty
+third argument. The second line's key is `git commit -m`, and `git` receives
+two arguments. Neither key approves the other command, and an older
+`exact git commit -m` rule never approves the quoted form. The same spelling
+is used for every key a resolved command or a filled template is matched
+against, blacklist `exact` rules included.
+
 In template mode, before anything runs:
 
-1. **Every placeholder is evaluated once** against the document's current
-   state and checked. `null` is a missing value (`MissingValue`). An array or
+1. **Every placeholder expression is evaluated once** against the document's
+   current state and checked; when the same expression fills several
+   arguments, that one checked value fills each of them. `null` is a missing
+   value (`MissingValue`). An array or
    object, or a string holding a NUL byte, is refused, even under a `string`
    rule. The original value must pass the placeholder's declared type,
    constraints included (`min`, `pattern`, …); nothing is converted first, so
-   a number never passes `alphanumeric`. A refused value fails with
+   a number never passes `alphanumeric`. A placeholder typed by a recursive
+   named type (`data: [string, number, "{ items: data[] }"]`) is checked
+   against that type's definition: with `value: data(required)`, `3` and
+   `"a b"` pass `{{ value }}`. A placeholder typed under a guard
+   (see [Guarded values](#guarded-values)) must also pass the type
+   the guard narrowed it to. A refused value fails with
    `TemplateValueRejected`, which names the placeholder and its declared type
    and never shows the value.
 2. **The value becomes text** (a string as is, a number or boolean as written)
@@ -362,7 +401,7 @@ lists only the choices the command is eligible for, numbered in this order:
 
 | Choice | Listed when | Saves |
 |--------|-------------|-------|
-| Allow this exact command | every value is known now | `exact <resolved command>` to `.darkmatter-shell-whitelist` |
+| Allow this exact command | resolved-byte approval is eligible and every value is known now | `exact <resolved command>` to `.darkmatter-shell-whitelist` |
 | Allow this command shape | the command has a placeholder and valid template grammar | `template <shape>` to `.darkmatter-shell-whitelist`; the command runs as a template |
 | Allow this program with any arguments | every program word is fixed | `prefix <program>` for each distinct program of the chain |
 | Allow once | always | nothing; this run only (for a command with no exact choice, its shape for this run) |
@@ -433,7 +472,7 @@ session over any reader and writer, which is how the prompt is tested.
 - Override globally: `--timeout <seconds>` (CLI) or `ComposeOptions::with_shell_timeout()` (library)
 - Override per-command: `$(cmd)::timeout:<seconds>` (frontmatter only)
 - Default timeout behavior: compose error
-- With `--allow-shell-timeout`: timed-out commands are replaced with an empty string and compose emits a warning instead of failing
+- With `--allow shell-timeout`: timed-out commands are replaced with an empty string and compose emits a warning instead of failing
 
 ## Integration with External Tools
 
@@ -461,6 +500,96 @@ Each resolved `::code` and `::toc-linking` target appears in `ComposePreflightRe
 
 **Late values.** A host whose commands read values the run produces later (Claudine's sequence outputs, for example) declares those roots with `ComposeOptions::with_deferred_shell_roots`. Discovery does not evaluate a placeholder that reads one, directly or through a frontmatter value derived from one, and marks it `HoleTiming::Deferred`. Its command has no resolved bytes, so it can be approved only as a template (`ModeRequirement::TemplateRequired`); one whose authored text is not a valid template fails pre-flight with `TemplateGrammar`. Declaring a root late does not make it readable: availability stays with the host's globals. The command's other placeholders are still checked for missing values. A late root names a host global: `fm.<root>` reads the document's own property of that name and is an approval-time value.
 
+#### Parsed-once syntax for a host
+
+A host that analyzes the same authored text several ways (Claudine's sequence preflight) builds one `expression::PreparedInterpolation` per text and reads it through `view(range)` instead of re-parsing. The collection retains each placeholder occurrence with its range, trimmed text, and the spanned syntax or the located `PreparationError`; `PreparedPlaceholder::expr()` gives the plain `Expr` (erased once, cached). A view translates coordinates for a sub-range, such as the command inside a `$( … )` wrapper found by `authored_shell_command`. The parsed counterparts — `validate_interpolation`, `parse_authored_prepared`, `CommandTemplate::project_types_prepared`, `project_hole_expr`, `DeferredShellRoots::late_roots_of_expr`, and `placeholder_guard_expr` — share their analysis bodies with the text functions, which remain. The collection holds syntax only: no values, schema, guards, or approval decisions, and evaluation is unaffected.
+
+#### Guarded values
+
+A guard that encloses a command proves things about the values it reads. In
+a document body, a command inside `::block when="…"` runs only when the
+condition held, because composition removes a false block before any command
+runs:
+
+```md
+::block when="release_tag"
+::shell git tag {{ release_tag }}
+::end-block
+```
+
+`release_tag` is present whenever `git tag` runs, even when it is missing
+while commands are approved. Such a placeholder waits for its command
+(`HoleTiming::Guarded`): the command can be approved only as a template, and
+the value is read and checked when the block is actually selected, before any
+segment of the chain starts. If the guard is false, the block is removed and
+nothing is read or run. The same applies to every command of a
+`::shell-block` inside the block. Nested blocks combine: a command inside
+`::block when="a"` and then `::block when="b"` has both guards.
+
+Only a guard excuses a missing value, and only for what it proves on its true
+side:
+
+| Around `::shell tool {{ x }}` | Missing `x` at approval |
+| --- | --- |
+| no block | `MissingValue` |
+| `::block when="x"`, `when="x != null"`, `when="file_exists(x)"`, `when="is_string(x)"`, `when="a && x"` | waits for the command |
+| `::block when="!x"`, `when="is_null(x)"`, `when="x != ''"`, `when="x \|\| y"`, `when="x.a"` | `MissingValue` |
+
+A schema declaring the property required does not excuse a missing value, and
+`when="x"` does not excuse a missing `y` in `tool {{ x }} {{ y }}` or a read
+of `x` outside the block. A frontmatter `$( … )` value is never guarded, even
+when a block that reads its key is the only use of it. A command that must
+wait this way and is not a valid template fails with `TemplateGrammar`.
+
+A host that runs commands under its own conditions types each command under
+those guards through the same type scope, so the rules above apply there too:
+a placeholder its guard proves present waits for its command, and a `null`
+read once the guard has selected the action fails that action with
+`MissingValue`. Claudine does this for a lifecycle item's `when:` (its `then:`
+and the actions written beside the `when:` get the true side, its `else:` the
+false side, nested items combining) and for a sequence task's `when:`, which
+covers that task's `shell:` command and `with:` values but not the document a
+`prompt:` task composes. A lifecycle `set` ends what a guard proved about each
+key it writes for the actions after it, including after the item that
+contains it.
+
+A guard also narrows the type a placeholder approves as. Under
+`::block when="mode != 'release'"` with `mode: enum(release, debug, test)`, the
+placeholder in `deploy {{ mode }}` approves as `{{ enum(debug,test) }}`, and a
+saved rule for the whole enum still covers it. A narrowing to a non-string
+type keeps the broad `{{ string }}` approval and is shown as
+`string (validated as number)`. Discovery and the compose pass type a body
+command under the same enclosing blocks, so the narrowed shape approved before
+composition is the shape that runs. When the command runs, the value must pass
+both its declaration and the narrowed type; a value that changed type after
+the guard (for example through a `set`) fails with `TemplateValueRejected`.
+A host's late-value barrier never reads a guarded placeholder, and checks a
+late value only against its declaration, leaving the narrowed type to the
+command that is reached.
+
+The whole path, from the guard to the command that runs:
+
+```mermaid
+flowchart TD
+    A["placeholder {{ x }} in a command"] --> B["type scope at the site:<br/>declaration + enclosing guards"]
+    B -->|"x proven present by a guard"| C["hole waits for its command<br/>(HoleTiming::Guarded)"]
+    B -->|"x not proven present, value missing"| F["pre-flight fails: MissingValue"]
+    B -->|"x present at pre-flight"| D["resolved bytes or template"]
+    C --> E["approved only as a template,<br/>typed with the narrowed type"]
+    D --> G["approved by exact, template, or prefix rule"]
+    E --> H{"guard at run time"}
+    H -->|"false"| I["region removed: nothing read, nothing runs"]
+    H -->|"true"| J["read the live value"]
+    J -->|"null"| K["MissingValue: no segment starts"]
+    J -->|"fails declaration or narrowed type"| L["TemplateValueRejected: no segment starts"]
+    J -->|"passes"| M["fill one argument per hole,<br/>blacklists, then run"]
+    G --> M
+```
+
+Which guard forms prove what, how equality treats missing values, and when a
+write ends a fact are in
+[What a Guard Proves](../topics/darkmatter-expressions.md#what-a-guard-proves).
+
 A host that places commands where their values may change before they run (a sequence task after the first) also calls `DeferredShellRoots::with_placeholders_template_required()`. Every command with a placeholder is then `TemplateRequired`, even when all its values are known: it contributes no resolved bytes, is never offered "this exact command", and an `exact` rule for its current bytes does not cover it. Its approval-time placeholders are still evaluated and checked for missing values, and a command with a placeholder that is not a valid template fails with `TemplateGrammar`. A command with no placeholder is unaffected.
 
 ```md
@@ -472,6 +601,8 @@ latest: "{{ last(seq.outputs) }}"
 ```
 
 **During composition**, Darkmatter receives the pre-approved set via `pre_approved_commands` on `ComposeOptions` (a `ShellPreApprovals` holding resolved bytes and template shapes) and bypasses its own approval flow. Each command must prove membership: its resolved bytes are in the exact set, or its authored shape, re-typed against its owner's schema, is in the template set. A template-only site is never admitted by bytes, and execution never adds the bytes it resolved to either set. A command admitted by its shape runs as a template, with the checks of [Running a command as a template](#running-a-command-as-a-template); a pre-approval never skips them.
+
+Membership is judged after the warnings of the collection walk are judged against the request's blocking policy (`ComposeOptions::with_blocking_policy`). A denied warning only that walk finds, such as an invalid schema trigger in a child that composition skips (`::file child.md when=false`), stops composition with `MarkdownError::BlockedDiagnostics` before any command runs, whatever the pre-approved set holds. `Markdown::compose_preflight_approvals` applies the same check before it reads a policy file or asks the approval handler, and returns the stop as `ShellExpansionError::Preflight`.
 
 **Running templates elsewhere.** A host that runs commands itself (Claudine's sequence and lifecycle runners) uses the same checks from `shell_expansion::template`: `fill_template` to fill a template through a `HoleEvaluator`, `resolve_late_values` to check values the run produced before a step's first command, `check_filled_chain` for the blacklists, and `resolve_direct_target` for each program. A host-owned whole-value `$( … )` (Claudine's lifecycle `set`) is a `ResolvedShellValue`; `with_template` makes it run as its typed template, `with_late_values` hands it values already checked at a barrier, and `execute_shell_values_with` reads its other placeholders through the host's own `HoleEvaluator`. Its pre-approval is then its shape, not its bytes. `ResolvedShellValue::template_only` keeps such a value whose interpolated text no longer reads as a command, so it can run only as its template.
 

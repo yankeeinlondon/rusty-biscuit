@@ -1,5 +1,37 @@
 # Darkmatter Dependencies
 
+## `serde_json` Features
+
+`darkmatter` declares three `serde_json` features itself rather than relying
+on feature unification from other crates:
+
+- `preserve_order` keeps every JSON map in written (insertion) order, so
+  frontmatter values, `with:` overlays, expression results such as
+  `as_json5`, and SimplifiedSchema → JSON Schema output keep the order the
+  author wrote. Cargo unifies the feature into every package that links
+  `darkmatter`. Outputs that publish alphabetical keys sort explicitly:
+  `md schema validate --format json`, the non-strict frontmatter hash used by
+  `md hash`, Claudine's OpenCode/Kilo inline config, and `sniff`'s JSON
+  output. Insertion order is not always source order: a map a function
+  builds keeps the order it was built in. A new consumer that needs a stable
+  order sorts explicitly rather than relying on the map.
+  - Written order is intentional where a reader sees it:
+    `md schema detect --format json` lists properties in the order the
+    documents wrote them (with `$schema` first), a mapping converted to text
+    for a `json`/`yaml` property or a `json` parameter keeps its key order
+    (`{ b: 1, a: 2 }` becomes `{"b":1,"a":2}`), and `keys()`/`values()`
+    return a map's entries in that order.
+  - Interoperability: the compiled JSON Schema is standard Draft 2020-12
+    plus Darkmatter's custom `format`s (`darkmatter-numberlike`,
+    `darkmatter-boolish`, `darkmatter-json`, `darkmatter-yaml`, and others)
+    and the `x-darkmatter-integer` keyword. Key order does not change what a
+    schema means, so another validator reads it the same way, but a
+    validator that ignores unknown formats and keywords accepts more than
+    Darkmatter does.
+- `raw_value` and `float_roundtrip` let the JSON loaders read each number's
+  written text and parse it exactly, which numeric admission needs (see
+  [Numbers](./topics/numbers.md)).
+
 ## Remote URL Referencing
 
 - `biscuit-file` with the `fetch` feature supplies the shared HTTP fetch
@@ -227,3 +259,7 @@ protocol-focused:
   per-diagnostic body is `biscuit_file::YamlDiagnostic`'s own `Serialize`, so
   the wire format stays pinned to the shared diagnostic vocabulary; the derive
   is only needed for the CLI-local envelope and stage tag that wrap it.
+- `ctrlc` — the Ctrl-C handler of a lifecycle `md compose` run: the first
+  interrupt cancels the run so its `cancelled` and `finalize` stacks still run
+  and it exits 130, and a second one exits at once. Installed only for a
+  document that authors a lifecycle event.

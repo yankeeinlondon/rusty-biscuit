@@ -12,6 +12,7 @@
 //! paths report the same [`SequenceStepResult`] for container failure handling,
 //! summaries, and interruption.
 
+use claudine::diagnostics::DiagnosticSnapshotExt;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};

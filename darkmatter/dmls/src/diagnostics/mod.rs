@@ -7,6 +7,7 @@
 //! ([`DiagnosticsScheduler`]), and the raw notification sender
 //! ([`DiagnosticsPublisher`]).
 
+pub(crate) mod call_check;
 pub mod codes;
 pub mod frontmatter;
 pub(crate) mod named_types;

@@ -2,6 +2,7 @@ use super::*;
 use darkmatter::markdown::compose::expression::EvaluationLookup;
 use serde_json::json;
 
+mod loop_leaf_reads;
 mod resolution_context;
 
 fn map(value: Value) -> Map<String, Value> {
@@ -174,7 +175,8 @@ fn evaluates_ambient_and_env_conditions() {
     );
     assert_eq!(
         evaluate_condition(&LoopCondition::While("env.PATH != \"\"".into()), &lookup).unwrap(),
-        std::env::var("PATH").is_ok_and(|value| !value.is_empty())
+        // An unset `PATH` reads as `null`, which strict `!=` separates from `""`.
+        std::env::var("PATH").ok().is_none_or(|value| !value.is_empty())
     );
 }
 

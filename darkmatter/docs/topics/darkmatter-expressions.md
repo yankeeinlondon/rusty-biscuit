@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Darkmatter Expressions
 
 Darkmatter exposes a single expression language used in two kinds of surface:
@@ -8,6 +12,12 @@ Darkmatter exposes a single expression language used in two kinds of surface:
 Both kinds share the same lexer, parser, and evaluator, so the operator
 set, truthiness rules, helper functions, and access semantics described here
 are identical everywhere.
+
+Before evaluating a document, Darkmatter checks calls against the available
+schema declarations and enclosing guards. The [call-check guide](../inline/call-check.md)
+explains which calls are rejected and which receive warnings. For command-line
+control of those warnings, see [diagnostic policy](../cli/policy.md); scripts
+can collect the result with [composition reports](../cli/report-json.md).
 
 ### Availability across every surface
 
@@ -25,7 +35,7 @@ surface that runs it:
 | `::block` / `::file` / `::code` conditions | `when="..."` |
 | Reference-graph conditional extraction | `when="..."` |
 | Public condition API | `evaluate_condition_against(...)` |
-| Claudine loop conditions | `until=` / `while=` / `action=` |
+| Claudine loop conditions and action operands | `until:` / `while:` and expressions under `action:` |
 | Claudine hook conditions | `when=` |
 
 This is the **availability invariant**: a read-side function or `fm.*`
@@ -127,9 +137,11 @@ title: Notes
 ```
 
 Every root is classified the same way, in this order. A host such as Claudine
-can register extra globals (see [Host Bindings](#host-bindings)); plain
-`md compose` registers none, so for it every unreserved root is a document
-property.
+can register extra globals (see [Host Bindings](#host-bindings)); the
+document host supplies those declarations for the current evaluation scope.
+Lifecycle events also declare `err` and `timing`; Claudine adds `seq`,
+`loop`, and `group` in their applicable scopes. An undeclared, unreserved root
+is a document property.
 
 ```mermaid
 flowchart TD
@@ -175,7 +187,15 @@ or `""` skips the directive with a compose warning. The guard above is applied
 before body interpolation, so it removes the directive and suppresses that
 warning. DMLS warns on statically nullable unguarded targets without executing
 the expression; unsupported expression or schema shapes remain unknown rather
-than being guessed nullable or safe.
+than being guessed nullable or safe. Any enclosing `when` that proves the
+target's property present on its true side counts as its guard (`log`,
+`log != null`, `log == 'main.md'`, `is_string(log)`, `!is_null(log)`,
+`file_exists(log)` and their aliases, or a conjunction holding one), by the
+same rules that excuse a missing shell placeholder (see
+[Guarded values](../inline/preflight-checks.md#guarded-values)); `!log`,
+`log || other`, `log != ''`, and a guard on a member such as `log.path` do
+not. A missing `log` is `null`, and `null != ''` is true, so `log != ''` lets
+a missing value through.
 
 ## Operator Precedence
 
@@ -220,13 +240,196 @@ This makes `||` a true fallback operator: `a || b` evaluates to `a` when `a`
 is truthy, and `b` otherwise.
 
 Note that the string `"false"` is still truthy — it is a non-empty string.
-Prefer explicit comparisons (`flag == 'true'`) when working with stringly-typed
-flags.
+Equality is strict, so a boolean flag compares with `flag == true`; a
+stringly-typed flag needs `flag == 'true'`, and the two forms are not
+interchangeable (see [Equality and Inequality](#equality-and-inequality)).
+
+## What a Guard Proves
+
+A condition that guards a region tells Darkmatter something about the values
+read inside that region. Function-argument checks, shell pre-flight,
+transclusion-target warnings, absence warnings, and DMLS diagnostics and hover
+all use this, without running the condition. Composition and DMLS compute it
+with the same library code, so they always agree. The guarded regions are:
+
+- the body of a `::block when="…"` (nested blocks combine);
+- the branches of a ternary `c ? a : b`, and the right operand of `&&`, `||`,
+  `and(…)`, and `or(…)`;
+- the `then:` and `else:` bodies of a lifecycle `when:` item, in `md`'s
+  events and in a host's (Claudine's lifecycle stacks and sequence task
+  `when:`; see Claudine's
+  [Pre-flight Checks](../../../claudine/docs/topics/pre-flight-checks.md)).
+
+A guard changes which function calls are proven safe. With `foo` declared
+`string | number` and `x` an optional `number`:
+
+```text
+min(foo, 5)                          foo may be text: a warning in strict DMLS
+is_number(foo) ? min(foo, 5) : 0     foo is a number here: no warning
+x && min(x, 5)                       x is present here: no warning
+is_number(flag) ? min(flag, 5) : 0   flag: boolean(required) can never be a number: still an error
+```
+
+```md
+---
+$schema:
+  release_tag: string
+release_tag: v1.2.3
+---
+::block when="release_tag"
+::shell git tag {{ release_tag }}      <!-- release_tag is present here -->
+::end-block
+
+::shell git tag {{ release_tag }}      <!-- not guarded: a missing value fails pre-flight -->
+```
+
+Each site has one **type scope**: the type of each value at that site. It has
+three layers, which stay separate:
+
+| Layer | Comes from | Example |
+| --- | --- | --- |
+| Declaration | the document's schema | `tag: string \| null`; an optional property includes `null`, and a `default(…)` binds no value |
+| Refinement | every guard enclosing the site | under `when="tag"`, `tag` is `string` |
+| Approval fallback | shell templates only | a placeholder of unknown or non-string type approves as `{{ string }}` |
+
+This is how a site's type scope is built and used, without evaluating
+anything:
+
+```mermaid
+flowchart TD
+    S["schema layers<br/>(baseline, triggers, document, host globals)"] --> DT["declared type of each value<br/>tag: string | null"]
+    DT --> G{"enclosing guards,<br/>outermost first"}
+    G -- "true side / then: / ternary yes" --> T["apply the guard's true-side facts"]
+    G -- "false side / else: / ternary no" --> FS["apply the guard's false-side facts"]
+    T --> W{"a lifecycle set<br/>wrote the subject since?"}
+    FS --> W
+    W -- yes --> DT2["back to the declared type"]
+    W -- no --> SC["the site's type scope"]
+    DT2 --> SC
+    SC --> C["call check, shell pre-flight,<br/>absence warnings, DMLS hover"]
+```
+
+The fallback is only the shape a shell command is approved by. It is not a
+declaration: an undeclared name stays unknown to functions, warnings, and
+DMLS. An undeclared value is unknown, which proves nothing about presence
+until a guard does.
+
+### Guard forms
+
+What each form proves on its true side (the region it guards) and on its
+false side (an `else`, a ternary's second branch, or `!` around it):
+
+| Guard | True side | False side |
+| --- | --- | --- |
+| `x` | `x` is present and not a falsy literal | nothing |
+| `!g` | the false side of `g` | the true side of `g` |
+| `a && b`, `and(a, b)` | everything `a` and `b` prove | what every way of failing has in common |
+| `a \|\| b`, `or(a, b)` | what every way of holding has in common | the false sides of both |
+| `is_string(x)`, `is_number(x)`, `is_array(x)`, `is_object(x)` | `x` has that type; a recursive named type (`node`) counts by the top level of its definition and keeps its name | `x` does not have that type |
+| `is_null(x)` | `x` is missing | `x` is present |
+| `is_empty(x)` | nothing | `x` is present |
+| `file_exists(x)` | `x` is a present string | nothing |
+| `is_file_type(x)` | `x` is suitable for a `file` parameter | nothing |
+| `x == null` | `x` is missing | `x` is present |
+| `x != null` | `x` is present | `x` is missing |
+| `x == 'debug'`, `x == 5`, `x == true` | `x` is present and equals that literal; an enum narrows to that member, and alternatives of another type are dropped | `x` is not that value (it may still be missing) |
+| `x != 'debug'`, `x != ''` | `x` is not that value (it may still be missing) | `x` is present and equals that literal |
+| `x == y` | `x` can only strictly equal one of `y`'s possible values, when `y`'s type lists them (an enum, literals, `boolean`, or `null`) | nothing, unless `y` has a single possible value |
+| `x == []`, `x == {…}` | `x` is present and is an array (or an object); its elements are not pinned | nothing |
+| `<`, `>`, `<=`, `>=`, `!=` against `[]` or `{}`, any other function | nothing | nothing |
+
+Predicate aliases (`isString`, `fileExists`) and case resolve to the same
+function and prove the same facts. A guard that can never hold
+(`is_number(flag)` with `flag: boolean(required)`) narrows nothing: the
+region is checked with the incoming type, so a call that is wrong there is
+still reported. Reversed operands (`'' != x`) prove the
+same facts as `x != ''`. Equality follows the evaluator exactly (see
+[Equality and Inequality](#equality-and-inequality)): a missing value is
+`null`, `null` equals only `null`, and a value of one type never equals a
+value of another. That is why `x != null` (or `!is_null(x)`) is the presence
+check and `x != ''` is not: a missing `x` is `null`, which differs from `''`.
+
+A fact is about one **stable subject**: a variable, or a path with constant
+members and indices (`x`, `fm.x`, `x.a`, `items[0]`). `x` and `fm.x` share a
+fact when they name the same document property. A guard on a computed value
+proves nothing about its inputs: `is_number(length(x))` says nothing about
+`x`, and `items[i]` is not a stable subject. A guard on `x.a` proves nothing
+about `x` or about a sibling `x.b`. A guard that contradicts itself
+(`mode == 'a' && mode == 'b'`) is not treated as dead code: every check still
+applies to the region.
+
+### Where a predicate's facts come from
+
+A predicate proves exactly the **narrowing fact** registered with the
+function, never a rule keyed by its name. Built-in predicates, a test
+function, and a host's function (such as a Claudine predicate) register
+facts the same way, and analysis reads them without calling the function.
+There are three kinds:
+
+| Kind | True side | False side | Example |
+| --- | --- | --- | --- |
+| true-iff a type | the argument has that type | that type is removed | `is_string(x)`, `is_null(x)` |
+| true-implies a type | the argument is suitable for that type | nothing | `file_exists(x)` (a string), `is_file_type(x)` (a `file`) |
+| false-implies a type | nothing | the argument is suitable for that type | `is_empty(x)` (present) |
+
+"Suitable for a type" keeps an alternative that already fits it, turns an
+alternative of the same kind of value into that type, and drops the rest.
+From `unknown` it is the type itself. So a host predicate registered as
+true-implies `file` lets `is_project_file(source) && frontmatter(source,
+'title')` pass `source` to a file parameter even when `source` is
+`unknown`. A true-iff fact names `null` or one bare kind of value (`string`,
+`number`, `boolean`, `object`, `unknown[]`), because only those have a
+false side Darkmatter can describe. Registration rejects a fact on a
+function that does not return `boolean`, on a parameter it does not
+declare, or of a type its kind cannot prove. A host's facts reach the editor
+through a generated facts artifact; see
+[Host Expression Functions](./host-functions.md).
+
+### How long a fact lasts
+
+- A fact ends where its region ends. After a conditional, only what every
+  branch agrees on remains.
+- A write ends the facts about what it writes: a lifecycle `set` of `x`
+  ends what guards proved about `x`, `fm.x`, every path below `x`, and every
+  path above it, for the actions after it. A write to a sibling (`x.b`)
+  leaves a fact about `x.a` alone. A write whose destination is
+  not a constant path ends every fact about document properties. A write
+  inside an inner branch still ends the fact after the outer branch joins.
+- Facts never carry across a lifecycle event, a loop pass, a retry, a resume,
+  or a proxy handoff. Entering a guard again proves its facts again.
+
+### Facts are static; live values are still checked
+
+Building a scope reads the expressions only. It evaluates nothing, runs no
+function, and touches no file or network: `file_exists(x)` checks nothing on
+disk while pre-flight or DMLS analyzes it. A fact is evidence about the region,
+not a promise about the value. When a guarded command runs, its value is read
+and checked against both its declaration and the guard's refinement. A `null`
+fails with `MissingValue`, and a value of another type fails with
+`TemplateValueRejected`, before any part of the command starts. Narrowing never
+changes a stored value, never proves that a file exists, and never grants
+access. See [Guarded values](../inline/preflight-checks.md#guarded-values) for
+how pre-flight approves and runs a guarded command.
+
+### Planned
+
+These are not built yet. Until they are, the guards involved prove only what
+the table above says:
+
+- **planned:** narrowing an object from a guard on one of its members
+  (`x.kind == 'a'` narrowing `x`), and nested unions;
+- **planned:** DMLS narrowing of sequence task bodies, and of hover inside
+  lifecycle `then:`/`else:` actions. DMLS's call diagnostics already narrow
+  every lifecycle stack, under the `md` host or under a host's
+  [lifecycle artifact](lifecycle/host-artifact.md) (Claudine's included).
 
 ## Literals and Grouping
 
 - string literals use double or single quotes: `"claude"`, `'claude'`
-- numeric literals: `0`, `1`, `3.14`, `-2`
+- numeric literals: `0`, `1`, `3.14`, `-2`; no exponent (`1e3`) or
+  leading-dot (`.5`) form, and a whole literal must be held exactly by an
+  `f64`: `9007199254740993` is an error ("cannot be represented exactly").
+  See [Numbers](./numbers.md)
 - boolean literals: `true`, `false`
 - parentheses for grouping: `(env.AGENT == "claude" || env.AGENT == "opencode")`
 
@@ -297,11 +500,16 @@ namespace.
 | --- | --- | --- |
 | `fm` / `fm.*` | the **current** document's frontmatter (this document) | eager |
 | `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](state-management/context-variables.md) | eager, captured once per request |
-| `env.*` | environment variables from the request's snapshot (the same map `{{VAR}}` file references read) | eager |
+| `env.*` | the document's captured environment (the same map `{{VAR}}` file references read) | eager |
 | `current.*` | the same keys as `ctx.*`, each observed when the reference is evaluated | lazy |
 
-`env` does not change during a composition: every `env.*` read in a request
-sees the same captured map.
+Each document captures `env` once. Loop iterations, retries, resumes, and
+transcluded content reuse that map; a new document captures its own. A host
+may select provider identity after frontmatter resolves through the explicit
+[frontmatter hook](compose-requests.md#choosing-the-bodys-environment-from-the-frontmatter).
+In that case frontmatter keeps the values it already read, and the body and
+its transclusions use the selected identity. No expression refreshes `env`
+from the live process.
 
 ### The lazy `current` namespace
 
@@ -342,7 +550,7 @@ old expression still parses but reads the document.
 | --- | --- | --- |
 | `{{ current_env.HOME }}` | the live process value of `HOME` | member `HOME` of the frontmatter property `current_env` (usually absent) |
 
-Rewrite `current_env.` to `env.` to read the request's captured environment.
+Rewrite `current_env.` to `env.` to read the document's captured environment.
 An old `current_env.X` with no `current_env` property renders empty and is
 reported as the advisory `dm.expression.undeclared_property`.
 
@@ -453,7 +661,10 @@ All six comparisons are supported: `==`, `!=`, `>`, `>=`, `<`, `<=`.
 
 ### Equality and Inequality
 
-`==` and `!=` compare scalar string representations.
+`==` and `!=` are **strict**: two values are equal only when they have the
+same runtime type and the same value. The runtime types are null, boolean,
+number, string, array, and object; a schema type such as `email` or `date` is
+a string at runtime. `!=` is always the exact opposite of `==`.
 
 ```md
 ::block when="stage == 'draft'"
@@ -463,18 +674,71 @@ Draft-only content
 ::file ./public.md when="audience != 'internal'"
 ```
 
-Edge cases:
+| Expression | Result | Why |
+| --- | --- | --- |
+| `5 == "5"`, `true == "true"` | `false` | a number or boolean never equals a string |
+| `0 == false`, `[] == {}` | `false` | different runtime types |
+| `[] == '[]'` | `false` | a container never equals its JSON text |
+| `5 == 5.0` | `true` | one number type; integer and decimal spellings of the same value are equal |
+| `'A' == 'a'`, `' a ' == 'a'` | `false` | strings compare exactly: no case folding, trimming, or Unicode normalization |
+| `null == null` | `true` | `null` equals itself |
+| `null == ''`, `'' == null` | `false` | `null` equals nothing else |
+| `[1, null] == [1.0, null]` | `true` | arrays: same length, equal elements in order |
+| `[1, 2] == [2, 1]` | `false` | order matters in arrays |
+| `{a: 1, b: null} == {b: null, a: 1.0}` | `true` | objects: same keys and equal values; key order is ignored |
+| `{a: null} == {}` | `false` | a missing key is not a key holding `null` |
 
-- if both sides are missing, `a == b` is false
-- if both sides are missing, `a != b` is also false
-- if one side is defined and the other is missing, `==` is false and `!=` is true
+Rules:
+
+- **Missing values are `null`.** A property that is absent, or present with
+  `null`, compares as `null`: `missing == null` is true, and `missing == ''`
+  and `missing == 'x'` are false.
+- **Numbers compare by exact value**, with no tolerance, and `0 == -0` is
+  true. Every number a document, schema, or literal supplies is an `f64` held
+  exactly ([Numbers](./numbers.md)), so equality agrees with `<` and `>`.
+  Only a typed value supplied from outside, such as `--set`, can hold an
+  integer no `f64` holds; it is compared without rounding, so
+  `9007199254740992` and a supplied `9007199254740993` stay unequal.
+- **Containers compare recursively** with these same rules.
+- **Schema coercion still applies first.** A value whose schema declares it a
+  `number` is coerced before any comparison runs, so a quoted `phase: "3"`
+  under `phase: number` equals `3`. An undeclared `"3"` stays a string and
+  does not.
+- **Errors are not inequality.** A failed operand (a malformed expression,
+  a failed function call, an unavailable host binding) fails the expression;
+  it never becomes `null` or an unequal comparison.
+
+Choose the check by what you mean:
+
+| Intended check | Expression |
+| --- | --- |
+| missing or `null` | `x == null`, `is_null(x)` |
+| present, including empty values | `x != null`, `!is_null(x)` |
+| exactly the empty string | `x == ''` |
+| missing or the empty string | `is_null(x) \|\| x == ''` |
+| present and not the empty string | `x != null && x != ''` |
+| `null`, or an empty string, array, or object | `is_empty(x)` |
+| none of those | `!is_empty(x)` |
+
+Convert explicitly when the types differ on purpose:
+
+```md
+{{ 5 == number("5") }}          ⇒ true    <!-- numeric comparison against text -->
+{{ ('' + x) == ('' + y) }}      ⇒ compares rendered text; null renders as ""
+```
+
+The rendered-text form makes `null` and `""` equal again for that site only;
+it does not make two missing values unequal.
 
 ### Numeric Comparisons
 
-For `>`, `>=`, `<`, and `<=`, both sides are coerced to numbers.
+For `>`, `>=`, `<`, and `<=`, both sides are coerced to numbers. Ordering is
+not strict the way equality is: `5 <= "5"` and `5 >= "5"` both hold, while
+`5 == "5"` is false.
 
 - numbers stay numbers
-- numeric strings are parsed
+- numeric strings are parsed with the [number rules](./numbers.md#arithmetic)
+  (`" 4 "` and `"1_000"` are numbers; `"inf"` and `"9007199254740993"` are not)
 - `true` becomes `1`
 - `false` becomes `0`
 - `null`, arrays, objects, and non-numeric strings become `0`
@@ -498,15 +762,26 @@ two numeric strings.
 {{ "count: " + 5 }}    ⇒ "count: 5"
 {{ 10 * (1 + 2) }}     ⇒ 30
 {{ 7 % 3 }}            ⇒ 1
+{{ 10 / 4 }}           ⇒ 2.5
+{{ 4.5 - 0.5 }}        ⇒ 4
 ```
+
+Arithmetic computes in `f64`, and a whole result displays without a decimal
+suffix and with every digit (`{{ 9007199254740992 + 0 }}` ⇒
+`9007199254740992`); see [Numbers](./numbers.md).
 
 ### Errors
 
 Arithmetic errors fail composition:
 
 - **Division by zero** — `x / 0` and `x % 0` raise an error
+- **Non-finite results** — a result too large for an `f64` (`big * 10` when
+  `big` is the largest finite number) raises "not finite", never infinity
 - **Non-numeric operands** — using `-`, `*`, `/`, or `%` on `null`, booleans,
   arrays, or objects raises an error
+- **Numbers that cannot be represented** — numeric text or a supplied integer
+  no `f64` holds exactly (`"9007199254740993" + 1`) raises "cannot be
+  represented exactly"
 
 ### Remainder Semantics
 
@@ -528,137 +803,157 @@ Arithmetic errors fail composition:
 Function names are **case-insensitive**: `has_key`, `HasKey`, and `haskey` all
 resolve to the same function.
 
-The authored source for this table is
-[`docs/schemas/expression-functions.yaml`](../schemas/expression-functions.yaml),
-projected through `expression_function_descriptors()`. Do not edit the generated
-table directly; run `just darkmatter regen-expr-doc` from the repository root to
-refresh it after changing the catalog.
+The authored source for this table is the function catalog
+[`schemas/partials/functions.yaml`](../../schemas/partials/functions.yaml),
+read through `expression_function_catalog()`. Categories appear in the order of
+the catalog's `categories:` list and functions alphabetically within each
+category, one row per overload. The `Example` column shows every example: inline
+ones as `call ⇒ result` (a display-only one marked with its reason) and
+file-form ones from `schemas/partials/function-examples/`. Do not edit the
+generated table directly; run `just darkmatter regen-expr-doc` from the
+repository root to refresh it after changing the catalog.
+
+The catalog's other `types:` entries are named helper types that signatures
+use: `agentic-cli`, `ip-address`, and `recent-commits`. A schema imports one as
+`Name@darkmatter:functions` (see
+[Reserved Darkmatter References](schemas/definition.md#reserved-darkmatter-references-namedarkmatterstem)).
+`ctx.recent_commits` is declared that way, so it and the return of
+`recent_commits(count)` are the one `recent-commits` type, a `string[]`:
+
+```yaml
+# darkmatter/schemas/partials/context-variables.yaml
+recent_commits: "recent-commits(generated; required)@darkmatter:functions -> …"
+```
 
 <!-- BEGIN GENERATED FUNCTION TABLE -->
 
 | Category | Function | Description | Example |
 | --- | --- | --- | --- |
-| Type Predicates | `is_string(x)` | Returns true when the value is a string. | `is_string("hello")` ⇒ `true` |
-| Type Predicates | `is_number(x)` | Returns true when the value is a number. | `is_number(42)` ⇒ `true` |
-| Type Predicates | `is_array(x)` | Returns true when the value is an array. | `is_array(items)` ⇒ `true` |
+| Type Predicates | `is_array(x)` | Returns true when the value is an array. | `is_array([1, 2, 3])` ⇒ `true` |
+| Type Predicates | `is_empty(x)` | Returns true when the value is null, empty text, an empty array, or an empty object. | `is_empty("")` ⇒ `true` |
+| Type Predicates | `is_integer(val)` | Returns true when the value is a number with no fractional part; text is never an integer. | `is_integer(7)` ⇒ `true` |
+| Type Predicates | `is_negative(val)` | Returns true when the number is less than zero; null is false. | `is_negative(-3)` ⇒ `true` |
 | Type Predicates | `is_null(x)` | Returns true when the value is null. | `is_null(null)` ⇒ `true` |
-| Type Predicates | `is_object(x)` | Returns true when the value is an object. | `is_object(obj)` ⇒ `true` |
-| Type Predicates | `is_empty(x)` | Returns true when the value is null, empty string, empty array, or empty object. | `is_empty("")` ⇒ `true` |
-| Type Predicates | `is_positive(val)` | Returns true when the coerced value is greater than zero. | `is_positive(5)` ⇒ `true` |
-| Type Predicates | `is_negative(val)` | Returns true when the coerced value is less than zero. | `is_negative(-3)` ⇒ `true` |
-| Type Predicates | `is_integer(val)` | Returns true when the value is a JSON number with no fractional component. | `is_integer(7)` ⇒ `true` |
-| Math | `min(a, b)` | Returns the smaller of two numbers. | `min(2, 5)` ⇒ `2` |
-| Math | `max(a, b)` | Returns the larger of two numbers. | `max(2, 5)` ⇒ `5` |
+| Type Predicates | `is_number(x)` | Returns true when the value is a number; numeric text such as `"4"` is not. | `is_number(42)` ⇒ `true` |
+| Type Predicates | `is_object(x)` | Returns true when the value is an object. | `is_object({a: 1})` ⇒ `true` |
+| Type Predicates | `is_positive(val)` | Returns true when the number is greater than zero; null is false. | `is_positive(5)` ⇒ `true` |
+| Type Predicates | `is_string(x)` | Returns true when the value is text. | `is_string("hello")` ⇒ `true` |
 | Math | `abs(x)` | Returns the absolute value of a number. | `abs(-3)` ⇒ `3` |
-| Collection | `first(x)` | Returns the first element of an array, or null when empty. | `first(items)` ⇒ `1` |
-| Collection | `last(x)` | Returns the last element of an array, or null when empty. | `last(items)` ⇒ `3` |
-| String Predicates | `starts_with(x, find)` | Returns true when the string starts with the given prefix (case-sensitive). | `starts_with("hello", "he")` ⇒ `true` |
-| String Predicates | `ends_with(x, find)` | Returns true when the string ends with the given suffix (case-sensitive). | `ends_with("hello", "lo")` ⇒ `true` |
-| String Mutations | `lower(x)` | Converts a string to lowercase. | `lower("HELLO")` ⇒ `hello` |
-| String Mutations | `upper(x)` | Converts a string to uppercase. | `upper("hello")` ⇒ `HELLO` |
-| String Mutations | `capitalize(x)` | Capitalizes the first character of a string. | `capitalize("hello")` ⇒ `Hello` |
-| String Mutations | `kebab_case(x)` | Converts a string to kebab-case. | `kebab_case("Hello World")` ⇒ `hello-world` |
-| String Mutations | `snake_case(x)` | Converts a string to snake_case. | `snake_case("Hello World")` ⇒ `hello_world` |
-| String Mutations | `camel_case(x)` | Converts a string to camelCase. | `camel_case("hello world")` ⇒ `helloWorld` |
-| String Mutations | `pascal_case(x)` | Converts a string to PascalCase. | `pascal_case("hello world")` ⇒ `HelloWorld` |
-| String Mutations | `title_case(x)` | Converts a string to Title Case. | `title_case("hello world")` ⇒ `Hello World` |
-| String Mutations | `without_date(string)` | Removes substrings that are real YYYY-MM-DD calendar dates, leaving surrounding text untouched. | `without_date("Note 2024-06-15")` ⇒ `Note ` |
-| String Mutations | `ensure_leading(var, prefix)` | Ensures the string form of a value starts with a prefix. | `ensure_leading("world", "hello ")` ⇒ `hello world` |
-| String Mutations | `ensure_trailing(var, postfix)` | Ensures the string form of a value ends with a postfix. | `ensure_trailing("hello", " world")` ⇒ `hello world` |
-| String Mutations | `replace(x, find, replacement)` | Replaces every literal occurrence of a substring; empty find is a no-op. | `replace("a.b.c", ".", "/")` ⇒ `a/b/c` |
-| String Mutations | `replace_first(x, find, replacement)` | Replaces the first literal occurrence of a substring; empty find is a no-op. | `replace_first("a.b.c", ".", "/")` ⇒ `a/b.c` |
-| String Mutations | `replace_last(x, find, replacement)` | Replaces the last literal occurrence of a substring; empty find is a no-op. | `replace_last("a.b.c", ".", "/")` ⇒ `a.b/c` |
-| Rendering | `terminal(string)` | Renders Prose markup to a terminal string with ANSI SGR sequences. | `terminal("hello")` ⇒ `hello` |
-| Date Formatting | `date(iso, fmt)` | Reformats an ISO date/datetime string into a named human format. | `date("2024-06-15", "long")` ⇒ `Sat, June 15th, 2024` |
-| Date Validators | `is_date(x)` | Returns true when the string is a valid ISO date (YYYY-MM-DD). | `is_date("2024-06-15")` ⇒ `true` |
-| Date Validators | `is_date_utc(x)` | Same as is_date (the format itself is timezone-agnostic). | `is_date_utc("2024-06-15")` ⇒ `true` |
-| Date Validators | `is_date_time(x)` | Returns true when the string is a valid ISO datetime. | `is_date_time("2024-06-15T12:30:00")` ⇒ `true` |
-| Date Validators | `is_date_time_utc(x)` | Same parse contract as is_date_time. | `is_date_time_utc("2024-06-15T12:30:00Z")` ⇒ `true` |
-| Date Validators | `is_today(x)` | Returns true when the date/datetime is today (local). |  |
-| Date Validators | `is_today_utc(x)` | Returns true when the date/datetime is today (UTC). |  |
-| Date Validators | `is_yesterday(x)` | Returns true when the date/datetime is yesterday (local). |  |
-| Date Validators | `is_yesterday_utc(x)` | Returns true when the date/datetime is yesterday (UTC). |  |
-| Date Validators | `is_tomorrow(x)` | Returns true when the date/datetime is tomorrow (local). |  |
-| Date Validators | `is_tomorrow_utc(x)` | Returns true when the date/datetime is tomorrow (UTC). |  |
-| Date Validators | `is_this_month(x)` | Returns true when the date/datetime is in the current month (local). |  |
-| Date Validators | `is_this_month_utc(x)` | Returns true when the date/datetime is in the current month (UTC). |  |
-| Date Validators | `is_this_year(x)` | Returns true when the date/datetime is in the current year (local). |  |
-| Date Validators | `is_this_year_utc(x)` | Returns true when the date/datetime is in the current year (UTC). |  |
-| Date Arithmetic | `date_delta(date1, date2, diff)` | Returns true when the two dates are at least the given duration apart, ignoring order (duration like 14d, 2mo, 1 hour). | `date_delta("2024-06-01", "2024-06-20", "14d")` ⇒ `true` |
-| Date Arithmetic | `older_than(date1, date2, diff)` | Returns true when date1 is at least the given duration older (earlier) than date2. | `older_than("2024-06-01", "2024-06-20", "14d")` ⇒ `true` |
+| Math | `max(a, b)` | Returns the larger of two numbers. | `max(2, 5)` ⇒ `5` |
+| Math | `min(a, b)` | Returns the smaller of two numbers. | `min(2, 5)` ⇒ `2`<br>`min("4", 5)` ⇒ `4`<br>`min("pear", 5)` ⇒ `error` |
+| Math | `round(x, [fallback])` | Rounds a number or numeric text to the nearest whole number, halfway values away from zero. When `x` is not a number or numeric text, a supplied `fallback` is rounded and returned instead; without one the call is a type error. | `round(3.7)` ⇒ `4`<br>`round("3.7")` ⇒ `4`<br>`round(-2.5)` ⇒ `-3`<br>`round("pear", 2.7)` ⇒ `3`<br>`round("pear")` ⇒ `error` |
+| Collection | `contains(haystack, needle)` | Returns true when the needle occurs in the haystack. Text is searched for a case-sensitive substring; array elements and object values (never keys) are compared by their rendered text, so `4` matches `"4"`. A null needle renders as empty text, and a null haystack is false. | `contains("hello", "ell")` ⇒ `true`<br>`contains([4], "4")` ⇒ `true`<br>`contains({a: "x"}, "a")` ⇒ `false` |
+| Collection | `first(x)` | Returns the first element of a list, or null when the list is empty or null. | `first([1, 2, 3])` ⇒ `1` |
+| Collection | `has_key(obj, key)` | Returns true when the object has the given key; a null object or key is false. | `has_key({a: 1}, "a")` ⇒ `true` |
+| Collection | `keys(obj)` | Returns the keys of a map in the order they were written; a null map has no keys. Its counterpart is `values`. | `keys({b: 1, a: 2})` ⇒ `["b", "a"]` |
+| Collection | `last(x)` | Returns the last element of a list, or null when the list is empty or null. | `last([1, 2, 3])` ⇒ `3` |
+| Collection | `length(val)` | Counts the characters of text, the elements of an array, or the keys of an object; a number counts the characters of its displayed text. A boolean is a type error. | `length("hello")` ⇒ `5`<br>`length("true")` ⇒ `4`<br>`length(2.5)` ⇒ `3`<br>`length({a: 1})` ⇒ `1`<br>`length(true)` ⇒ `error` |
+| Collection | `values(obj)` | Returns the values of a map in the order their keys were written; a null map has no values. Its counterpart is `keys`. | `values({b: 1, a: 2})` ⇒ `[1, 2]` |
+| String Predicates | `ends_with(x, find)` | Returns true when the text ends with the given suffix (case-sensitive); null is false. | `ends_with("hello", "lo")` ⇒ `true` |
+| String Predicates | `starts_with(x, find)` | Returns true when the text starts with the given prefix (case-sensitive); null is false. | `starts_with("hello", "he")` ⇒ `true` |
+| String Mutations | `camel_case(x)` | Converts text to camelCase; null passes through. | `camel_case("hello world")` ⇒ `"helloWorld"` |
+| String Mutations | `capitalize(x)` | Capitalizes the first character of the text; null passes through. | `capitalize("hello")` ⇒ `"Hello"` |
+| String Mutations | `ensure_leading(var, prefix)` | Ensures the text form of a value starts with a prefix, adding it only when missing. A value that already starts with it is returned unchanged, and a number given a numeric prefix stays a number. Null passes through. | `ensure_leading("world", "hello ")` ⇒ `"hello world"` |
+| String Mutations | `ensure_trailing(var, postfix)` | Ensures the text form of a value ends with a postfix, adding it only when missing. A value that already ends with it is returned unchanged, and a number given a numeric postfix stays a number. Null passes through. | `ensure_trailing("hello", " world")` ⇒ `"hello world"` |
+| String Mutations | `kebab_case(x)` | Converts text to kebab-case; null passes through. | `kebab_case("Hello World")` ⇒ `"hello-world"` |
+| String Mutations | `lower(x)` | Converts text to lowercase; null passes through. | `lower("HELLO")` ⇒ `"hello"` |
+| String Mutations | `pascal_case(x)` | Converts text to PascalCase; null passes through. | `pascal_case("hello world")` ⇒ `"HelloWorld"` |
+| String Mutations | `replace(x, find, replacement)` | Replaces every literal, case-sensitive occurrence of a substring; an empty `find` changes nothing. Null passes through. | `replace("a.b.c", ".", "/")` ⇒ `"a/b/c"` |
+| String Mutations | `replace_first(x, find, replacement)` | Replaces the first literal, case-sensitive occurrence of a substring; an empty `find` changes nothing. Null passes through. | `replace_first("a.b.c", ".", "/")` ⇒ `"a/b.c"` |
+| String Mutations | `replace_last(x, find, replacement)` | Replaces the last literal, case-sensitive occurrence of a substring; an empty `find` changes nothing. Null passes through. | `replace_last("a.b.c", ".", "/")` ⇒ `"a.b/c"` |
+| String Mutations | `snake_case(x)` | Converts text to snake_case; null passes through. | `snake_case("Hello World")` ⇒ `"hello_world"` |
+| String Mutations | `title_case(x)` | Converts text to Title Case; null passes through. | `title_case("hello world")` ⇒ `"Hello World"` |
+| String Mutations | `trim(text)` | Removes leading and trailing whitespace; null passes through. | `trim("  a  ")` ⇒ `"a"`<br>`trim(null)` ⇒ `null` |
+| String Mutations | `upper(x)` | Converts text to uppercase; null passes through. | `upper("hello")` ⇒ `"HELLO"`<br>`upper(2026)` ⇒ `"2026"` |
+| String Mutations | `without_date(string)` | Removes every substring that is a real YYYY-MM-DD calendar date, leaving the surrounding text untouched; null passes through. | `without_date("Note 2024-06-15")` ⇒ `"Note "` |
+| Rendering | `terminal(content)` | Renders Prose markup to terminal text with ANSI SGR sequences; null passes through. | `terminal("hello")` ⇒ `"hello"` |
+| Date Formatting | `date(iso, fmt)` | Formats an ISO date or datetime in a named format. `short` is `MMMM Do`, `short-optional` is `MMMM Do [YYYY]`, and `long` is `ddd, MMMM Do, YYYY`; a `[YYYY]` year appears only when it is not the current year. Null passes through. | `date("2024-06-15", "long")` ⇒ `"Sat, June 15th, 2024"` |
+| Date Validators | `is_date(x)` | Returns true when the value is text holding a valid ISO date (YYYY-MM-DD). | `is_date("2024-06-15")` ⇒ `true` |
+| Date Validators | `is_date_time(x)` | Returns true when the value is text holding a valid ISO datetime, with or without an offset. | `is_date_time("2024-06-15T12:30:00")` ⇒ `true` |
+| Date Validators | `is_date_time_utc(x)` | Same as is_date_time; a datetime's format does not depend on the time zone. | `is_date_time_utc("2024-06-15T12:30:00Z")` ⇒ `true` |
+| Date Validators | `is_date_utc(x)` | Same as is_date; a date's format does not depend on the time zone. | `is_date_utc("2024-06-15")` ⇒ `true` |
+| Date Validators | `is_this_month(x)` | Returns true when the value is an ISO date or datetime in the current local month. | `is_this_month("2024-06-15")` ⇒ `true` (display only: wall-clock dependent) |
+| Date Validators | `is_this_month_utc(x)` | Returns true when the value is an ISO date or datetime in the current UTC month. | `is_this_month_utc("2024-06-15")` ⇒ `true` (display only: wall-clock dependent) |
+| Date Validators | `is_this_year(x)` | Returns true when the value is an ISO date or datetime in the current local year. | `is_this_year("2024-06-15")` ⇒ `true` (display only: wall-clock dependent) |
+| Date Validators | `is_this_year_utc(x)` | Returns true when the value is an ISO date or datetime in the current UTC year. | `is_this_year_utc("2024-06-15")` ⇒ `true` (display only: wall-clock dependent) |
+| Date Validators | `is_today(x)` | Returns true when the value is an ISO date or datetime that falls on today's local date. | `is_today("2024-06-15")` ⇒ `true` (display only: wall-clock dependent) |
+| Date Validators | `is_today_utc(x)` | Returns true when the value is an ISO date or datetime that falls on today's UTC date. | `is_today_utc("2024-06-15")` ⇒ `true` (display only: wall-clock dependent) |
+| Date Validators | `is_tomorrow(x)` | Returns true when the value is an ISO date or datetime that falls on tomorrow's local date. | `is_tomorrow("2024-06-16")` ⇒ `true` (display only: wall-clock dependent) |
+| Date Validators | `is_tomorrow_utc(x)` | Returns true when the value is an ISO date or datetime that falls on tomorrow's UTC date. | `is_tomorrow_utc("2024-06-16")` ⇒ `true` (display only: wall-clock dependent) |
+| Date Validators | `is_yesterday(x)` | Returns true when the value is an ISO date or datetime that falls on yesterday's local date. | `is_yesterday("2024-06-14")` ⇒ `true` (display only: wall-clock dependent) |
+| Date Validators | `is_yesterday_utc(x)` | Returns true when the value is an ISO date or datetime that falls on yesterday's UTC date. | `is_yesterday_utc("2024-06-14")` ⇒ `true` (display only: wall-clock dependent) |
+| Date Arithmetic | `date_delta(date1, date2, diff)` | Returns true when the two dates are at least the given duration apart, in either order. A duration is a whole count and a unit, such as `14d`, `2mo`, or `1 hour`; `m` means minutes and `mo` months. | `date_delta("2024-06-01", "2024-06-20", "14d")` ⇒ `true` |
 | Date Arithmetic | `newer_than(date1, date2, diff)` | Returns true when date1 is at least the given duration newer (later) than date2. | `newer_than("2024-06-20", "2024-06-01", "14d")` ⇒ `true` |
-| Logical | `and(...)` | Logical AND of all arguments. Short-circuits on first falsy value. | `and(true, true)` ⇒ `true` |
-| Logical | `or(...)` | Logical OR of all arguments. Short-circuits on first truthy value. | `or(false, true)` ⇒ `true` |
-| Collection | `has_key(obj, key)` | Returns true when the object contains the given key. | `has_key(obj, "a")` ⇒ `true` |
-| Collection | `contains(haystack, needle)` | Returns true when haystack contains needle (array, object, or string). | `contains("hello", "ell")` ⇒ `true` |
-| Collection | `length(x)` | Returns the length of a string, array, or object. | `length("hello")` ⇒ `5` |
-| Type Conversion | `number(x, [default])` | Converts a value to a number, with an optional default. | `number("42")` ⇒ `42` |
-| Math | `round(x, [default])` | Rounds a value to the nearest integer, with an optional default. | `round(3.7)` ⇒ `4` |
-| Filesystem | `absolute(file)` | Returns the absolute path a file reference names, in native spelling; a missing target returns the first location it would be resolved at, so the result does not prove the file exists. Rejects HTTP(S) URLs. |  |
-| Filesystem | `relative(file)` | Returns a best-effort relative path from the document base directory. | `relative("fixture.md")` ⇒ `fixture.md` |
-| Filesystem | `file_exists(file)` | Returns true when the file exists (local or remote URL) and false when it is absent or the argument is null; a non-string argument, an invalid reference, missing context, probe failure, or failed remote fetch is an error. | `file_exists("fixture.md")` ⇒ `true` |
-| Filesystem | `frontmatter(file)` | Reads the frontmatter of a Markdown file as an object. | `frontmatter("fixture.md")` ⇒ `{"title":"Fixture Title"}` |
-| Filesystem | `frontmatter(file, prop)` | Reads the frontmatter of a Markdown file as an object. | `frontmatter("fixture.md", "title")` ⇒ `Fixture Title` |
-| Filesystem | `try_frontmatter(file)` | Reads the frontmatter of a Markdown file as `{ok, value, error}`; a missing, unreadable, or unparsable file gives `ok` false and its reason instead of failing. | `try_frontmatter("fixture.md").value.title` ⇒ `Fixture Title` |
-| Filesystem | `markdown_body_empty(file)` | Returns true when the Markdown body has only whitespace. | `markdown_body_empty("fixture.md")` ⇒ `false` |
-| Filesystem | `markdown_title(file)` | Returns the title from frontmatter or the first H1 heading. | `markdown_title("fixture.md")` ⇒ `Fixture Title` |
-| Filesystem | `validate_schema(file)` | Validates a Markdown document against its declared schema. | `validate_schema("fixture.md")` ⇒ `true` |
-| Filesystem | `validate_schema(file, obj)` | Validates a Markdown document against its declared schema. | `validate_schema("fixture.md", {})` ⇒ `true` |
-| Filesystem | `find_files(pattern)` | Returns every file a glob reference matches (`&dir/**/name.md`, `^docs/*.md`), as absolute paths merged across every root of its prefix in native order (most local root first, then shallowest, then by path component). A bare pattern searches the document's folder, then the repository root. A file symlink a bare, `./`, or `../` pattern matches whose target leaves the file tree is skipped with a `dm.glob.skipped_symlink` warning. A directory the search must enter but cannot read fails the expression with an I/O failure instead of shortening the list. | `length(find_files("**/note.md"))` ⇒ `2` |
-| Filesystem | `is_indexed_file(file)` | Returns true when the filename stem matches the indexed grammar (base-NNN). | `is_indexed_file("review-1.md")` ⇒ `true` |
-| Filesystem | `file_index(file)` | Returns the parsed index suffix, or -1 when non-indexed. | `file_index("review-1.md")` ⇒ `1` |
-| Filesystem | `increment_file_index(file)` | Increments the numeric index suffix, preserving zero-padding width, in the resolved file's directory; an absolute input returns an absolute path. | `increment_file_index("review-1.md")` ⇒ `review-2.md` |
-| Filesystem | `decrement_file_index(file)` | Decrements the numeric index suffix, clamped at 0, in the resolved file's directory; an absolute input returns an absolute path. | `decrement_file_index("review-2.md")` ⇒ `review-1.md` |
-| Filesystem | `basename(file)` | Returns the final path component including extension. | `basename("sub/note.md")` ⇒ `note.md` |
-| Filesystem | `basename_without_index(file)` | Returns the basename with any indexed suffix removed from the stem. | `basename_without_index("review-1.md")` ⇒ `review.md` |
-| Filesystem | `dirname(file)` | Returns the directory portion of the display path; an absolute input returns its absolute parent directory. | `dirname("sub/note.md")` ⇒ `sub` |
-| Filesystem | `ext(file)` | Returns the final extension without the leading dot. | `ext("sub/note.md")` ⇒ `md` |
-| Filesystem | `parent_dir(file)` | Returns the directory segment immediately above the basename. | `parent_dir("sub/note.md")` ⇒ `sub` |
-| Filesystem | `file_trailing(file)` | Returns the last directory segment plus the basename. | `file_trailing("sub/note.md")` ⇒ `sub/note.md` |
-| Filesystem | `dir_leading(file)` | Returns the directory path above the last directory segment, dropping the basename and its parent (the complement of file_trailing). | `dir_leading("sub/note.md")` ⇒ `` |
-| Filesystem | `join(left, right)` | Joins two path strings with normalized separators. | `join("sub", "note.md")` ⇒ `sub/note.md` |
-| Filesystem | `link(file)` | Creates a Markdown link to a local file, using its relative path as the link text. |  |
-| Filesystem | `link(target, desc)` | Creates a Markdown link to a local file, using its relative path as the link text. |  |
-| Filesystem | `code_link(file)` | Creates a Markdown link whose text is inline code. Arguments, destinations, and errors match link(); the text is a code span, so brackets and backslashes are kept as written rather than escaped. |  |
-| Filesystem | `code_link(target, desc)` | Creates a Markdown link whose text is inline code. Arguments, destinations, and errors match link(); the text is a code span, so brackets and backslashes are kept as written rather than escaped. |  |
-| Filesystem | `has_command(cmd)` | Returns true when the command is found on PATH or is an existing executable absolute path. |  |
-| Context | `has_skill(name)` | Returns true when a skill directory exists in a user-scoped or local-scoped skill root. |  |
-| Context | `has_local_skill(name)` | Returns true when a skill directory exists in a local-scoped skill root. |  |
-| List Formatting | `as_line_separated(list)` | Joins a list into a newline-separated string, one element per line. |  |
-| List Formatting | `as_csv(list)` | Joins a list into a comma-separated string. | `as_csv(items)` ⇒ `1, 2, 3` |
-| List Formatting | `as_tsv(list)` | Joins a list into a tab-separated string. |  |
-| List Formatting | `as_space_separated(list)` | Joins a list into a space-separated string. | `as_space_separated(items)` ⇒ `1 2 3` |
-| List Formatting | `as_unordered_list(list)` | Renders a list as a Markdown unordered list, auto-nesting nested arrays and object-array shapes as indented sublists. |  |
-| List Formatting | `as_ordered_list(list)` | Renders a list as a Markdown ordered list, auto-nesting nested arrays and object-array shapes as indented sublists. |  |
-| Filesystem | `find_first_index(file)` | Returns the lowest-indexed existing sibling in the file's directory, with the unindexed base sorting first; returns the input when the family has no existing member. An absolute input returns an absolute path. | `find_first_index("review-2.md")` ⇒ `review-1.md` |
-| Filesystem | `find_last_index(file)` | Returns the highest-indexed existing sibling in the file's directory; returns the input when the family has no existing member. An absolute input returns an absolute path. | `find_last_index("review-1.md")` ⇒ `review-2.md` |
-| Git | `predict_conflicts(branch)` | Returns the repository-relative paths that would conflict if the named local branch were merged into the caller's current branch. |  |
-| Git | `branch_exists_on_remote()` | Returns whether an exact branch exists in the selected remote's live ref advertisement or authoritative provider API. |  |
-| Git | `branch_exists_on_remote(branch)` | Returns whether an exact branch exists in the selected remote's live ref advertisement or authoritative provider API. |  |
-| Git | `branch_exists_on_remote(branch, remote)` | Returns whether an exact branch exists in the selected remote's live ref advertisement or authoritative provider API. |  |
-| Git | `remote_vendor([remote])` | Returns the canonical provider token for the selected configured remote, probing an ambiguous self-hosted server only when allowlisted. |  |
-| Pull Requests | `pr(id)` | Returns one provider pull or merge request in canonical Markdown form. |  |
-| Pull Requests | `pr_list(query)` | Queries pull or merge requests with the canonical bounded filter vocabulary. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
-| Pull Requests | `pr_list(count)` | Queries pull or merge requests with the canonical bounded filter vocabulary. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
-| CI/CD | `cicd(id)` | Returns one provider-addressable CI/CD job in canonical Markdown form. |  |
-| CI/CD | `cicd_list(query)` | Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
-| CI/CD | `cicd_list(count)` | Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
-| List Formatting | `as_json(list)` | Renders a list as compact JSON — the explicit spelling of how a bare array renders in text. An empty list renders as `[]`. | `as_json(["a", 1])` ⇒ `["a",1]` |
-| List Formatting | `as_json5(list)` | Renders a list as compact single-line JSON5, with single-quoted strings and unquoted object keys where they are valid identifiers. An empty list renders as `[]`. | `as_json5(["a", 1])` ⇒ `['a', 1]` |
-| Filesystem | `has_binary(name_or_path)` | Returns true when the command is found on PATH or is an existing executable absolute path. A second name for has_command with the same implementation. |  |
-| Shell | `has_alias(name)` | Returns true when the name is an alias in the login shell ($SHELL, or pwsh then powershell.exe on Windows). Any probe failure returns false; the name is never executed. |  |
-| Shell | `has_builtin_function(name)` | Returns true when the name is a shell builtin (or a PowerShell cmdlet) in the login shell. Any probe failure returns false; the name is never executed. |  |
-| Shell | `has_user_function(name)` | Returns true when the name is a user-defined function in the login shell. Any probe failure returns false; the name is never executed. |  |
-| Shell | `can_execute(name)` | Returns true when the name is an alias, a binary, a shell builtin, or a user function (has_alias \|\| has_binary \|\| has_builtin_function \|\| has_user_function). |  |
-| Agentic CLIs | `has_agentic_cli(agent)` | Returns true when the named agentic CLI is installed on PATH. Names are the Claudine provider roster slugs and their aliases; an unknown name is a compose error. |  |
-| Repository | `package_area(where)` | Returns the name of the package area containing the path, from the captured repository observation. Returns an empty string outside the repository, outside a monorepo, or when no area contains the path. |  |
-| Repository | `package(where)` | Returns the name of the package containing the path, from the captured repository observation. Returns an empty string outside the repository, outside a monorepo, or when no package contains the path. |  |
-| Git | `recent_commits(count)` | Recent commits of the captured repository, newest first. Each element is one commit rendered exactly as `sniff repo recent-commits --plain` renders it (a multi-line block). `ctx.recent_commits` holds the last 10, captured at the start of execution; `recent_commits(count)` returns the newest `count`, evaluated at call time. Empty outside a repository. |  |
-| Network | `ipv4([filter])` | Returns the host's IPv4 addresses, excluding loopback and link-local. A valid CIDR filter selects addresses inside that network (and can include loopback or link-local); any other filter is a substring match over the default set. |  |
-| Network | `ipv6([filter])` | Returns the host's IPv6 addresses, excluding loopback and link-local; scoped addresses keep their %scope suffix. Filters behave as in ipv4. |  |
-| Network | `ping(address, [timeout])` | Sends one ICMP echo to an IP address and returns true when it replies within timeout milliseconds (default 100). Returns null with a warning when the address is not granted through --allow-host, false when there is no reply, and a compose error when the host cannot send ICMP. |  |
-| Network | `ping_under(address, timeout, [attempts])` | Sends attempts ICMP echoes (default 3) sequentially, each with a timeout of timeout milliseconds. Returns true when every reply arrives in time, false when none does, and "unstable" otherwise. Consent and error rules match ping. |  |
-| Composition | `as_markdown(content)` | Composes the string as Markdown through the root document's request (same context, base directory, consent, and recursion budget) and returns the composed Markdown text. |  |
+| Date Arithmetic | `older_than(date1, date2, diff)` | Returns true when date1 is at least the given duration older (earlier) than date2. | `older_than("2024-06-01", "2024-06-20", "14d")` ⇒ `true` |
+| Logical | `and(...)` | Returns true when every argument is truthy, evaluating them in order and stopping at the first falsy one. | `and(true, true)` ⇒ `true` |
+| Logical | `or(...)` | Returns true when any argument is truthy, evaluating them in order and stopping at the first truthy one. | `or(false, true)` ⇒ `true` |
+| Type Conversion | `number(x, [fallback])` | Converts a number or numeric text to a number. When `x` cannot convert (malformed text, null, a boolean, a list, an object, or a number that cannot be held exactly), a supplied `fallback` is returned instead; without one the call is a type error. The fallback must itself be a number. | `number("42")` ⇒ `42`<br>`number("4")` ⇒ `4`<br>`number(" 4 ")` ⇒ `4`<br>`number("pear", 7)` ⇒ `7`<br>`number(null, 7)` ⇒ `7`<br>`number(true, 7)` ⇒ `7`<br>`number([], 7)` ⇒ `7`<br>`number("9007199254740993", 7)` ⇒ `7`<br>`number("pear")` ⇒ `error`<br>`number("4", "x")` ⇒ `error`<br>`number()` ⇒ `error` |
+| Filesystem | `absolute(file)` | Returns the absolute path a file reference names, in native spelling. A missing target returns the first location it would be resolved at, so the result does not prove the file exists. Rejects HTTP(S) URLs; null passes through. | `absolute("fixture.md")` ⇒ `"/path/to/fixture.md"` (display only: resolves to an absolute path of the resolution context, which is not portable) |
+| Filesystem | `basename(file)` | Returns the final path component, including its extension; null passes through. | `basename("sub/note.md")` ⇒ `"note.md"` |
+| Filesystem | `basename_without_index(file)` | Returns the basename with any index suffix (`-NNN`) removed from its stem; null passes through. | `basename_without_index("review-1.md")` ⇒ `"review.md"` |
+| Filesystem | `code_link(file)` | Creates a Markdown link to a local file whose text is its relative path as inline code. Destinations, null handling, and errors match link(). | `code_link("fixture.md")` ⇒ `"[`fixture.md`](/path/to/fixture.md)"` (display only: result includes an absolute path, which is not portable) |
+| Filesystem | `code_link(target, desc)` | Creates a Markdown link whose text is the description as inline code; brackets and backslashes are kept as written. Destinations, null handling, and errors match link(). | `code_link("fixture.md", "md hash")` ⇒ `"[`md hash`](/path/to/fixture.md)"` (display only: result includes an absolute destination path, which is not portable) |
+| Filesystem | `decrement_file_index(file)` | Decrements the numeric index suffix, clamped at 0, in the resolved file's directory; an unindexed name gets index 0. An absolute input returns an absolute path; null passes through. | `decrement_file_index("review-2.md")` ⇒ `"review-1.md"` |
+| Filesystem | `dir_leading(file)` | Returns the directory path above the last directory segment, dropping the basename and its parent (the complement of file_trailing); empty when there is none. Null passes through. | `dir_leading("sub/note.md")` ⇒ `""` |
+| Filesystem | `dirname(file)` | Returns the directory portion of the display path; an absolute input returns its absolute parent directory. Null passes through. | `dirname("sub/note.md")` ⇒ `"sub"` |
+| Filesystem | `ext(file)` | Returns the final extension without its leading dot, or empty text when there is none; null passes through. | `ext("sub/note.md")` ⇒ `"md"` |
+| Filesystem | `file_exists(value)` | Returns true when the file exists, locally or as a fetched remote URL. The argument is inspected, never converted, so null, a number, a boolean, an array, or an object is false, and so is text that is not a well-formed file reference (`""`, `https://`), which is never looked up. A resolution failure (a tree escape or a missing home, vault, or repository anchor), a probe failure, or a failed remote fetch is an error. | `file_exists("fixture.md")` ⇒ `true` |
+| Filesystem | `file_index(file)` | Returns the numeric index suffix of the file's stem, or -1 when it has none; null passes through. | `file_index("review-1.md")` ⇒ `1` |
+| Filesystem | `file_trailing(file)` | Returns the last directory segment plus the basename, or the basename alone when there is no directory; null passes through. | `file_trailing("sub/note.md")` ⇒ `"sub/note.md"` |
+| Filesystem | `find_files(pattern)` | Returns every file a glob reference matches (`&dir/**/name.md`, `^docs/*.md`) as absolute paths, merged across every root of its prefix: the most local root first, then the shallowest, then by path component. A bare pattern searches the document's folder, then the repository root. A matched file symlink whose target leaves the file tree is skipped with a `dm.glob.skipped_symlink` warning, and a directory the search cannot read is an error. A null pattern lists nothing. | `length(find_files("**/note.md"))` ⇒ `2` |
+| Filesystem | `find_first_index(file)` | Returns the lowest-indexed existing member of the file's index family in its directory, the unindexed base sorting first; returns the input when no member exists. An absolute input returns an absolute path; null passes through. | `find_first_index("review-2.md")` ⇒ `"review-1.md"` |
+| Filesystem | `find_last_index(file)` | Returns the highest-indexed existing member of the file's index family in its directory; returns the input when no member exists. An absolute input returns an absolute path; null passes through. | `find_last_index("review-1.md")` ⇒ `"review-2.md"` |
+| Filesystem | `frontmatter(file)` | Reads the frontmatter of a Markdown file as an object; null passes through. A missing or unparsable file is an error. | `frontmatter("fixture.md")` ⇒ `{title: "Fixture Title"}` |
+| Filesystem | `frontmatter(file, prop)` | Reads one top-level frontmatter property of a Markdown file, or null when the property is absent or the file is null. | `frontmatter("fixture.md", "title")` ⇒ `"Fixture Title"` |
+| Filesystem | `has_binary(name_or_path)` | Returns true when the command is found on PATH or is an existing executable absolute path; the same check as has_command. The command is never run. | `has_binary("sh")` ⇒ `true` (display only: result is host-dependent) |
+| Filesystem | `has_command(cmd)` | Returns true when the command is found on PATH or is an existing executable absolute path; it is never run. Null, empty text, and a relative path with a directory part are false. | `has_command("sh")` ⇒ `true` (display only: result is host-dependent) |
+| Filesystem | `increment_file_index(file)` | Increments the numeric index suffix, preserving its zero-padding width, in the resolved file's directory; an unindexed name gets index 2. An absolute input returns an absolute path; null passes through. | `increment_file_index("review-1.md")` ⇒ `"review-2.md"` |
+| Filesystem | `is_file_type(value)` | Returns true when the value is text that is a well-formed file reference (a local, Windows, project, vault, recursive, or HTTP(S) reference, on every host); it never resolves, reads, or fetches anything, so true does not mean the file exists. Empty text, malformed reference syntax, and every non-text value are false. | `is_file_type("./docs/spec.md")` ⇒ `true`<br>`is_file_type("hello world")` ⇒ `true`<br>`is_file_type("https://")` ⇒ `false`<br>`is_file_type(42)` ⇒ `false` |
+| Filesystem | `is_indexed_file(file)` | Returns true when the file's stem ends in a numeric index suffix (`base-NNN`); null is false. | `is_indexed_file("review-1.md")` ⇒ `true` |
+| Filesystem | `join(left, right)` | Joins two path strings with normalized separators and validates the result as a path; HTTP(S) arguments are rejected. Null passes through. | `join("sub", "note.md")` ⇒ `"sub/note.md"` |
+| Filesystem | `link(file)` | Creates a Markdown link to a local file, using its relative path as the link text and its absolute path as the destination. HTTP(S) URLs are rejected because they need a description; null passes through. | `link("fixture.md")` ⇒ `"[fixture.md](/path/to/fixture.md)"` (display only: result includes an absolute path, which is not portable) |
+| Filesystem | `link(target, desc)` | Creates a Markdown link to a local file or an HTTP(S) URL with the given description as its text; null passes through. | `link("fixture.md", "Fixture")` ⇒ `"[Fixture](/path/to/fixture.md)"` (display only: result includes an absolute destination path, which is not portable) |
+| Filesystem | `markdown_body_empty(file)` | Returns true when the Markdown file's body holds only whitespace; null is false. | `markdown_body_empty("fixture.md")` ⇒ `false` |
+| Filesystem | `markdown_title(file)` | Returns the Markdown file's frontmatter `title`, else its first H1 heading, else null; null passes through. | `markdown_title("fixture.md")` ⇒ `"Fixture Title"` |
+| Filesystem | `parent_dir(file)` | Returns the directory segment immediately above the basename, or empty text when there is none; null passes through. | `parent_dir("sub/note.md")` ⇒ `"sub"` |
+| Filesystem | `relative(file)` | Returns a best-effort relative path from the document's base directory, with forward slashes; null passes through. | `relative("fixture.md")` ⇒ `"fixture.md"` |
+| Filesystem | `try_frontmatter(file)` | Reads the frontmatter of a Markdown file as `{ok, value, error}`. A file that reads and parses gives `ok` true and the frontmatter as `value`; a missing, unreadable, or unparsable file gives `ok` false and its reason as `error` instead of failing. Null passes through. | `try_frontmatter("fixture.md")` ⇒ `{ok: true, value: {title: "Fixture Title"}, error: null}` |
+| Filesystem | `validate_schema(file)` | Returns whether a Markdown document's frontmatter is valid against its declared schema; a document that declares no schema is valid. Null passes through; a file that cannot be loaded, or a schema that cannot be processed, is an error. | `validate_schema("fixture.md")` ⇒ `true` |
+| Filesystem | `validate_schema(file, obj)` | Merges `obj` over a Markdown document's frontmatter (nested objects merge; supplied values, arrays, and explicit nulls win) and returns whether the combined page is valid against its schema. Validation happens in memory; the file and `obj` are never modified. | `validate_schema("fixture.md", {})` ⇒ `true` |
+| Context | `has_local_skill(name)` | Returns true when a skill directory with this name exists in a local-scoped skill root of the executing agent. Null and empty text are false; a name with a path separator is an error. | `has_local_skill("darkmatter")` ⇒ `true` (display only: depends on agent-specific skill roots outside the tempdir fixture) |
+| Context | `has_skill(name)` | Returns true when a skill directory with this name exists in a user-scoped or local-scoped skill root of the executing agent. Null and empty text are false; a name with a path separator is an error. | `has_skill("darkmatter")` ⇒ `true` (display only: depends on agent-specific skill roots outside the tempdir fixture) |
+| List Formatting | `as_csv(list)` | Joins a list into comma-separated text (`, ` between elements); null passes through. | `as_csv([1, 2, 3])` ⇒ `"1, 2, 3"` |
+| List Formatting | `as_json(list)` | Renders a list as compact JSON, the explicit spelling of how a bare array renders in text. An empty list renders as `[]`; null passes through. | `as_json(["a", 1])` ⇒ `'["a",1]'` |
+| List Formatting | `as_json5(list)` | Renders a list as compact single-line JSON5, with single-quoted strings and unquoted object keys where they are valid identifiers. An empty list renders as `[]`; null passes through. | `as_json5(["a", 1])` ⇒ `"['a', 1]"` |
+| List Formatting | `as_line_separated(list)` | Joins a list into newline-separated text, one element per line; null passes through. | `as_line_separated(["a", "b", "c"])` ⇒ `"a\nb\nc"` (example file) |
+| List Formatting | `as_ordered_list(list)` | Renders a list as a Markdown ordered list, nesting nested arrays and object-array shapes as indented sublists; null passes through. | `as_ordered_list(["first", ["a", "b"], "second"])` ⇒ `"1. first\n  1. a\n  2. b\n2. second"` (example file) |
+| List Formatting | `as_space_separated(list)` | Joins a list into space-separated text; null passes through. | `as_space_separated([1, 2, 3])` ⇒ `"1 2 3"` |
+| List Formatting | `as_tsv(list)` | Joins a list into tab-separated text; null passes through. | `as_tsv(["a", "b", "c"])` ⇒ `"a\tb\tc"` (example file) |
+| List Formatting | `as_unordered_list(list)` | Renders a list as a Markdown unordered list, nesting nested arrays and object-array shapes as indented sublists; null passes through. | `as_unordered_list([{package: "darkmatter", dependencies: ["biscuit-terminal", "renderable"]}, {package: "renderable", dependencies: []}])` ⇒ `"- darkmatter\n  - biscuit-terminal\n  - renderable\n- renderable"` (example file) |
+| Git | `branch_exists_on_remote()` | Returns whether the caller's current branch exists on the selected remote, from its live ref advertisement or authoritative provider API. | `branch_exists_on_remote()` ⇒ `true` (display only: Requires an allowlisted remote-provider fixture.) |
+| Git | `branch_exists_on_remote(branch)` | Returns whether the exact branch exists on the selected remote, from its live ref advertisement or authoritative provider API. | `branch_exists_on_remote("main")` ⇒ `true` (display only: Requires an allowlisted remote-provider fixture.) |
+| Git | `branch_exists_on_remote(branch, remote)` | Returns whether the exact branch exists on the named remote, from its live ref advertisement or authoritative provider API. | `branch_exists_on_remote("main", "origin")` ⇒ `true` (display only: Requires an allowlisted remote-provider fixture.) |
+| Git | `predict_conflicts(branch)` | Returns the repository-relative paths that would conflict if the named local branch were merged into the caller's current branch; null passes through. | `predict_conflicts("feature/example")` ⇒ `["src/config.rs"]` (display only: Requires a Git fixture with divergent local branch tips.) |
+| Git | `recent_commits(count)` | Returns the newest `count` commits of the caller's repository, newest first, rendered as `ctx.recent_commits` renders them. `ctx.recent_commits` holds the last 10, captured at the start of execution; `recent_commits(count)` returns the newest `count`, evaluated at call time. Commits that touched no files are left out, so the list can be shorter than `count`; it is empty outside a repository. | `recent_commits(3)` ⇒ `["- [abc1234] feat(sniff) at 1:01pm Today: add gateways\n\n"]` (display only: result depends on the repository history and the local clock) |
+| Git | `remote_vendor([remote])` | Returns the canonical provider token for the selected configured remote, probing an ambiguous self-hosted server only when allowlisted. | `remote_vendor()` ⇒ `"github"` (display only: Requires a configured caller repository remote.) |
+| Pull Requests | `pr(id)` | Returns one pull or merge request, addressed by number or canonical URL, in canonical Markdown form. | `pr(123)` ⇒ `"[PR #123 — Fix parser](https://provider/pr/123) · open · @alice"` (display only: Requires an allowlisted remote-provider fixture.) |
+| Pull Requests | `pr_list(query)` | Queries pull or merge requests with the canonical bounded filter vocabulary. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. | `pr_list({ state: "open", limit: 5 })` ⇒ `["[PR #123 — Fix parser](https://provider/pr/123) · open · @alice"]` (display only: Requires an allowlisted remote-provider fixture.) |
+| Pull Requests | `pr_list(count)` | Lists the most recent `count` pull or merge requests, from 1 to 100. | `pr_list(5)` ⇒ `["[PR #123 — Fix parser](https://provider/pr/123) · open · @alice"]` (display only: Requires an allowlisted remote-provider fixture.) |
+| CI/CD | `cicd(id)` | Returns one provider-addressable CI/CD job, addressed by number or canonical URL, in canonical Markdown form. | `cicd(456)` ⇒ `"[CI job #456 — test](https://provider/job/456) · failed"` (display only: Requires an allowlisted remote-provider fixture.) |
+| CI/CD | `cicd_list(query)` | Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. | `cicd_list({ statuses: ["failed"], limit: 5 })` ⇒ `["[CI job #456 — test](https://provider/job/456) · failed"]` (display only: Requires an allowlisted remote-provider fixture.) |
+| CI/CD | `cicd_list(count)` | Lists the most recent `count` CI/CD jobs, from 1 to 100. | `cicd_list(5)` ⇒ `["[CI job #456 — test](https://provider/job/456) · failed"]` (display only: Requires an allowlisted remote-provider fixture.) |
+| Shell | `can_execute(name)` | Returns true when the name is a binary, an alias, a shell builtin, or a user function (has_binary, then the login-shell probes). Null and empty text are false; the name is never run. | `can_execute("git")` ⇒ `true` (display only: result depends on the host and the login shell profile) |
+| Shell | `has_alias(name)` | Returns true when the name is an alias in the login shell ($SHELL, or pwsh then powershell.exe on Windows). Any probe failure, null, and empty text are false; the name is never run. | `has_alias("ll")` ⇒ `true` (display only: result depends on the login shell profile) |
+| Shell | `has_builtin_function(name)` | Returns true when the name is a shell builtin (or a PowerShell cmdlet) in the login shell. Any probe failure, null, and empty text are false; the name is never run. | `has_builtin_function("cd")` ⇒ `true` (display only: result depends on the login shell) |
+| Shell | `has_user_function(name)` | Returns true when the name is a user-defined function in the login shell. Any probe failure, null, and empty text are false; the name is never run. | `has_user_function("mkcd")` ⇒ `true` (display only: result depends on the login shell profile) |
+| Agentic CLIs | `has_agentic_cli(agent)` | Returns true when the named agentic CLI is installed on PATH, from the request's captured agent observation. Names are the Claudine provider roster slugs and their aliases; null is false. | `has_agentic_cli("claude")` ⇒ `true` (display only: result depends on the host PATH) |
+| Repository | `package(where)` | Returns the name of the package containing the path, from the captured repository observation. Returns empty text outside the repository, outside a monorepo, or when no package contains the path. | `package("darkmatter/lib/src/lib.rs")` ⇒ `"darkmatter"` (display only: result depends on the captured repository) |
+| Repository | `package_area(where)` | Returns the name of the package area containing the path, from the captured repository observation. Returns empty text outside the repository, outside a monorepo, or when no area contains the path. | `package_area("darkmatter/lib/src/lib.rs")` ⇒ `"darkmatter"` (display only: result depends on the captured repository) |
+| Network | `ipv4([filter])` | Returns the host's IPv4 addresses, excluding loopback and link-local, from the request's captured network observation. A valid CIDR filter selects addresses inside that network (and can include loopback or link-local); any other filter is a substring match over the default set. | `ipv4("192.168.0.0/16")` ⇒ `["192.168.10.5"]` (display only: result depends on the host interfaces) |
+| Network | `ipv6([filter])` | Returns the host's IPv6 addresses, excluding loopback and link-local; scoped addresses keep their %scope suffix. Filters behave as in ipv4. | `ipv6("::1/128")` ⇒ `["::1"]` (display only: result depends on the host interfaces) |
+| Network | `ping(address, [timeout])` | Sends one ICMP echo to an IP address and returns true when it replies within `timeout` milliseconds (default 100, at most 60000). Returns null with a warning when the address is not granted through --allow host=HOST, false when there is no reply, and an error when the host cannot send ICMP. | `ping("192.168.1.1", 250)` ⇒ `true` (display only: result depends on the network and the ICMP grant) |
+| Network | `ping_under(address, timeout, [attempts])` | Sends `attempts` ICMP echoes (default 3) one after another, each with a timeout of `timeout` milliseconds. Returns true when every reply arrives in time, false when none does, and "unstable" otherwise. Consent and error rules match ping. | `ping_under("192.168.1.1", 50, 5)` ⇒ `"unstable"` (display only: result depends on the network and the ICMP grant) |
+| Composition | `as_markdown(content)` | Composes the text as Markdown through the root document's request (same context, base directory, consent, and recursion budget) and returns the composed Markdown; null passes through. | `as_markdown("::file ./intro.md")` ⇒ `"# Introduction"` (display only: result depends on the transcluded file) |
 <!-- END GENERATED FUNCTION TABLE -->
 
 ### `date()` format tokens
@@ -747,12 +1042,64 @@ that file exists yet, and `increment_file_index(review)` is
 `/r/claudine/features/x/review-2.md`. A relative input keeps the relative
 display form: `dirname("sub/x.md")` is `sub`.
 
-`file_exists(file)` is `false` only when the file is genuinely absent (a
-directory also reads `false`). It fails, rather than answering `false`, when
-it cannot tell: an invalid reference, a relative path that leaves the file
-tree, a `~`, `&`, `^`, or `vault:` reference whose home, repository, or vault
-is not available, a permission error while probing a candidate, or a remote
-URL whose fetch was denied or failed.
+`file_exists(file)` is `false` when the file is genuinely absent (a
+directory also reads `false`) and when the text is not a well-formed
+reference at all (`""`, `https://`, `vault:`), which it never looks up. It
+fails, rather than answering `false`, when it cannot tell: a relative path
+that leaves the file tree, a `~`, `&`, `^`, or `vault:` reference whose home,
+repository, or vault is not available, a permission error while probing a
+candidate, or a remote URL whose fetch was denied or failed (or that is read
+where no remote runtime exists).
+
+#### Checking a reference's syntax: `is_file_type`
+
+`is_file_type(value)` asks whether a value could name a file, without
+looking for it. It is `true` for text that is a well-formed reference of any
+supported kind, on every OS, and `false` for everything else:
+
+| Value | `is_file_type` |
+| --- | --- |
+| `"./docs/spec.md"`, `"/tmp/spec.md"`, `"\Users\ken\data.json"`, `"C:\x\y.md"` | `true` |
+| `"@docs/spec.md"`, `"%@spec.md"`, `"&docs/x.md"`, `"^docs/x.md"`, `"~/x.md"`, `"vault:notes/x.md"` | `true` |
+| `"https://example.com/x.md"`, `"{{HOME}}/x.md"` (never read), `"file://foo/bar"` | `true` |
+| `"42"`, `"hello world"` (plain file names) | `true` |
+| `""`, `"https://"`, `"https:///x"`, `"%https://example.com/x"`, `"vault:"`, `"vault:/etc/hosts"` | `false` |
+| `"ftp://x/y"`, `"~bob/x"`, `"@"`, text holding a NUL, `"{{home}}/x"` | `false` |
+| `42`, `null`, `true`, a list, an object | `false` |
+
+It reads no file, directory, environment variable, configuration, or
+network, so it works where no document context exists, and `true` does not
+mean the file exists or is readable. A `file://` prefix is stripped before
+the check, so `file://foo/bar` is the reference `foo/bar`; every other
+character, separators included, is checked as written.
+
+Its true side proves the argument is suitable for a `file` parameter. With
+`source: unknown`, the call check treats `frontmatter(source, 'title')` as
+category 4 (silent by default, a warning under `expressions.strict`) and
+
+```text
+is_file_type(source) && frontmatter(source, 'title')
+```
+
+as category 1 under both settings. The guard rewrites nothing: the read
+still resolves `source`, applies access policy, and can fail at runtime.
+
+#### Calls that are always false
+
+A `file_exists` (or `fileexists`) call whose argument is literal text that
+is not a well-formed reference can only return `false`:
+
+```text
+{{ file_exists("https://") }}   ← warning: always false
+{{ file_exists(path) }}         ← no warning, even with `path: string`
+```
+
+Composition reports a `dm.expression.always_false_call` warning for it, with
+the file and line. The document still composes under the default policy;
+`--deny all` or `--deny dm.expression.always_false_call` makes the warning
+blocking. DMLS shows the same warning at the literal. Only an authored literal
+is judged; a variable of type `string` never is. Finding it reads no file and
+runs no function.
 
 #### Filesystem Helpers
 
@@ -764,7 +1111,7 @@ URL whose fetch was denied or failed.
 | `markdown_title(path)` | another file's first H1 title | yes (body only) |
 | `markdown_body_empty(path)` | whether another file's body is empty | yes (body only) |
 | `validate_schema(path)` | a file against its declared `$schema` | yes (body only) |
-| `validate_schema(path, obj)` | accepted for forward compatibility | yes (body only) |
+| `validate_schema(path, obj)` | the file's frontmatter with `obj` merged over it, validated in memory | yes (body only) |
 | `absolute(path)` | the absolute path a reference names, existing or not | **no** |
 | `relative(path)` | a path relative to the base dir | **no** |
 | `has_command(cmd)` | whether a command is runnable on the host | **no** |
@@ -960,25 +1307,55 @@ Missing skill roots return `false`, not an error.
 
 ### Function Contracts
 
-All functions added in the expression-syntax expansion follow a consistent
-null-safety + type-mismatch contract:
+Every function call runs in two steps. First Darkmatter **binds** the
+arguments to the function's declared signature (its entry in the function
+catalog): each argument is kept, converted by the same rules that convert
+frontmatter values, or rejected. Only when every argument binds does the
+function **compute** its result. A call that does not bind is a type error
+that names the function, the parameter, the expected type, and the value it
+received; the function never runs.
 
-- **Null argument propagation** — if any argument is `null`, the function returns `null`
-- **Type-mismatch error** — if any argument has the wrong type for the function's domain, the function returns an error
+```text
+{{ min("4", 5) }}       → 4        ("4" converts to a number)
+{{ upper(2026) }}       → 2026     (a number converts to text)
+{{ min("pear", 5) }}    → type error: a: expected number, received text "pear"
+```
 
-This applies to:
+The conversions, the union and overload rules, and what a type error
+reports are the same engine frontmatter uses, described once in
+[Type Coercion](./schemas/definition.md#type-coercion). Before a document
+composes, a call that no value could ever bind, such as `min(flag, 5)` with
+`flag: boolean(required)`, rejects the document even in a branch that never
+runs; see [Call Check](../inline/call-check.md).
 
-- math: `min`, `max`, `abs`
-- collections: `first`, `last`
-- string predicates: `starts_with`, `ends_with`
-- string mutations: `lower`, `upper`, `capitalize`, `kebab_case`, `camel_case`, `pascal_case`, `snake_case`, `title_case`, `without_date`, `ensure_leading`, `ensure_trailing`, `replace`, `replace_first`, `replace_last`
-- rendering: `terminal`
-- date formatting: `date`
+`null` is a type like any other, and a parameter admits it only when its
+signature says so:
 
-`is_string`/`is_number`/`is_array`/`is_null`/`is_object`/`is_empty`/`is_integer`
-are inspecting predicates and never error or null-propagate; they always return
-a boolean. `is_positive` and `is_negative` are coercing predicates: they error
-when their argument cannot be coerced to a number (including `null`).
+| Family | Example | Result for `null` |
+| --- | --- | --- |
+| Text transforms (`upper`, `lower`, `trim`, `capitalize`, …) | `upper(null)` | `null` |
+| Yes/no checks (`is_*`, `has_*`, `starts_with`, `file_exists`, …) | `has_key(null, "a")` | `false` (`is_null(null)` and `is_empty(null)` are `true`) |
+| Arithmetic and comparison (`min`, `max`, `abs`, `length`, …) | `min(null, 5)` | type error |
+| Lists rendered as text (`as_csv`, `as_json`, …) and `first`/`last` | `as_csv(null)` | `null` |
+| Map helpers `keys`/`values` | `keys(null)` | `[]` |
+
+A yes/no check given the wrong kind of value (`has_key("hello", "a")`) is a
+type error, not `false`. The inspecting predicates (`is_string`, `is_number`,
+`is_array`, `is_object`, `is_null`, `is_empty`, `is_integer`) see the value
+exactly as written, so `is_number("4")` is `false`.
+
+A few functions keep a contract of their own:
+
+- `number(x, fallback?)` and `round(x, fallback?)` accept a number or numeric
+  text. If `x` does not bind, a supplied `fallback` is used
+  (`number("pear", 7)` → `7`); without one the call is a type error.
+  `round` rounds halves away from zero (`round(-2.5)` → `-3`).
+- `length(val)` counts the characters of text, the elements of a list, or the
+  keys of an object; a number counts the characters of its displayed text
+  (`length(2.5)` → `3`), and a boolean is a type error.
+- `contains(haystack, needle)` compares by rendered text, so
+  `contains([4], "4")` is `true`; an object's values are searched, not its
+  keys.
 
 ## Provider Query Vocabulary
 
@@ -1337,6 +1714,31 @@ global, a declared global with no entry, and an entry that contradicts its
 declaration. A lazy global (`RuntimeBinding::lazy`) runs at most once per
 session, on first read, and caches a `null` result too.
 
+A global that is an object with one large member can skip building the whole
+object when a read needs only one of its members. Give it to
+`RuntimeBinding::members(member, whole)`:
+
+- A dotted read `root.name.rest` calls `member("name")` and selects `rest`
+  from the result. A `None` result means the member is missing, and the read
+  is `null`.
+- A bare `root` read runs `whole()`, as a lazy global's provider does. So does
+  a read the evaluator does not spell as a dotted path, such as
+  `root['name']`. It runs at most once per session. After it has run, dotted
+  reads in that session select from its value.
+- `member(name)` must equal `whole().get(name)` for every name. Every read
+  then returns the same value an eager binding of `whole()` would.
+
+```rust
+let binding = RuntimeBinding::members(
+    |name| iteration_value().get(name).cloned(), // `loop.count`: one member
+    || iteration_value(),                        // `loop`, `loop['count']`
+);
+```
+
+A `member` call is not cached, so it may run once per read. Claudine binds
+`loop` this way, so `{{ loop.count }}` never copies the previous pass's
+output.
+
 `prepare_value` parses every expression in a value without evaluating it.
 `validate_prepared` reports unavailable globals and unknown functions in every
 branch, and runs no provider. `evaluate_prepared` evaluates through a session
@@ -1518,6 +1920,7 @@ Executable expressions fail closed on real defects, and only on those:
 | malformed syntax (`{{ 1 + }}`) | an absent document property (`null`) |
 | an unknown function (`{{ no_such_fn(x) }}`) | a missing member or index (`null`) |
 | a function that rejects its arguments, or a failed file read | `null` inside text (renders empty) |
+| a call no value could bind, in any branch ([Call Check](../inline/call-check.md)) | |
 | a read of a host global the host marked unavailable | an escaped span (`{{{ x }}}` renders `{{ x }}`) |
 
 Inserted values are data: text an expression returns is never scanned for
@@ -1548,24 +1951,33 @@ Expression functions live in domain modules under
 and share one registration model:
 
 - **Pure functions** — depend only on their arguments. Most
-  helpers (`length`, `min`, `kebab_case`, `is_today`, …) are pure. Dispatched by
-  `dispatch`, which needs no context.
-- **Context-aware / read-side functions** — need a
+  helpers (`length`, `min`, `kebab_case`, `is_today`, …) are pure.
+- **Context functions** — need a
   [`ResolutionContext`](../../lib/src/markdown/compose/expression/resolve_ctx.rs)
   to resolve path arguments. The [read-side functions](#read-side-functions)
-  live here. Dispatched by `dispatch_fs`, which receives the context; `is_fs_function`
-  reports membership so the evaluator can emit the "requires a document
-  resolution context" error when no context is available.
+  live here; without a context a call fails with the "requires a document
+  resolution context" error.
+- **Lazy functions** — `and` and `or`, which the evaluator computes so it can
+  stop at the first argument that decides the answer.
+
+Every call goes through one dispatch entry, `call_function`, which resolves the
+name (case-insensitive, canonical or alias), binds the arguments to the
+function's declared overloads, and only then enters the handler.
 
 To add a function:
 
-1. Add its signatures, description, ordering, and examples to the authored
-   [`expression-functions.yaml`](../schemas/expression-functions.yaml) catalog.
+1. Add its `function(...)` type to the catalog
+   [`schemas/partials/functions.yaml`](../../schemas/partials/functions.yaml):
+   parameters, return type, `category(...)` (one listed in `categories:`),
+   description, and examples. Overloads are a list of `function(...)` types.
 2. In the owning domain module, implement the handler and add one runtime binding
    containing its canonical name, aliases, evaluation mode, and handler kind.
-   Consumers read the projected catalog through
-   `expression_function_descriptors()`; runtime bindings do not repeat authored
+   Consumers read the catalog through `expression_function_catalog()` and
+   `function_descriptors(name)`; runtime bindings do not repeat authored
    metadata.
+
+A program embedding Darkmatter adds its own functions without editing
+Darkmatter: see [Host Expression Functions](./host-functions.md).
 
 For a read-side function, obtain paths through the `ResolutionContext`
 (`cwd`, the document's directory; magic search paths; optional remote runtime)
@@ -1580,6 +1992,8 @@ it never leaks an unresolved `{{ … }}` literal.
 
 ## See Also
 
+- [Host Expression Functions](./host-functions.md) — functions a host
+  registers, and the facts artifact the editor reads
 - [Parsing](./parsing/index.md) — scanning, lexing, and grammar in detail
 - [Side Effects](./side-effects.md)
 - [Page Blocks](../inline/page-blocks.md)

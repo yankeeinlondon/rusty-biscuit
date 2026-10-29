@@ -10,7 +10,7 @@ use darkmatter::markdown::compose::EffectiveStateBuilder;
 pub(crate) struct RuntimeFixture {
     pub source: ResolvedCompositionSource,
     originals: HashMap<PathBuf, Value>,
-    documents: HashMap<PathBuf, (Value, Arc<darkmatter::markdown::MappingOrders>)>,
+    documents: HashMap<PathBuf, Arc<ReferencedDocument>>,
 }
 
 impl RuntimeFixture {
@@ -36,7 +36,10 @@ impl RuntimeFixture {
             self.originals.insert(path.clone(), loaded.value.clone());
             let mut value = loaded.value;
             sanitize(&mut value);
-            self.documents.insert(path, (value, Arc::new(loaded.orders)));
+            self.documents.insert(path, Arc::new(ReferencedDocument {
+                text: Vec::new(), value, orders: Arc::new(loaded.orders),
+                checked: std::sync::Mutex::new(Vec::new()), catalog_index: std::sync::OnceLock::new(),
+            }));
         }
     }
 
@@ -51,7 +54,7 @@ impl RuntimeFixture {
         loader.walk_plan(plan)?;
         let mut steps = std::mem::take(&mut loader.graph.steps);
         for (index, step) in steps.iter_mut().enumerate() {
-            loader.step_frontmatter = Arc::new(loader.step_frontmatter(plan, index));
+            loader.enter_step(plan, index);
             if let Some(task) = &mut step.task {
                 self.restore(task, &mut loader, false)?;
             }
@@ -67,12 +70,12 @@ impl RuntimeFixture {
             task.teardown = raw.get("teardown").cloned();
         }
         let state = EffectiveStateBuilder::new()
-            .with_frontmatter((*loader.step_frontmatter).clone())
+            .with_shared_frontmatter(loader.step_frontmatter.clone())
             .with_context(loader.context.clone()).with_allow_ctx_override(true).build().unwrap();
         let scope = SiteScope {
             origin: &task.origin_path.clone(), label: &task.label.clone(),
             property: task.diagnostic.task_property.clone(), state: &state,
-            placement: Placement { position: task.position, in_group },
+            placement: Placement { position: task.position, in_group }, guard: None,
         };
         loader.collect_lifecycle_shell(task, &scope)?;
         if let PreflightAction::Group(group) = &mut task.action {

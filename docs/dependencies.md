@@ -44,6 +44,19 @@
   version changed. `json` does not request serde_json's `preserve_order`; the
   crate's dev-dependency on `serde_json` does, so its own tests can build maps
   with explicit insertion order.
+- `darkmatter` enables `serde_json`'s `preserve_order`, `raw_value`, and
+  `float_roundtrip` features (2026-10-22). `preserve_order` unifies into every
+  package that links `darkmatter` (Claudine, DMLS, `md`, `messenger`,
+  `research`, `sniff-cli`, `playa-cli`, `biscuit-icon-cli`,
+  `biscuit-speaks-cli`), so `serde_json` maps there keep insertion order.
+  Outputs with an alphabetical-key contract sort explicitly (`sniff`'s JSON
+  output, `md schema validate --format json`, the `md hash` frontmatter hash,
+  Claudine's OpenCode/Kilo inline config); any new consumer that needs a
+  stable order must sort too. Written order is intended elsewhere:
+  `md schema detect --format json` and JSON text produced for `json`-typed
+  values keep the order the author wrote. No crate is added. See
+  `darkmatter/docs/dependencies.md`, which also covers how Darkmatter's
+  custom JSON Schema formats read in other validators.
 - `biscuit-visualized` drops `mermaid-rs-renderer` (2026-10-22): Merman,
   already in the graph under its `image` feature, is now its only Mermaid
   backend. `merman` is a git dependency on Ken's fork

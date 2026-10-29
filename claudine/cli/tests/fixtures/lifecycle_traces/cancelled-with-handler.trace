@@ -1,0 +1,27 @@
+# scenario: cancelled-with-handler
+# doc: cancelled-with-handler.md
+# given: invoked as `claudine sequence --claude --yolo cancelled-with-handler.md` from the directory holding the fixture documents
+# given: group checks has fail_fast true; leg opted declares cancelled and its shell waits until bad has failed
+# given: leg bad's shell exits 1 after opted's shell started
+# given: no provider launches
+event seq:initialize
+event seq:start
+event checks:initialize
+event checks:start
+event opted:initialize
+event opted:start
+task opted waiting
+task bad
+event opted:cancelled
+err composition.cancelled
+event opted:finalize
+err composition.cancelled
+event checks:failure
+err composition.failed
+event checks:finalize
+err composition.failed
+event seq:failure
+err composition.failed
+event seq:finalize
+err composition.failed
+exit 1

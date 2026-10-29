@@ -24,7 +24,10 @@ those model fields do not authorize retired task YAML. Its `PrewarmHandle` trave
 (`with_prewarm`; `DocumentEpoch::prewarm`). Every preparation site calls
 `prewarm::collect_and_submit`: the pipeline's lifecycle phase, the staged
 bootstrap, the loop bootstrap, and harness re-materialization. Sequence
-preflight calls `submit_sequence_preflight`; internal legacy task stages are
+preflight calls `submit_sequence_preflight` for prompt documents and the root
+and nested sequence/group lifecycles. Containers resubmit from their lexical
+bootstrap and start-time snapshots, using their captured `ctx`/`env`; they
+share the same invocation worker and de-duplication. Internal legacy task stages are
 reconsidered by `submit_task_stacks` wherever the task's context is
 established (`run_step_task`, `open_member_run`, `open_leg_run` in
 `cli/src/commands/wrap/sequence/task_run.rs`), against the step's effective
@@ -70,14 +73,55 @@ bundle expands in a fixed canonical order at parse time. Every retired spelling
 `CompositionError::RemovedGrammar` with a replacement hint. The directive
 verbs live in one list (`signatures.rs::LIFECYCLE_CONTROL_VERBS`); `prep` is
 the one directive that returns (`LifecycleControlAction::returns`), so it is
-exempt from the last-item rule. A loop `gate:` is never `null` or `{}`. The parser
-slice (`lifecycle/{parse,action_shape,actions,validate,signatures,source_map}.rs`)
-is lift-ready: `lib/tests/l1/lifecycle_lift_ready_guard.rs` fails if it names a
-Claudine runtime type, so the caller injects the effect catalog
+exempt from the last-item rule. A loop `gate:` is never `null` or `{}`. The parser,
+executor, run accounting, catch protocol, and control admission live in
+`darkmatter::lifecycle` (see the `darkmatter` skill's `lifecycle.md`); Claudine
+re-exports them at their old paths and adapts them: `effects.rs`
+(`ClaudineLifecycleEffects`: TTS and messaging configuration), `executor.rs`
+(`StackExecutionContext` is the `LifecycleHost`), `ClaudineRunHost` for the run
+guard, the `*Ext` traits for the old constructors, and `CompositionError`
+twins of `LifecycleError`. Event names come from the host registry:
+`claudine_registry()` (`composition/lifecycle/registry.rs`) renames
+Darkmatter's `composed`/`failed` to `start`/`blocked` (the Darkmatter spelling
+is `LifecycleRenamedEvent`) and registers `success`/`failure` and `loop`;
+derive event keys from `authored_event_keys()`, never a hand list. The host
+globals `seq`, `loop`, and `group` are declared once in the host catalog
+`claudine/schemas/globals.yaml` (embedded by `composition/schema/globals.rs`,
+`claudine_globals()`/`host_global()`; never a trigger or document schema), and
+`bindings.rs` and the registry take their names from it; Darkmatter's own
+globals (`fm`, `ctx`, `current`, `env`, `err`, `timing`) are declared in
+`darkmatter/schemas/darkmatter.yaml`, whose resolved `fm` is the built-in
+baseline. Trigger files are `kind: schema-trigger`; a top-level `match:` list
+is AND and `group:` is OR. A discovered trigger that fails to load (envelope,
+payload, or import) is skipped with Darkmatter's `InvalidTriggerFinding` and
+the valid ones still apply; `discover_schema_owner` records it in
+`InvocationContext::trigger_findings()` (`composition/schema/findings.rs`)
+before the authored `$schema` resolves (one `pre_validate_schema` call
+discovers once and shares the loaded triggers between its cleanup and verdict
+preparations, matching each pass's current values; every other entry point
+— standalone cleanup, status, `load_effective_schema` — discovers on its own), so every preliminary check carries it,
+and the CLI prints one `[schema_validation]` warning per trigger per
+invocation, ahead of any unrelated error. It is never a `CompositionError`; a
+`$schema` naming a trigger is still `SchemaLoad`. Every
+recovery verdict, refusal route, `blocked`-vs-`failure` choice, and hop budget
+is decided by `darkmatter::lifecycle::policy` (`SubjectKind` carries the
+document/root-sequence/sequence/group differences); a driver calls it and maps
+refusals through `CompositionError::from_lifecycle_refusal`. Pre-launch checks
+run through `composition/preflight/checks.rs` (`claudine_preflight()`,
+`sequence_preflight()`): a `BeforeRun` failure fires no event, an `InRun`
+failure is a preflight failure. The one-implementation guards,
+`lib/tests/l1/lifecycle_one_implementation_guard.rs` (library source) and
+`cli/tests/l1/lifecycle_one_implementation_guard.rs` (CLI source), share the
+scan in `lib/tests/common/lifecycle_ownership_scan.rs` and fail on a Claudine
+definition of a Darkmatter-owned lifecycle item, a `MAX_PROXY_HOPS`
+comparison, a refusal or parser-twin error built outside its one mapping, or an
+unreviewed seam `impl` or registration; a new adapter adds an allowlist entry,
+with its reason, to the guard that scans its file. `lib/tests/l1/lifecycle_lift_ready_guard.rs` still
+reads the moved slice, so the caller injects the effect catalog
 (`LifecycleParseOptions`). Loop values are the host-declared `loop` global
 (`loop.count`, …), supplied to Darkmatter main compose through
 `ComposeOptions::with_host_globals`; `fm.loop` is the loop configuration.
-`retry.with` shares `proxy.with`'s evaluation (`executor.rs::resolve_with_overlay`)
+`retry.with` shares `proxy.with`'s evaluation (Darkmatter `executor.rs::resolve_with_overlay`)
 and travels as `StackControl::Retry.overlay` into
 `HarnessPromptState.pending_retry_overlay`; `prompt.rs::active_overlay` layers
 it over the retained proxy overlay (retry wins a shared key). The retried
@@ -120,7 +164,7 @@ break in declaration order; a failure or retry `discard()`s it. The code is
 the exit status only for the root loop (`RootRun::broken_exit_code`;
 `prep.rs` when `step_scope` is `None`). `PromptRunOutcome.withheld` keeps an
 unlaunched document out of `seq.outputs`. `prep` is a returning action
-(`executor.rs::run_prep`) through the thread-installed
+(Darkmatter `executor.rs::run_prep`, via `LifecycleHost::prep`) through the thread-installed
 `lifecycle::prep::PrepRunner` (`install`, `inherit` for group workers, call
 chain `enter_call`, one cycle domain with proxies); the CLI runner
 (`commands/prep_target.rs`, installed by compose/inline-compose/sequence)
@@ -219,6 +263,12 @@ back in.
 To assert the exact child argv or the composed prompt (providers read it on
 stdin), install a recording stub provider with `common::launch_recorder`
 (`install`/`launches`/`prompts`, Unix-only) rather than writing another one.
+A test that only asks whether, or how often, the provider launched must stay
+portable: copy `bin_exe!("claudine-fake-goose")` to `goose{EXE_SUFFIX}` in the
+fixture `bin` and set `PROVIDER_MARKER` (one line per launch; gate the module
+`#[cfg(feature = "test-fixtures")]`, as `launch_trigger_schemas.rs` does), and
+prove effects with a portable action (`ensure_file`, `append_line`), not a
+shell `touch`.
 A test whose subject *is* the running child — a signal, a deadline, a streaming
 read, `CREATE_NEW_PROCESS_GROUP`, an `expectrl` session — uses `command_std()`
 (or `command_builder()…build_std()`), which is the same policy on a
@@ -281,7 +331,10 @@ original invocation's approval, never by prompting. Root retries pass the same
 closed membership into graph approval; rebuilding the graph cannot reopen approval,
 and the retry runs the first attempt's graph (`RootRun::graph`). Nested preparation
 (`prepare_nested_sequence`/`prepare_nested_group`) rereads container events and
-`variables` but keeps the frozen node's children and order. Preserve normalized exact
+`variables` but keeps the frozen node's children and order; an unchanged source
+is parsed once per invocation (`PreflightGraph::nested_sources`, compared by text), and so is each referenced
+group/catalog/task/sequence file, shared by `Arc` rather than cloned per reference. A group start rereads only
+its own files (`PreflightGroup::sources`) to decide whether to re-prepare. Preserve normalized exact
 command keys, including multiple shell-value commands. Catalog cycle identity
 includes the selected group name, so distinct entries in one catalog are legal;
 diagnostics retain each entry as `catalog#name`. First position propagates to
@@ -348,39 +401,56 @@ leg mutations in declaration order. Body-only steps mask source lifecycle keys
 through data overrides so canonical rereads do not fire container events again. Internal legacy task-stage tests
 construct preflight models directly; they do not authorize old YAML syntax.
 The canonical shipped trigger schema lives in `claudine/schemas/`, not
-Darkmatter's docs tree. See [Sequences](topics/flow-control/sequences.md).
+Darkmatter's docs tree. A malformed disk `claudine.yaml` is skipped with a
+warning and still shadows the embedded copy; there is no fallback to it
+(`claudine_schemas_embedded.rs`, `launch_trigger_schemas.rs`). Action shapes are Darkmatter's: `action.yaml`'s
+categories and bundles, the `cancelled-*` types, and `loop`'s loose verbs are
+mappings whose values reference per-verb types `@darkmatter:lifecycle` (a
+reserved reference that resolves from Darkmatter's embedded partials, so the
+bundle stays self-contained); `claudine/lib/tests/l1/claudine_schema_parity.rs`
+derives event/action parity from `claudine_registry()`. `claudine.yaml`
+declares `composed`/`failed` as `null` with descriptions naming `start`/`blocked`. See [Sequences](topics/flow-control/sequences.md).
 The sequence trigger is `schemas/sequence.yaml` (matches any non-null
 `sequence`; payload `sequence`, `template`, and `fail_fast: null` so a root
 `fail_fast` is reported by name), and it is the only declaration of
 `sequence`: `claudine.yaml` no longer declares it, and a sequence document's
 events and `loop` are typed by `claudine.yaml`, which they select. The
 container types live in `schemas/sequence-types.yaml`, not `lifecycle.yaml`.
-SimplifiedSchema inlines named types (no recursion), so they are unrolled to
-three typed levels (`task`/`group`, `-2`, `-3`; below that any list). Each
-level inlines the next twice (task `sequence:` and group `tasks:`), so a
-container field costs 4x per level: `cancelled: cancelled-stack` on levels
-1–2 only, the shared `loop` type on level 1 only (object below), other events
-shape-only. Fully typed container events and loops measured +3 s per
-document (release `md`) and doubling `sequence` in both triggers +0.34 s per
-process (debug); every trigger payload is loaded whenever any trigger loads,
-so this cost hits every Claudine launch (see
+The lifecycle families (`stack`/`item`/`conditional`, `initialize-*`,
+`cancelled-*`, literal `then`/`else` keys) and the containers (`task`
+reached from `sequence:` items and `group` `tasks:` legs) are recursive
+named types, which the resolver stores once in `$defs`: every container
+event is typed with its family (`initialize` shell-free, `cancelled` `stop`
+only) and `loop` with the shared `loop` type, at every depth. A structured
+named type with two or more authored uses (`expression`, `loop`, the
+categories, the verb short forms) is also stored once and referenced; a
+type with one authored site is still expanded wherever that site expands,
+and a union named as a union arm (`entry` inside `item`) is always copied
+so the arm list stays flat, which copies the bundles (one authored site
+each, inside `entry`) into both `stack` and `item`. Never unroll a family by hand
+again (the typed unroll measured 11 MB). The schema encodes no
+conditional-depth limit: depth 6 is schema-valid and parser-invalid.
+`claudine_schemas_embedded.rs::embedded_trigger_payloads_resolve_within_one_megabyte`
+pins the payload under a fixed 1,000,000-byte limit (measured 572 kB
+`claudine.yaml`, 569 kB `sequence.yaml`, 768 kB for both, plus 25% headroom)
+and asserts the families by `DefKey`, never by `$defs` key; criterion-10
+container cells are `lib/tests/l1/container_schema_recursion.rs` over the
+`tests/fixtures/sequence-schema/containers-depth4-*.md` controls (see
 [Schemas](topics/schemas.md#sequence-containers)). A group is closed but a
 union with a file reference, so `execution`/`max_paralel` are reported at
 `/…/group` with the value in the message; a top-level `sequence: 42` is
-coerced to the string arm (schema valid; the parser rejects it). The
-`cancelled-*` family is unrolled to the parser's `MAX_CONDITIONAL_DEPTH` (5)
-with no conditional at level 6; its conditionals use one
-`<pattern::^(?:then|else)$>` key, since literal `then`+`else` inline each body
-twice and grow the schema 2^n (measured 10x per validation at five levels).
-DMLS neither completes pattern keys nor resolves values below them, which is
-why `initialize-*` keeps literal keys and three typed levels.
+coerced to the string arm (schema valid; the parser rejects it).
 
 ## Per-task provider selection
 
 A sequence has no single planned target. Preflight predicts each `prompt:`
 task's provider from its own `agent` (`PreflightTask.provider`, computed in
 `composition/sequence/preflight/providers.rs` without running or composing
-anything) and keys every task by its graph `TaskIdentity`. The CLI
+anything; a literal hint is classified before any state is built, so only a
+document hint that reads an expression builds `PredictionStateBuild` state;
+`ProviderPrediction.dependencies` is per task, so `defer_runtime_written`
+moves both `agent` and `model` to launch when either reads a runtime-written
+key) and keys every task by its graph `TaskIdentity`. The CLI
 (`wrap/sequence/providers.rs`) turns predictions into per-task targets
 (own / enclosing-document fallback / decided at launch / unresolved), fails an
 unusable static hint with `SequenceTaskProviderSelection` before any task
@@ -423,9 +493,30 @@ root fallback for reads introduced by transclusion; Darkmatter's explicit
 `seq.previous`, and `seq.next`; typed expression evaluation retains objects.
 Sequence task templates defer `seq`/`group`/`loop`, including the first task.
 Container runners use complete lexical roots for their own events and restore
-the enclosing roots on exit. `RuntimeState::replace_sequence_scope` restores
-position and outputs while keeping mutations; group workers clone the snapshot
-so in-memory writes and proxy ancestry remain isolated across branches.
+the enclosing roots on exit. `RuntimeState::replace_sequence_scope` swaps
+position and outputs while keeping mutations and returns the replaced pair, so
+a nested sequence moves the enclosing outputs out and back instead of copying
+them; group workers clone the snapshot so in-memory writes and proxy ancestry
+remain isolated across branches. A leg's branch (`task/group/branch.rs::LegBranch`)
+is built from the group-start seed only at admission and dropped before its
+worker admits the next leg; `work_counters::Gauge::RuntimeStateBranch` (live
+and peak) and the `test-fixtures` seam `CLAUDINE_TEST_GROUP_BRANCHES` pin
+peak ≤ cap (`sequence/task/tests/branch_admission.rs`,
+`cli/tests/l1/group_branch_lifetime.rs`). Read runtime state through the narrow
+projections (`mutations`, `mutation_keys`, `mutations_and_outputs`,
+`mutations_and_output_count`, `outputs_from`, `sequence_scope`); a full
+`snapshot()` is only for seeding a branch or `layered_set_overrides`.
+`Work::RuntimeSnapshot`/`RuntimeOutputsCopy` pin this
+(`sequence/task/tests/runtime_projections.rs`). Dotted `hook.<path>`
+(`dispatch/expression.rs::hook_member`) and loop-condition `loop.<member>`
+(`LoopAmbient::member_named`) resolve the member without building the whole
+root; only a bare `hook`/`loop` read materializes it
+(`HookPayloadMaterialize`/`LoopAmbientMaterialize`). Lifecycle, body, and
+frontmatter `loop.*` reads do the same through Darkmatter's member-aware
+`RuntimeBinding::members` (`EnclosingLoop::binding`, used by
+`runtime_bindings_enclosed` and `composition_host_globals`); bracket access
+builds the whole root once per session. `LoopAmbient.last_output` is an
+`Arc<Value>`, so the `'static` binding clones the ambient without copying it.
 
 ## Structured shell authorization
 
@@ -456,6 +547,119 @@ the first spawn. Shared redirection targets identify original destinations:
 `2>&1 > /dev/null` retains stderr on original stdout; never collapse it to
 stderr's own capture channel. Native `native_task_` and `native_lifecycle_`
 CLI regressions prove routing and downstream output on every OS. See [Pre-flight Checks](topics/pre-flight-checks.md).
+
+Sequence shell-site static analysis (`SequencePreflight::prepare_site`) parses each
+placeholder occurrence once into Darkmatter's `PreparedInterpolation` (raw view for
+approval diagnostics, target identity, fallback holes and presence; command view
+for grammar, typing and late roots), drops it on return, and stores it nowhere.
+Exact count is steps x holes x 6 (`preflight/tests/scaling.rs`). The text entry
+points remain for paths that bypass `prepare_site`; do not add a text reparse
+inside it.
+
+Static presence decisions read Darkmatter's shared `TypeScope`.
+`lib/tests/l1/type_scope_ownership_guard.rs` fails when a
+`TypeScope::unguarded`, `DeclaredTypes::new`, `assume_at`, or presence lookup
+appears outside its reasoned allowlist entry, or when an entry is stale. It also
+fails when preflight refuses a `MissingValue` without asking `placeholder_guard`,
+and on an unreviewed `Expr::Variable(`/`SpannedExprKind::Variable(` match:
+which roots and paths an expression reads comes from Darkmatter's
+`static_access_reads`/`static_variable_reads`, filtered by Claudine's names.
+Claudine registers no host expression function. Adding one means a
+`function(...)` catalog in `claudine/schemas/`, a Rust registration through
+Darkmatter's `expression::host::HostFunctions` installed at startup, and its
+generated `<stem>.facts.json` with a freshness test. Until all of that is
+wired, `lib/tests/l1/host_catalog.rs::claudine_ships_no_host_function_catalog_and_no_facts_artifact`
+fails (see `darkmatter/docs/topics/host-functions.md`; user docs:
+[Schemas → What Claudine adds to expression checking](topics/schemas.md#what-claudine-adds-to-expression-checking)).
+DMLS types Claudine lifecycle stacks (its events, renames, per-event `err`,
+and verbs such as `say`/`retry`/`proxy`) from the generated
+`claudine/schemas/globals.lifecycle.json` beside `globals.yaml`
+(`composition::lifecycle::lifecycle_artifact()`, Darkmatter's
+`lifecycle::host_profile`): after changing `claudine_registry()`,
+`claudine_parse_options`, `globals.yaml`, or the Playa effect catalog, run
+`just regen-lifecycle-artifact` in `claudine/`;
+`host_catalog.rs::lifecycle_artifact` fails while it is stale and proves the
+rebuilt registry equals `claudine_registry()`.
+A new host site adds an entry with its reason. Runtime `is_null` checks are not
+restricted. The guard/site conformance matrix is
+`composition/lifecycle/executor/tests/scope_site_conformance.rs` plus its
+sequence sibling in `sequence/preflight/tests.rs`. A guard fact is pre-flight
+evidence only: it never crosses an event, loop pass, retry, resume, or proxy
+handoff, and the live value is always checked again at the command. User docs:
+[Lifecycle → What a guard proves](topics/flow-control/lifecycle.md#what-a-guard-proves-to-the-actions-it-selects)
+and [Sequences → Task guards](topics/flow-control/sequences.md#task-guards-when).
+
+Launch pre-validation (`composition/schema/mod.rs::is_composition_independent`)
+sets a problem aside for composition only through Darkmatter's
+`schemas::awaits_rendering`: the value at the problem's own path holds a
+template the schema did not accept as `deferred` (`ValidationReport::deferred`),
+and the problem is not an unknown or missing key on a collection. A literal
+mistake beside a template therefore fails launch, and so does a malformed
+template (`expression::is_malformed_template`), which no rendering can
+settle. Claudine's `action.yaml` categories, bundles, and `loop` keys select
+Darkmatter's generated per-verb forms (`<verb>-short`/`-long@darkmatter:lifecycle`;
+a bundle of several verbs, and `loop-bundle`, short only; a category, and
+`loop-single`, short or long). A category is a single-action dictionary
+(`uncounted-keys: [when, no_error]` keeps `when`/`no_error` out of its
+one-verb count), so each family's `entry` (category | bundle) types root,
+`then`/`else`, and list-item dictionaries alike; only `item` adds the
+conditional, so a root/body dictionary holding `then` is a schema error
+(every cycle runs stack → `item[]` → conditional → `then`/`else`, and the
+acyclic `entry` is inlined at both references). `loop` is
+`loop-bundle | loop-single`; the schema leaves `when` beside a root/body
+dictionary's actions to the parser, as a bundle's `when` always was. `claudine_schemas.rs::single_action_*`
+judge every family × position by schema and parser; `claudine_schemas.rs::generated_verb_keys_equal_the_darkmatter_catalogs`
+pins each reference against `LifecycleSchemaProjection::shipped()`, and the
+parser itself does not type-check literal operands (a wrong-typed literal is
+S-reject, P-accept, R-reject). Schema validation binds each generated verb
+value through the verb's runtime registration (Darkmatter's `operands(...)`
+marker), so `number: [pear, 7]` passes and `length: [true]` fails at launch,
+in DMLS, and in `md schema validate` alike; a generated verb's operand holding
+a `{{ … }}` span that fails to parse (`ensure_file: "{{ 1 + }}"`) is a
+positioned `malformed template` problem there too, even for a text parameter.
+The hand-written verb types carry the same marker, so every string the parser
+reads as a template (`say` text, directive strings, `shell`, `set` values but
+a `$( … )` one, `with:` values) reports a malformed span the same way
+(`lifecycle::template_operands`). Side-effect operands are bound to their typed
+signatures at event time, before the effect engine runs; a binding failure
+is an evaluation failure that `no_error` does not suppress. Optional and
+nullable are independent: an omitted optional operand is fine, an explicit
+`null` only where the parameter type admits it (`ping: ["127.0.0.1", null]`
+is a schema error; `set_frontmatter: [f, k, null]` is not). A catalog
+signature change is regenerated with `just -f darkmatter/justfile
+regen-lifecycle-schema` (only the `# BEGIN/END GENERATED` regions of
+Darkmatter's `lifecycle.yaml`; never hand-edit them); a new or removed verb
+also needs its key in `action.yaml` and `lifecycle.yaml`'s `loop` keys. User
+docs: [Schemas → Generated verbs](topics/schemas.md#generated-verbs-have-typed-arguments).
+
+Darkmatter's design-time call check rejects any composed prompt (compose,
+inline-compose, sequence task) whose authored call is proven wrong, before
+any expression or shell runs, including dead branches. Claudine adds no rule:
+the rejection is Darkmatter's `MarkdownError` carrying
+`ExpressionError::CallCheck` (`rejected_call()`). Lifecycle `when:`
+predicates and action operands get the same verdict, each typed at its site
+under the enclosing `when:` items (a `set` ends the fact; no fact crosses an
+event), from `darkmatter::lifecycle::reject_incompatible_calls`, which `prepare.rs` calls
+right after the launch schema resolves (`lifecycle::reject_incompatible_calls`,
+error twin `CompositionError::LifecycleCallRejected`, whose
+`lifecycle_call_diagnostic()` keeps Darkmatter's located shared record); on success it returns
+the stacks' category 3 and always-false warnings, located in
+`source.original_text`, which lead `PreparedComposition.warnings`. Expressions are typed
+by every schema layer (`DeclaredTypes::for_schema`), and Claudine's globals
+by its host catalog, which `claudine_registry()` registers
+(`register_global_catalog`); sequence preflight sites add
+`with_global_catalog(claudine_globals())`. A shipped prompt or fixture
+that trips it holds a real bug, so fix the call; never work around the check.
+The function catalog (`darkmatter/schemas/partials/functions.yaml`, read
+through `expression_function_catalog()`) and the argument categories are
+Darkmatter's library; `claudine context --expressions` renders that catalog
+and states no conversion rule. DMLS shows the same verdict while editing
+(`dm.expression.incompatible_call`), plus `dm.expression.uncertain_call`
+warnings that `[expressions] strict` widens and `dm.expression.always_false_call`
+warnings (a malformed literal `file_exists` reference, which composition
+reports too); see the darkmatter skill's `dmls.md`. `is_file_type` is a
+generated lifecycle verb, so `action.yaml` and `lifecycle.yaml` carry its
+`-short`/`-long@darkmatter:lifecycle` references like every other verb.
 
 Late roots are `seq`, `loop`, and `group`; sequence and container terminal
 event shells participate in the same closed graph audit. Both group schedulers
@@ -544,7 +748,7 @@ of a topic doc.
 - [Error Architecture](topics/error-architecture.md) — the `Diagnostic`/`BlockError` pair, the discovery seam, effective-diagnostic selection and the `Semantic`/`Transparent` role contract, the snapshot boundary, typed-wrapper rules, and the lossy-boundary audit
 - [Composition](topics/composition.md) — `compose`, `inline-compose`, `sequence`, lifecycle stacks, provider selection
 - [Schemas](topics/schemas.md) — the seven `claudine/schemas/` files (including the `sequence.yaml` trigger and the `sequence-types.yaml` container types), event/action-type permissions, what only the parser checks, disk discovery vs the embedded bundle, and DMLS's disk-only use for diagnostics, completion, and hover; the strict launch policy is in [Composition](topics/composition.md#claudines-trigger-schemas-in-the-launch-verdict)
-- [Lifecycle](topics/flow-control/lifecycle.md) — the seven events, the list/dictionary stack grammar with `when`/`then`/`else`, action forms, `err`/`timing`/`current` globals, validation errors
+- [Lifecycle](topics/flow-control/lifecycle.md) — Claudine as a host of Darkmatter's lifecycle (renames, registrations, how failures route, the `finalize` exceptions), the seven events, the list/dictionary stack grammar with `when`/`then`/`else`, action forms, `err`/`timing`/`current` globals, validation errors. The host-neutral model (Darkmatter's five events, host registration, the `md` host, recovery modes) is `darkmatter/docs/topics/lifecycle/index.md` and `error-handling.md`
 - [Flow Control](topics/flow-control/flow-control.md) and [Flow Control Reference](topics/flow-control/flow-control-reference.md) — the `stop`/`skip`/`error`/`retry`/`resume`/`proxy`/`defer` directives, per-event runtime limits, retry/resume re-entry, `proxy` handoffs and the `with:` overlay
 - [Timeouts](topics/timeouts.md) — the two timeout rules, four env vars, precedence, termination path, the post-exit stream-reader wait (`stream_reader_timeout`), the single output worker that keeps a blocked terminal from stalling the parser or the wrapper (`wrap/output_worker.rs`; run output is a queued frame, and once a run creates the worker every diagnostic — `crate::log`, signal notices, `--perf`, tracing, the panic hook, the library's `render::console` lines — is one too, through `crate::terminal_gate::write`; signal handlers never write the terminal), exit reasons, and the three runaway content guards
 - [Signal Handling](topics/signal-handling.md) — user Ctrl+C vs wrapper-driven SIGTERM/SIGKILL, the unified wait loop, termination labels (`Aborted`/`Interrupted`/`TimedOut`), non-interactive ladder, Windows parity

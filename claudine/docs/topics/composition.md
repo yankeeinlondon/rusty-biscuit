@@ -1,4 +1,5 @@
 ---
+kind: canonical-documentation
 hash: ef46db3751d8e999-52be26f8b9a4bfff
 last_updated: 2026-09-17
 ---
@@ -396,7 +397,10 @@ Steps:
    `compose`; an eager-only property remains optional, while a
    required-but-not-eager property may stay absent (the agent supplies it, the
    completion verdict enforces it) and renders as *deferred* in the launch
-   report. A present value is always type-checked. The intrinsic `prompt`
+   report. A present value is always type-checked; only the spot that still
+   holds `{{ … }}` or `$( … )` text waits for composition, so in
+   `counts: [three, "{{ fm.x }}"]` against `number[]` the launch fails at
+   `/counts/0` while the template's own element is judged once rendered. The intrinsic `prompt`
    verdict comes **after** this step, so a `--set`, positional `prompt=…`, or
    interactively collected eager `prompt` satisfies the gate and becomes the
    delivered prompt without being written to the file.
@@ -884,6 +888,12 @@ prepare emit non-fatal did-you-mean warnings to stderr, suppressed by `--silent`
 String literals and code fences do not trigger the `ctx.*` diagnostic because it
 is parsed from the interpolation AST, not a raw text scan.
 
+A schema trigger skipped as invalid is reported the same way: one
+`warning: [schema_validation] ignoring invalid schema trigger <path>: <reason>`
+row per trigger, once per invocation even though loops, retries, and repeated
+schema checks discover it again, and also suppressed by `--silent`. See
+[When a trigger is invalid](schemas.md#when-a-trigger-is-invalid).
+
 ## Provider Selection
 
 Provider selection behaves differently in **TTY** (interactive terminal) and **non-TTY** (piped or CI) modes. In both modes, explicit `--<provider>` flags always win unconditionally.
@@ -1053,10 +1063,11 @@ Composition documents can declare a `$schema` in their frontmatter to constrain 
 ### Claudine's Trigger Schemas in the Launch Verdict
 
 The launch verdict judges a document by its **effective schema**: Claudine's
-trigger schemas (`claudine.yaml` and `inline-compose.yaml`) plus any other
-matching trigger schema, under the document's authored `$schema`. A document
-with no `$schema` is still checked: a lifecycle stack, `loop`, `agent`,
-`model`, timeout, or linking key with the wrong shape blocks the launch.
+trigger schemas (`claudine.yaml`, `inline-compose.yaml`, and `sequence.yaml`)
+plus any other matching trigger schema, under the document's authored
+`$schema`. A document with no `$schema` is still checked: a lifecycle stack,
+`loop`, `agent`, `model`, timeout, or linking key with the wrong shape blocks
+the launch.
 
 ```yaml
 ---
@@ -1099,11 +1110,28 @@ The rules:
   A failing verdict fires `blocked` and `finalize`; `start` and the provider
   never run. A lifecycle stack the parser cannot read fails earlier still,
   before `initialize`, because the bootstrap parses every stack.
+- **A deferred operand waits for its event; a malformed one does not.** A
+  whole-value `{{ … }}` template in a generated verb's argument
+  (`ensure_file: "{{ target }}"`) passes the verdict, and its evaluated value
+  is bound to the verb's signature when the event runs. A literal mistake
+  beside it, or a template that does not parse (`"{{ 1 + }}"`), fails the
+  launch (see
+  [Deferred values and what happens at the event](schemas.md#deferred-values-and-what-happens-at-the-event)).
 - **Retired spellings report the migration.** When a document fails the
   verdict and its lifecycle uses a removed spelling, the error is the parser's
   `RemovedGrammar` with its replacement, not a bare schema mismatch.
 - **Fresh reads use the same verdict.** Retries, resumes, proxy targets, and
   sequence steps re-read their document through it.
+- **An invalid trigger file is skipped, not fatal.** A discovered trigger that
+  cannot be used (a bad envelope, or a payload or import that fails to load)
+  contributes nothing to the effective schema; the valid triggers still
+  apply. Claudine records it before the authored `$schema` resolves, so every
+  preliminary check and the launch carry it, and prints one
+  `warning: [schema_validation] ignoring invalid schema trigger …` row per
+  trigger per invocation, before an unrelated error if the launch then fails.
+  It is never a composition error. A `$schema` naming a trigger file still
+  fails (see
+  [When a trigger is invalid](schemas.md#when-a-trigger-is-invalid)).
 - **The schema is frozen at launch.** The inline completion verdict judges the
   effective schema resolved at launch, trigger payloads included. An edit to
   `$schema` or to a schema file during the run takes effect on the next run.
@@ -1645,7 +1673,9 @@ failure:
             reason: "{{ err.msg }}"
 ```
 
-**Launch identity is rebuilt at the fresh-read boundary, not snapshotted at adoption.** Every retry/resume re-materializes the active document from disk and recomputes the whole launch bundle against *that* read — provider, the profile and binary it selects, the resume protocol that profile supports, model, interactivity, the permission mode `--yolo` actually achieves for that pair, the structured-output shape it implies, the MCP tag set lexed from the refreshed body, the provider argv, and the environment overlay (`harness_orch/loop_control/target_launch.rs::rebuild_launch_identity`, called at every fresh-read boundary). An attempt therefore launches with the identity the document it is about to run resolves to now, not with an adoption-time snapshot. What the document does not name falls back to the invocation's plan: a document with no `agent:` keeps the planned provider, and one with no `model:` (and no `--model`) keeps the planned model while it keeps that provider. A sequence task's plan is the target its provider selection chose (its own predicted provider, the enclosing sequence document's, or a review-screen choice); elsewhere the planned model is the invocation's own, minus a model the launched document's frontmatter chose, so a retry after `model:` is removed launches without it.
+**Launch identity is rebuilt at the fresh-read boundary, not snapshotted at adoption.** Every retry/resume re-materializes the active document from disk and recomputes the whole launch bundle against *that* read — provider, the profile and binary it selects, the resume protocol that profile supports, model, interactivity, the permission mode `--yolo` actually achieves for that pair, the structured-output shape it implies, the MCP tag set lexed from the refreshed body, the provider argv, and the environment overlay (`harness_orch/loop_control/target_launch.rs::rebuild_launch_identity`, called at every fresh-read boundary). An attempt therefore launches with the identity the document it is about to run resolves to now, not with an adoption-time snapshot.
+
+A document with no `agent:` can keep the planned provider. A model chosen by the document's own `model:` is read again: removing that property before retry removes its old choice from the next prompt, provider arguments, and child environment, for a sequence task as well as a direct invocation. An explicit `--model` or captured model environment still wins, and a genuine inherited or review-selected fallback remains eligible while the provider stays compatible. The model value Claudine injected into the previous attempt's environment is not a new caller choice.
 
 **One rebuild per attempt, and it *is* the launch.** The rebuilt bundle is both what the child is spawned with and what the compatibility key below is computed from, so the key can never describe a plan the child did not receive. Argv and MCP injection come from `wrap/launch_plan.rs::build_launch_plan`, a re-entrant, side-effect-free builder the invocation feeds once with the results of every effect it performed (temp files, the provider overlay plan, MCP tag ambiguity resolutions — which is why a retry never re-prompts for an ambiguous tag). A rebuild whose facets match the invocation's gets that recorded plan back verbatim, so an unchanged document is byte-identical to the invocation by construction. System-prompt *delivery* is re-applied per provider and so moves with the provider; its *content* is composed once at invocation.
 
@@ -1715,13 +1745,13 @@ A document that still declares any of these keys fails composition with a typed 
 |-------------|-------------|
 | `pre_checks` | the `initialize` or `start` lifecycle stack |
 | `post_checks` | the `success` or `finalize` lifecycle stack |
-| `handle_<event>` (e.g. `handle_timeout`, `handle_inline_body_unchanged`) | the `blocked` or `failure` lifecycle recovery actions |
+| `handle_<event>` (e.g. `handle_timeout`, `handle_inline_body_unchanged`) | the `failure` lifecycle recovery actions (`blocked` reports, but cannot recover) |
 | `handle` | a lifecycle `shell` action or other lifecycle action |
 | `deviate` | a lifecycle `shell` action plus a recovery action (`retry`, `resume`, etc.) |
 
 The scan runs before lifecycle event blocks are parsed, so the diagnostic names the removed DSL key rather than falling through to generic unknown-field handling. Like every frontmatter-rooted composition error, it appends a focused, syntax-highlighted excerpt of the frontmatter around the removed key under a TTY.
 
-**Verification** that the agentic loop actually did the work it claimed (the old `post_checks` role) now belongs in the `success` or `finalize` stack: guard a `when:` clause and raise an `Error` lifecycle action when the contract is unmet. **Recovery** (the old `handle_*` role) belongs in a `failure`/`blocked` stack — or any other event's, since flow control is universal — via `retry`, `resume`, or `proxy`. See [Flow Control](flow-control/flow-control.md) for the full directive catalog.
+**Verification** that the agentic loop actually did the work it claimed (the old `post_checks` role) now belongs in the `success` or `finalize` stack: guard a `when:` clause and raise an `Error` lifecycle action when the contract is unmet. **Recovery** (the old `handle_*` role) belongs in a `failure` stack — or another event's, such as `success` or `finalize` — via `retry`, `resume`, or `proxy`. `blocked` cannot recover; see [Lifecycle — How Failures Route](flow-control/lifecycle.md#how-failures-route). See [Flow Control](flow-control/flow-control.md) for the full directive catalog.
 
 ## Timeouts
 
@@ -1852,7 +1882,7 @@ loss to its `session_end` record; see
 
 ### Recovery
 
-Recovery is expressed through the lifecycle stacks, not a separate handler DSL. `failure` and `blocked` are its natural homes, but recovery is **not limited to them** — flow control is universal, so a `success` stack can `resume` an agent that finished cleanly without producing what it promised, and a `finalize` stack can `retry` an error the terminal event downgraded. The available recovery actions are:
+Recovery is expressed through the lifecycle stacks, not a separate handler DSL. `failure` is its natural home, but recovery is **not limited to it**, so a `success` stack can `resume` an agent that finished cleanly without producing what it promised, and a `finalize` stack can `retry` an error the terminal event downgraded. `blocked` is the exception: it refuses every recovery (see [Lifecycle — How Failures Route](flow-control/lifecycle.md#how-failures-route)). The available recovery actions are:
 
 - **`retry`** — re-run the prompt with a fresh provider attempt. Its re-entry point is derived from whether the provider had launched, not from the event that asked for it.
 - **`resume`** — resume the agent session with its context intact and a follow-up message (provider must support session resume; pre-launch there is no session, and it surfaces `ResumeWithoutSession`).

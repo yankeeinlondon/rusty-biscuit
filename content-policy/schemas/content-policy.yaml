@@ -1,17 +1,17 @@
 # content-policy editor schema (SimplifiedSchema, `kind: schema`).
 #
 # Types for a document's `content_policy` list, so editors running DMLS can
-# complete and check policies. Evaluation by the content-policy library is the
-# authority; this schema only flags what it can express:
+# complete and check policies. The content-policy declaration parser is the
+# authority for syntax; this schema only flags what it can express:
 #
 # - Pattern arguments cannot hold a literal `(`, `)`, `,`, or space, so those
 #   are written `\x28`, `\x29`, `\x2C`, and `\x20`. Regex groups cannot be
 #   written either, so each duration form is a top-level alternation with one
 #   anchored branch per unit (`d`, `wk`, `mo`, `yr`).
-# - Dates are checked for shape only; evaluation rejects impossible dates.
+# - Dates are checked for shape only; the parser rejects impossible dates.
 # - `FileChanged` paths reject `,`, `)`, `\`, leading or trailing whitespace,
 #   a leading `/`, `~`, `@`, `%`, or `{{`. Without groups or lookaround a `{{`
-#   after the first character cannot be expressed, so evaluation alone rejects
+#   after the first character cannot be expressed, so the parser rejects
 #   a path such as `docs/{{HOME}}.md`.
 kind: schema
 types:

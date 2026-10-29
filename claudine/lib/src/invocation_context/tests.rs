@@ -1235,6 +1235,8 @@ fn commit_all(root: &Path, message: &str) {
                 "user.name=Claudine Test",
                 "-c",
                 "user.email=claudine@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
             ])
             .args(&args)
             .current_dir(root)

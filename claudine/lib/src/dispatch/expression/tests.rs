@@ -10,6 +10,8 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+mod hook_leaf_reads;
+
 fn parse_and_evaluate<L: EvaluationLookup>(
     expression: &str,
     mode: ParseMode,

@@ -12,6 +12,17 @@ use crate::prepared::PreparedMessage;
 use crate::receipt::{MessageRef, ProviderKind, SendReceipt};
 use crate::target::Target;
 
+/// Discord rejects a `content` field longer than this many characters.
+pub const CONTENT_MAX_CHARS: usize = 2000;
+
+/// Receipt metadata key: number of webhook posts a long message was split
+/// into. Present only when that number is greater than one.
+pub const POST_COUNT_KEY: &str = "post_count";
+
+/// Receipt metadata key: comma-separated message ids of every post, in
+/// delivery order. Present only alongside [`POST_COUNT_KEY`].
+pub const POST_MESSAGE_IDS_KEY: &str = "post_message_ids";
+
 /// Configuration for the Discord webhook provider.
 ///
 /// The `webhook_url` must be a complete Discord webhook URL in the form
@@ -280,11 +291,14 @@ impl super::Provider for DiscordWebhookProvider {
                 (content, None)
             }
         };
-        let content_opt = content_owned.as_deref();
+        let content_chunks: Vec<String> = content_owned
+            .map(|content| crate::markdown::split::split_to_char_limit(&content, CONTENT_MAX_CHARS))
+            .unwrap_or_default();
 
         let attachments = message.attachments();
         tracing::debug!(
-            content_len = content_owned.as_ref().map(String::len).unwrap_or(0),
+            content_len = content_chunks.iter().map(String::len).sum::<usize>(),
+            post_count = content_chunks.len().max(1),
             has_embed = embeds_owned.is_some(),
             attachment_count = attachments.len(),
             has_thread = thread_id.is_some(),
@@ -295,11 +309,88 @@ impl super::Provider for DiscordWebhookProvider {
         // instead of an empty 204.
         let url = self.build_request_url(thread_id.as_deref())?;
 
+        // Over-long content becomes consecutive posts. The embed and the
+        // attachments ride on the final post so they follow all of the text.
+        let post_count = content_chunks.len().max(1);
+        let mut posted: Vec<WebhookMessageResponse> = Vec::with_capacity(post_count);
+        for index in 0..post_count {
+            let is_last = index + 1 == post_count;
+            let content = content_chunks.get(index).map(String::as_str);
+            let (embeds, post_attachments) = if is_last {
+                (embeds_owned.clone(), attachments)
+            } else {
+                (None, &[][..])
+            };
+            match self
+                .post(url.clone(), content, embeds, post_attachments)
+                .await
+            {
+                Ok(response) => posted.push(response),
+                Err(error) => {
+                    if !posted.is_empty() {
+                        // Earlier posts are already visible in the channel;
+                        // a caller that retries the whole message repeats them.
+                        tracing::warn!(
+                            delivered = posted.len(),
+                            post_count,
+                            "Discord webhook multi-post send failed part-way"
+                        );
+                    }
+                    return Err(error);
+                }
+            }
+        }
+
+        let mut posted = posted.into_iter();
+        let first = posted
+            .next()
+            .ok_or_else(|| ProviderKind::DiscordWebhook.transport_error("no post was sent"))?;
+        tracing::debug!(raw_id = %first.id, post_count, "Discord webhook message sent");
+
+        // A multi-post send yields one receipt that identifies the *first*
+        // post: it is where the message begins, so `raw_id` and `message_ref`
+        // keep meaning "this message" for single and multi-post sends alike.
+        // The remaining post ids are recorded in metadata, which stays empty
+        // for a single post so existing receipts are unchanged.
+        let mut metadata = BTreeMap::new();
+        if post_count > 1 {
+            let ids: Vec<String> = std::iter::once(first.id.clone())
+                .chain(posted.map(|response| response.id))
+                .collect();
+            metadata.insert(POST_COUNT_KEY.to_owned(), post_count.to_string());
+            metadata.insert(POST_MESSAGE_IDS_KEY.to_owned(), ids.join(","));
+        }
+
+        let webhook_id = first.webhook_id.unwrap_or_else(|| self.webhook_id.clone());
+
+        Ok(SendReceipt {
+            provider: ProviderKind::DiscordWebhook,
+            message_ref: MessageRef::DiscordWebhook {
+                webhook_id,
+                channel_id: first.channel_id,
+                message_id: first.id.clone(),
+                thread_id,
+            },
+            raw_id: first.id,
+            metadata,
+        })
+    }
+}
+
+impl DiscordWebhookProvider {
+    /// Execute the webhook once and decode the created message.
+    async fn post(
+        &self,
+        url: reqwest::Url,
+        content: Option<&str>,
+        embeds: Option<Vec<EmbedBody>>,
+        attachments: &[Attachment],
+    ) -> Result<WebhookMessageResponse, MessengerError> {
         let response = if attachments.is_empty() {
             let body = WebhookJsonBody {
-                content: content_opt,
+                content,
                 attachments: None,
-                embeds: embeds_owned.clone(),
+                embeds,
             };
             self.client.post(url).json(&body).send().await
         } else {
@@ -319,9 +410,9 @@ impl super::Provider for DiscordWebhookProvider {
                 form = form.part(format!("files[{index}]"), part);
             }
             let payload = WebhookJsonBody {
-                content: content_opt,
+                content,
                 attachments: Some(metas),
-                embeds: embeds_owned.clone(),
+                embeds,
             };
             let payload_json = serde_json::to_string(&payload)
                 .map_err(|e| ProviderKind::DiscordWebhook.transport_error(e))?;
@@ -368,24 +459,7 @@ impl super::Provider for DiscordWebhookProvider {
             });
         }
 
-        let msg: WebhookMessageResponse =
-            super::http_helpers::handle_http_response(response, ProviderKind::DiscordWebhook)
-                .await?;
-        tracing::debug!(raw_id = %msg.id, "Discord webhook message sent");
-
-        let webhook_id = msg.webhook_id.unwrap_or_else(|| self.webhook_id.clone());
-
-        Ok(SendReceipt {
-            provider: ProviderKind::DiscordWebhook,
-            message_ref: MessageRef::DiscordWebhook {
-                webhook_id,
-                channel_id: msg.channel_id,
-                message_id: msg.id.clone(),
-                thread_id,
-            },
-            raw_id: msg.id,
-            metadata: BTreeMap::new(),
-        })
+        super::http_helpers::handle_http_response(response, ProviderKind::DiscordWebhook).await
     }
 }
 

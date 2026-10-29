@@ -142,15 +142,15 @@ harness = false
 name = "render_tree"
 harness = false
 
-# CI policy: L1 runs with the `image` feature; biscuit-terminal owns L2
+# CI policy: L1 runs with the `image` and `serde` features; biscuit-terminal owns L2
 # (real-terminal) and browser (headless) tier tests. The library's own L2
 # tests drive WezTerm only (tmux/kitty/apple-terminal are the CLI's); a
 # backend declared here that no lib test executes fails backend-proof.
 [package.metadata.ci.tests]
 tiers = ["L1", "L2", "browser"]
 l2-backends = ["wezterm"]
-features = ["image", "terminal-tests", "browser-tests"]
-local-features = ["image"]
+features = ["image", "serde", "terminal-tests", "browser-tests"]
+local-features = ["image", "serde"]
 # The PTY tests spawn this example from `<profile>/examples/` beside the test
 # binaries. `cargo nextest archive` builds lib, bin, and test targets and never
 # examples, so the producer both builds it and carries it; a consumer that had

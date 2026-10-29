@@ -12,6 +12,7 @@
 
 mod group;
 mod shell;
+use crate::composition::LifecycleErrorInfoExt;
 pub(crate) use shell::run_owned_lifecycle_command;
 mod sequence;
 mod templates;
@@ -20,7 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use darkmatter::markdown::MarkdownError;
-use darkmatter::markdown::compose::EffectiveState;
+use darkmatter::markdown::compose::{EffectiveState, SharedFrontmatter};
 use darkmatter::markdown::compose::expression::Expr;
 use darkmatter::markdown::compose::subtree::SubtreeCompose;
 
@@ -38,7 +39,7 @@ use super::super::lifecycle::{
     LifecycleSignal, parse_single_action_with_order, parse_task_action_stack_with_order,
 };
 use super::super::runtime_state::{
-    LayeredOverrides, RuntimeState, layered_set_overrides, trim_transport_newline,
+    LayeredOverrides, RuntimeState, layered_set_overrides, sequence_value_of, trim_transport_newline,
 };
 use darkmatter::markdown::compose::OverrideOrigin;
 use super::model::RuntimeMutation;
@@ -489,6 +490,25 @@ struct ValidatedTask {
 }
 
 impl TaskExecution<'_> {
+    /// Submit `lifecycle`'s pre-warm phrases, classified against a clone of
+    /// `frontmatter` that shares its base: a container start never copies
+    /// the definitions its state holds.
+    pub(super) fn prewarm_container(&self, lifecycle: &crate::composition::LifecycleConfig, frontmatter: &SharedFrontmatter) {
+        let Some(document) = self.document else { return };
+        let handle = document.prewarm().with_injected_keys(
+            reserved::ROOT_OVERLAY_KEYS.iter().map(|key| (*key).to_string())
+                .chain(self.user_setters.and_then(Value::as_object).into_iter().flat_map(|map| map.keys().cloned())),
+        );
+        crate::composition::lifecycle::prewarm::collect_and_submit(&handle, self.stack.settings, lifecycle, || {
+            crate::composition::lifecycle::prewarm::PrewarmInputs::shared(
+                frontmatter.clone(),
+                self.stack.prepared_context.unwrap_or_else(|| self.state.context()).clone(),
+            )
+        });
+    }
+}
+
+impl TaskExecution<'_> {
     /// Run the task through setup, its primary action, and teardown.
     ///
     /// Never returns `Err`: every failure is part of the task's reported
@@ -522,10 +542,10 @@ impl TaskExecution<'_> {
             self.dry_run_note(&format!("`{name}` runs when `{condition}` (not evaluated in a dry run)"));
             return Ok(true);
         }
-        let frontmatter: Map<String, Value> = self.state.data().iter()
-            .map(|(key, value)| (key.clone(), value.clone())).collect();
+        // An unguarded task reads no `seq`, so it copies no outputs.
+        if self.task.when.is_none() { return Ok(true); }
         let seq = self.sequence_binding();
-        let context = StackExecutionContext { frontmatter: &frontmatter, seq: Some(&seq), ..self.stack.with_signal(self.stack.signal) };
+        let context = StackExecutionContext { frontmatter: self.state.data(), seq: Some(&seq), ..self.stack.with_signal(self.stack.signal) };
         evaluate_task_guard(self.task, &context)
     }
 
@@ -757,7 +777,7 @@ impl TaskExecution<'_> {
         let document_runner = self.document.and_then(|document| {
             self.stack
                 .shell_runner
-                .for_child_environment(document.env_baseline())
+                .for_child_environment(&document.env_baseline().shell_child_environment())
         });
         let in_document;
         let stack = match document_runner.as_deref() {
@@ -886,12 +906,12 @@ impl TaskExecution<'_> {
     /// The cap template's located error, or a malformed override.
     pub(super) fn open_loop(
         &self, preflight: Option<&super::preflight::PreflightLoop>, kind: crate::composition::looping::LoopResultKind,
-        state: &Map<String, Value>, runtime: &RuntimeState,
+        state: &SharedFrontmatter, runtime: &RuntimeState,
     ) -> Result<Option<crate::composition::looping::LoopFrame>, CompositionError> {
         let Some(preflight) = preflight else { return Ok(None) };
         let mut config = preflight.config.clone();
-        let mut values = state.clone();
-        values.extend(runtime.snapshot().mutations);
+        let values = crate::composition::looping::container_state(state, runtime);
+        crate::note_work!(ContainerStateNodes, crate::work_counters::value_nodes(values.owned()));
         let ambient = crate::composition::LoopAmbient::new(1, true, false, kind.empty(), 0);
         let lookup = crate::composition::LoopExpressionLookup::new(
             &values, &ambient, self.stack.file_resolution_context, &preflight.location.source_path,
@@ -1260,7 +1280,7 @@ impl TaskExecution<'_> {
     fn verify_preflight_approvals(&self) -> Option<TaskDiagnostic> {
         let document = self.document?;
         let environment = document.document_environment();
-        let writes = self.runtime.map(|runtime| runtime.snapshot().mutations).unwrap_or_default();
+        let writes = self.runtime.map(|runtime| runtime.mutations()).unwrap_or_default();
         // In the order the stages would run, so the refusal names the first
         // command that would have run changed.
         for stage in [TaskStage::Setup, TaskStage::Primary, TaskStage::Teardown] {
@@ -1273,6 +1293,19 @@ impl TaskExecution<'_> {
         None
     }
 
+    /// The task's `seq` value as it stands now: the runtime's position (else
+    /// the overlay's) with the committed outputs.
+    fn sequence_binding(&self) -> Value {
+        let overlay_seq = || self.overlay.and_then(|overlay| overlay.get("seq")).cloned();
+        // In-process callers may supply an already frozen sequence value.
+        let Some(runtime) = self.runtime else {
+            return overlay_seq().unwrap_or_else(||
+                crate::composition::lifecycle::bindings::SequenceBinding::standalone(Vec::new()).to_value());
+        };
+        let (seq, outputs) = runtime.sequence_scope();
+        sequence_value_of(seq.or_else(overlay_seq), outputs)
+    }
+
     /// Read and validate every late value this task's command sites read
     /// ([`super::preflight::resolve_task_late_values`]), against the task's
     /// state as it stands now: `outputs` and the step's values from
@@ -1280,19 +1313,6 @@ impl TaskExecution<'_> {
     /// innermost looping container around the task.
     ///
     /// [`Self::state`]: TaskExecution::state
-    fn sequence_binding(&self) -> Value {
-        let mut snapshot = self.runtime.map_or_else(Default::default, |runtime| runtime.snapshot());
-        if snapshot.seq.is_none() {
-            snapshot.seq = self.overlay.and_then(|overlay| overlay.get("seq")).cloned();
-        }
-        // In-process callers may supply an already frozen sequence value.
-        if self.runtime.is_none() {
-            return snapshot.seq.unwrap_or_else(||
-                crate::composition::lifecycle::bindings::SequenceBinding::standalone(Vec::new()).to_value());
-        }
-        snapshot.sequence_value()
-    }
-
     fn late_values(
         &self,
     ) -> Result<darkmatter::markdown::compose::shell_expansion::template::LateValues, CompositionError>
@@ -1530,7 +1550,7 @@ impl TaskExecution<'_> {
     /// The runtime mutation map as it stands right now.
     fn mutation_snapshot(&self) -> Map<String, Value> {
         self.runtime
-            .map(|runtime| runtime.snapshot().mutations.into_iter().collect())
+            .map(|runtime| runtime.mutations().into_iter().collect())
             .unwrap_or_default()
     }
 
@@ -1540,8 +1560,7 @@ impl TaskExecution<'_> {
             return Vec::new();
         };
         runtime
-            .snapshot()
-            .mutations
+            .mutations()
             .into_iter()
             .filter(|(key, value)| before.get(key) != Some(value))
             .map(|(key, value)| RuntimeMutation {
@@ -1725,6 +1744,9 @@ fn describe_action(action: &LifecycleAction) -> String {
         }
         LifecycleActionKind::SideEffect(effect) => format!("`{}` is a side effect", effect.verb),
         LifecycleActionKind::RuntimeSet(_) => "`set` is a side effect".to_string(),
+        // Claudine's parse profile rejects unknown verbs, so it never
+        // produces an ignored action.
+        LifecycleActionKind::Ignored(ignored) => format!("`{}` is not a lifecycle verb", ignored.verb),
     }
 }
 

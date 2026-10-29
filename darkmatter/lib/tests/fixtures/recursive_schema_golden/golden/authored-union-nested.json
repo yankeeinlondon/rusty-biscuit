@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "direct": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "format": "darkmatter-boolish"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "object"
+        }
+      ]
+    },
+    "nested": {
+      "anyOf": [
+        {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "format": "darkmatter-boolish"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "object"
+        }
+      ]
+    },
+    "direct_tag": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "a"
+            },
+            "a": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "a"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "b"
+            },
+            "b": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "b"
+          ]
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "nested_tag": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "a"
+            },
+            "a": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "a"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "b"
+            },
+            "b": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "b"
+          ]
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "toggles": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": [
+              "boolean",
+              "string"
+            ],
+            "format": "darkmatter-boolish"
+          },
+          {
+            "type": "number"
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "nested",
+    "nested_tag",
+    "toggles"
+  ]
+}

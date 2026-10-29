@@ -4,6 +4,13 @@
 //! Sequence values travel separately through `LayeredOverrides`, so compose
 //! cannot persist them or overwrite an authored `fm.seq` property. The live
 //! runtime cell supplies event-time outputs; a snapshot supplies a reread.
+//!
+//! Every read copies its fields out under one lock acquisition and releases
+//! the lock before returning, so no reader holds the cell while a lifecycle
+//! action writes to it, and a pair read together (`mutations_and_outputs`,
+//! `sequence_scope`) comes from one moment. Readers take the narrowest
+//! projection that answers them; [`RuntimeState::snapshot`] is for readers of
+//! the whole state, because it copies the whole output history.
 
 use std::collections::BTreeSet;
 use std::sync::Mutex;
@@ -108,11 +115,13 @@ impl RuntimeState {
         inner.outputs.truncate(outputs);
     }
 
-    /// Restore the enclosing lexical accumulator without undoing child mutations.
-    pub fn replace_sequence_scope(&self, seq: Option<Value>, outputs: Vec<Value>) {
+    /// Swap in a lexical accumulator without undoing child mutations, and
+    /// return the one it replaced: a container enters its own scope with this
+    /// and restores the enclosing one the same way, moving the enclosing
+    /// outputs rather than copying them.
+    pub fn replace_sequence_scope(&self, seq: Option<Value>, outputs: Vec<Value>) -> (Option<Value>, Vec<Value>) {
         let mut inner = self.inner.lock().expect(POISONED);
-        inner.seq = seq;
-        inner.outputs = outputs;
+        (std::mem::replace(&mut inner.seq, seq), std::mem::replace(&mut inner.outputs, outputs))
     }
 
     /// Enter a container handoff and restore its enclosing chain on drop.
@@ -141,12 +150,62 @@ impl RuntimeState {
 
     /// The lexical sequence with the current committed outputs.
     pub fn sequence_value(&self) -> Value {
-        self.snapshot().sequence_value()
+        let (seq, outputs) = self.sequence_scope();
+        sequence_value_of(seq, outputs)
     }
 
-    /// Copy the current layers out of the cell.
+    /// Copy every layer out of the cell.
+    ///
+    /// Only for a reader that needs the whole state, such as a private branch
+    /// seeded from it or a fold of mutations, position, and outputs together.
+    /// A reader of some fields takes the narrow projection that copies only
+    /// those, so it never copies the output history it does not read.
     pub fn snapshot(&self) -> RuntimeSnapshot {
-        self.inner.lock().expect(POISONED).clone()
+        crate::note_work!(RuntimeSnapshot);
+        let snapshot = self.inner.lock().expect(POISONED).clone();
+        crate::note_work!(RuntimeOutputsCopy, snapshot.outputs.len());
+        snapshot
+    }
+
+    /// The accumulated `set` writes, in first-write order.
+    pub fn mutations(&self) -> FrontmatterMap {
+        self.inner.lock().expect(POISONED).mutations.clone()
+    }
+
+    /// The keys of the accumulated `set` writes, without their values.
+    pub fn mutation_keys(&self) -> Vec<String> {
+        self.inner.lock().expect(POISONED).mutations.keys().cloned().collect()
+    }
+
+    /// The mutations and the committed outputs as they stood at one moment.
+    pub fn mutations_and_outputs(&self) -> (FrontmatterMap, Vec<Value>) {
+        let inner = self.inner.lock().expect(POISONED);
+        crate::note_work!(RuntimeOutputsCopy, inner.outputs.len());
+        (inner.mutations.clone(), inner.outputs.clone())
+    }
+
+    /// The mutations and how many outputs were committed at one moment: the
+    /// entry state of a looping container's pass.
+    pub fn mutations_and_output_count(&self) -> (FrontmatterMap, usize) {
+        let inner = self.inner.lock().expect(POISONED);
+        (inner.mutations.clone(), inner.outputs.len())
+    }
+
+    /// The committed entries from index `start` on; empty when `start` is
+    /// past the end.
+    pub fn outputs_from(&self, start: usize) -> Vec<Value> {
+        let inner = self.inner.lock().expect(POISONED);
+        let tail = &inner.outputs[start.min(inner.outputs.len())..];
+        crate::note_work!(RuntimeOutputsCopy, tail.len());
+        tail.to_vec()
+    }
+
+    /// The innermost sequence position and the committed outputs at one
+    /// moment, without the mutations.
+    pub fn sequence_scope(&self) -> (Option<Value>, Vec<Value>) {
+        let inner = self.inner.lock().expect(POISONED);
+        crate::note_work!(RuntimeOutputsCopy, inner.outputs.len());
+        (inner.seq.clone(), inner.outputs.clone())
     }
 
     /// Apply one programmatic runtime write and return the value it replaced.
@@ -185,7 +244,7 @@ impl RuntimeState {
         &self,
         engine: &EffectEngine,
         updates: &IndexMap<String, Value>,
-        prior_base: &Map<String, Value>,
+        prior_base: &dyn crate::composition::sequence::expr::DocumentFrontmatter,
     ) -> Result<IndexMap<String, Value>, RuntimeMutationError> {
         let mut validated = FrontmatterMap::new();
         for (key, value) in updates {
@@ -203,7 +262,7 @@ impl RuntimeState {
                 key.clone(),
                 next.get(key)
                     .cloned()
-                    .or_else(|| prior_base.get(key).cloned())
+                    .or_else(|| prior_base.top_level(key).cloned())
                     .unwrap_or(Value::Null),
             );
             next.insert(key.clone(), value.clone());
@@ -227,7 +286,9 @@ impl RuntimeState {
 
     /// The committed entries as the `seq.outputs` value.
     pub fn outputs_value(&self) -> Value {
-        Value::Array(self.inner.lock().expect(POISONED).outputs.clone())
+        let inner = self.inner.lock().expect(POISONED);
+        crate::note_work!(RuntimeOutputsCopy, inner.outputs.len());
+        Value::Array(inner.outputs.clone())
     }
 
     /// How many entries have been committed.
@@ -249,17 +310,23 @@ impl RuntimeState {
 impl RuntimeSnapshot {
     /// Whole-root replacement prevents fallback to an enclosing accumulator.
     pub fn sequence_value(&self) -> Value {
-        let mut value = self.seq.clone().unwrap_or_else(||
-            crate::composition::lifecycle::bindings::SequenceBinding::standalone(Vec::new()).to_value());
-        value.as_object_mut().expect("sequence bindings are objects")
-            .insert("outputs".into(), self.outputs_value());
-        value
+        sequence_value_of(self.seq.clone(), self.outputs.clone())
     }
 
     /// The committed entries as the `seq.outputs` value.
     pub fn outputs_value(&self) -> Value {
         Value::Array(self.outputs.clone())
     }
+}
+
+/// The `seq` value of position `seq` (standalone when `None`) with `outputs`
+/// as its `outputs` member.
+pub(crate) fn sequence_value_of(seq: Option<Value>, outputs: Vec<Value>) -> Value {
+    let mut value = seq.unwrap_or_else(||
+        crate::composition::lifecycle::bindings::SequenceBinding::standalone(Vec::new()).to_value());
+    value.as_object_mut().expect("sequence bindings are objects")
+        .insert(OUTPUTS_KEY.into(), Value::Array(outputs));
+    value
 }
 
 /// Remove exactly one trailing transport newline (`\n`, or `\r\n`).

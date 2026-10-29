@@ -159,19 +159,14 @@ impl EvalValue {
     /// Converts the value to its string representation.
     ///
     /// - `String` -> the string itself
-    /// - `Number` -> string representation (integers without decimal)
+    /// - `Number` -> [`crate::markdown::numeric::format_number`] (`4.0` is
+    ///   `"4"`, never narrowed through an integer)
     /// - `Null` -> empty string
     /// - `Bool` -> `"true"` or `"false"`
     pub fn as_string(&self) -> String {
         match self {
             EvalValue::String(s) => s.clone(),
-            EvalValue::Number(n) => {
-                if n.fract() == 0.0 {
-                    format!("{}", *n as i64)
-                } else {
-                    n.to_string()
-                }
-            }
+            EvalValue::Number(n) => crate::markdown::numeric::format_number(*n),
             EvalValue::Null => String::new(),
             EvalValue::Bool(b) => b.to_string(),
         }
@@ -192,13 +187,13 @@ impl EvalValue {
     /// Attempts to convert the value to a number for comparison.
     ///
     /// - `Number` -> `Some(n)`
-    /// - `String` -> `Some(n)` if parseable as f64
+    /// - `String` -> `Some(n)` when the canonical numeric-text parser admits it
     /// - `Bool` -> `Some(1.0)` for true, `Some(0.0)` for false
     /// - `Null` -> `None`
     pub fn as_number(&self) -> Option<f64> {
         match self {
             EvalValue::Number(n) => Some(*n),
-            EvalValue::String(s) => s.parse::<f64>().ok(),
+            EvalValue::String(s) => crate::markdown::numeric::admit_number_text(s).ok(),
             EvalValue::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
             EvalValue::Null => None,
         }
@@ -248,6 +243,13 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
                 root.span = span.clone();
             }
         }
+    }
+
+    /// The roots recorded since `mark`, leaving them in place.
+    pub(crate) fn missing_roots_since(&self, mark: usize) -> Vec<MissingRoot> {
+        self.missing_roots
+            .as_ref()
+            .map_or_else(Vec::new, |roots| roots.borrow().iter().skip(mark).cloned().collect())
     }
 
     /// Takes the recorded missing roots, leaving none.
@@ -1011,17 +1013,21 @@ mod tests {
             }
         }
 
-        /// Equality comparison keeps `scalar_string`'s JSON-array form, so the
-        /// interpolation output change does not leak into `==` (spec criterion 8).
+        /// `==` compares the array value, not its rendered text: neither the
+        /// line-separated interpolation output nor the JSON text equals it.
         #[test]
         fn equality_comparison_unaffected_by_line_separated_output() {
             let state = create_test_state(json!({"items": ["a", "b"]}));
             let evaluator = Evaluator::new(&state);
-            let expr = parse(r#"items == '["a","b"]' ? "yes" : "no""#).unwrap();
-
-            match evaluator.eval(&expr) {
-                EvalResult::Value(s) => assert_eq!(s, "yes"),
-                _ => panic!("Expected Value"),
+            for (source, expected) in [
+                (r#"items == ["a", "b"] ? "yes" : "no""#, "yes"),
+                (r#"items == '["a","b"]' ? "yes" : "no""#, "no"),
+                (r#"items == "a\nb" ? "yes" : "no""#, "no"),
+            ] {
+                match evaluator.eval(&parse(source).unwrap()) {
+                    EvalResult::Value(s) => assert_eq!(s, expected, "{source}"),
+                    _ => panic!("Expected Value for {source}"),
+                }
             }
         }
     }
@@ -1755,40 +1761,34 @@ mod tests {
             }
         }
 
+        /// Ledger row 18: null is a type error (was `0`).
         #[test]
         fn length_null() {
             let state = create_test_state(json!({"nothing": null}));
             let evaluator = Evaluator::new(&state);
             let expr = parse("length(nothing)").unwrap();
 
-            match evaluator.eval(&expr) {
-                EvalResult::Value(s) => assert_eq!(s, "0"),
-                _ => panic!("Expected Value"),
-            }
+            assert!(evaluator.eval(&expr).is_error());
         }
 
+        /// Ledger row 18: a missing variable is null, a type error (was `0`).
         #[test]
         fn length_missing_variable() {
             let state = create_test_state(json!({}));
             let evaluator = Evaluator::new(&state);
             let expr = parse("length(missing)").unwrap();
 
-            match evaluator.eval(&expr) {
-                EvalResult::Value(s) => assert_eq!(s, "0"),
-                _ => panic!("Expected Value"),
-            }
+            assert!(evaluator.eval(&expr).is_error());
         }
 
+        /// Ledger row 18: a boolean is a type error (was `0`).
         #[test]
         fn length_bool() {
             let state = create_test_state(json!({"flag": true}));
             let evaluator = Evaluator::new(&state);
             let expr = parse("length(flag)").unwrap();
 
-            match evaluator.eval(&expr) {
-                EvalResult::Value(s) => assert_eq!(s, "0"),
-                _ => panic!("Expected Value"),
-            }
+            assert!(evaluator.eval(&expr).is_error());
         }
 
         #[test]
@@ -1913,16 +1913,15 @@ mod tests {
             }
         }
 
+        /// Ledger row 19: a missing (null) subject without a fallback is a
+        /// type error (was `0`).
         #[test]
-        fn number_missing_uses_zero_default() {
+        fn number_missing_without_fallback_is_an_error() {
             let state = create_test_state(json!({}));
             let evaluator = Evaluator::new(&state);
             let expr = parse("number(missing)").unwrap();
 
-            match evaluator.eval(&expr) {
-                EvalResult::Value(s) => assert_eq!(s, "0"),
-                _ => panic!("Expected Value"),
-            }
+            assert!(evaluator.eval(&expr).is_error());
         }
 
         #[test]
@@ -2005,7 +2004,7 @@ mod tests {
             let expr = parse("round(value)").unwrap();
 
             match evaluator.eval(&expr) {
-                EvalResult::Value(s) => assert_eq!(s, "5"), // banker's rounding rounds 0.5 up
+                EvalResult::Value(s) => assert_eq!(s, "5"), // halfway rounds away from zero
                 _ => panic!("Expected Value"),
             }
         }
@@ -2022,16 +2021,15 @@ mod tests {
             }
         }
 
+        /// Ledger row 13: a missing (null) subject without a fallback is a
+        /// type error (was `0`).
         #[test]
-        fn round_missing_uses_zero() {
+        fn round_missing_without_fallback_is_an_error() {
             let state = create_test_state(json!({}));
             let evaluator = Evaluator::new(&state);
             let expr = parse("round(missing)").unwrap();
 
-            match evaluator.eval(&expr) {
-                EvalResult::Value(s) => assert_eq!(s, "0"),
-                _ => panic!("Expected Value"),
-            }
+            assert!(evaluator.eval(&expr).is_error());
         }
 
         #[test]
@@ -2326,9 +2324,11 @@ mod tests {
         #[test]
         fn null_propagation_through_helpers() {
             let state = create_test_state(json!({}));
-            assert_eq!(render(&state, "min(missing, 5)"), "");
             assert_eq!(render(&state, "lower(missing)"), "");
             assert_eq!(render(&state, "first(missing)"), "");
+            // Ledger row 10: arithmetic does not admit null (it propagated).
+            let evaluator = Evaluator::new(&state);
+            assert!(evaluator.eval(&parse("min(missing, 5)").unwrap()).is_error());
         }
 
         #[test]

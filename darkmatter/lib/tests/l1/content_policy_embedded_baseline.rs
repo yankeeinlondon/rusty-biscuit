@@ -58,7 +58,7 @@ fn kind_name(kind: &ValidationProblemKind) -> &'static str {
 
 #[test]
 fn the_runtime_baseline_declares_the_policy_list() {
-    let shipped = include_str!("../../../docs/schemas/darkmatter.yaml");
+    let shipped = include_str!("../../../schemas/partials/fm.yaml");
     assert_eq!(shipped.matches(BASELINE_DECLARATION_LINE).count(), 1);
 }
 
@@ -89,6 +89,32 @@ fn the_authoring_example_validates_against_the_embedded_baseline() {
         "embedded documents are not watched: {:?}",
         effective.dependencies()
     );
+}
+
+#[test]
+fn explicit_library_configuration_does_not_adopt_the_builtin_policy_rules() {
+    let (_dir, root) = temp_root();
+    let markdown = load(&root, "content_policy: not-a-list\n");
+    let unconfigured = DarkmatterSchemas::new(context_at(&root));
+    assert!(unconfigured.effective_for(&markdown).unwrap().is_none());
+    assert!(unconfigured.validate(&markdown).unwrap().valid);
+
+    let builtin = embedded_api(&root).validate(&markdown).unwrap();
+    assert!(!builtin.valid);
+    assert_eq!(builtin.problems[0].path, "/content_policy");
+
+    let custom = DarkmatterSchemas::new(context_at(&root))
+        .with_baseline_json_schema(serde_json::json!({
+            "type": "object",
+            "properties": {"content_policy": {"type": "string"}},
+            "required": ["content_policy"],
+        }))
+        .unwrap();
+    assert!(custom.validate(&markdown).unwrap().valid);
+    let missing = custom.validate(&load(&root, "title: no policy\n")).unwrap();
+    assert!(!missing.valid, "the explicit baseline still applies");
+    assert_eq!(missing.problems[0].property.as_deref(), Some("content_policy"));
+    assert_eq!(missing.problems[0].kind, ValidationProblemKind::Missing);
 }
 
 /// Every shared declaration, in each presentation, reports exactly its
@@ -270,7 +296,7 @@ fn triggers_and_documents_override_the_embedded_declaration_without_name_collisi
     std::fs::write(root.join("schemas/same-names.yaml"), SAME_NAMED_TYPES).expect("types");
     std::fs::write(
         root.join("schemas/review.trigger.yaml"),
-        "kind: trigger-schema\nmatch:\n  review: string(required)\n$schema: review.yaml\n",
+        "kind: schema-trigger\nmatch:\n  review: string(required)\n$schema: review.yaml\n",
     )
     .expect("trigger");
     std::fs::write(

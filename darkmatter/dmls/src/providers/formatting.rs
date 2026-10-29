@@ -38,7 +38,7 @@ pub struct FormattingOutcome {
 /// Formats the current buffer of `ctx`.
 ///
 /// Only a `file:` document passes its path to the transaction; an
-/// `untitled:` buffer gets no trigger-schema discovery.
+/// `untitled:` buffer gets no schema-trigger discovery.
 pub fn formatting(ctx: &DocumentContext) -> FormattingOutcome {
     let document_path = uri_to_file_path(ctx.uri).is_some().then_some(ctx.path);
     let request = CleanRequest {

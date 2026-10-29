@@ -1,0 +1,12 @@
+# scenario: cancelled-root-document-unauthored
+# doc: cancelled-root-document-unauthored.md
+# given: invoked as `claudine compose --claude cancelled-root-document-unauthored.md` from the directory holding the fixture documents
+# given: the document authors no cancelled stack
+# given: launch 1 sends SIGINT to claudine while it runs (a Ctrl+C) and is ended by the forwarded interrupt
+# given: finalize still reads the interrupt as provider.interrupted
+event initialize
+event start
+work fresh 130
+event finalize
+err provider.interrupted
+exit 130

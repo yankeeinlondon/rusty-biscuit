@@ -17,11 +17,13 @@ use std::sync::Arc;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
+use darkmatter::markdown::schemas::completion::DefinitionLookup;
 use darkmatter::markdown::schemas::resolve::{merge_baseline, resolve_schema};
+use darkmatter::markdown::schemas::simplified::query::resolved_alternatives;
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, PatternKey, PropertyAtom, PropertyDef, SchemaArm,
+    DarkmatterSchemas, DefKey, Definition, DefinitionTable, EffectiveSchema, PatternKey, PropertyAtom, PropertyDef, SchemaArm,
     SchemaAdvisory, SchemaError, SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind,
-    SimplifiedSchema, SimplifiedType, StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr,
+    SimplifiedSchema, SimplifiedType, StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr, ValidationStage,
     darkmatter_base_json_schema_ref, effective_property_shape, mapping_separator,
     triggers::TriggerRegistry,
 };
@@ -217,6 +219,7 @@ pub fn frontmatter_authoring(
         return SchemaAuthoringState::Inactive;
     };
     let shape = effective_shape(outcome);
+    let definitions = outcome_definitions(outcome);
     let mut values = Vec::new();
     for (index, entry) in ast.entries().iter().enumerate() {
         // Sequence interiors belong to the value that owns the sequence: the
@@ -236,8 +239,8 @@ pub fn frontmatter_authoring(
         let kinds = if path == ["$schema"] {
             vec![MetaSchemaKind::Schema]
         } else {
-            def_at_path(&shape, &path)
-                .map(|definition| meta_schema_kinds(&definition))
+            def_at_path(&shape, &path, definitions)
+                .map(|definition| meta_schema_kinds(&definition, definitions))
                 .unwrap_or_default()
         };
         if !kinds.is_empty() {
@@ -799,6 +802,15 @@ fn effective_shape(outcome: &SchemaOutcome) -> SchemaShape {
     }
 }
 
+/// Where a [`TypeExpr::Ref`] in the outcome's shape is looked up: the
+/// bundle's definitions, or none when no schema was assembled.
+fn outcome_definitions(outcome: &SchemaOutcome) -> &dyn DefinitionLookup {
+    match outcome {
+        SchemaOutcome::Ready(Some(bundle)) => bundle.as_ref(),
+        _ => &NoDefinitions,
+    }
+}
+
 fn merge_shape(base: &mut SchemaShape, incoming: &SchemaShape) {
     for (name, definition) in &incoming.properties {
         let definition = match base.properties.get(name) {
@@ -809,19 +821,21 @@ fn merge_shape(base: &mut SchemaShape, incoming: &SchemaShape) {
     }
 }
 
-fn def_at_path(root: &SchemaShape, path: &[&str]) -> Option<PropertyDef> {
+/// The definition at a key path, descending each ancestor's merged
+/// inline-object alternatives and opening one recursive reference per step.
+fn def_at_path(root: &SchemaShape, path: &[&str], definitions: &dyn DefinitionLookup) -> Option<PropertyDef> {
     let (leaf, ancestors) = path.split_last()?;
     let mut shape = root.clone();
     for ancestor in ancestors {
         let definition = shape.properties.get(*ancestor)?;
-        shape = merged_inline_shape(definition)?;
+        shape = merged_inline_shape(definition, definitions)?;
     }
     shape.properties.get(*leaf).cloned()
 }
 
-fn merged_inline_shape(definition: &PropertyDef) -> Option<SchemaShape> {
+fn merged_inline_shape(definition: &PropertyDef, definitions: &dyn DefinitionLookup) -> Option<SchemaShape> {
     let mut merged = None;
-    for atom in alternatives(definition) {
+    for atom in alternatives(definition, definitions) {
         let TypeExpr::InlineObject(shape) = &atom.ty else {
             continue;
         };
@@ -844,9 +858,9 @@ fn merge_defs(existing: &PropertyDef, incoming: &PropertyDef) -> PropertyDef {
     }
 }
 
-fn meta_schema_kinds(definition: &PropertyDef) -> Vec<MetaSchemaKind> {
+fn meta_schema_kinds(definition: &PropertyDef, definitions: &dyn DefinitionLookup) -> Vec<MetaSchemaKind> {
     let mut kinds = Vec::new();
-    for atom in alternatives(definition) {
+    for atom in alternatives(definition, definitions) {
         let kind = match atom.ty {
             TypeExpr::Primitive(SimplifiedType::TypeDefinition) => MetaSchemaKind::TypeDefinition,
             TypeExpr::Primitive(SimplifiedType::Schema) => MetaSchemaKind::Schema,
@@ -866,19 +880,15 @@ fn atoms(definition: &PropertyDef) -> &[PropertyAtom] {
     }
 }
 
-/// The value alternatives of a definition: [`atoms`], with each resolved
-/// union-typed reference (`U[]`, `U(required)`) replaced by its arms,
-/// recursively, as the library's frontmatter shape reads them.
-fn alternatives(definition: &PropertyDef) -> Vec<&PropertyAtom> {
-    fn push<'a>(atom: &'a PropertyAtom, out: &mut Vec<&'a PropertyAtom>) {
-        match atom.union_arms() {
-            Some(arms) => arms.iter().for_each(|arm| push(arm, out)),
-            None => out.push(atom),
-        }
-    }
-    let mut out = Vec::new();
-    atoms(definition).iter().for_each(|atom| push(atom, &mut out));
-    out
+/// The value alternatives of a definition, as the library's
+/// [`resolved_alternatives`] reads them: union-typed references replaced by
+/// their arms, and a recursive reference at the top of the definition by its
+/// definition's alternatives (one level, never the closure).
+fn alternatives<'a>(definition: &'a PropertyDef, definitions: &'a dyn DefinitionLookup) -> Vec<&'a PropertyAtom> {
+    resolved_alternatives(definition, definitions)
+        .into_iter()
+        .map(|alternative| alternative.atom)
+        .collect()
 }
 
 /// The assembled schema for one document: the effective schema plus the
@@ -912,6 +922,36 @@ pub struct SchemaBundle {
     /// configured extension baseline (or a type it imports) invalidates the
     /// cached bundle.
     pub extension_dependencies: Vec<PathBuf>,
+    /// The recursive definitions the matched extension baselines' shapes
+    /// reach, one table per entry of [`Self::extension_shapes`] that has any.
+    ///
+    /// The extensions are merged into the baseline JSON before the effective
+    /// schema exists, so [`EffectiveSchema::definition`] cannot see these
+    /// tables; the bundle's [`DefinitionLookup`] searches them after it.
+    pub extension_definitions: Vec<Arc<DefinitionTable>>,
+}
+
+/// Every [`TypeExpr::Ref`] an editor walk meets in the bundle's shapes is
+/// opened here: the effective schema's tables (document `$schema` and matched
+/// trigger payloads), then the extension tables. Each call opens exactly one
+/// definition, so a walk sees only the definitions its cursor path reaches.
+impl DefinitionLookup for SchemaBundle {
+    fn lookup_definition(&self, key: &DefKey) -> Option<&Definition> {
+        crate::work_counters::note_definition_lookup(key);
+        self.effective
+            .definition(key)
+            .or_else(|| self.extension_definitions.iter().find_map(|table| table.get(key)))
+    }
+}
+
+/// The lookup for a document with no assembled schema: every reference
+/// offers nothing.
+pub(crate) struct NoDefinitions;
+
+impl DefinitionLookup for NoDefinitions {
+    fn lookup_definition(&self, _key: &DefKey) -> Option<&Definition> {
+        None
+    }
 }
 
 /// Assembles the effective schema for a document.
@@ -934,7 +974,8 @@ pub fn assemble(
     trigger_registry: Option<TriggerRegistry>,
     file_context: &FileResolutionContext,
 ) -> Result<Option<SchemaBundle>, SchemaError> {
-    let combined = combined_baseline(doc_path, config, workspace_roots, file_context)?;
+    let combined =
+        ValidationStage::Resolve.time(|| combined_baseline(doc_path, config, workspace_roots, file_context))?;
 
     let md: Markdown = document_text.into();
     let md = md.with_source(ComposeSource::File(doc_path.to_path_buf()));
@@ -946,15 +987,16 @@ pub fn assemble(
         baseline,
         extension_shapes,
         dependencies,
+        extension_definitions,
     } = combined;
     // File values and `$schema` references resolve through the document's
     // repository context, as `md compose` from the repository root resolves
     // them.
     let schemas = DarkmatterSchemas::new(file_context.clone());
-    let mut schemas = match baseline {
+    let mut schemas = ValidationStage::Resolve.time(|| match baseline {
         Some(baseline) => schemas.with_baseline_json_schema(baseline),
         None => schemas.with_darkmatter_baseline_json_schema(),
-    }?;
+    })?;
     if let Some(registry) = trigger_registry {
         schemas = schemas.with_trigger_registry(registry);
     }
@@ -966,6 +1008,7 @@ pub fn assemble(
             frontmatter_json: frontmatter_json(&md),
             extension_shapes,
             extension_dependencies: dependencies,
+            extension_definitions,
         })),
         None => Ok(None),
     }
@@ -993,6 +1036,7 @@ struct CombinedBaseline {
     baseline: Option<Value>,
     extension_shapes: Vec<SchemaShape>,
     dependencies: Vec<PathBuf>,
+    extension_definitions: Vec<Arc<DefinitionTable>>,
 }
 
 /// The Darkmatter base baseline with every matching extension baseline merged
@@ -1006,6 +1050,7 @@ fn combined_baseline(
 ) -> Result<CombinedBaseline, SchemaError> {
     let mut baseline: Option<Value> = None;
     let mut shapes = Vec::new();
+    let mut definitions = Vec::new();
     let mut dependencies: BTreeSet<PathBuf> = BTreeSet::new();
     for extension in config.schema.extensions.values() {
         if !extension_matches(doc_path, extension, workspace_roots) {
@@ -1014,6 +1059,9 @@ fn combined_baseline(
         let resolved = load_extension_schema(extension, workspace_roots, context)?;
         if let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified {
             shapes.push(shape.clone());
+            if !resolved.definitions.is_empty() {
+                definitions.push(Arc::clone(&resolved.definitions));
+            }
         }
         // The extension file's own path (via `referenced_files`, since
         // `load_extension_schema` resolves a `Value::String(path)`) plus the
@@ -1034,6 +1082,7 @@ fn combined_baseline(
         baseline,
         extension_shapes: shapes,
         dependencies: dependencies.into_iter().collect(),
+        extension_definitions: definitions,
     })
 }
 

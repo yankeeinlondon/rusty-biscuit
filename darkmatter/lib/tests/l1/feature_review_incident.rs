@@ -15,7 +15,8 @@ use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeRepor
 use darkmatter::markdown::{Markdown, MarkdownError, SourceRef};
 use tempfile::TempDir;
 
-/// Claudine's `LIFECYCLE_EVENT_KEYS`, deferred from compose-time resolution.
+/// Claudine's lifecycle event keys (its registry's `authored_event_keys()`),
+/// deferred from compose-time resolution.
 const LIFECYCLE_EVENT_KEYS: &[&str] =
     &["initialize", "start", "success", "blocked", "failure", "finalize", "loop"];
 

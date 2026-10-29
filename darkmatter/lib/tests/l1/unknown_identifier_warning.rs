@@ -180,8 +180,12 @@ fn every_suppression_row_warns_exactly_where_evaluation_reads_an_unhandled_root(
         ("{{ set || x }}", "yes", &[]),
         ("{{ x ? \"a\" : \"b\" }}", "b", &[]),
         ("{{ x ? x : \"b\" }}", "b", &[]),
-        // A guarded root is silent even in the branch evaluation reaches.
-        ("{{ x ? \"a\" : x }}", "", &[]),
+        // The false branch learns nothing about its condition's root, so a
+        // read of `x` there warns; only the true branch is proven.
+        ("{{ x ? \"a\" : x }}", "", &["x"]),
+        // A branch reached because its condition proved `x` present reads it
+        // silently, whatever the condition's form.
+        ("{{ set != null ? set : x }}", "yes", &[]),
         // A different root in a guarded ternary's branch still warns.
         ("{{ x ? \"a\" : y }}", "", &["y"]),
         ("{{ set ? x : \"b\" }}", "", &["x"]),
@@ -191,15 +195,27 @@ fn every_suppression_row_warns_exactly_where_evaluation_reads_an_unhandled_root(
         // Registered aliases resolve through the same function catalog.
         ("{{ isnull(x) }}", "true", &[]),
         ("{{ isEmpty(x) }}", "true", &[]),
-        // Nested: the predicate no longer directly guards the read. The spec
-        // writes `is_empty(trim(x))`, but `trim` is not a catalog function.
+        // Nested: a call that is another call's argument hands its result
+        // on, so its own direct argument is no longer handled.
+        ("{{ is_empty(trim(x)) }}", "true", &["x"]),
         ("{{ is_empty(lower(x)) }}", "true", &["x"]),
-        ("{{ length(x) }}", "0", &["x"]),
+        // A text transform's `string | null` parameter handles a direct
+        // missing argument, which renders empty, whatever it returns.
+        ("{{ upper(x) }}", "", &[]),
+        ("{{ trim(x) }}", "", &[]),
+        ("{{ lower(x) }}", "", &[]),
         // A chain that is itself a primary handles every operand.
         ("{{ x || y || \"d\" }}", "d", &[]),
         // "Direct" only: a comparison in the condition is an ordinary operand.
         ("{{ x == \"a\" ? \"1\" : \"2\" }}", "2", &["x"]),
         ("{{ !x ? \"1\" : \"2\" }}", "1", &["x"]),
+        // Strict equality picks the branch: a missing `x` is `null`, which
+        // equals only `null`, and `blank` is a known `""`.
+        ("{{ x == null ? \"1\" : \"2\" }}", "1", &["x"]),
+        ("{{ x != '' ? \"1\" : \"2\" }}", "1", &["x"]),
+        ("{{ x == '' ? \"1\" : \"2\" }}", "2", &["x"]),
+        ("{{ blank == null ? \"1\" : \"2\" }}", "2", &[]),
+        ("{{ blank == '' ? \"1\" : \"2\" }}", "1", &[]),
         // Path access on a handled value is still that value's absence check.
         ("{{ x.deep || \"d\" }}", "d", &[]),
         ("{{ x[0] || \"d\" }}", "d", &[]),
@@ -217,6 +233,50 @@ fn every_suppression_row_warns_exactly_where_evaluation_reads_an_unhandled_root(
         ));
         assert_eq!(content, format!("[{rendered}]"), "render of {expression}");
         assert_eq!(warned_roots(&report), *warned, "warnings for {expression}: {:?}", report.warnings);
+    }
+}
+
+/// DMLS's static twin reads every branch, each under the branch facts the
+/// shared type scope gives it: `&&` proves its left operand for its right,
+/// a false ternary branch inherits none of the true side's facts, and a fact
+/// about one member proves nothing about a sibling.
+#[test]
+fn static_reads_use_the_shared_branch_facts() {
+    use darkmatter::markdown::compose::expression::{parse_spanned, static_variable_reads};
+
+    let rows: &[(&str, &[&str])] = &[
+        // A direct `&&` operand is handled: `and` declares `unknown | null`.
+        // `and` is an operator, not a consuming call, so `lower`'s own
+        // `string | null` parameter still handles its argument.
+        ("x && x.name", &[]),
+        ("x && lower(x.name)", &[]),
+        ("is_string(x) && lower(x)", &[]),
+        ("lower(x) && lower(x)", &[]),
+        ("is_null(x) && is_empty(trim(y))", &["y"]),
+        ("x && y ? y : z", &["z"]),
+        ("x ? x : \"none\"", &[]),
+        ("x ? \"some\" : x", &["x"]),
+        ("is_string(x) ? \"some\" : x", &["x"]),
+        ("x.a ? x.a : \"none\"", &[]),
+        ("x.a ? x.b : \"none\"", &["x"]),
+        ("x.a || x.b", &["x"]),
+        // `null` is a reserved root: listed as a read here, never warned by
+        // a consumer.
+        ("x != null && lower(x.name)", &["x", "null"]),
+        // `null != ''`, so the left operand proves nothing; `lower`'s own
+        // parameter handles the right one.
+        ("x != '' && lower(x.name)", &["x"]),
+        ("x == null ? 'none' : x.name", &["x", "null"]),
+    ];
+    for (source, expected) in rows {
+        let expr = parse_spanned(source).unwrap();
+        let reads = static_variable_reads(&expr);
+        let unhandled: Vec<&str> = reads
+            .iter()
+            .filter(|read| !read.handles_absence)
+            .map(|read| read.root())
+            .collect();
+        assert_eq!(unhandled, *expected, "{source}");
     }
 }
 
@@ -343,7 +403,7 @@ fn a_matched_trigger_schema_property_is_known() {
     write(
         repo.path(),
         "schemas/stable.trigger.yaml",
-        "kind: trigger-schema\nmatch:\n  gate: literal(stable; required)\n$schema: payload.yaml\n",
+        "kind: schema-trigger\nmatch:\n  gate: literal(stable; required)\n$schema: payload.yaml\n",
     );
     write(repo.path(), "schemas/payload.yaml", "$schema:\n  trigger_marker: string\n");
     let path = write(repo.path(), "prompts/doc.md", "---\ngate: stable\n---\n[{{ trigger_marker }}]\n");
@@ -508,4 +568,140 @@ fn a_root_read_only_inside_a_false_block_never_warns_even_with_preflight_discove
 
     assert_eq!(content, "ok");
     assert!(unknown_identifiers(&report).is_empty(), "{:?}", report.warnings);
+}
+
+// ── Absence handled by type (criteria 21, 36) ────────────────────────────────
+
+/// Criterion 21, composition side: a direct argument to a built-in whose
+/// parameter declares `| null` is handled, whether the result may be null
+/// (`trim`, `lower`) or not; `is_empty(trim(x))` is not direct, so it still
+/// warns, and so does a bare read. Each root is distinct so the warnings
+/// name exactly the unhandled ones.
+#[test]
+fn a_parameter_declaring_null_handles_a_direct_missing_argument() {
+    let (content, report) = compose_doc(concat!(
+        "---\ntitle: t\n---\n",
+        "{{ is_null(a) }} {{ is_empty(b) }} {{ file_exists(c) }} {{ isnull(d) }} ",
+        "{{ is_empty(trim(e)) }} {{ lower(f) }} [{{ g }}] [{{ trim(h) }}]\n",
+    ));
+    assert_eq!(content, "true true false true true  [] []");
+    assert_eq!(warned_roots(&report), ["e", "g"]);
+}
+
+/// Criterion 21 in frontmatter: a direct nullable argument in an
+/// interpolated value is handled exactly as in the body, whatever the
+/// function returns, and a nested one still warns at its key.
+#[test]
+fn a_frontmatter_value_handles_a_direct_nullable_argument() {
+    let (content, report) = compose_doc(concat!(
+        "---
+",
+        "title: \"{{ trim(a) }}{{ lower(b) }}\"\n",
+        "probe: \"{{ is_null(c) }}\"\n",
+        "nested: \"{{ is_empty(trim(d)) }}\"\n",
+        "---
+[{{ title }}] {{ probe }} {{ nested }}\n",
+    ));
+    assert_eq!(content, "[] true true");
+    assert_eq!(warned_roots(&report), ["d"], "{:#?}", report.warnings);
+    assert!(unknown_identifiers(&report)[0].message.contains("(frontmatter key 'nested')"), "{:#?}", report.warnings);
+}
+
+/// Criteria 21 and 36: `min(x, 5)` is not suppressed. At runtime the missing
+/// `x` reaches `min` as `null`, which its `number` parameter refuses, so the
+/// binding error stays visible; the editor's static reads still flag `x`.
+#[test]
+fn a_non_null_parameter_handles_nothing_and_its_binding_error_stays_visible() {
+    use darkmatter::markdown::compose::expression::{parse_spanned, static_variable_reads};
+
+    let dir = TempDir::new().unwrap();
+    let path = write(dir.path(), "doc.md", "---\ntitle: t\n---\n{{ min(x, 5) }}\n");
+    let error = Markdown::try_from(path.as_path())
+        .unwrap()
+        .compose_with(&crate::request_support::request(options(dir.path(), &path)))
+        .expect_err("`min(null, 5)` does not bind");
+    assert!(error.to_string().contains("min"), "{error}");
+
+    for (source, expected) in [("min(x, 5)", vec!["x"]), ("is_number(x)", vec![]), ("is_null(x, y)", vec!["x", "y"])] {
+        let expr = parse_spanned(source).unwrap();
+        let unhandled: Vec<_> =
+            static_variable_reads(&expr).into_iter().filter(|read| !read.handles_absence).map(|read| read.root().to_string()).collect();
+        assert_eq!(unhandled, expected, "{source}");
+    }
+}
+
+/// Criterion 36 for every parameter shape, through test-registered
+/// functions: an explicit `| null` handles the argument, whatever the
+/// function returns, unless the call is itself another call's argument; a
+/// plain `unknown`,
+/// an optional non-null parameter, or overloads that disagree at that
+/// position do not; overloads that all declare `null` there do. The rule is
+/// the same at runtime and in the static walk.
+#[cfg(feature = "effects-instrumentation")]
+#[test]
+fn only_an_explicit_null_in_every_overload_handles_a_missing_argument() {
+    use darkmatter::markdown::compose::expression::call_binding::FunctionRegistration;
+    use darkmatter::markdown::compose::expression::function_test_hooks as hooks;
+    use darkmatter::markdown::compose::expression::{parse_spanned, static_variable_reads};
+
+    let register = |name: &str, signatures: &str| {
+        let registration = FunctionRegistration::builder(name, signatures).build().expect("the test signature compiles");
+        hooks::register(registration, Arc::new(|_| Ok(json!(true))))
+    };
+    let _guards = [
+        register("nullable_arg", "function(parameters(v: string | null); returns(boolean))"),
+        register("nullable_pass", "function(parameters(v: string | null); returns(string | null))"),
+        register("unknown_arg", "function(parameters(v: unknown); returns(boolean))"),
+        register("optional_arg", "function(parameters(a: number, b?: number); returns(boolean))"),
+        register(
+            "mixed_overloads",
+            "function(parameters(v: string | null); returns(boolean)) | function(parameters(v: number); returns(boolean))",
+        ),
+        register(
+            "null_overloads",
+            "function(parameters(v: string | null); returns(boolean)) | function(parameters(v: number | null, w: number); returns(boolean))",
+        ),
+    ];
+    for (source, handled) in [
+        ("nullable_arg(x)", true),
+        ("nullable_pass(x)", true),
+        ("is_empty(nullable_pass(x))", false),
+        ("unknown_arg(x)", false),
+        ("optional_arg(1, x)", false),
+        ("mixed_overloads(x)", false),
+        ("null_overloads(x)", true),
+        ("null_overloads(x, 1)", true),
+    ] {
+        let expr = parse_spanned(source).unwrap();
+        let reads = static_variable_reads(&expr);
+        assert_eq!(reads.iter().find(|read| read.root() == "x").unwrap().handles_absence, handled, "static: {source}");
+    }
+
+    // At runtime only the null-admitting ones can bind a missing value, and
+    // they warn about nothing.
+    let (content, report) = compose_doc("---\ntitle: t\n---\n{{ nullable_arg(x) }} {{ null_overloads(y) }}\n");
+    assert_eq!(content, "true true");
+    assert!(warned_roots(&report).is_empty(), "{:#?}", report.warnings);
+}
+
+/// Criterion 21: absence handling has no function-name list. The classifier
+/// asks the call's registration, and no group of named absence predicates
+/// remains in the function registry.
+#[test]
+fn absence_handling_names_no_function() {
+    let absence = include_str!("../../src/markdown/compose/expression/absence.rs");
+    let production: String = absence[..absence.find("#[cfg(test)]").unwrap_or(absence.len())]
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect();
+    for name in ["is_null", "isnull", "is_empty", "isempty", "is_absence_predicate"] {
+        assert!(!production.contains(name), "absence.rs names `{name}`");
+    }
+    let functions = include_str!("../../src/markdown/compose/expression/functions/mod.rs");
+    let predicates = include_str!("../../src/markdown/compose/expression/functions/predicates.rs");
+    for source in [functions, predicates] {
+        assert!(!source.contains("ABSENCE_PREDICATES"), "a named absence-predicate group remains");
+        assert!(!source.contains("fn is_absence_predicate"), "a name-based absence rule remains");
+    }
+    assert!(production.contains("handles_absence_at"), "the classifier asks the registration");
 }

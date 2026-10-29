@@ -8,7 +8,7 @@ use darkmatter::markdown::compose::context::{
     context_variable_descriptors, ContextVariableDescriptor,
 };
 use darkmatter::markdown::compose::expression::{
-    expression_function_descriptors, ExpressionFunctionDescriptor,
+    expression_function_catalog, ExpressionFunctionDescriptor,
 };
 use darkmatter::markdown::compose::ComposeContext;
 
@@ -64,27 +64,25 @@ fn group_context_descriptors(
     groups
 }
 
+/// The function catalog grouped for display: categories in the catalog's
+/// `categories:` list order, functions alphabetical within each with their
+/// overloads together. A listed category with no functions is omitted.
 fn group_expression_descriptors(
 ) -> Vec<(&'static str, Vec<&'static ExpressionFunctionDescriptor>)> {
-    // The catalog is physically laid out by implementation grouping, so a
-    // single category (e.g. `Math`, `Collection`) can appear in non-adjacent
-    // runs. Consolidate every category into one group, ordered by first
-    // appearance, then honor each descriptor's `order` as the stable display
-    // order within the category.
-    let mut groups: Vec<(&'static str, Vec<&'static ExpressionFunctionDescriptor>)> = Vec::new();
-
-    for desc in expression_function_descriptors() {
-        match groups.iter_mut().find(|(cat, _)| *cat == desc.category) {
-            Some((_, funcs)) => funcs.push(desc),
-            None => groups.push((desc.category, vec![desc])),
-        }
-    }
-
-    for (_, funcs) in &mut groups {
-        funcs.sort_by_key(|f| f.order);
-    }
-
-    groups
+    let catalog = expression_function_catalog();
+    catalog
+        .categories
+        .iter()
+        .map(|category| {
+            let functions: Vec<_> = catalog
+                .descriptors
+                .iter()
+                .filter(|descriptor| descriptor.category == category.name)
+                .collect();
+            (&*category.name, functions)
+        })
+        .filter(|(_, functions)| !functions.is_empty())
+        .collect()
 }
 
 // ------------------------------------------------------------------

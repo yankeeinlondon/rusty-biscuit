@@ -383,7 +383,11 @@ pub(super) fn interactive_shape_for_atom(atom: &PropertyAtom) -> Option<Interact
         | TypeExpr::Imported { .. }
         // A value with several alternatives has no single widget, as for a
         // property-level union.
-        | TypeExpr::Union(_) => None,
+        | TypeExpr::Union(_)
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_)
+        // A recursive named type is a nested structure.
+        | TypeExpr::Ref(_) => None,
     }
 }
 
@@ -430,6 +434,9 @@ pub(super) fn type_label_for_atom(atom: &PropertyAtom) -> String {
         TypeExpr::InlineObject(_) => format!("object{suffix}"),
         TypeExpr::Imported { name, reference } => format!("{name}{suffix}@{reference}"),
         TypeExpr::Union(_) => format!("union{suffix}"),
+        TypeExpr::Tuple(_) => format!("tuple{suffix}"),
+        TypeExpr::Function(_) => format!("function{suffix}"),
+        TypeExpr::Ref(key) => format!("{name}{suffix}", name = key.name),
     }
 }
 
@@ -506,6 +513,7 @@ pub fn build_schema_status_report(
     set_overrides: Option<&serde_json::Value>,
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
+    trigger_findings: &super::TriggerFindings,
 ) -> Result<Option<SchemaStatusReport>, CompositionError> {
     build_schema_status_report_for_mode(
         source,
@@ -513,6 +521,7 @@ pub fn build_schema_status_report(
         file_ref_fallback_dir,
         file_resolution_context,
         CompositionMode::ChainedDocument,
+        trigger_findings,
     )
 }
 
@@ -530,6 +539,7 @@ pub fn build_schema_status_report_for_mode(
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
+    trigger_findings: &super::TriggerFindings,
 ) -> Result<Option<SchemaStatusReport>, CompositionError> {
     let phase = launch_phase_for_mode(mode);
     // Skip when the document has no `$schema`.
@@ -551,6 +561,7 @@ pub fn build_schema_status_report_for_mode(
         file_ref_fallback_dir,
         file_resolution_context,
         &callers,
+        trigger_findings,
     )?;
     let Some(effective) = effective else {
         // Raw JSON Schema (no SimplifiedSchema projection): we can still
@@ -581,14 +592,15 @@ pub fn build_schema_status_report_for_mode(
         }
     }
 
-    // Judged on the text composition reads; `fm_map` keeps stored tokens so
-    // the status below still sees them as data rather than pending.
-    let instance =
-        crate::composition::closure::stored_text(&serde_json::Value::Object(fm_map.clone()));
-    let mut report = match phase {
-        Some(phase) => effective.validate_for_phase(&instance, phase),
-        None => Ok(effective.validate(&instance)),
-    }
+    // Judged on the text composition reads, which Darkmatter decodes from
+    // the stored tokens and never defers as a template; `fm_map` keeps them
+    // so the status below still sees them as data rather than pending.
+    let mut report = effective
+        .validate_stored(
+            &serde_json::Value::Object(fm_map.clone()),
+            &darkmatter::markdown::schemas::PositionMap::new(),
+            phase,
+        )
     .map_err(|error| {
         schema_error_to_composition_error(
             &source.resolved_path,

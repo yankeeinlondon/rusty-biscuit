@@ -288,6 +288,8 @@ fn render_top_level_error(report: &Report) {
 /// original error.
 #[cfg(feature = "test-fixtures")]
 fn write_diagnostic_snapshot_for_tests(report: &Report) {
+    use claudine::diagnostics::DiagnosticSnapshotExt;
+
     if let Some(path) = std::env::var_os("CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT")
         && let Some(snapshot) =
             claudine::diagnostics::DiagnosticSnapshot::select(report.as_ref())

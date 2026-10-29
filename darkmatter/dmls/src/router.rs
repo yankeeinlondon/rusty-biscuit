@@ -50,6 +50,7 @@ use lsp_types::{
     WorkDoneProgressReport, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use darkmatter::markdown::compose::RequestSnapshot;
+use darkmatter::markdown::schemas::ValidationStage;
 use darkmatter::markdown::schemas::triggers::{PayloadMemoCounts, PayloadMemoTally};
 use thiserror::Error;
 
@@ -66,6 +67,7 @@ use crate::providers::{DocumentContext, ProviderRegistry};
 use crate::registry_jobs::{
     PendingRegistries, RegistryJob, RegistryJobKind, RegistryQueue, StartupPhase, StartupReady,
 };
+use crate::validation_timing;
 use crate::request_timing::{
     CompletionEvent, MessageKind, Outcome, RequestTimings, Stage, Wait, document_uri,
 };
@@ -931,6 +933,7 @@ impl ServerState {
         let overlay = self.timings.time(Stage::OverlayBuild, || {
             self.overlay.for_document_timed(
                 uri,
+                Some(open.version()),
                 open.text(),
                 &path,
                 self.config.effective(),
@@ -1017,18 +1020,34 @@ impl ServerState {
     /// list's arrival refreshes every open document. An open document whose
     /// trigger registry is not prepared keeps its published diagnostics: its
     /// preparation is queued, and the refresh runs when it is installed.
+    ///
+    /// A refresh whose overlay looked up the document's effective schema
+    /// logs one slow-validation event ([`crate::validation_timing`]).
     fn refresh_diagnostics(&self, uri: &Uri) {
         let version = self.documents.get(uri).map(|doc| doc.version());
-        if self.documents.is_open(uri) {
-            if let Some(need) = self.registry_need(uri) {
-                self.registries.borrow_mut().wait_for(need, Some(uri.clone()), None);
-                return;
+        let (computed, validation) = validation_timing::collect(|| {
+            if self.documents.is_open(uri) {
+                let need = validation_timing::part(|| {
+                    ValidationStage::Discover.time(|| self.registry_need(uri))
+                });
+                if let Some(need) = need {
+                    self.registries.borrow_mut().wait_for(need, Some(uri.clone()), None);
+                    return None;
+                }
+                self.prepare_document(uri);
             }
-            self.prepare_document(uri);
+            Some(self.with_document(uri, |ctx| (self.registry.diagnostics(ctx), ctx.path.to_path_buf())))
+        });
+        let Some(computed) = computed else {
+            return;
+        };
+        if let (Some(validation), Some((_, path))) = (validation, &computed) {
+            let threshold = Duration::from_millis(self.config.effective().schema.slow_validation_ms);
+            validation.emit(path, threshold);
         }
         let listing = self.snapshot.load().listing();
-        let diagnostics = self
-            .with_document(uri, |ctx| self.registry.diagnostics(ctx))
+        let diagnostics = computed
+            .map(|(diagnostics, _)| diagnostics)
             .unwrap_or_default()
             .into_iter()
             .filter(|diagnostic| !listing_gates(listing, diagnostic))
@@ -1062,33 +1081,43 @@ impl ServerState {
         self.publish_trigger_transitions();
     }
 
-    /// Publishes the trigger-file diagnostics registry preparations changed
+    /// Publishes the skipped-trigger warnings registry preparations changed
     /// since the last call (see
     /// [`OverlayState::take_trigger_diagnostic_transitions`]).
     fn publish_trigger_transitions(&self) {
         let mut trigger_transitions = HashMap::new();
         for transition in self.overlay.take_trigger_diagnostic_transitions() {
-            trigger_transitions.insert(transition.path, transition.error);
+            trigger_transitions.insert(transition.path, transition.finding);
         }
-        for (path, error) in trigger_transitions {
+        for (path, finding) in trigger_transitions {
             let Some(uri) = crate::workspace::file_path_to_uri(&path) else {
                 continue;
             };
             // Open-buffer diagnostics are versioned and derive from the
             // authoritative in-memory text. Recompute them after every scan
-            // has settled because a later document can move or clear trigger
-            // failure ownership after the envelope's first refresh.
+            // has settled because a later document can publish or clear the
+            // trigger's warning after the envelope's first refresh.
             if self.documents.is_open(&uri) {
                 self.refresh_diagnostics(&uri);
                 continue;
             }
-            let diagnostics = error
-                .as_deref()
-                .map(crate::diagnostics::frontmatter::trigger_load_diagnostic)
+            let diagnostics = finding
+                .as_ref()
+                .map(crate::diagnostics::frontmatter::invalid_trigger_diagnostic)
                 .into_iter()
                 .collect();
             self.diagnostics.publish(uri, None, diagnostics);
         }
+    }
+
+    /// The diagnostics a closed file keeps: the skipped-trigger warning a
+    /// prepared registry still reports for it, or none.
+    fn closed_file_diagnostics(&self, uri: &Uri) -> Vec<lsp_types::Diagnostic> {
+        uri_to_file_path(uri)
+            .and_then(|path| self.overlay.trigger_finding(&path))
+            .map(|finding| crate::diagnostics::frontmatter::invalid_trigger_diagnostic(&finding))
+            .into_iter()
+            .collect()
     }
 
     /// Rescans the workspace from disk and reconciles the index for
@@ -2535,9 +2564,11 @@ impl Router {
                 }
                 self.state.close_buffer(&uri);
                 self.state.overlay.forget(&uri);
-                // Clear the closed document's markers, then refresh the rest
+                // Replace the closed document's markers with what a closed file
+                // keeps (a skipped trigger's warning), then refresh the rest
                 // (its links may have propped up another document's validity).
-                self.state.diagnostics.publish(uri, None, Vec::new());
+                let kept = self.state.closed_file_diagnostics(&uri);
+                self.state.diagnostics.publish(uri, None, kept);
                 self.state.refresh_all_diagnostics();
             }
             DidSaveTextDocument::METHOD => {

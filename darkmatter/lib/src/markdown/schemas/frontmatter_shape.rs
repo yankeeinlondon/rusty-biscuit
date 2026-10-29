@@ -13,18 +13,27 @@
 //! expression.
 //!
 //! Only literal properties are consulted; pattern-dictionary keys contribute
-//! no property definitions here. Matching trigger payloads contribute through
+//! no property definitions here.
+//!
+//! A reference to a stored definition, recursive or shared
+//! ([`TypeExpr::Ref`]), is followed only by the
+//! `_with_definitions` lookups, one definition body per path segment, so a
+//! lookup through a recursive type is as long as its path and never expands
+//! the type as a whole. Matching trigger payloads contribute through
 //! [`EffectiveSchema::property_shape`](super::EffectiveSchema::property_shape).
 
 use std::borrow::Cow;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use serde_json::Value;
 
 use super::{
-    PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
-    darkmatter_base_schema_ref, select_literal_discriminant_arm,
+    DefKey, DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
+    TypeExpr, darkmatter_base_schema_ref, select_literal_discriminant_arm,
 };
+
+/// The table an unresolved lookup follows references in: none resolve.
+static NO_DEFINITIONS: LazyLock<DefinitionTable> = LazyLock::new(DefinitionTable::default);
 
 /// The effective top-level property shape for one document: the Darkmatter
 /// base properties, overlaid with each extension baseline shape in order, then
@@ -59,6 +68,9 @@ pub(super) fn layered_property_shape(
     document: Option<&SimplifiedSchema>,
     frontmatter: &Value,
 ) -> SchemaShape {
+    // The definition-free baseline: this shape is read with the document's
+    // and payloads' tables (`EffectiveSchema::layered_definitions`), which
+    // hold none of the baseline's stored types.
     let mut shape = match darkmatter_base_schema_ref() {
         SimplifiedSchema::Single(shape) => shape.clone(),
         SimplifiedSchema::Union(_) => SchemaShape::default(),
@@ -90,34 +102,64 @@ pub(super) fn layered_property_shape(
 /// several arms with divergent types resolves to the union of their atoms.
 /// The result borrows for a top-level leaf and is owned for a nested one,
 /// because a merged leaf must be owned.
+///
+/// A recursive reference is not followed; see
+/// [`property_def_at_path_with_definitions`].
 pub fn property_def_at_path<'a>(
     root: &'a SchemaShape,
     frontmatter: &Value,
     path: &[&str],
 ) -> Option<Cow<'a, PropertyDef>> {
+    property_def_at_path_with_definitions(root, frontmatter, path, &NO_DEFINITIONS)
+}
+
+/// [`property_def_at_path`] for a resolved shape whose recursive references
+/// point into `definitions` (`EffectiveSchema::definitions`): an ancestor
+/// typed by a reference descends into its definition's body, one body per
+/// segment, so a path of any depth through a recursive type resolves.
+pub fn property_def_at_path_with_definitions<'a>(
+    root: &'a SchemaShape,
+    frontmatter: &Value,
+    path: &[&str],
+    definitions: &DefinitionTable,
+) -> Option<Cow<'a, PropertyDef>> {
     let (leaf, ancestors) = path.split_last()?;
     if ancestors.is_empty() {
         return root.properties.get(*leaf).map(Cow::Borrowed);
     }
-    let shape = nested_property_shape(root, frontmatter, ancestors)?;
+    let shape = nested_property_shape_with_definitions(root, frontmatter, ancestors, definitions)?;
     shape.properties.get(*leaf).cloned().map(Cow::Owned)
 }
 
 /// The nested [`SchemaShape`] reached by walking `ancestors` from `root`, with
 /// the same arm selection as [`property_def_at_path`]. An empty path yields
 /// `root`; `None` when a segment is absent or has no inline-object arm.
+///
+/// A recursive reference is not followed; see
+/// [`nested_property_shape_with_definitions`].
 pub fn nested_property_shape(
     root: &SchemaShape,
     frontmatter: &Value,
     ancestors: &[&str],
 ) -> Option<SchemaShape> {
+    nested_property_shape_with_definitions(root, frontmatter, ancestors, &NO_DEFINITIONS)
+}
+
+/// [`nested_property_shape`] through recursive references that point into
+/// `definitions`, one definition body per segment.
+pub fn nested_property_shape_with_definitions(
+    root: &SchemaShape,
+    frontmatter: &Value,
+    ancestors: &[&str],
+    definitions: &DefinitionTable,
+) -> Option<SchemaShape> {
     let mut shape = root.clone();
     for depth in 0..ancestors.len() {
         let def = shape.properties.get(ancestors[depth])?;
         let path = &ancestors[..=depth];
-        let next = match discriminated_arm_shape(def, frontmatter, path) {
+        let next = match discriminated_arm_shape(def, frontmatter, path, definitions) {
             Some(selected) => selected.clone(),
-            None => merged_inline_object_shape(def)?,
+            None => merged_inline_object_shape(def, definitions)?,
         };
         shape = next;
     }
@@ -127,7 +169,7 @@ pub fn nested_property_shape(
 /// The first `expression`-typed arm of a property, so a union whose
 /// expression arm is not first is still recognized.
 pub fn expression_atom(def: &PropertyDef) -> Option<&PropertyAtom> {
-    alternatives_of(def)
+    alternatives_of(def, &NO_DEFINITIONS)
         .into_iter()
         .find(|atom| matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::Expression)))
 }
@@ -174,6 +216,17 @@ pub fn frontmatter_expression_values(
     shape: &SchemaShape,
     frontmatter: &Value,
 ) -> Vec<FrontmatterExpressionValue> {
+    frontmatter_expression_values_with_definitions(shape, frontmatter, &NO_DEFINITIONS)
+}
+
+/// [`frontmatter_expression_values`] for a resolved shape whose references
+/// point into `definitions`, classified through
+/// [`property_def_at_path_with_definitions`].
+pub fn frontmatter_expression_values_with_definitions(
+    shape: &SchemaShape,
+    frontmatter: &Value,
+    definitions: &DefinitionTable,
+) -> Vec<FrontmatterExpressionValue> {
     let mut out = Vec::new();
     let Some(root) = frontmatter.as_object() else {
         return out;
@@ -184,7 +237,7 @@ pub fn frontmatter_expression_values(
             continue;
         }
         path.push(key.as_str());
-        collect_expression_values(shape, frontmatter, &mut path, value, &mut out);
+        collect_expression_values(shape, frontmatter, definitions, &mut path, value, &mut out);
         path.pop();
     }
     out
@@ -193,6 +246,7 @@ pub fn frontmatter_expression_values(
 fn collect_expression_values<'v>(
     shape: &SchemaShape,
     frontmatter: &Value,
+    definitions: &DefinitionTable,
     path: &mut Vec<&'v str>,
     value: &'v Value,
     out: &mut Vec<FrontmatterExpressionValue>,
@@ -201,7 +255,7 @@ fn collect_expression_values<'v>(
         Value::Object(map) => {
             for (key, child) in map {
                 path.push(key.as_str());
-                collect_expression_values(shape, frontmatter, path, child, out);
+                collect_expression_values(shape, frontmatter, definitions, path, child, out);
                 path.pop();
             }
             return;
@@ -210,7 +264,7 @@ fn collect_expression_values<'v>(
         Value::String(text) => text.clone(),
         Value::Bool(_) | Value::Number(_) => value.to_string(),
     };
-    let is_expression = property_def_at_path(shape, frontmatter, path)
+    let is_expression = property_def_at_path_with_definitions(shape, frontmatter, path, definitions)
         .is_some_and(|def| expression_atom(&def).is_some());
     if is_expression {
         out.push(FrontmatterExpressionValue {
@@ -231,20 +285,43 @@ fn atoms_of(def: &PropertyDef) -> &[PropertyAtom] {
 }
 
 /// The value alternatives classification and descent read: [`atoms_of`],
-/// with every [`TypeExpr::Union`] atom replaced by its arms, recursively.
+/// with every [`TypeExpr::Union`] atom replaced by its arms, recursively, and
+/// every reference `definitions` holds replaced by its body's alternatives.
 ///
-/// An array of a union (`U[]`) yields its item arms. Key paths here carry no
-/// sequence index, so an array property's path already descends into its
+/// An array of a union (`U[]`) yields its item arms, and a list of a
+/// recursive type (`K[]`) its definition's alternatives. Key paths here carry
+/// no sequence index, so an array property's path already descends into its
 /// items, exactly as an inline-object array (`{ … }[]`) does.
-fn alternatives_of(def: &PropertyDef) -> Vec<&PropertyAtom> {
-    fn push<'a>(atom: &'a PropertyAtom, out: &mut Vec<&'a PropertyAtom>) {
-        match atom.union_arms() {
-            Some(arms) => arms.iter().for_each(|arm| push(arm, out)),
+///
+/// Each definition is expanded at most once per call. Admission rejects a
+/// reference cycle that never descends into a value, so the bodies reached
+/// here are finite anyway; the record also stops a hand-built table.
+fn alternatives_of<'a>(def: &'a PropertyDef, definitions: &'a DefinitionTable) -> Vec<&'a PropertyAtom> {
+    fn push<'a>(
+        atom: &'a PropertyAtom,
+        definitions: &'a DefinitionTable,
+        expanded: &mut Vec<&'a DefKey>,
+        out: &mut Vec<&'a PropertyAtom>,
+    ) {
+        if let Some(arms) = atom.union_arms() {
+            arms.iter().for_each(|arm| push(arm, definitions, expanded, out));
+            return;
+        }
+        let body = match &atom.ty {
+            TypeExpr::Ref(key) if !expanded.contains(&key) => definitions.get(key).map(|definition| (key, definition)),
+            _ => None,
+        };
+        match body {
+            Some((key, definition)) => {
+                expanded.push(key);
+                atoms_of(&definition.body).iter().for_each(|arm| push(arm, definitions, expanded, out));
+            }
             None => out.push(atom),
         }
     }
     let mut out = Vec::new();
-    atoms_of(def).iter().for_each(|atom| push(atom, &mut out));
+    let mut expanded = Vec::new();
+    atoms_of(def).iter().for_each(|atom| push(atom, definitions, &mut expanded, &mut out));
     out
 }
 
@@ -294,8 +371,14 @@ fn root_arm_discriminant_json(arm: &SchemaArm) -> Value {
 fn arm_discriminant_json(atom: &PropertyAtom) -> Value {
     match &atom.ty {
         TypeExpr::InlineObject(shape) => shape_discriminant_json(shape),
-        // `alternatives_of` has already replaced a union type with its arms.
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => {
+        // `alternatives_of` has already replaced a union type with its arms
+        // and a reference it could resolve with its body.
+        TypeExpr::Primitive(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Union(_)
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => {
             serde_json::json!({})
         }
     }
@@ -321,8 +404,9 @@ fn discriminated_arm_shape<'a>(
     def: &'a PropertyDef,
     frontmatter: &Value,
     path: &[&str],
+    definitions: &'a DefinitionTable,
 ) -> Option<&'a SchemaShape> {
-    let atoms = alternatives_of(def);
+    let atoms = alternatives_of(def, definitions);
     if atoms.len() < 2 {
         return None;
     }
@@ -346,9 +430,9 @@ fn navigate_json<'a>(root: &'a Value, path: &[&str]) -> Option<&'a Value> {
 }
 
 /// `None` when the property has no inline-object arm.
-fn merged_inline_object_shape(def: &PropertyDef) -> Option<SchemaShape> {
+fn merged_inline_object_shape(def: &PropertyDef, definitions: &DefinitionTable) -> Option<SchemaShape> {
     let mut merged: Option<SchemaShape> = None;
-    for atom in alternatives_of(def) {
+    for atom in alternatives_of(def, definitions) {
         let TypeExpr::InlineObject(inner) = &atom.ty else {
             continue;
         };

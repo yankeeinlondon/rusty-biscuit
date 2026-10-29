@@ -15,6 +15,16 @@ fn command_query_tokenizes_quotes_and_escapes() {
     );
 }
 
+/// A quoted empty word is one empty argument, as a shell passes it; unquoted
+/// whitespace never makes one.
+#[test]
+fn command_query_keeps_quoted_empty_arguments() {
+    let query = CommandQuery::from_raw(r#"git commit -m "" --author ''  "#);
+
+    assert_eq!(query.executable.as_deref(), Some("git"));
+    assert_eq!(query.argv, vec!["git", "commit", "-m", "", "--author", ""]);
+}
+
 #[test]
 fn command_query_skips_env_assignments_for_executable() {
     let query = CommandQuery::from_raw("FOO=bar BAZ=qux /usr/bin/python script.py");

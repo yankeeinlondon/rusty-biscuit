@@ -1,0 +1,117 @@
+kind: schema
+categories:
+    - State Mutation -> Change the in-memory runtime state map; nothing on disk or on the network is touched.
+    - Frontmatter Mutations -> Change a Markdown document's frontmatter on disk, inside the mutation root.
+    - File & Directory -> Create files and directories, or append to files, inside the mutation root.
+    - Network -> Send a request to an allow-listed host.
+types:
+    # State Mutation
+    set: |-
+        function(
+            parameters(key: string, value: unknown | null);
+            returns(unknown | null);
+            category(State Mutation);
+            fallible;
+        ) -> Sets a top-level key in the in-memory state map; no disk write. Returns the prior value, or null. An empty or dotted key is an error.
+
+    # Frontmatter Mutations
+    set_frontmatter: |-
+        function(
+            parameters(file: string, prop: string, value: unknown | null);
+            returns(unknown | null);
+            category(Frontmatter Mutations);
+            fallible;
+        ) -> Sets a frontmatter property to the value as given. Returns the prior value, or null.
+    merge_frontmatter: |-
+        function(
+            parameters(file: string, obj: object);
+            returns(object);
+            category(Frontmatter Mutations);
+            fallible;
+        ) -> Shallow-merges an object into the document's frontmatter. Returns the merged frontmatter.
+    delete_frontmatter: |-
+        function(
+            parameters(file: string, prop: string);
+            returns(unknown | null);
+            category(Frontmatter Mutations);
+            fallible;
+        ) -> Removes a frontmatter property. Returns the removed value, or null.
+    increment_frontmatter: |-
+        function(
+            parameters(file: string, prop: string);
+            returns(number(integer));
+            category(Frontmatter Mutations);
+            fallible;
+        ) -> Increments an integer frontmatter property (integer text is read as its number); missing or null becomes 1. Returns the new number. Any other stored value is an error.
+    decrement_frontmatter: |-
+        function(
+            parameters(file: string, prop: string);
+            returns(number(integer));
+            category(Frontmatter Mutations);
+            fallible;
+        ) -> Decrements an integer frontmatter property (integer text is read as its number); missing or null becomes -1. Returns the new number. Any other stored value is an error.
+    append_frontmatter: |-
+        function(
+            parameters(file: string, prop: string, value: unknown | null);
+            returns(unknown[]);
+            category(Frontmatter Mutations);
+            fallible;
+        ) -> Appends a value to a frontmatter array property; missing or null starts a new array. Returns the new array. A non-array property is an error.
+    prepend_frontmatter: |-
+        function(
+            parameters(file: string, prop: string, value: unknown | null);
+            returns(unknown[]);
+            category(Frontmatter Mutations);
+            fallible;
+        ) -> Prepends a value to a frontmatter array property; missing or null starts a new array. Returns the new array. A non-array property is an error.
+
+    # File & Directory
+    #
+    # Text payloads (`content`, `text`, `body`) are written as text: a number
+    # or boolean as its display text, an array or object as its JSON text, and
+    # null as empty text.
+    ensure_file:
+        - |-
+            function(
+                parameters(file: string);
+                returns(string);
+                category(File & Directory);
+                fallible;
+            ) -> Creates an empty file if missing. Returns the absolute path.
+        - |-
+            function(
+                parameters(file: string, content: string | object | unknown[] | null);
+                returns(string);
+                category(File & Directory);
+                fallible;
+            ) -> Creates a file with content if missing; an existing file is unchanged. Returns the absolute path.
+    ensure_dir: |-
+        function(
+            parameters(dir: string);
+            returns(string);
+            category(File & Directory);
+            fallible;
+        ) -> Creates a directory and all parents if missing. Returns the absolute path.
+    append_line: |-
+        function(
+            parameters(file: string, text: string | object | unknown[] | null);
+            returns(string);
+            category(File & Directory);
+            fallible;
+        ) -> Appends text and a newline to a file. Returns the absolute path.
+    append_jsonl: |-
+        function(
+            parameters(file: string, obj: unknown | null);
+            returns(string);
+            category(File & Directory);
+            fallible;
+        ) -> Serializes any value as one line of JSON and appends it to a file. Returns the absolute path.
+
+    # Network
+    http_post: |-
+        function(
+            parameters(url: string, body: string | object | unknown[] | null);
+            returns({ status: number(integer), body: string });
+            category(Network);
+            fallible;
+        ) -> Sends an HTTP POST request to an allow-listed host. Returns the response status and body.

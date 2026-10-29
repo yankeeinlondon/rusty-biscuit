@@ -423,7 +423,7 @@ fn external_payload_workspace(workspace: &LspWorkspace, external: &std::path::Pa
     let payload_reference = biscuit_file::to_portable_string(&payload);
     std::fs::write(
         schemas.join("prompt.trigger.yaml"),
-        format!("kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: \"{payload_reference}\"\n"),
+        format!("kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: \"{payload_reference}\"\n"),
     )
     .unwrap();
     payload

@@ -214,6 +214,58 @@ fn a_disabled_handle_walks_nothing() {
     assert!(fake.calls().is_empty());
 }
 
+#[tokio::test]
+#[serial_test::serial]
+async fn container_events_are_collected_with_their_lexical_frontmatter() {
+    let _dry_run = test_toolkit::EnvGuard::set_safe("PLAYA_DRY_RUN", "0");
+    let dir = TempDir::new().unwrap();
+    write_source(dir.path(), "prompt.md", &json!({ "failure": [{ "say": "prompt" }] }), "Work.\n");
+    write_source(dir.path(), "nested.md", &json!({
+        "title": "Child",
+        "failure": [{ "say": "referenced {{ fm.title }}" }],
+        "sequence": [{ "name": "child", "prompt": "prompt.md" }],
+    }), "Child.\n");
+    let path = write_source(dir.path(), "seq.md", &json!({
+        "title": "Root",
+        "initialize": [{ "say": "never prepare initialize" }],
+        "failure": [{ "say": "root {{ fm.title }}" }],
+        "sequence": [{
+            "name": "group",
+            "group": {
+                "failure": [
+                    { "say": "group {{ fm.title }}" },
+                    { "say": "late {{ group.failed }}" },
+                ],
+                "tasks": [
+                    { "name": "inline", "sequence": [{ "name": "prompt", "prompt": "prompt.md" }],
+                      "failure": [{ "say": "inline {{ fm.title }}" }] },
+                    { "name": "referenced", "sequence": "nested.md" },
+                ],
+            },
+        }],
+    }), "Root.\n");
+    let (source, graph) = graph_for(&path);
+    let fake = FakePreparer::recording();
+    let worker = PrewarmWorker::deferred_with(false, Arc::new(fake.clone()));
+
+    assert_eq!(submit(&worker.handle(), &source, &graph), 5);
+    fake.wait_for_calls(5).await;
+    drop(worker);
+    assert_eq!(sorted(fake.texts()), strings(&[
+        "root Root", "group Root", "inline Root", "referenced Child", "prompt",
+    ]));
+
+    let fake = FakePreparer::recording();
+    let worker = PrewarmWorker::deferred_with(false, Arc::new(fake.clone()));
+    assert_eq!(submit_sequence_preflight(
+        &worker.handle(), &GlobalSettings::default(), &graph, &source,
+        ["title".to_string()], &ComposeContext::capture_minimal(),
+    ), 1, "caller-supplied keys stay late in every lexical container");
+    fake.wait_for_calls(1).await;
+    drop(worker);
+    assert_eq!(fake.texts(), ["prompt"]);
+}
+
 /// Under an explicit provider and voice, task `setup:`/`teardown:` stacks (a
 /// top-level task, a serial member, a parallel member) are prepared with what
 /// task stacks play with, and prompt document lifecycles with the user's
@@ -398,4 +450,60 @@ async fn task_stacks_resolve_with_the_tasks_captured_inputs() {
     }
     expected.sort();
     assert_eq!(sorted(fake.texts()), expected);
+}
+
+/// The walk reads the sequence document's frontmatter through one shared
+/// view: each container's submission copies none of the sibling definitions
+/// that frontmatter holds, so the copied nodes grow linearly with the
+/// container count (the walk's one decode of the document). A value still
+/// holding a template stays late, and an `fm` read is still early.
+#[cfg(feature = "work-counters")]
+#[test]
+fn nested_container_submissions_share_the_sequence_frontmatter() {
+    use crate::work_counters::{Work, snapshot};
+
+    let mut copied = Vec::new();
+    for containers in [10usize, 55, 100] {
+        let dir = TempDir::new().unwrap();
+        // No template inside the definitions, so the `sequence:` list is
+        // readable state that a per-container copy would include.
+        let children: Vec<Value> = (0..containers)
+            .map(|index| json!({
+                "name": format!("c{index}"),
+                "start": [{ "say": "container starts" }],
+                "sequence": [{ "name": "work", "shell": format!("echo {index}") }],
+            }))
+            .collect();
+        let sequence = write_source(
+            dir.path(),
+            "seq.md",
+            &json!({
+                "title": "Release",
+                "pending": "{{ title }} later",
+                "success": [{ "say": "{{ pending }} pending" }],
+                "finalize": [{ "say": "{{ title }} done" }],
+                "sequence": [{ "name": "outer", "sequence": children }],
+            }),
+            "Body.\n",
+        );
+        let (source, graph) = graph_for(&sequence);
+        let fake = FakePreparer::recording();
+        let worker = PrewarmWorker::start_with(Arc::new(fake.clone()));
+
+        let before = snapshot();
+        let queued = submit(&worker.handle(), &source, &graph);
+        let work = snapshot().since(&before);
+
+        assert_eq!(queued, 2, "each early text is queued once; the templated value stays late");
+        assert_eq!(work.get(Work::PrewarmStateBuild), containers as u64 + 1, "one resolution per container and the root's");
+        copied.push(work.get(Work::PrewarmStateNodes));
+        let prepared = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap()
+            .block_on(async { tokio::time::timeout(std::time::Duration::from_secs(5), fake.wait_for_calls(2)).await });
+        assert!(prepared.is_ok(), "the queued phrases were never prepared");
+        drop(worker);
+        assert_eq!(sorted(fake.texts()), strings(&["Release done", "container starts"]));
+    }
+    let [small, middle, large] = copied[..] else { unreachable!() };
+    assert!(small > 0, "the walk's decode of the document is counted");
+    assert_eq!(middle - small, large - middle, "{small} → {middle} → {large}");
 }

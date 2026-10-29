@@ -601,7 +601,7 @@ fn parse_yaml_with_fallbacks(yaml: &str) -> Result<ParsedYaml, YamlParseError> {
             if normalized != *yaml {
                 match parse_yaml_map_rejecting_duplicates(&normalized) {
                     Ok(map) => return Ok(map),
-                    Err(error) if is_duplicate_yaml_error(&error) => return Err(error),
+                    Err(error) if is_final_yaml_error(&error) => return Err(error),
                     Err(_) => {}
                 }
             }
@@ -632,7 +632,7 @@ fn parse_yaml_with_fallbacks(yaml: &str) -> Result<ParsedYaml, YamlParseError> {
                     parsed.map = restore_expressions_in_map(parsed.map, &shell_replacements);
                     Ok(parsed)
                 }
-                Err(error) if is_duplicate_yaml_error(&error) => Err(error),
+                Err(error) if is_final_yaml_error(&error) => Err(error),
                 Err(_) => Err(original_err),
             }
         }
@@ -645,6 +645,8 @@ fn parse_yaml_with_fallbacks(yaml: &str) -> Result<ParsedYaml, YamlParseError> {
 /// semantics to duplicate YAML keys. `serde_yaml_ng::Value` rejects duplicates
 /// recursively and retains the parser's source location, so every fallback
 /// strategy validates the authored mapping before conversion can collapse it.
+/// Every number is admitted from its written spelling before conversion, which
+/// would otherwise turn `.inf`/`.nan` into `null` and round inexact values.
 #[derive(Debug, Default)]
 struct ParsedYaml {
     map: FrontmatterMap,
@@ -652,14 +654,17 @@ struct ParsedYaml {
 }
 
 fn parse_yaml_map_rejecting_duplicates(yaml: &str) -> Result<ParsedYaml, YamlParseError> {
-    let value = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml)?;
+    let value = super::numeric::load_admitted_yaml(yaml)?;
     let mapping_orders = MappingOrders::collect(&value);
     let map = serde_yaml_ng::from_value(value)?;
     Ok(ParsedYaml { map, mapping_orders })
 }
 
-fn is_duplicate_yaml_error(error: &YamlParseError) -> bool {
+/// Whether a strategy's error is final: a duplicate key or an inadmissible
+/// number is in the authored YAML itself, so a later fallback must not hide it.
+fn is_final_yaml_error(error: &YamlParseError) -> bool {
     error.to_string().contains("duplicate entry with key")
+        || super::numeric::is_yaml_admission_error(error)
 }
 
 /// Replaces `$(...)` shell command substitution bodies with safe placeholders.
@@ -1250,6 +1255,50 @@ This is content."#;
             );
             assert!(error.to_string().contains("duplicate entry"), "{error}");
         }
+    }
+
+    #[test]
+    fn inadmissible_frontmatter_numbers_are_located_load_errors() {
+        for (line, reason) in [
+            ("n: 9007199254740993", "cannot be represented exactly"),
+            ("n: 9007199254740993.0", "cannot be represented exactly"),
+            ("n: 99999999999999999999", "cannot be represented exactly"),
+            ("n: 1e-400", "cannot be represented exactly"),
+            ("n: .inf", "not finite"),
+            ("n: .nan", "not finite"),
+        ] {
+            let content = format!("---\ntitle: T\n{line}\n---\n# Body\n");
+            let error = parse_frontmatter(&content).expect_err(line);
+            let MarkdownError::FrontmatterParse { source, .. } = &error else {
+                panic!("unexpected error for {line}: {error:?}");
+            };
+            let location = source.location().expect("located");
+            assert_eq!((location.line(), location.column()), (2, 4), "{line}");
+            assert!(source.to_string().starts_with("n: number "), "{source}");
+            assert!(source.to_string().contains(reason), "{source}");
+        }
+    }
+
+    #[test]
+    fn inadmissible_numbers_are_not_hidden_by_expression_fallbacks() {
+        let content = "---\nroute: \"{{ fallback || \"plan.md\" }}\"\nn: 9007199254740993\n---\n# Body\n";
+        let error = parse_frontmatter(content).expect_err("fallback must retain the admission error");
+        assert!(error.to_string().contains("cannot be represented exactly"), "{error}");
+    }
+
+    #[test]
+    fn admissible_frontmatter_numbers_load_exactly() {
+        let content = "---\nz: 0.1\na: 1e3\nm: 9007199254740992\nb: -9007199254740992\nc: .5\nd: 4.0\nq: \"9007199254740993\"\n---\n";
+        let (frontmatter, _) = parse_frontmatter(content).unwrap();
+        let map = frontmatter.as_map();
+        assert_eq!(map.keys().map(String::as_str).collect::<Vec<_>>(), ["z", "a", "m", "b", "c", "d", "q"]);
+        assert_eq!(map["z"], serde_json::json!(0.1));
+        assert_eq!(map["a"].as_f64(), Some(1000.0));
+        assert_eq!(map["m"], serde_json::json!(9007199254740992_u64));
+        assert_eq!(map["b"], serde_json::json!(-9007199254740992_i64));
+        assert_eq!(map["c"], serde_json::json!(0.5));
+        assert_eq!(map["d"].as_f64(), Some(4.0));
+        assert_eq!(map["q"], serde_json::json!("9007199254740993"));
     }
 
     #[test]

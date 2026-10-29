@@ -12,17 +12,23 @@ use darkmatter::markdown::compose::context::{
     ContextVariableDescriptor, context_variable_descriptors,
 };
 use darkmatter::markdown::compose::expression::{
-    BinaryOp, ExpressionError, ExpressionFinder, ExpressionFunctionDescriptor, ExpressionLintKind,
+    Availability, BinaryOp, BindingError, ExpressionError, ExpressionFinder, ExpressionFunctionDescriptor, ExpressionLintKind,
     ParseError,
     ParseMode, SpannedExpr, SpannedExprKind, expression_function_descriptors,
-    BindingView, ReservedRootDescriptor, RootMembers, identifier_prefix_start,
-    is_whole_value_span, lint_expression, parse_condition_spanned, parse_spanned,
-    reserved_root_descriptors, static_variable_reads, validate_expression,
+    function_descriptors as catalog_function_overloads,
+    BindingView, ReservedRootDescriptor, RootMembers, ScopedType, Shape, TypeScope, branch_scope,
+    identifier_prefix_start, is_whole_value_span, lint_expression, parse_condition_spanned,
+    parse_spanned, reserved_root_descriptors, static_variable_reads, validate_expression,
 };
+use darkmatter::markdown::schemas::catalog::GlobalCatalog;
+use darkmatter::markdown::schemas::simplified::serialize_property_atom;
+use darkmatter::markdown::schemas::{PropertyDef, TypeExpr};
 use darkmatter::markdown::schemas::{DecodedScalar, decode_scalar};
 use darkmatter::markdown::span::SourceSpan;
 use serde::{Deserialize, Serialize};
 
+
+use crate::overlay::event_views::StackEvent;
 use crate::overlay::{FmEntry, FmScalarStyle, FmValueKind, FrontmatterAst};
 
 /// One `{{{ … }}}` interpolation literal with a document-relative span.
@@ -327,6 +333,11 @@ impl FrontmatterInterpolation<'_> {
         self.projection.range(self.outer.clone())
     }
 
+    /// Where [`text`](Self::text) starts in the scalar's analyzed text.
+    pub fn analyzed_start(&self) -> usize {
+        self.inner.start
+    }
+
     /// The exact authored range of the trimmed inner expression.
     pub fn inner_span(&self) -> Option<SourceSpan> {
         self.projection.project(self.inner.clone())
@@ -357,40 +368,54 @@ pub fn frontmatter_interpolations<'a>(
 ) -> Vec<FrontmatterInterpolation<'a>> {
     let mut out = Vec::new();
     for (index, entry) in ast.entries().iter().enumerate() {
-        let Some(scalar) = entry.scalar.as_deref().filter(|_| entry.kind == FmValueKind::Scalar)
-        else {
-            continue;
-        };
-        if !scalar.contains("{{") {
-            continue;
+        out.extend(scalar_interpolations(document, entry, index));
+    }
+    out
+}
+
+/// The `{{ … }}` spans inside the one scalar entry `entry` (arena `index`), in
+/// order: the per-scalar step of [`frontmatter_interpolations`], for a caller
+/// that needs one scalar without scanning the document. Empty for a
+/// non-scalar entry.
+pub fn scalar_interpolations<'a>(
+    document: &str,
+    entry: &'a FmEntry,
+    index: usize,
+) -> Vec<FrontmatterInterpolation<'a>> {
+    let Some(scalar) = entry.scalar.as_deref().filter(|_| entry.kind == FmValueKind::Scalar) else {
+        return Vec::new();
+    };
+    if !scalar.contains("{{") {
+        return Vec::new();
+    }
+    let whole_value = is_whole_value_span(scalar);
+    let raw = document.get(entry.value_span.clone());
+    let (projection, analyzed, scan_from) = match (entry.scalar_style, entry.tagged, raw) {
+        (Some(FmScalarStyle::Literal), false, Some(raw)) => {
+            // Skip the block header line, which may carry a comment.
+            let body = raw.find('\n').map_or(raw.len(), |newline| newline + 1);
+            let projection = ScalarProjection {
+                scalar: entry.value_span.clone(),
+                mode: ProjectionMode::Literal { base: entry.value_span.start },
+            };
+            (projection, raw.to_string(), body)
         }
-        let whole_value = is_whole_value_span(scalar);
-        let raw = document.get(entry.value_span.clone());
-        let (projection, analyzed, scan_from) = match (entry.scalar_style, entry.tagged, raw) {
-            (Some(FmScalarStyle::Literal), false, Some(raw)) => {
-                // Skip the block header line, which may carry a comment.
-                let body = raw.find('\n').map_or(raw.len(), |newline| newline + 1);
-                let projection = ScalarProjection {
-                    scalar: entry.value_span.clone(),
-                    mode: ProjectionMode::Literal { base: entry.value_span.start },
-                };
-                (projection, raw.to_string(), body)
-            }
-            _ => {
-                let Some((projection, analyzed)) = ScalarProjection::for_value(entry, document)
-                else {
-                    continue;
-                };
-                (projection, analyzed, 0)
-            }
-        };
-        for location in ExpressionFinder::find_all_plain(&analyzed[scan_from..]) {
+        _ => {
+            let Some((projection, analyzed)) = ScalarProjection::for_value(entry, document) else {
+                return Vec::new();
+            };
+            (projection, analyzed, 0)
+        }
+    };
+    ExpressionFinder::find_all_plain(&analyzed[scan_from..])
+        .into_iter()
+        .map(|location| {
             let start = scan_from + location.start;
             let end = scan_from + location.end;
             let inner_slice = &analyzed[start + 2..end - 2];
             let leading = inner_slice.len() - inner_slice.trim_start().len();
             let inner_start = start + 2 + leading;
-            out.push(FrontmatterInterpolation {
+            FrontmatterInterpolation {
                 entry,
                 index,
                 inner: inner_start..inner_start + location.expression.len(),
@@ -398,10 +423,9 @@ pub fn frontmatter_interpolations<'a>(
                 whole_value,
                 outer: start..end,
                 projection: projection.clone(),
-            });
-        }
-    }
-    out
+            }
+        })
+        .collect()
 }
 
 /// Parses a **value-dialect** expression, span-carrying. This is the body
@@ -613,18 +637,17 @@ pub fn function_descriptors() -> &'static [ExpressionFunctionDescriptor] {
     expression_function_descriptors()
 }
 
-/// The expression-function descriptor whose bare name (the leading identifier
-/// of its `signature`) is `name`, if any. Overloads share a bare name; the
-/// first catalog entry wins, matching the pre-descriptor lookup order.
-pub fn function_descriptor(name: &str) -> Option<&'static ExpressionFunctionDescriptor> {
-    expression_function_descriptors()
-        .iter()
-        .find(|descriptor| function_name(descriptor.signature) == name)
+/// Every overload of the function `name` names, resolved by Darkmatter the way
+/// dispatch resolves it: case-insensitive, by canonical name or registered
+/// alias (`isString` finds `is_string`). Empty for an unknown name.
+pub fn function_overloads(name: &str) -> &'static [ExpressionFunctionDescriptor] {
+    catalog_function_overloads(name)
 }
 
-/// The bare function name — the leading identifier of a catalog `signature`.
-fn function_name(signature: &str) -> &str {
-    signature.split('(').next().unwrap_or(signature)
+/// The first overload of the function `name` names (see
+/// [`function_overloads`]), if any.
+pub fn function_descriptor(name: &str) -> Option<&'static ExpressionFunctionDescriptor> {
+    function_overloads(name).first()
 }
 
 /// Whether `name` (a `ctx.NAME` tail) is a known context variable.
@@ -640,7 +663,7 @@ pub fn is_ctx_name(name: &str) -> bool {
 /// Thin wrapper over [`function_descriptor`]; new work that needs the typed
 /// signature must take the descriptor directly.
 pub fn function_description(name: &str) -> Option<&'static str> {
-    function_descriptor(name).map(|descriptor| descriptor.description)
+    function_descriptor(name).map(|descriptor| &*descriptor.description)
 }
 
 /// Renders the shared catalog-backed Markdown block for a `ctx.*` hover.
@@ -672,12 +695,20 @@ pub fn format_ctx_hover_block(descriptor: &ContextVariableDescriptor) -> String 
 /// only the (response-boundary–resolved) link: a completion popup is a
 /// one-line surface, not a reference table.
 pub fn format_function_block(descriptor: &ExpressionFunctionDescriptor) -> String {
-    let mut block = format!(
-        "**`{}`**\n\n{}",
-        descriptor.typed_signature(),
-        descriptor.description
-    );
-    if let Some(vocabulary) = query_vocabulary_block(function_name(descriptor.signature)) {
+    format_function_overloads_block(std::slice::from_ref(descriptor))
+}
+
+/// [`format_function_block`] for every overload of one function: each
+/// overload's typed signature and description, in catalog order, then the
+/// query vocabulary once. One overload renders exactly as
+/// [`format_function_block`].
+pub fn format_function_overloads_block(overloads: &[ExpressionFunctionDescriptor]) -> String {
+    let mut block = overloads
+        .iter()
+        .map(|descriptor| format!("**`{}`**\n\n{}", descriptor.typed_signature(), descriptor.description))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if let Some(vocabulary) = overloads.first().and_then(|descriptor| query_vocabulary_block(&descriptor.name)) {
         block.push_str("\n\n");
         block.push_str(vocabulary);
     }
@@ -827,12 +858,17 @@ pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<
         }
     }
 
+    // A function is offered under its canonical name only, once per overload.
+    // Typing a registered alias (`isStr` for `isstring`, matched
+    // case-insensitively as dispatch matches it) offers the canonical too.
+    let alias_partial = partial.to_ascii_lowercase();
     for descriptor in function_descriptors() {
-        let signature = descriptor.signature;
-        let name = function_name(signature);
-        if name.starts_with(partial) {
+        let name = &*descriptor.name;
+        let alias_matches = !partial.is_empty()
+            && descriptor.aliases.iter().any(|alias| alias.starts_with(&alias_partial));
+        if name.starts_with(partial) || alias_matches {
             items.push(ExprCompletion {
-                label: signature.to_string(),
+                label: descriptor.signature.to_string(),
                 insert_text: name.to_string(),
                 kind: ExprCompletionKind::Function,
                 detail: Some(descriptor.typed_signature()),
@@ -844,9 +880,159 @@ pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<
     items
 }
 
+/// The hover block for a host global or one of its members (`seq`,
+/// `seq.index`), from the host catalogs in the document's schema roots
+/// ([`darkmatter::markdown::schemas::catalog::host_catalogs`]). `None` when no
+/// catalog declares the root or the member. Only the declared shape is shown;
+/// which events may read the global is the host's.
+pub fn host_global_hover(name: &str, catalogs: &[GlobalCatalog]) -> Option<String> {
+    let (root, member) = match name.split_once('.') {
+        Some((root, member)) => (root, Some(member)),
+        None => (name, None),
+    };
+    let declaration = catalogs.iter().find_map(|catalog| catalog.global(root))?;
+    let shape = declaration.shape()?;
+    match member {
+        None => {
+            let members: Vec<String> = shape.properties.keys().map(|key| format!("`{key}`")).collect();
+            Some(format!("**`{root}`** — host global\n\nMembers: {}", members.join(", ")))
+        }
+        Some(member) => {
+            let def = shape.properties.get(member.split('.').next().unwrap_or(member))?;
+            Some(format!("**`{root}.{member}`** — {}", member_summary(def)))
+        }
+    }
+}
+
+/// `type — description` for one catalog member.
+fn member_summary(def: &PropertyDef) -> String {
+    let atoms: Vec<_> = match def {
+        PropertyDef::Single(atom) => vec![atom],
+        PropertyDef::Union(atoms) => atoms.iter().collect(),
+    };
+    let types: Vec<String> = atoms
+        .iter()
+        .map(|atom| match &atom.ty {
+            TypeExpr::InlineObject(_) => if atom.is_array { "object[]".to_string() } else { "object".to_string() },
+            _ => {
+                let mut bare = (*atom).clone();
+                bare.description = None;
+                serialize_property_atom(&bare)
+            }
+        })
+        .collect();
+    let description = atoms.iter().find_map(|atom| atom.description.as_deref());
+    match description {
+        Some(description) => format!("`{}` — {description}", types.join(" | ")),
+        None => format!("`{}`", types.join(" | ")),
+    }
+}
+
+/// Completion candidates for host globals matching `partial`: each declared
+/// root, and once `partial` names a root and a `.`, its declared members.
+pub fn host_global_candidates(partial: &str, catalogs: &[GlobalCatalog]) -> Vec<ExprCompletion> {
+    let mut items = Vec::new();
+    for declaration in catalogs.iter().flat_map(GlobalCatalog::globals) {
+        let root = declaration.name();
+        let Some(shape) = declaration.shape() else { continue };
+        if root.starts_with(partial) {
+            items.push(ExprCompletion {
+                label: root.to_string(),
+                insert_text: root.to_string(),
+                kind: ExprCompletionKind::ReservedRoot,
+                detail: Some("host global".to_string()),
+                documentation: host_global_hover(root, catalogs),
+            });
+        }
+        if let Some(member) = partial.strip_prefix(root).and_then(|rest| rest.strip_prefix('.')) {
+            for (key, def) in &shape.properties {
+                if key.starts_with(member) {
+                    let label = format!("{root}.{key}");
+                    items.push(ExprCompletion {
+                        label: label.clone(),
+                        insert_text: label,
+                        kind: ExprCompletionKind::ContextVariable,
+                        detail: Some("host global member".to_string()),
+                        documentation: Some(member_summary(def)),
+                    });
+                }
+            }
+        }
+    }
+    items
+}
+
+/// The hover block for a global the host's registry declares for `event`
+/// (`err`, `timing`) or one of its members: the declaration's description, its
+/// availability in that event, and the member's shape from Darkmatter's
+/// global catalog. `None` when the event's view does not declare the root.
+pub fn event_global_hover(name: &str, event: &StackEvent) -> Option<String> {
+    let (root, member) = match name.split_once('.') {
+        Some((root, member)) => (root, Some(member)),
+        None => (name, None),
+    };
+    let global = event.globals().global(root)?;
+    let mut block = format!(
+        "**`{root}`** — {}\n\nIn `{}`: {}",
+        global.description(),
+        event.name(),
+        global.availability()
+    );
+    if let Some(member) = member
+        && let Some(def) = GlobalCatalog::darkmatter()
+            .global(root)
+            .and_then(|declaration| declaration.member(member.split('.').next().unwrap_or(member)))
+    {
+        block.push_str(&format!("\n\n**`{root}.{member}`** — {}", member_summary(def)));
+    }
+    Some(block)
+}
+
+/// Completion candidates for the globals `event` may read: each root its view
+/// declares and does not make unavailable, and, once `partial` names one and
+/// a `.`, its members from Darkmatter's global catalog.
+pub fn event_global_candidates(partial: &str, event: &StackEvent) -> Vec<ExprCompletion> {
+    let mut items = Vec::new();
+    for global in event.globals().globals() {
+        if matches!(global.availability(), Availability::Unavailable(_)) {
+            continue;
+        }
+        let root = global.root();
+        if root.starts_with(partial) {
+            items.push(ExprCompletion {
+                label: root.to_string(),
+                insert_text: root.to_string(),
+                kind: ExprCompletionKind::ReservedRoot,
+                detail: Some("lifecycle global".to_string()),
+                documentation: event_global_hover(root, event),
+            });
+        }
+        let shape = GlobalCatalog::darkmatter().global(root).and_then(|declaration| declaration.shape());
+        if let Some(member) = partial.strip_prefix(root).and_then(|rest| rest.strip_prefix('.'))
+            && let Some(shape) = shape
+        {
+            for (key, def) in &shape.properties {
+                if key.starts_with(member) {
+                    let label = format!("{root}.{key}");
+                    items.push(ExprCompletion {
+                        label: label.clone(),
+                        insert_text: label,
+                        kind: ExprCompletionKind::ContextVariable,
+                        detail: Some("lifecycle global member".to_string()),
+                        documentation: Some(member_summary(def)),
+                    });
+                }
+            }
+        }
+    }
+    items
+}
+
 /// The Markdown body of a **value-dialect** expression hover — the body `{{ }}`
 /// interpolation hover. `expr_offset` is the cursor's byte offset into
-/// `expression`. Pure so the D2/D5 classification is unit-testable.
+/// `expression`; `site` is the type scope enclosing the whole expression (its
+/// body `::block` guards, or unguarded). Pure so the D2/D5 classification is
+/// unit-testable.
 ///
 /// The single authority for value-dialect expression hover markdown. See
 /// [`hover_markdown_from`] for the shared classification rule, and
@@ -855,6 +1041,7 @@ pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<
 pub fn hover_markdown(
     expression: &str,
     expr_offset: usize,
+    site: &TypeScope<'_>,
     frontmatter_scalar: impl Fn(&str) -> Option<String>,
     schema_property: impl Fn(&str) -> Option<String>,
 ) -> String {
@@ -862,8 +1049,10 @@ pub fn hover_markdown(
         parse(expression),
         expression,
         expr_offset,
+        site,
         frontmatter_scalar,
         schema_property,
+        None,
     )
 }
 
@@ -875,6 +1064,7 @@ pub fn hover_markdown(
 pub fn hover_markdown_condition(
     expression: &str,
     expr_offset: usize,
+    site: &TypeScope<'_>,
     frontmatter_scalar: impl Fn(&str) -> Option<String>,
     schema_property: impl Fn(&str) -> Option<String>,
 ) -> String {
@@ -882,8 +1072,35 @@ pub fn hover_markdown_condition(
         parse_condition(expression),
         expression,
         expr_offset,
+        site,
         frontmatter_scalar,
         schema_property,
+        None,
+    )
+}
+
+/// The expression hover for an expression inside `event`'s lifecycle stack,
+/// parsed with `parser`: identical to [`hover_markdown`] and
+/// [`hover_markdown_condition`], except that a root the event's view declares
+/// ([`event_global_hover`]) shadows a same-named frontmatter key, as it does
+/// when the stack runs.
+pub fn hover_markdown_in_event(
+    parser: fn(&str) -> Result<SpannedExpr, ParseError>,
+    expression: &str,
+    expr_offset: usize,
+    site: &TypeScope<'_>,
+    frontmatter_scalar: impl Fn(&str) -> Option<String>,
+    schema_property: impl Fn(&str) -> Option<String>,
+    event: &StackEvent,
+) -> String {
+    hover_markdown_from(
+        parser(expression),
+        expression,
+        expr_offset,
+        site,
+        frontmatter_scalar,
+        schema_property,
+        Some(event),
     )
 }
 
@@ -897,14 +1114,18 @@ pub fn hover_markdown_condition(
 /// the generic hover without borrowing a similarly named bare key's value. A bare
 /// identifier with no static frontmatter value falls back to `schema_property` —
 /// the effective schema's type/constraints/description for a declared-but-unset
-/// property — before the generic function-name description. Nothing here
-/// evaluates the expression or reads `ctx.*`.
+/// property — before the generic function-name description. When a guard
+/// refines the identifier's type at the cursor ([`local_type`]), a final line
+/// gives that local type. Nothing here evaluates the expression or reads
+/// `ctx.*`.
 fn hover_markdown_from(
     parsed: Result<SpannedExpr, ParseError>,
     expression: &str,
     expr_offset: usize,
+    site: &TypeScope<'_>,
     frontmatter_scalar: impl Fn(&str) -> Option<String>,
     schema_property: impl Fn(&str) -> Option<String>,
+    event: Option<&StackEvent>,
 ) -> String {
     let mut value = match &parsed {
         Ok(expr) => format!("**Expression**\n\n`{}`", expr.erase()),
@@ -915,11 +1136,12 @@ fn hover_markdown_from(
     };
 
     // D5: a cursor on a known function-name identifier wins.
-    if let Some(name) = function_call_at(&expr, expression, expr_offset)
-        && let Some(descriptor) = function_descriptor(name)
-    {
-        value.push_str(&format!("\n\n{}", format_function_block(descriptor)));
-        return value;
+    if let Some(name) = function_call_at(&expr, expression, expr_offset) {
+        let overloads = function_overloads(name);
+        if !overloads.is_empty() {
+            value.push_str(&format!("\n\n{}", format_function_overloads_block(overloads)));
+            return value;
+        }
     }
 
     // Resolve the identifier against the sub-expression under the cursor (e.g.
@@ -949,6 +1171,9 @@ fn hover_markdown_from(
         // A reserved root shadows a same-named frontmatter key, so its catalog
         // description wins over any static value.
         value.push_str(&format!("\n\n**`{}`** — {}", root.name, root.description));
+    } else if let Some(block) = event.and_then(|event| event_global_hover(&name, event)) {
+        // An event's global shadows a same-named frontmatter key.
+        value.push_str(&format!("\n\n{block}"));
     } else if let Some(member) = frontmatter_member {
         if let Some(scalar) = frontmatter_scalar(member) {
             value.push_str(&format!("\n\nStatic value: `{scalar}` (from frontmatter `{member}`)"));
@@ -962,7 +1187,63 @@ fn hover_markdown_from(
     } else if let Some(descriptor) = function_descriptor(&name) {
         value.push_str(&format!("\n\nFunction: {}", descriptor.description));
     }
+    if let Some(line) = local_type_line(&expr, sub_expr, site) {
+        value.push_str(&format!("\n\n{line}"));
+    }
     value
+}
+
+/// The type of `node` (a node of `expr`) at `site` extended by the branch
+/// facts of `expr` that enclose it, when an enclosing guard refined its
+/// declaration or proves it present. `None` for an unrefined type and for a
+/// node that reads no stable subject (a function result, a computed index).
+///
+/// Every fact comes from Darkmatter's [`TypeScope::assume`] through
+/// [`branch_scope`]; DMLS decides none itself. Static: both branches of a
+/// ternary get their own side's type, whichever would run.
+pub fn local_type(expr: &SpannedExpr, node: &SpannedExpr, site: &TypeScope<'_>) -> Option<ScopedType> {
+    let scope = branch_scope(expr, &node.span, site.clone());
+    let ty = scope.type_of_expr(&node.erase())?;
+    (ty.is_refined() || ty.guard_presence().is_some()).then_some(ty)
+}
+
+/// The hover line giving [`local_type`] and the guards that narrowed it, or
+/// `None` when no guard refined `node` there. Shared by the expression hover
+/// and the shell-command hovers, whose `{{ }}` holes are typed the same way.
+pub fn local_type_line(expr: &SpannedExpr, node: &SpannedExpr, site: &TypeScope<'_>) -> Option<String> {
+    let local = local_type(expr, node, site)?;
+    let mut guards: Vec<String> = Vec::new();
+    for origin in local.refinements().iter().chain(local.guard_presence()) {
+        let label = format!("`{}`", origin.label());
+        if !guards.contains(&label) {
+            guards.push(label);
+        }
+    }
+    Some(format!("Type here: `{}` (narrowed by {})", type_text(&local), guards.join(", ")))
+}
+
+/// A scoped type as type text: its non-null alternatives in the schema
+/// grammar, then `null` when it is still admitted.
+pub fn type_text(ty: &ScopedType) -> String {
+    match ty.shape() {
+        Shape::Unknown { non_null: true } => "unknown (not null)".to_string(),
+        Shape::Unknown { non_null: false } => "unknown".to_string(),
+        Shape::Arms { arms, nullable } => {
+            let mut parts: Vec<String> = arms
+                .iter()
+                .map(|arm| {
+                    let mut arm = arm.clone();
+                    arm.description = None;
+                    serialize_property_atom(&arm)
+                })
+                .collect();
+            if *nullable {
+                // The JSON spelling, so DMLS keeps no root names of its own.
+                parts.push(serde_json::Value::Null.to_string());
+            }
+            parts.join(" | ")
+        }
+    }
 }
 
 /// Whether a bare root `name` is an undeclared document property: one the
@@ -971,9 +1252,8 @@ fn hover_markdown_from(
 /// property, or expression function names. The single authority for the check
 /// so the body-interpolation and frontmatter-expression diagnostics agree.
 ///
-/// DMLS passes [`BindingView::baseline`]: it supplies no host descriptors, so
-/// a host global such as Claudine's `err` reads as a document property here.
-/// Any dotted path is treated as declared; callers pass a root. The caller
+/// DMLS passes the view [`validation_view`](crate::overlay::event_views::validation_view)
+/// builds for the expression's site. Any dotted path is treated as declared; callers pass a root. The caller
 /// supplies frontmatter-key and schema-property membership.
 pub fn is_undeclared_property(
     name: &str,
@@ -1006,6 +1286,23 @@ pub fn unknown_function_calls(expr: &SpannedExpr, source: &str) -> Vec<(String, 
                 let span = if source.get(name_span.clone()) == Some(name.as_str()) { name_span } else { call };
                 Some((name, span))
             }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Each read in `expr` of a global `view` declares unavailable, as `(span,
+/// message)`: Darkmatter's passive [`validate_expression`] decides, and the
+/// message is its error, which names the scope and the view's reason. A
+/// same-named frontmatter key is never read in its place.
+pub fn unavailable_global_reads(expr: &SpannedExpr, view: &BindingView) -> Vec<(SourceSpan, String)> {
+    validate_expression(expr, view)
+        .into_iter()
+        .filter_map(|(span, error)| match error {
+            ExpressionError::Binding(binding) => match *binding {
+                BindingError::Unavailable(unavailable) => Some((span, unavailable.to_string())),
+                _ => None,
+            },
             _ => None,
         })
         .collect()
@@ -1064,8 +1361,11 @@ pub enum UndeclaredPropertyFinding {
 /// (the YAML quote style around a frontmatter value).
 ///
 /// Absence handling follows the library's static walk
-/// ([`static_variable_reads`]), so the editor suppresses what the runtime
-/// suppresses; it flags both branches because it cannot know which runs.
+/// ([`static_variable_reads`]): intentional absence handling plus the shared
+/// branch facts, so the second `x` of `x && x` or `x ? x : 'none'` is silent
+/// while a false ternary branch and a sibling path are not. It checks both
+/// branches, each under its own side's facts, because it cannot know which
+/// runs; the runtime warns only for the branch it reads.
 pub fn undeclared_property_findings(
     expr: &SpannedExpr,
     source: &str,
@@ -1265,6 +1565,14 @@ mod frontmatter_inventory_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use darkmatter::markdown::compose::expression::DeclaredTypes;
+
+    /// The declared layer of a document with no schema or frontmatter.
+    static UNTYPED: DeclaredTypes<'static> = DeclaredTypes::new(None);
+
+    fn untyped() -> TypeScope<'static> {
+        TypeScope::unguarded(&UNTYPED)
+    }
 
     /// Findings for a value-dialect `source` where `keys` are the document's
     /// frontmatter keys.
@@ -1312,7 +1620,8 @@ mod tests {
             generic("known ? then_b : else_b", &keys),
             [pair("then_b", "then_b"), pair("else_b", "else_b")]
         );
-        assert_eq!(generic("lower(arg)", &keys), [pair("arg", "arg")]);
+        assert_eq!(generic("abs(arg)", &keys), [pair("arg", "arg")]);
+        assert_eq!(generic("is_empty(lower(arg))", &keys), [pair("arg", "arg")]);
         assert_eq!(generic("known || rhs", &keys), [pair("rhs", "rhs")]);
         assert_eq!(generic("user.name + 1", &keys), [pair("user", "user.name")]);
     }
@@ -1324,6 +1633,7 @@ mod tests {
             "maybe ? maybe : \"none\"",
             "is_null(maybe)",
             "isEmpty(maybe)",
+            "lower(maybe)",
             "ok ? known : null",
             "current.cwd",
             "fm.anything-at-all",
@@ -1367,6 +1677,7 @@ mod tests {
         let declared = hover_markdown(
             "current_env",
             3,
+            &untyped(),
             |name| (name == "current_env").then(|| "userland".to_string()),
             |_| None,
         );
@@ -1374,7 +1685,7 @@ mod tests {
         assert!(!declared.contains("reserved"), "{declared}");
 
         let from_schema =
-            hover_markdown("current_env", 3, |_| None, |name| (name == "current_env").then(|| "SCHEMA-BLOCK".to_string()));
+            hover_markdown("current_env", 3, &untyped(), |_| None, |name| (name == "current_env").then(|| "SCHEMA-BLOCK".to_string()));
         assert!(from_schema.contains("SCHEMA-BLOCK"), "{from_schema}");
     }
 
@@ -1497,21 +1808,136 @@ mod tests {
     #[test]
     fn test_function_descriptor_returns_typed_signature() {
         let length = function_descriptor("length").expect("`length` is a known function");
-        assert_eq!(function_name(length.signature), "length");
+        assert_eq!(&*length.name, "length");
         // Thin wrapper agrees with the descriptor lookup.
-        assert_eq!(function_description("length"), Some(length.description));
+        assert_eq!(function_description("length"), Some(&*length.description));
         assert!(function_descriptor("definitely_not_a_function").is_none());
         assert!(function_description("definitely_not_a_function").is_none());
     }
 
+    /// Criterion 57: a registered alias, in any case, resolves to its
+    /// canonical's overloads exactly as dispatch resolves it, and typing an
+    /// alias completes the canonical; no alias is ever listed as a function.
+    #[test]
+    fn an_alias_resolves_and_completes_as_its_canonical() {
+        let canonical = function_overloads("is_string");
+        assert!(!canonical.is_empty());
+        assert!(canonical[0].aliases.contains(&"isstring".into()), "{:?}", canonical[0].aliases);
+        for spelling in ["isString", "isstring", "IS_STRING"] {
+            assert_eq!(function_overloads(spelling), canonical, "`{spelling}`");
+        }
+
+        let offered: Vec<_> = completion_candidates("isStr", &[])
+            .into_iter()
+            .filter(|candidate| candidate.kind == ExprCompletionKind::Function)
+            .collect();
+        assert_eq!(offered.len(), canonical.len(), "{offered:#?}");
+        assert!(offered.iter().all(|candidate| candidate.insert_text == "is_string"), "{offered:#?}");
+
+        let functions: Vec<_> = completion_candidates("", &[])
+            .into_iter()
+            .filter(|candidate| candidate.kind == ExprCompletionKind::Function)
+            .collect();
+        assert_eq!(functions.len(), expression_function_descriptors().len());
+        assert!(functions.iter().all(|candidate| candidate.insert_text != "isstring"));
+    }
+
+    /// Every overload of a function hovers together, in catalog order.
+    #[test]
+    fn overloads_hover_together() {
+        let overloads = function_overloads("code_link");
+        assert_eq!(overloads.len(), 2);
+        let block = format_function_overloads_block(overloads);
+        let first = block.find(&overloads[0].typed_signature()).expect("first overload");
+        let second = block.find(&overloads[1].typed_signature()).expect("second overload");
+        assert!(first < second, "{block}");
+        assert_eq!(format_function_overloads_block(&overloads[..1]), format_function_block(&overloads[0]));
+    }
+
+    // The exact-text pins below were captured from the pre-owned-descriptor
+    // catalog, so they prove the hover and completion text survived that
+    // refactor byte for byte. A failure here means user-visible output changed.
+
+    #[test]
+    fn overloaded_function_hover_block_is_pinned_exactly() {
+        assert_eq!(
+            format_function_overloads_block(function_overloads("link")),
+            "**`link(file: file | null) -> string | null | error`**\n\n\
+             Creates a Markdown link to a local file, using its relative path as the link text and its \
+             absolute path as the destination. HTTP(S) URLs are rejected because they need a description; \
+             null passes through.\n\n\
+             **`link(target: file | null, desc: string | null) -> string | null | error`**\n\n\
+             Creates a Markdown link to a local file or an HTTP(S) URL with the given description as its \
+             text; null passes through."
+        );
+    }
+
+    #[test]
+    fn single_signature_function_hover_block_is_pinned_exactly() {
+        assert_eq!(
+            format_function_overloads_block(function_overloads("round")),
+            "**`round(x: numberlike, [fallback: number]) -> number`**\n\n\
+             Rounds a number or numeric text to the nearest whole number, halfway values away from zero. \
+             When `x` is not a number or numeric text, a supplied `fallback` is rounded and returned \
+             instead; without one the call is a type error."
+        );
+    }
+
+    #[test]
+    fn function_completion_items_are_pinned_exactly() {
+        let function_items: Vec<ExprCompletion> = completion_candidates("", &[])
+            .into_iter()
+            .filter(|candidate| candidate.insert_text == "link" || candidate.insert_text == "round")
+            .collect();
+        let expected = [
+            ExprCompletion {
+                label: "round(x, [fallback])".to_string(),
+                insert_text: "round".to_string(),
+                kind: ExprCompletionKind::Function,
+                detail: Some("round(x: numberlike, [fallback: number]) -> number".to_string()),
+                documentation: Some(
+                    "Rounds a number or numeric text to the nearest whole number, halfway values away from \
+                     zero. When `x` is not a number or numeric text, a supplied `fallback` is rounded and \
+                     returned instead; without one the call is a type error."
+                        .to_string(),
+                ),
+            },
+            ExprCompletion {
+                label: "link(file)".to_string(),
+                insert_text: "link".to_string(),
+                kind: ExprCompletionKind::Function,
+                detail: Some("link(file: file | null) -> string | null | error".to_string()),
+                documentation: Some(
+                    "Creates a Markdown link to a local file, using its relative path as the link text and \
+                     its absolute path as the destination. HTTP(S) URLs are rejected because they need a \
+                     description; null passes through."
+                        .to_string(),
+                ),
+            },
+            ExprCompletion {
+                label: "link(target, desc)".to_string(),
+                insert_text: "link".to_string(),
+                kind: ExprCompletionKind::Function,
+                detail: Some("link(target: file | null, desc: string | null) -> string | null | error".to_string()),
+                documentation: Some(
+                    "Creates a Markdown link to a local file or an HTTP(S) URL with the given description as \
+                     its text; null passes through."
+                        .to_string(),
+                ),
+            },
+        ];
+        assert_eq!(function_items, expected);
+    }
+
     #[test]
     fn test_function_descriptor_fallible_signature_has_error_suffix() {
-        // `length` is fallible, so its typed signature carries the
+        // `recent_commits` is fallible, so its typed signature carries the
         // `| error` union suffix that the untyped `signature` lacks.
-        let length = function_descriptor("length").expect("`length` is a known function");
-        assert!(length.signature.contains("length("));
-        assert!(!length.signature.contains("| error"));
-        assert!(length.typed_signature().ends_with("| error"));
+        let recent = function_descriptor("recent_commits").expect("`recent_commits` is a known function");
+        assert!(recent.fallible);
+        assert!(recent.signature.contains("recent_commits("));
+        assert!(!recent.signature.contains("| error"));
+        assert!(recent.typed_signature().ends_with("| error"));
     }
 
     #[test]
@@ -1529,7 +1955,7 @@ mod tests {
 
         let vendor = function_descriptor("remote_vendor").unwrap();
         let typed = vendor.typed_signature();
-        assert!(typed.contains("enum(\"\", github, gitlab, gitea, forgejo"));
+        assert!(typed.contains("enum('',github,gitlab,gitea,forgejo"), "{typed}");
         assert!(typed.ends_with("| error"));
     }
 
@@ -1550,18 +1976,18 @@ mod tests {
         }
 
         for descriptor in function_descriptors() {
-            let name = function_name(descriptor.signature);
+            let name = &*descriptor.name;
             let candidate = candidates
                 .iter()
                 .find(|candidate| {
-                    candidate.label == descriptor.signature && candidate.insert_text == name
+                    *candidate.label == *descriptor.signature && candidate.insert_text == name
                 })
                 .unwrap_or_else(|| {
                     panic!("function descriptor `{}` missing from completion", descriptor.signature)
                 });
             assert_eq!(candidate.kind, ExprCompletionKind::Function);
             assert_eq!(candidate.detail, Some(descriptor.typed_signature()));
-            assert_eq!(candidate.documentation.as_deref(), Some(descriptor.description));
+            assert_eq!(candidate.documentation.as_deref(), Some(&*descriptor.description));
         }
     }
 
@@ -1720,10 +2146,12 @@ mod tests {
                 "`{name}` hover block must link to the query vocabulary: {block}"
             );
 
-            // D4 completion documentation.
+            // D4 completion documentation, on the query overload (the
+            // `count` overload takes no query).
+            let query = format!("{name}(query)");
             let documented = candidates
                 .iter()
-                .filter(|candidate| function_name(&candidate.label) == name)
+                .filter(|candidate| candidate.label == query)
                 .collect::<Vec<_>>();
             assert!(!documented.is_empty(), "`{name}` must reach completion");
             for candidate in documented {
@@ -1801,11 +2229,11 @@ mod tests {
 
     #[test]
     fn test_format_function_block_carries_typed_signature_and_description() {
-        let length = function_descriptor("length").expect("`length` is a known function");
-        let block = format_function_block(length);
-        assert!(block.contains(&length.typed_signature()));
+        let recent = function_descriptor("recent_commits").expect("`recent_commits` is a known function");
+        let block = format_function_block(recent);
+        assert!(block.contains(&recent.typed_signature()));
         assert!(block.contains("| error"));
-        assert!(block.contains(length.description));
+        assert!(block.contains(&*recent.description));
     }
 
     /// More-context plan 4.7: every added `ctx.*` variable and function is
@@ -1825,28 +2253,42 @@ mod tests {
         }
 
         for (expression, name, typed) in [
-            ("recent_commits(3)", "recent_commits", "recent_commits(count: number(integer)) -> string[] | error"),
+            (
+                "recent_commits(3)",
+                "recent_commits",
+                "recent_commits(count: number(integer;min(1))) -> recent-commits | error",
+            ),
             (
                 "ping_under(\"10.0.0.1\", 50)",
                 "ping_under",
-                "ping_under(address: ip-address, timeout: number, [attempts: number(integer)]) -> boolean | \"unstable\" | null | error",
+                "ping_under(address: ip-address, timeout: number, [attempts: number(integer;min(1);max(100))]) -> boolean | enum(unstable) | null | error",
             ),
-            ("has_agentic_cli(\"kimi_code\")", "has_agentic_cli", "\"kimi-code\""),
-            ("as_markdown(\"x\")", "as_markdown", "as_markdown(content: string) -> string | error"),
-            ("has_binary(\"sh\")", "has_binary", "has_binary(name_or_path: string) -> boolean"),
+            (
+                "has_agentic_cli(\"kimi_code\")",
+                "has_agentic_cli",
+                "has_agentic_cli(agent: agentic-cli | null) -> boolean | error",
+            ),
+            (
+                "as_markdown(\"x\")",
+                "as_markdown",
+                "as_markdown(content: string | null) -> string | null | error",
+            ),
+            ("has_binary(\"sh\")", "has_binary", "has_binary(name_or_path: string | null) -> boolean"),
         ] {
             assert!(
                 candidates.iter().any(|candidate| candidate.insert_text == name
                     && candidate.detail.as_deref().is_some_and(|detail| detail.contains(typed))),
                 "completion for {name} must carry `{typed}`"
             );
-            let hover = hover_markdown(expression, 1, |_| None, |_| None);
+            let hover = hover_markdown(expression, 1, &untyped(), |_| None, |_| None);
             assert!(hover.contains(typed), "{hover}");
             assert!(!hover.contains("not implemented"), "hover must not evaluate: {hover}");
         }
 
         let recent = ctx_descriptor("recent_commits").unwrap();
-        assert_eq!(function_descriptor("recent_commits").unwrap().description, recent.description);
+        // The function and the variable describe each other.
+        assert!(function_descriptor("recent_commits").unwrap().description.contains("`ctx.recent_commits`"));
+        assert!(recent.description.contains("`recent_commits(count)`"));
     }
 
     #[test]
@@ -1950,15 +2392,15 @@ mod tests {
         let no_schema = |_: &str| None;
         // Body (value dialect) hover renders `||` as fallback — the behavior this
         // change must preserve.
-        let body = hover_markdown("a || b", 0, no_fm, no_schema);
+        let body = hover_markdown("a || b", 0, &untyped(), no_fm, no_schema);
         assert!(body.contains("`a || b`"), "{body}");
         // Frontmatter (condition dialect) hover lowers `||` to a logical `or(...)`.
-        let cond = hover_markdown_condition("a || b", 0, no_fm, no_schema);
+        let cond = hover_markdown_condition("a || b", 0, &untyped(), no_fm, no_schema);
         assert!(cond.contains("`or(a, b)`"), "{cond}");
         // A function-call name inside a condition expression still enriches.
         let source = "is_empty(title) || is_string(title)";
         let fn_offset = source.find("is_empty").unwrap() + 2;
-        let enriched = hover_markdown_condition(source, fn_offset, no_fm, no_schema);
+        let enriched = hover_markdown_condition(source, fn_offset, &untyped(), no_fm, no_schema);
         let is_empty = function_descriptor("is_empty").expect("`is_empty` is a known function");
         assert!(enriched.contains(&format_function_block(is_empty)), "{enriched}");
     }
@@ -2025,8 +2467,8 @@ mod tests {
             let expression = "spec-name || foo";
             for offset in 0..="spec-name".len() {
                 for markdown in [
-                    hover_markdown(expression, offset, kebab_scalar, |_| None),
-                    hover_markdown_condition(expression, offset, kebab_scalar, |_| None),
+                    hover_markdown(expression, offset, &untyped(), kebab_scalar, |_| None),
+                    hover_markdown_condition(expression, offset, &untyped(), kebab_scalar, |_| None),
                 ] {
                     assert!(
                         markdown.contains("from frontmatter `spec-name`"),
@@ -2039,9 +2481,9 @@ mod tests {
         #[test]
         fn hover_keeps_double_dash_operands_separate() {
             let expression = "foo--bar";
-            let on_foo = hover_markdown(expression, 1, kebab_scalar, |_| None);
+            let on_foo = hover_markdown(expression, 1, &untyped(), kebab_scalar, |_| None);
             assert!(on_foo.contains("from frontmatter `foo`"), "{on_foo}");
-            let on_bar = hover_markdown(expression, expression.len() - 1, kebab_scalar, |_| None);
+            let on_bar = hover_markdown(expression, expression.len() - 1, &untyped(), kebab_scalar, |_| None);
             assert!(on_bar.contains("from frontmatter `bar`"), "{on_bar}");
         }
 

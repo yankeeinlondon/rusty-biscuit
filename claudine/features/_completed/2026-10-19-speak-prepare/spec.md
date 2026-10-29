@@ -1,5 +1,7 @@
 ---
 area: biscuit-speaks
+canonical_docs:
+    - biscuit-speaks/docs/tts-caching.md
 status: finalized-spec
 created: 2026-10-10
 owner: Ken Snyder <ken@ken.net>

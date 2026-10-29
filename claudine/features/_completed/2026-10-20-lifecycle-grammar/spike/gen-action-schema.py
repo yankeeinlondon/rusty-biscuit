@@ -10,7 +10,8 @@ Emits, under spike/schemas/:
   lifecycle-collapsed.yaml    depth 5 over the collapsed action table
   lifecycle-collapsed-d3.yaml depth 3 over the collapsed action table
 
-Usage: python3 gen-action-schema.py   (paths are absolute; run from anywhere)
+Usage: python3 gen-action-schema.py   (paths derive from this file's location;
+       run from any directory)
 
 Traps this generator works around (each is a finding in spike-results.md):
   T1  Darkmatter's standalone source-map projector cannot locate `- arm` lines
@@ -49,8 +50,11 @@ def dump(doc):
     return yaml.dump(doc, Dumper=SchemaDumper, sort_keys=False, width=float("inf"))
 
 
-REPO = Path("/Volumes/coding/wt/rusty-biscuit/feat-schema-enhancement")
-OUT = REPO / "claudine/features/2026-09-21-lifecycle-ergonomics/spike/schemas"
+# This file sits at claudine/features/<lifecycle>/<feature>/spike/, five
+# directories below the repository root; output goes to the adjacent schemas/.
+SPIKE = Path(__file__).resolve().parent
+REPO = SPIKE.parents[4]
+OUT = SPIKE / "schemas"
 CATALOG_RS = REPO / "darkmatter/lib/src/effects/catalog.rs"
 FUNCS_YAML = REPO / "darkmatter/docs/schemas/expression-functions.yaml"
 

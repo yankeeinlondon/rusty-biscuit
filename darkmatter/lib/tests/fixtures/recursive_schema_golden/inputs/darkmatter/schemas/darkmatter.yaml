@@ -1,0 +1,13 @@
+# The global catalog: the one declaration of every Darkmatter global's shape.
+# The runtime, `md schema`, and DMLS read these resolved declarations; the
+# resolved `fm` definition is the built-in document baseline. A catalog is
+# registered explicitly and never applies as a document schema.
+kind: schema
+description: the shapes of every Darkmatter global
+$schema:
+    fm: fm@./partials/fm.yaml -> the frontmatter; its resolved definition is the built-in document baseline
+    ctx: context@./partials/context-variables.yaml -> context captured once at the start of the document's lifecycle
+    current: context@./partials/context-variables.yaml -> the same context, materialized lazily when an event reads it
+    env: object -> environment variables captured once at the start of the document's lifecycle
+    err: err@./partials/error.yaml -> the active failure
+    timing: timing@./partials/timing.yaml -> observed durations

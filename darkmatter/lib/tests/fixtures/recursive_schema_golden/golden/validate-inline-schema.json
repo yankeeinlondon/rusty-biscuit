@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "rating": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "minimum": 0,
+          "maximum": 5,
+          "type": "number"
+        }
+      ]
+    }
+  },
+  "required": [
+    "title"
+  ]
+}

@@ -4,10 +4,10 @@
 //! matching trigger schemas of its five schema locations, with Claudine's
 //! embedded bundle ([`bundle`]) as the last-resort location, under its
 //! authored `$schema` (see [`load_effective_schema`]). Darkmatter's compose
-//! pipeline also runs schema validation as an always-on stage between
-//! override application and shell expansion (see
-//! `darkmatter::markdown::compose::schema_validation`), against the authored
-//! `$schema` alone. When the (post-override) frontmatter does not satisfy it,
+//! pipeline also runs effective-schema validation between frontmatter
+//! interpolation and shell expansion (see
+//! `darkmatter::markdown::compose::schema_validation`). When the
+//! post-override frontmatter does not satisfy that schema,
 //! compose aborts with `MarkdownError::SchemaValidationFailed`, which the
 //! prepare layer surfaces as `CompositionError::ComposeFailed`.
 //!
@@ -34,10 +34,8 @@
 //! user-visible warning to stderr; `tracing::warn!` events still fire for
 //! anyone running with structured tracing enabled.
 //!
-//! See [`claudine/features/2026-05-15-schemas/plan.md`][plan] for the
-//! Phase 2 contract.
-//!
-//! [plan]: ../../../../features/2026-05-15-schemas/plan.md
+//! The current launch contract is documented in
+//! [Composition](../../../../docs/topics/composition.md).
 
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::schemas::{
@@ -55,15 +53,18 @@ use super::prepare::{
     prepare_inline_selecting,
 };
 use super::types::{CompositionMode, PreparedComposition, ResolvedCompositionSource};
-use darkmatter::markdown::schemas::{SchemaPhase, ValidationReport};
+use darkmatter::markdown::schemas::{PositionMap, SchemaPhase, ValidationReport};
 
 pub mod bundle;
 pub mod classify;
+pub mod findings;
+pub mod globals;
 mod status_render;
 pub mod supplied;
 pub mod translate;
 
 pub use classify::*;
+pub use findings::{TriggerFindings, TriggerWarning};
 pub use status_render::{
     description_suffix, escape_schema_prose, render_optional_line, render_required_line,
     schema_status_report_prose,
@@ -189,6 +190,15 @@ pub fn prepare_direct_with_schema_and_prompt(
     prompt_source: PromptSource,
 ) -> Result<PreparedComposition, CompositionError> {
     prepare_with_schema(source, options, PrepareMode::Direct(prompt_source, None))
+}
+
+pub(super) fn prepare_direct_with_schema_and_prompt_selecting(
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    prompt_source: PromptSource,
+    select: Option<&ResolvedIdentitySelector<'_>>,
+) -> Result<PreparedComposition, CompositionError> {
+    prepare_with_schema(source, options, PrepareMode::Direct(prompt_source, select))
 }
 
 /// Wrap [`prepare_inline`] with schema-aware error categorization and
@@ -541,35 +551,73 @@ pub fn authored_schema_parameters(
 /// record's origin, as composition judges them.
 ///
 /// Returns `Ok(None)` when no schema applies: no authored `$schema` and no
-/// matching trigger.
+/// matching trigger. Either way, and when the authored `$schema` then fails,
+/// the triggers discovery skipped as invalid are recorded in
+/// `trigger_findings`; they are warnings, never a [`CompositionError`].
 pub(super) fn load_effective_schema(
     source: &ResolvedCompositionSource,
     snapshot: Option<&serde_json::Value>,
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     callers: &darkmatter::markdown::compose::CallerInputRecords,
+    trigger_findings: &TriggerFindings,
 ) -> Result<Option<EffectiveSchema>, CompositionError> {
-    let schema_error = |err: SchemaError| {
-        // A grammar/convert/shape error is a body-syntax problem (`SchemaParse`);
-        // a missing file / remote URL / ambiguous reference / malformed trigger
-        // stays `SchemaLoad`. Darkmatter hands us the typed cause directly.
-        schema_error_to_composition_error(&source.resolved_path, err.to_string(), Some(&err))
-    };
+    let schemas = discover_schema_owner(
+        source,
+        file_ref_fallback_dir,
+        file_resolution_context,
+        trigger_findings,
+    )?
+    .with_caller_input_records(callers);
+    prepare_effective_schema(source, snapshot, &schemas)
+}
+
+/// Discover the document's trigger schemas once, record the triggers it
+/// skipped as invalid in `trigger_findings`, and own the result for the
+/// caller's passes.
+///
+/// A failed scan (root enumeration or text read) is an error and records
+/// nothing; an invalid individual trigger is a finding, never an error.
+fn discover_schema_owner(
+    source: &ResolvedCompositionSource,
+    file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
+    trigger_findings: &TriggerFindings,
+) -> Result<DarkmatterSchemas, CompositionError> {
     let document_context = file_resolution_context.for_source(&source.resolved_path);
     let mut schemas = DarkmatterSchemas::new(document_context)
         .with_embedded_trigger_bundle(bundle::claudine_schema_bundle())
         .and_then(DarkmatterSchemas::with_trigger_discovery)
-        .map_err(schema_error)?
-        .with_file_resolution_context(file_resolution_context.clone())
-        .with_caller_input_records(callers);
+        .map_err(|err| schema_load_error(source, &err))?;
+    // Recorded before any effective schema resolves, so a later authored
+    // `$schema` failure is delivered with the triggers skipped before it.
+    trigger_findings.record(schemas.discovery_findings());
+    schemas = schemas.with_file_resolution_context(file_resolution_context.clone());
     if let Some(fallback) = file_ref_fallback_dir {
         schemas = schemas.with_file_ref_fallback_dir(fallback);
     }
+    Ok(schemas)
+}
+
+/// Match the discovered triggers against `snapshot` (`None`: the source's own
+/// frontmatter) and merge the matches under the authored `$schema`.
+fn prepare_effective_schema(
+    source: &ResolvedCompositionSource,
+    snapshot: Option<&serde_json::Value>,
+    schemas: &DarkmatterSchemas,
+) -> Result<Option<EffectiveSchema>, CompositionError> {
     match snapshot.and_then(serde_json::Value::as_object) {
         Some(values) => schemas.effective_for(&matching_markdown(source, values)),
         None => schemas.effective_for(&source.markdown),
     }
-    .map_err(schema_error)
+    .map_err(|err| schema_load_error(source, &err))
+}
+
+/// A grammar/convert/shape error is a body-syntax problem (`SchemaParse`); a
+/// missing file / remote URL / ambiguous reference / failed scan stays
+/// `SchemaLoad`. Darkmatter hands us the typed cause directly.
+fn schema_load_error(source: &ResolvedCompositionSource, err: &SchemaError) -> CompositionError {
+    schema_error_to_composition_error(&source.resolved_path, err.to_string(), Some(err))
 }
 
 /// The authored `$schema` alone, with no trigger layers: what the document
@@ -681,6 +729,10 @@ pub struct PreValidatedSchema {
 /// - **Schema load failure** → returned as
 ///   [`CompositionError::SchemaLoad`].
 ///
+/// Whatever the outcome, the schema triggers discovery skipped as invalid
+/// are recorded in `trigger_findings` (the invocation's record), never
+/// turned into an error.
+///
 /// ## Errors
 ///
 /// Returns one of the typed `CompositionError` variants listed above when
@@ -691,6 +743,7 @@ pub fn pre_validate_schema(
     set_overrides: Option<&serde_json::Value>,
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
+    trigger_findings: &TriggerFindings,
 ) -> Result<PreValidatedSchema, CompositionError> {
     pre_validate_schema_for_mode(
         source,
@@ -698,6 +751,7 @@ pub fn pre_validate_schema(
         file_ref_fallback_dir,
         file_resolution_context,
         CompositionMode::ChainedDocument,
+        trigger_findings,
     )
 }
 
@@ -719,6 +773,7 @@ pub fn pre_validate_schema_for_mode(
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
+    trigger_findings: &TriggerFindings,
 ) -> Result<PreValidatedSchema, CompositionError> {
     pre_validate_with_origin(
         source,
@@ -727,6 +782,7 @@ pub fn pre_validate_schema_for_mode(
         file_ref_fallback_dir,
         file_resolution_context,
         mode,
+        trigger_findings,
     )
 }
 
@@ -744,6 +800,7 @@ pub fn pre_validate_layered_for_mode(
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
+    trigger_findings: &TriggerFindings,
 ) -> Result<PreValidatedSchema, CompositionError> {
     pre_validate_with_origin(
         source,
@@ -752,6 +809,7 @@ pub fn pre_validate_layered_for_mode(
         file_ref_fallback_dir,
         file_resolution_context,
         mode,
+        trigger_findings,
     )
 }
 
@@ -762,6 +820,7 @@ fn pre_validate_with_origin(
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
+    trigger_findings: &TriggerFindings,
 ) -> Result<PreValidatedSchema, CompositionError> {
     pre_validate_verdict(
         source,
@@ -770,6 +829,7 @@ fn pre_validate_with_origin(
         file_ref_fallback_dir,
         file_resolution_context,
         mode,
+        trigger_findings,
     )
     .map_err(|err| prefer_removed_grammar(source, &build_effective_instance(source, set_overrides), err))
 }
@@ -799,30 +859,35 @@ fn pre_validate_verdict(
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
+    trigger_findings: &TriggerFindings,
 ) -> Result<PreValidatedSchema, CompositionError> {
     let phase = launch_phase_for_mode(mode);
 
     // First pass: drop non-template invalid optionals so the prepare-time
     // pipeline (and the preflight Darkmatter pass) sees a clean slate.
-    let (source, set_overrides, dropped_optionals) = drop_invalid_optionals_with_origin(
+    // One discovery serves both passes; each pass still matches and prepares
+    // against its own values and caller records.
+    let schemas = discover_schema_owner(
+        source,
+        file_ref_fallback_dir,
+        file_resolution_context,
+        trigger_findings,
+    )?;
+    let original_callers = override_records(set_overrides, file_resolution_context, file_ref_fallback_dir);
+    let schemas = schemas.with_caller_input_records(&original_callers);
+    let (source, set_overrides, dropped_optionals) = drop_invalid_optionals_with_schemas(
         source.clone(),
         set_overrides.cloned(),
         data_keys,
-        file_ref_fallback_dir,
-        file_resolution_context,
+        &schemas,
     );
 
     // Deferral is decided on the raw values, where a stored literal token is
     // visibly data; validation judges the text composition will read.
     let raw_instance = build_effective_instance(&source, set_overrides.as_ref());
     let callers = override_records(set_overrides.as_ref(), file_resolution_context, file_ref_fallback_dir);
-    let effective = match load_effective_schema(
-        &source,
-        Some(&raw_instance),
-        file_ref_fallback_dir,
-        file_resolution_context,
-        &callers,
-    ) {
+    let schemas = schemas.with_caller_input_records(&callers);
+    let effective = match prepare_effective_schema(&source, Some(&raw_instance), &schemas) {
         Ok(Some(e)) => e,
         // No authored `$schema` and no matching trigger: nothing to judge.
         Ok(None) => {
@@ -834,18 +899,19 @@ fn pre_validate_verdict(
         }
         Err(err) => return Err(err),
     };
-    let mut instance = crate::composition::closure::stored_text(&raw_instance);
+    // Darkmatter decodes the stored tokens itself, so it judges their text
+    // without ever deferring it as a template.
+    let mut instance = raw_instance.clone();
     normalize_file_array_values(&mut instance, Some(&effective));
-    let report = match phase {
-        Some(phase) => effective.validate_for_phase(&instance, phase).map_err(|error| {
+    let report = effective
+        .validate_stored(&instance, &PositionMap::new(), phase)
+        .map_err(|error| {
             schema_error_to_composition_error(
                 &source.resolved_path,
                 error.to_string(),
                 Some(&error),
             )
-        })?,
-        None => effective.validate(&instance),
-    };
+        })?;
     if report.valid {
         return Ok(PreValidatedSchema {
             source,
@@ -863,8 +929,8 @@ fn pre_validate_verdict(
         );
 
     // Filter problems composition-tolerantly: drop Invalid/Type verdicts
-    // whose raw value contains template syntax, because Darkmatter may
-    // resolve them to valid values during composition. A caller-originated
+    // whose raw value at the problem's path contains template syntax, because
+    // Darkmatter may resolve them to valid values during composition. A caller-originated
     // eager file likewise keeps its launch-area provenance only in canonical
     // preparation, but only after the literal reference resolves there. An
     // unresolved partial must remain visible so the CLI can offer completion.
@@ -877,7 +943,7 @@ fn pre_validate_verdict(
             let caller_resolved = !matches!(p.kind, ValidationProblemKind::Missing)
                 && top_level_pointer_segment(&p.path)
                     .is_some_and(|name| caller_resolved_eager_files.contains(&name));
-            !caller_resolved && is_composition_independent(p, &raw_instance, data_keys)
+            !caller_resolved && is_composition_independent(p, &raw_instance, data_keys, &report.deferred)
         })
         .cloned()
         .collect();
@@ -1018,34 +1084,46 @@ fn normalize_file_array_values(
 ///
 /// Retained as a building block for [`pre_validate_schema`] and for
 /// callers (notably `sequence`) that want to scrub doc-wide invalid
-/// optionals before per-step validation.
+/// optionals before per-step validation. Skipped schema triggers are
+/// recorded in `trigger_findings`, as by [`pre_validate_schema`].
 pub fn drop_invalid_optionals(
     source: ResolvedCompositionSource,
     set_overrides: Option<serde_json::Value>,
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
+    trigger_findings: &TriggerFindings,
 ) -> (
     ResolvedCompositionSource,
     Option<serde_json::Value>,
     Vec<DroppedOptional>,
 ) {
-    drop_invalid_optionals_with_origin(
+    // A failed scan is left to the prepare-time validator to report.
+    let Ok(schemas) = discover_schema_owner(
+        &source,
+        file_ref_fallback_dir,
+        file_resolution_context,
+        trigger_findings,
+    ) else {
+        return (source, set_overrides, Vec::new());
+    };
+    let callers = override_records(set_overrides.as_ref(), file_resolution_context, file_ref_fallback_dir);
+    let schemas = schemas.with_caller_input_records(&callers);
+    drop_invalid_optionals_with_schemas(
         source,
         set_overrides,
         &std::collections::BTreeSet::new(),
-        file_ref_fallback_dir,
-        file_resolution_context,
+        &schemas,
     )
 }
 
-/// [`drop_invalid_optionals`] where the overrides named in `data_keys` are
+/// [`drop_invalid_optionals`] against an already discovered owner whose caller
+/// records match `set_overrides`; the overrides named in `data_keys` are
 /// data: final values, dropped when invalid whatever text they hold.
-fn drop_invalid_optionals_with_origin(
+fn drop_invalid_optionals_with_schemas(
     mut source: ResolvedCompositionSource,
     mut set_overrides: Option<serde_json::Value>,
     data_keys: &std::collections::BTreeSet<String>,
-    file_ref_fallback_dir: Option<&std::path::Path>,
-    file_resolution_context: &biscuit_file::FileResolutionContext,
+    schemas: &DarkmatterSchemas,
 ) -> (
     ResolvedCompositionSource,
     Option<serde_json::Value>,
@@ -1056,25 +1134,28 @@ fn drop_invalid_optionals_with_origin(
     else {
         return (source, set_overrides, dropped);
     };
-    let callers = override_records(set_overrides.as_ref(), file_resolution_context, file_ref_fallback_dir);
-    let effective = match load_effective_schema(
+    let effective = match prepare_effective_schema(
         &source,
         Some(&serde_json::Value::Object(instance.clone())),
-        file_ref_fallback_dir,
-        file_resolution_context,
-        &callers,
+        schemas,
     ) {
         Ok(Some(e)) => e,
-        // No schema applies, or it cannot be loaded: the prepare-time
-        // validator reports a load failure.
+        // No schema applies, or it cannot be prepared: the prepare-time
+        // validator reports a failure.
         Ok(None) | Err(_) => return (source, set_overrides, dropped),
     };
 
-    // Judged on decoded text; only a judgment is made here, and the source
-    // handed on keeps its stored tokens.
-    let report = effective.validate(&crate::composition::closure::stored_text(
+    // Judged on the stored tokens' text, never deferred as a template; only
+    // a judgment is made here, and the source handed on keeps its tokens.
+    let report = match effective.validate_stored(
         &serde_json::Value::Object(instance.clone()),
-    ));
+        &PositionMap::new(),
+        None,
+    ) {
+        Ok(report) => report,
+        // Unphased validation projects nothing, so it cannot fail.
+        Err(_) => return (source, set_overrides, dropped),
+    };
     if report.valid {
         return (source, set_overrides, dropped);
     }
@@ -1212,15 +1293,21 @@ fn file_override_resolves_from(
 /// Whether a validation problem stands regardless of composition.
 ///
 /// `Missing` always stands: no template can conjure a key absent from both raw
-/// frontmatter and overrides. `Type`/`Invalid` stand only when the problem's
-/// top-level property in `instance` holds no template or shell syntax, since
-/// composition may still turn such a value valid; a property named in
-/// `data_keys` is data and always stands. Shared by the pre-validator and
-/// root-union arm selection so both judge arms by the same rule.
+/// frontmatter and overrides. `Type`/`Invalid` stand unless Darkmatter's
+/// [`awaits_rendering`](darkmatter::markdown::schemas::awaits_rendering) says
+/// rendering could settle them: the value at the problem's own path (its
+/// nearest existing ancestor when absent) holds template or shell syntax the
+/// schema did not already accept as `deferred` (`deferred`, from the report)
+/// and no malformed template, and the problem is not an unknown or missing
+/// key on a collection. A
+/// literal sibling of a template always stands. A property named in `data_keys`
+/// is data and always stands. Shared by the pre-validator and root-union arm
+/// selection so both judge arms by the same rule.
 pub(super) fn is_composition_independent(
     problem: &ValidationProblem,
     instance: &serde_json::Value,
     data_keys: &std::collections::BTreeSet<String>,
+    deferred: &[String],
 ) -> bool {
     match problem.kind {
         ValidationProblemKind::Missing => true,
@@ -1228,8 +1315,17 @@ pub(super) fn is_composition_independent(
             let Some(name) = top_level_pointer_segment(&problem.path) else {
                 return true;
             };
+            // A malformed `{{ … }}` span can never render into a valid
+            // value, so its problem stands, as plain validation reports it.
+            let holds = |text: &str| {
+                darkmatter::markdown::literal_token::holds_pending_syntax(text)
+                    && !darkmatter::markdown::compose::expression::is_malformed_template(text)
+            };
             data_keys.contains(&name)
-                || !value_needs_composition(instance.as_object().and_then(|map| map.get(&name)))
+                || !darkmatter::markdown::schemas::authored_node_at(instance, &problem.path)
+                    .is_some_and(|(pointer, node)| {
+                        darkmatter::markdown::schemas::awaits_rendering(problem, node, &pointer, deferred, &holds)
+                    })
         }
     }
 }

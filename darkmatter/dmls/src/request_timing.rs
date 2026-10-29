@@ -26,7 +26,7 @@
 //! Stage figures are elapsed times, not a breakdown of the total:
 //!
 //! - `overlay_build_ms` contains `schema_assembly_ms`, which contains
-//!   `trigger_registry_ms`. A trigger-schema file being authored times its
+//!   `trigger_registry_ms`. A schema-trigger file being authored times its
 //!   registry lookup directly under the overlay build.
 //! - `provider_chain_ms` is a sibling of the overlay build.
 //!

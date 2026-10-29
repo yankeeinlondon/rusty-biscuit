@@ -98,7 +98,7 @@ fn reader_rows() -> Vec<Row> {
         "http_post",
     ] {
         let signature = side_effect_signature(verb).unwrap_or_else(|| panic!("`{verb}` signature"));
-        let last = signature.required_count() - 1;
+        let last = signature.min_count() - 1;
         let args: Vec<Value> = (0..=last)
             .map(|i| if i == last { json!(BAD) } else { json!("x.md") })
             .collect();
@@ -111,11 +111,11 @@ fn reader_rows() -> Vec<Row> {
     ));
 
     let length = expression_function_signature("length").expect("`length` signature");
-    let param = length.params[0].clone();
+    let param = length.overloads()[0].names().next().expect("`length` takes a parameter");
     rows.push(row("length positional", json!({ "length": BAD }), "length.arg[0]"));
     rows.push(row(
         "length named",
-        json!({ "length": { param.as_str(): BAD } }),
+        json!({ "length": { param: BAD } }),
         format!("length.{param}"),
     ));
 

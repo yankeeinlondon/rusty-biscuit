@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "asset": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "type": "string",
+              "format": "darkmatter-file"
+            }
+          ]
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "lazy": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "anyOf": [
+            {
+              "const": ""
+            },
+            {
+              "type": "string",
+              "format": "darkmatter-file-reference"
+            }
+          ]
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "assets": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "darkmatter-file"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

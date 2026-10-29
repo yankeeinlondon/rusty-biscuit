@@ -130,7 +130,7 @@ fn schemas_without_repeats_keep_their_lowered_output() {
                 "title": { "type": "string", "pattern": r"\S", "maxLength": 80 },
                 "slug": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[a-z-]+$" }] },
                 "count": {
-                    "anyOf": [{ "type": "null" }, { "type": "integer", "minimum": 0, "maximum": 10 }],
+                    "anyOf": [{ "type": "null" }, { "type": "integer", "minimum": 0, "maximum": 10, "x-darkmatter-integer": true }],
                     "default": 3
                 },
                 "tags": {

@@ -306,5 +306,8 @@ fn describe_atom(atom: &PropertyAtom) -> String {
         TypeExpr::InlineObject(_) => format!("inline object{suffix}"),
         TypeExpr::Imported { name, reference } => format!("{name}{suffix}@{reference}"),
         TypeExpr::Union(_) => format!("union{suffix}"),
+        TypeExpr::Tuple(_) => format!("tuple{suffix}"),
+        TypeExpr::Function(_) => format!("function{suffix}"),
+        TypeExpr::Ref(key) => format!("{name}{suffix}", name = key.name),
     }
 }

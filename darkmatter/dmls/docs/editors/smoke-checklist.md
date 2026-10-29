@@ -23,8 +23,8 @@ Zed, and Helix, remain manual.
 
 Run this checklist once per target editor after installing `dmls` on `PATH` and
 wiring the editor per its guide in this folder. It exercises every v1 feature
-family end to end. Record results and any client-quirk observations in the
-feature folder ([../../features/2026-07-04-dmls/](../../../features/2026-07-04-dmls/)).
+family end to end. Record results and any client-quirk observations
+alongside the editor's guide in this folder.
 
 Use a small scratch workspace with a `.dmls.toml` at its root, at least two
 Markdown files that link to each other (both Markdown `[text](path)` and wiki

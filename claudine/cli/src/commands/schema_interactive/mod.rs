@@ -107,6 +107,7 @@ pub fn pre_validate_with_interactive_collection(
     file_resolution_context: &biscuit_file::FileResolutionContext,
     defer_schema_verdict: bool,
     mode: CompositionMode,
+    trigger_findings: &claudine::composition::TriggerFindings,
 ) -> Result<PreValidatedSchema, CompositionError> {
     let first = pre_validate_schema_for_mode(
         source,
@@ -114,6 +115,7 @@ pub fn pre_validate_with_interactive_collection(
         file_ref_fallback_dir,
         file_resolution_context,
         mode,
+        trigger_findings,
     );
     let Err(err) = first else {
         return first;
@@ -144,6 +146,7 @@ pub fn pre_validate_with_interactive_collection(
             err,
             file_ref_fallback_dir,
             file_resolution_context,
+            trigger_findings,
         );
     }
 
@@ -177,6 +180,7 @@ pub fn pre_validate_with_interactive_collection(
         file_ref_fallback_dir,
         file_resolution_context,
         mode,
+        trigger_findings,
     ) {
         render_status_report(&report, term);
     }
@@ -196,6 +200,7 @@ pub fn pre_validate_with_interactive_collection(
         file_ref_fallback_dir,
         file_resolution_context,
         mode,
+        trigger_findings,
     )
 }
 
@@ -221,6 +226,7 @@ fn resolve_unresolved_file_reference(
     err: CompositionError,
     file_ref_fallback_dir: Option<&std::path::Path>,
     file_resolution_context: &biscuit_file::FileResolutionContext,
+    trigger_findings: &claudine::composition::TriggerFindings,
 ) -> Result<PreValidatedSchema, CompositionError> {
     let CompositionError::UnresolvedFileReference {
         ref property,
@@ -255,6 +261,7 @@ fn resolve_unresolved_file_reference(
         Some(&serde_json::Value::Object(merged)),
         file_ref_fallback_dir,
         file_resolution_context,
+        trigger_findings,
     )
 }
 

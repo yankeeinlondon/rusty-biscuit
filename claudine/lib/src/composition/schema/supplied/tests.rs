@@ -91,7 +91,7 @@ fn supplied_file_failure_matches_existing_partial_diagnostic() {
     .caller_input_records;
     let pending = unresolved_supplied_files(&source, &records, &context.for_source(&path));
     let previous =
-        super::super::pre_validate_schema(&source, overrides.as_ref(), Some(dir.path()), &crate::test_support::context())
+        super::super::pre_validate_schema(&source, overrides.as_ref(), Some(dir.path()), &crate::test_support::context(), &crate::composition::TriggerFindings::default())
             .unwrap_err();
     let CompositionError::UnresolvedFileReference { reason: old_reason, .. } = previous else {
         panic!("expected the existing partial-file classification");
@@ -510,6 +510,99 @@ fn an_existing_caller_file_selects_an_arm_only_when_every_match_group_admits_it(
     }
 }
 
+/// The globs `plan` is completed against when the caller supplies an existing
+/// `spec` file and a `plan` partial, for a union whose first arm declares
+/// `spec` (and its named types) as `first_arm_spec`.
+fn plan_alternatives_for_caller_spec(first_arm_spec: &str, spec_file: &str) -> Vec<Vec<Vec<String>>> {
+    let dir = tempfile::tempdir().unwrap();
+    let caller = dir.path().join("caller");
+    let document = dir.path().join("document");
+    for folder in ["notes", "other"] {
+        std::fs::create_dir_all(caller.join(folder)).unwrap();
+        std::fs::write(caller.join(folder).join("x.md"), "x\n").unwrap();
+    }
+    std::fs::create_dir(&document).unwrap();
+    let path = document.join("prompt.md");
+    std::fs::write(
+        &path,
+        format!(
+            "---\n\
+             $schema:\n\
+             {first_arm_spec}\
+             \x20   plan: 'file(required;eager;match(**/one/*.md))'\n\
+             \x20 - spec: file\n\
+             \x20   plan: 'file(required;eager;match(**/two/*.md))'\n\
+             ---\nbody\n"
+        ),
+    )
+    .unwrap();
+    let source =
+        resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot_at(dir.path())).unwrap();
+    let records = CallerInputLayers::from_caller_overrides(
+        Some(json!({"spec": spec_file, "plan": "partial"})),
+        FileResolutionContext::new(&caller),
+    )
+    .caller_input_records;
+    let pending =
+        unresolved_supplied_files(&source, &records, &FileResolutionContext::new(&document).for_source(&path));
+    assert_eq!(pending.len(), 1, "{first_arm_spec} / {spec_file}: {pending:?}");
+    let CompositionError::UnresolvedFileReference { property, alternatives, .. } = &pending[0].error else {
+        panic!("expected UnresolvedFileReference, got {:?}", pending[0].error);
+    };
+    assert_eq!(property, "plan");
+    alternatives.clone()
+}
+
+/// An existing caller file outside the glob a root-union arm enforces rules
+/// that arm out, whether the glob is reached through a recursive reference,
+/// an acyclic named file type, or directly. Judged from the caller's origin,
+/// a file inside the glob leaves both arms contending (ruling D1).
+#[test]
+fn an_existing_caller_file_outside_a_glob_reached_through_a_reference_rules_its_arm_out() {
+    for (shape, first_arm_spec) in [
+        (
+            "recursive reference",
+            "\x20 - node: \"file(match('./notes/*.md')) | { children: node[] }\"\n\x20   spec: node\n",
+        ),
+        (
+            "acyclic named type",
+            "\x20 - note: \"file(match('./notes/*.md'))\"\n\x20   spec: note\n",
+        ),
+        ("direct file property", "\x20 - spec: \"file(match('./notes/*.md'))\"\n"),
+    ] {
+        assert_eq!(
+            plan_alternatives_for_caller_spec(first_arm_spec, "./notes/x.md"),
+            alternatives_of(&[&[&["**/one/*.md"]], &[&["**/two/*.md"]]]),
+            "{shape}: a file inside the glob keeps the first arm"
+        );
+        assert_eq!(
+            plan_alternatives_for_caller_spec(first_arm_spec, "./other/x.md"),
+            alternatives_of(&[&[&["**/two/*.md"]]]),
+            "{shape}: a file outside the glob rules the first arm out"
+        );
+        assert_eq!(
+            plan_alternatives_for_caller_spec(first_arm_spec, "./notes/partial"),
+            alternatives_of(&[&[&["**/one/*.md"]], &[&["**/two/*.md"]]]),
+            "{shape}: a value naming no file rules no arm out"
+        );
+    }
+}
+
+/// A file alternative written in the arm itself (`file(match(...)) | number`)
+/// has an acyclic, suggestion-only glob: an existing caller file outside it
+/// rules no arm out, so both arms' candidates remain.
+#[test]
+fn a_caller_file_outside_a_property_union_alternative_glob_rules_no_arm_out() {
+    let first_arm_spec = "\x20 - spec: \"file(match('./notes/*.md')) | number\"\n";
+    for spec_file in ["./notes/x.md", "./other/x.md"] {
+        assert_eq!(
+            plan_alternatives_for_caller_spec(first_arm_spec, spec_file),
+            alternatives_of(&[&[&["**/one/*.md"]], &[&["**/two/*.md"]]]),
+            "{spec_file}"
+        );
+    }
+}
+
 /// A partial names no file yet, so it rules no arm out: a settled arm keeps
 /// its own glob, and an undecided union still merges both (ruling D1).
 #[test]
@@ -537,7 +630,148 @@ fn late_verdict_on_a_settled_union_completes_against_that_arm_alone() {
     );
     std::fs::write(&path, settled).unwrap();
     let source = resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot_at(dir.path())).unwrap();
-    let error = super::super::pre_validate_schema(&source, Some(&json!({"spec": "cli"})), Some(dir.path()), &crate::test_support::context())
+    let error = super::super::pre_validate_schema(&source, Some(&json!({"spec": "cli"})), Some(dir.path()), &crate::test_support::context(), &crate::composition::TriggerFindings::default())
+    .unwrap_err();
+    let CompositionError::UnresolvedFileReference { alternatives, .. } = error else {
+        panic!("expected UnresolvedFileReference, got {error:?}");
+    };
+    assert_eq!(alternatives, alternatives_of(&[&[&["**/fixes/**/spec.md"]]]));
+}
+
+/// The early pass reads a caller file's timing and globs through references:
+/// a recursive type and a list of a recursive type each complete a partial
+/// against their eager file's globs, from the caller's origin, like the
+/// direct controls. A lazy file reached the same way is left for canonical
+/// preparation, and so is an acyclic union with a file alternative, which is
+/// not read as a file (as before recursive types existed).
+#[test]
+fn caller_files_through_references_are_classified_and_completed() {
+    let eager = "file(eager;match(**/*spec*.md))";
+    let lazy = "file(match(**/*spec*.md))";
+    for (shape, schema, value, pending_slots) in [
+        ("direct eager control", format!("\x20 spec: '{eager}'\n"), json!("cli"), Some(vec![None])),
+        (
+            "recursive eager",
+            format!("\x20 node: \"{eager} | {{ children: node[] }}\"\n\x20 spec: node\n"),
+            json!("cli"),
+            Some(vec![None]),
+        ),
+        (
+            "acyclic named union with an eager file",
+            format!("\x20 doc: \"{eager} | {{ title: string }}\"\n\x20 spec: doc\n"),
+            json!("cli"),
+            None,
+        ),
+        ("direct eager list control", format!("\x20 spec: '{eager}[]'\n"), json!(["cli"]), Some(vec![Some(0)])),
+        (
+            "list of recursive eager",
+            format!("\x20 node: \"{eager} | {{ children: node[] }}\"\n\x20 spec: node[]\n"),
+            json!(["cli"]),
+            Some(vec![Some(0)]),
+        ),
+        ("direct lazy control", format!("\x20 spec: '{lazy}'\n"), json!("cli"), None),
+        (
+            "recursive lazy",
+            format!("\x20 node: \"{lazy} | {{ children: node[] }}\"\n\x20 spec: node\n"),
+            json!("cli"),
+            None,
+        ),
+        (
+            "recursive eager beside a plain string",
+            format!("\x20 node: \"{eager} | string | {{ children: node[] }}\"\n\x20 spec: node\n"),
+            json!("cli"),
+            None,
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let caller = dir.path().join("caller");
+        let document = dir.path().join("document");
+        std::fs::create_dir_all(&caller).unwrap();
+        std::fs::create_dir_all(&document).unwrap();
+        let path = document.join("prompt.md");
+        std::fs::write(&path, format!("---\n$schema:\n{schema}---\nbody\n")).unwrap();
+        let source =
+            resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot_at(dir.path())).unwrap();
+        let origin = FileResolutionContext::new(&caller);
+        let records = CallerInputLayers::from_caller_overrides(Some(json!({ "spec": value })), origin)
+            .caller_input_records;
+        let pending =
+            unresolved_supplied_files(&source, &records, &FileResolutionContext::new(&document).for_source(&path));
+        let Some(slots) = pending_slots else {
+            assert!(pending.is_empty(), "{shape}: {pending:?}");
+            continue;
+        };
+        assert_eq!(pending.iter().map(|p| p.array_index).collect::<Vec<_>>(), slots, "{shape}");
+        let CompositionError::UnresolvedFileReference { alternatives, is_array, reason, .. } = &pending[0].error else {
+            panic!("{shape}: expected UnresolvedFileReference, got {:?}", pending[0].error);
+        };
+        assert_eq!(alternatives, &alternatives_of(&[&[&["**/*spec*.md"]]]), "{shape}");
+        assert_eq!(*is_array, value.is_array(), "{shape}");
+        assert!(reason.contains(&caller.display().to_string()), "{shape}: resolved from the caller: {reason}");
+    }
+}
+
+/// A root-union arm whose eager file is reached through a reference still
+/// relaxes existence for a caller's partial, so the arm applies alone and the
+/// partial completes against its glob; the other arm needs `design`. An
+/// acyclic union with an eager file alternative is not read as a file, so it
+/// offers no completion, as before recursive types existed.
+#[test]
+fn a_partial_through_a_reference_keeps_its_root_union_arm_applicable() {
+    for spec in [
+        "\x20   spec: 'file(required;eager;match(**/*spec*.md))'\n",
+        "\x20   node: \"file(eager;match(**/*spec*.md)) | { children: node[] }\"\n\x20   spec: node(required)\n",
+    ] {
+        let document = format!(
+            "---\n\
+             $schema:\n\
+             \x20 - doc_ref: file\n\
+             {spec}\
+             \x20 - design: 'file(required;match(**/*design*.md))'\n\
+             ---\nbody\n"
+        );
+        let pending = pending_for(&document, json!({"spec": "everywhere"}));
+        assert_single_spec_partial(&pending, "everywhere");
+    }
+    let acyclic = "---\n\
+         $schema:\n\
+         \x20 - doc_ref: file\n\
+         \x20   doc: \"file(eager;match(**/*spec*.md)) | { title: string }\"\n\
+         \x20   spec: doc(required)\n\
+         \x20 - design: 'file(required;match(**/*design*.md))'\n\
+         ---\nbody\n";
+    assert!(pending_for(acyclic, json!({"spec": "everywhere"})).is_empty());
+}
+
+/// The late verdict on a settled union completes against that arm's glob when
+/// the arm reaches its file through a recursive reference.
+#[test]
+fn late_verdict_reads_a_settled_arms_file_through_a_reference() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("prompt.md");
+    std::fs::write(
+        &path,
+        "---\n\
+         $schema:\n\
+         \x20 - kind: 'literal(feature)'\n\
+         \x20   node: \"file(required;eager;match(**/features/**/spec.md)) | { children: node[] }\"\n\
+         \x20   spec: node(required)\n\
+         \x20 - kind: 'literal(fix)'\n\
+         \x20   node: \"file(required;eager;match(**/fixes/**/spec.md)) | { children: node[] }\"\n\
+         \x20   spec: node(required)\n\
+         kind: fix\n\
+         ---\nbody\n",
+    )
+    .unwrap();
+    let source =
+        resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot_at(dir.path())).unwrap();
+    let error = super::super::pre_validate_schema(
+        &source,
+        Some(&json!({"spec": "cli"})),
+        Some(dir.path()),
+        &crate::test_support::context(),
+        &crate::composition::TriggerFindings::default(),
+    )
     .unwrap_err();
     let CompositionError::UnresolvedFileReference { alternatives, .. } = error else {
         panic!("expected UnresolvedFileReference, got {error:?}");

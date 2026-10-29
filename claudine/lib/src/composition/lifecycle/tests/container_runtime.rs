@@ -1,3 +1,5 @@
+use crate::composition::lifecycle::cancellation::CancellationCauseExt;
+use crate::composition::LifecycleErrorInfoExt;
 use super::*;
 use crate::composition::LifecycleErrorInfo;
 use crate::composition::lifecycle::runtime::{ContainerEventDecision as Decision, ContainerRunner};
@@ -13,10 +15,10 @@ fn exercise(frontmatter: serde_json::Value, run: impl FnOnce(&mut ContainerRunne
         source_path: dummy_path(), repo_root: None, launch_area: Some(dir.path()), context: None,
     };
     let engine = darkmatter::effects::EffectEngine::builder().mutation_root(dir.path()).auto_rehash(false).build();
-    let map = frontmatter.as_object().unwrap();
+    let map = darkmatter::markdown::compose::SharedFrontmatter::from(frontmatter.as_object().unwrap().clone());
     let stack = StackExecutionContext {
         seq: None, signal: LifecycleSignal::Initialize, scope: None,
-        frontmatter: map, live_frontmatter: None, runtime_state: None,
+        frontmatter: &map, live_frontmatter: None, runtime_state: None,
         err: None, timing: None, current: None, group: None, loop_values: None,
         base_dir: Some(dir.path()), ctx_base_dir: Some(dir.path()), prepared_context: None,
         file_resolution_context: crate::test_support::process_context(),

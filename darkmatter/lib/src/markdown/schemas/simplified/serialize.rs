@@ -1,7 +1,9 @@
-//! Serialise a [`PropertyAtom`] back into a type-and-constraint string.
+//! Serialise a [`PropertyAtom`] back into a type-and-constraint string, and
+//! one [`Constraint`] into the text diagnostics show
+//! ([`Constraint::to_schema_text`], [`Constraint::diagnostic_excerpt`]).
 //!
-//! Used by tests (especially `proptest` round-trip tests) to verify that the
-//! parser and the AST agree. The output is canonical (deterministic key
+//! Round-trip tests use the atom form to verify that the parser and the AST
+//! agree. The output is canonical (deterministic key
 //! ordering, minimal whitespace) and re-parses to an equal [`PropertyAtom`]
 //! for every atom the passive parser produces, except that `alphanumeric`
 //! options are written in canonical form, which re-parses to the same type
@@ -11,15 +13,138 @@ use std::fmt::Write;
 
 use super::{
     alphanumeric::AlphanumericOptions,
-    types::{Constraint, PropertyAtom, SimplifiedType, TypeExpr},
+    types::{
+        CallExample, Constraint, ExampleOutcome, FunctionParameters, FunctionType, PropertyAtom,
+        PropertyDef, SimplifiedType, TupleType, TypeExpr,
+    },
 };
+use crate::markdown::numeric::{NumberTextError, admit_number_spelling, format_number};
+
+/// The most Unicode scalar values a [`Constraint::diagnostic_excerpt`] holds,
+/// including the final `…` of a shortened excerpt.
+const DIAGNOSTIC_EXCERPT_LIMIT: usize = 160;
+
+impl Constraint {
+    /// This one constraint in canonical SimplifiedSchema spelling, as the
+    /// serializer writes it inside a constraint list.
+    ///
+    /// `ty` is the constrained type, `None` when it is unknown; it only
+    /// selects the canonical spelling of numeric `suggest(...)` candidates.
+    /// An [`Constraint::Options`] set is written as the type it names:
+    /// `alphanumeric(allow-dashes,allow-periods)` in canonical option order,
+    /// or bare `alphanumeric` for the empty set. A default keeps its JSON
+    /// type visible (`default(3)` versus `default('3')`, `default(null)`
+    /// versus `default('null')`); an object or array default, which only Rust
+    /// can construct, is written as `default(<compact JSON>)`, a diagnostic
+    /// spelling the grammar does not parse.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::schemas::simplified::Constraint;
+    ///
+    /// assert_eq!(Constraint::MinLen(10).to_schema_text(None), "min(10)");
+    /// assert_eq!(Constraint::Options(vec![]).to_schema_text(None), "alphanumeric");
+    /// assert_eq!(
+    ///     Constraint::Default(serde_json::json!("3")).to_schema_text(None),
+    ///     "default('3')"
+    /// );
+    /// ```
+    pub fn to_schema_text(&self, ty: Option<SimplifiedType>) -> String {
+        let mut out = String::new();
+        match self {
+            Constraint::Options(options) => {
+                out.push_str(SimplifiedType::Alphanumeric.as_keyword());
+                let keywords = options
+                    .iter()
+                    .copied()
+                    .collect::<AlphanumericOptions>()
+                    .canonical()
+                    .keywords()
+                    .collect::<Vec<_>>();
+                if !keywords.is_empty() {
+                    let _ = write!(out, "({})", keywords.join(","));
+                }
+            }
+            other => write_constraint(&mut out, other, ty),
+        }
+        out
+    }
+
+    /// The text every diagnostic shows for this constraint: the error's
+    /// `Display`, the terminal status block, and editor related information.
+    ///
+    /// It is [`Constraint::to_schema_text`] with no type, made safe for one
+    /// line of a message. Line feed, carriage return, and tab become `\n`,
+    /// `\r`, and `\t`; every other control character, and the Unicode line
+    /// and paragraph separators, become `\u{hex}` (ESC is `\u{1b}`). The
+    /// escaped text is then shortened to at most 160 Unicode scalar values,
+    /// the last of which is `…` when anything was cut; an escape is never
+    /// split, so a shortened excerpt can be slightly under the limit.
+    ///
+    /// The excerpt is for reading, not reparsing: a backslash already in the
+    /// text is not escaped. Markup escaping for a particular output (terminal
+    /// Prose, Markdown code spans) is that renderer's job.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::schemas::simplified::Constraint;
+    ///
+    /// let tab = Constraint::Default(serde_json::json!("a\tb"));
+    /// assert_eq!(tab.diagnostic_excerpt(), r"default('a\tb')");
+    ///
+    /// let long = Constraint::Default(serde_json::json!("é".repeat(300)));
+    /// let excerpt = long.diagnostic_excerpt();
+    /// assert_eq!(excerpt.chars().count(), 160);
+    /// assert!(excerpt.ends_with('…'));
+    /// ```
+    pub fn diagnostic_excerpt(&self) -> String {
+        let text = self.to_schema_text(None);
+        let mut escaped = String::with_capacity(text.len());
+        // Scalar count and byte length of `escaped` after each source char,
+        // so shortening cuts only between escapes.
+        let mut ends = Vec::with_capacity(text.len());
+        let mut scalars = 0;
+        for c in text.chars() {
+            let before = escaped.len();
+            push_excerpt_char(&mut escaped, c);
+            scalars += escaped[before..].chars().count();
+            ends.push((scalars, escaped.len()));
+        }
+        if scalars <= DIAGNOSTIC_EXCERPT_LIMIT {
+            return escaped;
+        }
+        let keep = ends
+            .iter()
+            .rev()
+            .find(|(count, _)| *count < DIAGNOSTIC_EXCERPT_LIMIT)
+            .map_or(0, |(_, bytes)| *bytes);
+        escaped.truncate(keep);
+        escaped.push('…');
+        escaped
+    }
+}
+
+fn push_excerpt_char(out: &mut String, c: char) {
+    match c {
+        '\n' => out.push_str("\\n"),
+        '\r' => out.push_str("\\r"),
+        '\t' => out.push_str("\\t"),
+        c if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') => {
+            let _ = write!(out, "\\u{{{:x}}}", u32::from(c));
+        }
+        c => out.push(c),
+    }
+}
 
 /// Serialise `atom` into a string suitable for re-parsing via
 /// [`grammar::parse_type_expr`].
 ///
 /// Only passively parsed atoms round-trip. A resolved [`TypeExpr::Union`]
-/// (an expanded postfixed union reference) serializes to a display form,
-/// `[arm, arm][]`, that the grammar does not accept.
+/// without `[]` (an expanded postfixed union reference) serializes to its
+/// options in parentheses, which re-parse as a union of those options rather
+/// than one atom.
 ///
 /// [`grammar::parse_type_expr`]: super::grammar::parse_type_expr
 pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
@@ -65,7 +190,10 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
         // `name ('(' constraints ')')? ('[]' ('(' constraints ')')?)? ('@' ref)?`.
         // A local reference is written bare unless its name is a built-in
         // keyword, where only `@this` selects the local type.
-        TypeExpr::Imported { name, reference } => {
+        //
+        // A resolved reference to a cyclic definition is written as a
+        // back-reference by name, with no namespace.
+        TypeExpr::Imported { name, .. } | TypeExpr::Ref(super::DefKey { name, .. }) => {
             out.push_str(name);
             let constraints = render_constraints(&atom.constraints, None);
             if !constraints.is_empty() {
@@ -81,21 +209,28 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
                     out.push(')');
                 }
             }
-            if !atom.ty.is_local_reference() || SimplifiedType::is_keyword(name) {
+            if let TypeExpr::Imported { reference, .. } = &atom.ty
+                && (!atom.ty.is_local_reference() || SimplifiedType::is_keyword(name))
+            {
                 out.push('@');
                 out.push_str(reference);
             }
         }
-        // Display only: the resolver alone produces a union type, and the
-        // bracketed arm list is not a parseable type expression.
+        // `(A | B)[]`, the parsed list of a union.
         TypeExpr::Union(arms) => {
-            out.push('[');
+            out.push('(');
             let rendered: Vec<String> = arms.iter().map(serialize_property_atom).collect();
-            out.push_str(&rendered.join(", "));
-            out.push(']');
-            if atom.is_array {
-                out.push_str("[]");
-            }
+            out.push_str(&rendered.join(" | "));
+            out.push(')');
+            write_array_suffix(&mut out, atom);
+        }
+        TypeExpr::Tuple(tuple) => {
+            write_tuple(&mut out, tuple, &atom.constraints);
+            write_array_suffix(&mut out, atom);
+        }
+        TypeExpr::Function(function) => {
+            write_function(&mut out, function, &atom.constraints);
+            write_array_suffix(&mut out, atom);
         }
     }
 
@@ -105,6 +240,124 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
     }
 
     out
+}
+
+/// Serialise `def` as a type expression: a [`PropertyDef::Union`] is written
+/// with `|`, which re-parses to the same union. Only the last option's
+/// description survives, as only it can be written in that form.
+pub fn serialize_property_def(def: &PropertyDef) -> String {
+    match def {
+        PropertyDef::Single(atom) => serialize_property_atom(atom),
+        PropertyDef::Union(arms) => arms
+            .iter()
+            .map(serialize_property_atom)
+            .collect::<Vec<_>>()
+            .join(" | "),
+    }
+}
+
+fn write_array_suffix(out: &mut String, atom: &PropertyAtom) {
+    if atom.is_array {
+        out.push_str("[]");
+        if !atom.array_constraints.is_empty() {
+            out.push('(');
+            out.push_str(&render_constraints(&atom.array_constraints, None));
+            out.push(')');
+        }
+    }
+}
+
+/// A nested definition, parenthesized when `?` must apply to all of it.
+fn write_optional_def(out: &mut String, def: &PropertyDef, optional: bool) {
+    let text = serialize_property_def(def);
+    if optional && matches!(def, PropertyDef::Union(_)) {
+        out.push('(');
+        out.push_str(&text);
+        out.push(')');
+    } else {
+        out.push_str(&text);
+    }
+    if optional {
+        out.push('?');
+    }
+}
+
+fn write_tuple(out: &mut String, tuple: &TupleType, constraints: &[Constraint]) {
+    out.push_str("tuple([");
+    let mut first = true;
+    for element in &tuple.elements {
+        if !first {
+            out.push_str(", ");
+        }
+        first = false;
+        write_optional_def(out, &element.def, element.optional);
+    }
+    if let Some(spread) = &tuple.spread {
+        if !first {
+            out.push_str(", ");
+        }
+        out.push_str("...");
+        out.push_str(&serialize_property_atom(spread));
+    }
+    out.push(']');
+    if !constraints.is_empty() {
+        out.push_str("; ");
+        out.push_str(&render_constraints(constraints, None));
+    }
+    out.push(')');
+}
+
+fn write_function(out: &mut String, function: &FunctionType, constraints: &[Constraint]) {
+    out.push_str("function(parameters(");
+    match &function.parameters {
+        FunctionParameters::Void => out.push_str("void"),
+        FunctionParameters::List(parameters) => {
+            for (index, parameter) in parameters.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                if parameter.rest {
+                    out.push_str("...");
+                }
+                out.push_str(&parameter.name);
+                if parameter.optional {
+                    out.push('?');
+                }
+                out.push_str(": ");
+                out.push_str(&serialize_property_def(&parameter.def));
+            }
+        }
+    }
+    out.push_str("); returns(");
+    out.push_str(&serialize_property_def(&function.returns));
+    out.push(')');
+    if function.fallible {
+        out.push_str("; fallible");
+    }
+    for example in &function.examples {
+        out.push_str("; ");
+        write_call_example(out, example);
+    }
+    if !constraints.is_empty() {
+        out.push_str("; ");
+        out.push_str(&render_constraints(constraints, None));
+    }
+    out.push(')');
+}
+
+fn write_call_example(out: &mut String, example: &CallExample) {
+    out.push_str("example(");
+    out.push_str(&example.call);
+    out.push_str(" => ");
+    match &example.expected {
+        ExampleOutcome::Error => out.push_str("error"),
+        ExampleOutcome::Value(value) => out.push_str(&value.to_string()),
+    }
+    if let Some(reason) = &example.display_only {
+        out.push_str("; display-only: ");
+        out.push_str(reason);
+    }
+    out.push(')');
 }
 
 fn write_inline_object(out: &mut String, shape: &super::types::SchemaShape, is_array: bool) {
@@ -120,8 +373,7 @@ fn write_inline_object(out: &mut String, shape: &super::types::SchemaShape, is_a
         // PropertyAtom and prefix with a single space so the produced
         // `{ name: <atom> }` form re-parses. Whitespace inside braces is
         // stripped by the grammar parser (Decision #2).
-        let serialized = serialize_property_atom(def_single_atom(def));
-        out.push_str(&serialized);
+        out.push_str(&serialize_property_def(def));
     }
     out.push('}');
     if is_array {
@@ -129,22 +381,10 @@ fn write_inline_object(out: &mut String, shape: &super::types::SchemaShape, is_a
     }
 }
 
-fn def_single_atom(def: &super::types::PropertyDef) -> &PropertyAtom {
-    match def {
-        super::types::PropertyDef::Single(atom) => atom,
-        // Property-level unions are not supported inside inline objects by
-        // this feature. Fall back to using the first arm so serialization
-        // stays total; the output may not round-trip on re-parse, which is
-        // an acceptable signal.
-        super::types::PropertyDef::Union(arms) => arms
-            .first()
-            .expect("property-level union inside an inline object must have at least one arm"),
-    }
-}
-
 /// Renders a constraint list without its parentheses. `ty` is the target
-/// type, `None` for a reference or inline object. `alphanumeric` options lead
-/// in canonical form, and redundant ones disappear with it.
+/// type, `None` for a reference or inline object. Concrete `alphanumeric`
+/// options are canonicalized; unresolved references retain their assertions
+/// until the resolver can compare them with the target's option set.
 fn render_constraints(constraints: &[Constraint], ty: Option<SimplifiedType>) -> String {
     let mut out = String::new();
     let options = constraints
@@ -154,8 +394,12 @@ fn render_constraints(constraints: &[Constraint], ty: Option<SimplifiedType>) ->
             _ => None,
         })
         .flatten()
-        .collect::<AlphanumericOptions>()
-        .canonical();
+        .collect::<AlphanumericOptions>();
+    let options = if ty == Some(SimplifiedType::Alphanumeric) {
+        options.canonical()
+    } else {
+        options
+    };
     out.push_str(&options.keywords().collect::<Vec<_>>().join(","));
     for c in constraints
         .iter()
@@ -177,6 +421,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>
         Constraint::Integer => out.push_str("integer"),
         Constraint::Unique => out.push_str("unique"),
         Constraint::Generated => out.push_str("generated"),
+        Constraint::Deferred => out.push_str("deferred"),
 
         Constraint::Min(n) => {
             let _ = write!(out, "min({})", format_number(*n));
@@ -201,6 +446,16 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>
         }
         Constraint::MaxKeys(n) => {
             let _ = write!(out, "max-keys({n})");
+        }
+        Constraint::UncountedKeys(keys) => {
+            out.push_str("uncounted-keys(");
+            for (index, key) in keys.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                write_arg(out, key);
+            }
+            out.push(')');
         }
 
         Constraint::Pattern(p) => {
@@ -272,6 +527,12 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: Option<SimplifiedType>
             write_default_value(out, value, ty);
             out.push(')');
         }
+        Constraint::Category(name) => {
+            let _ = write!(out, "category({name})");
+        }
+        Constraint::Operands(name) => {
+            let _ = write!(out, "operands({name})");
+        }
     }
 }
 
@@ -284,12 +545,27 @@ fn write_default_value(out: &mut String, value: &serde_json::Value, _ty: Option<
         serde_json::Value::Number(n) => {
             let _ = write!(out, "{n}");
         }
-        serde_json::Value::String(s) => write_arg(out, s),
-        // Compound defaults are not supported by the v1 grammar.
+        serde_json::Value::String(s) => {
+            if needs_quoting(s) || !bare_default_round_trips_as_string(s) {
+                write_quoted(out, s);
+            } else {
+                out.push_str(s);
+            }
+        }
+        // The grammar has no compound default; only Rust can build one, and
+        // it is shown as compact JSON so diagnostics still carry the value.
         other => {
-            let _ = write!(out, "\"{other}\"");
+            let _ = write!(out, "{other}");
         }
     }
+}
+
+/// Whether bare `value` re-parses as the same string `default(...)`: not a
+/// `true`/`false`/`null` keyword and not any number spelling, which the
+/// grammar either reads as a number or rejects as inadmissible.
+fn bare_default_round_trips_as_string(value: &str) -> bool {
+    !matches!(value, "true" | "false" | "null")
+        && matches!(admit_number_spelling(value), Err(NumberTextError::NotANumber))
 }
 
 /// Write an argument, quoting it if it contains characters that would
@@ -351,14 +627,6 @@ fn needs_quoting(value: &str) -> bool {
         || value
             .chars()
             .any(|c| c.is_whitespace() || matches!(c, ',' | ';' | '(' | ')' | '\'' | '"'))
-}
-
-fn format_number(n: f64) -> String {
-    if n.fract() == 0.0 && n.is_finite() && n.abs() < 1e16 {
-        format!("{}", n as i64)
-    } else {
-        format!("{n}")
-    }
 }
 
 #[cfg(test)]
@@ -429,6 +697,14 @@ mod tests {
             array_constraints: vec![],
             description: None,
         });
+    }
+
+    #[test]
+    fn round_trip_object_with_uncounted_keys() {
+        let atom = parse_type_expr("test", "{ info: string, when: string }(max-keys(1); uncounted-keys(when))")
+            .expect("parses");
+        assert!(atom.constraints.contains(&Constraint::UncountedKeys(vec!["when".to_string()])));
+        round_trip(atom);
     }
 
     #[test]
@@ -796,6 +1072,106 @@ mod tests {
         assert!(parsed.is_array);
         let has_suggest = parsed.constraints.iter().any(|c| matches!(c, Constraint::Suggest(_)));
         assert!(has_suggest, "parsed atom must retain suggest constraint");
+    }
+
+    fn default_atom(ty: SimplifiedType, value: serde_json::Value) -> PropertyAtom {
+        PropertyAtom {
+            ty: TypeExpr::Primitive(ty),
+            is_array: false,
+            constraints: vec![Constraint::Default(value)],
+            array_constraints: vec![],
+            description: None,
+        }
+    }
+
+    #[test]
+    fn default_strings_that_look_like_other_scalars_are_quoted_and_round_trip() {
+        for (value, written) in [
+            (serde_json::json!("3"), "string(default('3'))"),
+            (serde_json::json!("-2.5"), "string(default('-2.5'))"),
+            (serde_json::json!("1e3"), "string(default('1e3'))"),
+            (serde_json::json!("1e999"), "string(default('1e999'))"),
+            (serde_json::json!("null"), "string(default('null'))"),
+            (serde_json::json!("true"), "string(default('true'))"),
+            (serde_json::json!("false"), "string(default('false'))"),
+            (serde_json::json!("draft"), "string(default(draft))"),
+            (serde_json::json!("v1.2"), "string(default(v1.2))"),
+        ] {
+            let atom = default_atom(SimplifiedType::String, value);
+            assert_eq!(serialize_property_atom(&atom), written);
+            round_trip(atom);
+        }
+        for (ty, value, written) in [
+            (SimplifiedType::Number, serde_json::json!(3), "number(default(3))"),
+            (SimplifiedType::Number, serde_json::json!(-2.5), "number(default(-2.5))"),
+            (SimplifiedType::Boolean, serde_json::json!(true), "boolean(default(true))"),
+            (SimplifiedType::Unknown, serde_json::Value::Null, "unknown(default(null))"),
+        ] {
+            let atom = default_atom(ty, value);
+            assert_eq!(serialize_property_atom(&atom), written);
+            round_trip(atom);
+        }
+    }
+
+    #[test]
+    fn to_schema_text_writes_one_constraint_canonically() {
+        use super::super::alphanumeric::AlphanumericOption::*;
+        for (constraint, expected) in [
+            (Constraint::Min(10.0), "min(10)"),
+            (Constraint::Max(2.5), "max(2.5)"),
+            (Constraint::MinLen(3), "min(3)"),
+            (Constraint::MaxItems(5), "max(5)"),
+            (Constraint::MinKeys(1), "min-keys(1)"),
+            (Constraint::MaxKeys(9), "max-keys(9)"),
+            (Constraint::Scheme(vec!["http".into(), "https".into()]), "scheme(http,https)"),
+            (Constraint::Scheme(vec![]), "scheme()"),
+            (Constraint::Default(serde_json::json!(3)), "default(3)"),
+            (Constraint::Default(serde_json::json!("3")), "default('3')"),
+            (Constraint::Default(serde_json::Value::Null), "default(null)"),
+            (Constraint::Default(serde_json::json!("null")), "default('null')"),
+            (Constraint::Default(serde_json::json!(false)), "default(false)"),
+            (Constraint::Default(serde_json::json!("false")), "default('false')"),
+            (Constraint::Default(serde_json::json!("a, b")), "default('a, b')"),
+            (Constraint::Default(serde_json::json!({"k": [1, "x"]})), r#"default({"k":[1,"x"]})"#),
+            (Constraint::Default(serde_json::json!([])), "default([])"),
+            (Constraint::Options(vec![]), "alphanumeric"),
+            (Constraint::Options(vec![AllowPeriods, AllowDashes]), "alphanumeric(allow-dashes,allow-periods)"),
+            // Canonical: a block whose character is not allowed is dropped.
+            (Constraint::Options(vec![BlockLeadingDash]), "alphanumeric"),
+            (Constraint::Required, "required"),
+        ] {
+            assert_eq!(constraint.to_schema_text(None), expected, "{constraint:?}");
+        }
+    }
+
+    #[test]
+    fn diagnostic_excerpt_escapes_controls_and_line_separators() {
+        let constraint = Constraint::Default(serde_json::json!("a\nb\r\tc\u{1b}d\u{7f}e\u{2028}f"));
+        assert_eq!(
+            constraint.diagnostic_excerpt(),
+            r"default('a\nb\r\tc\u{1b}d\u{7f}e\u{2028}f')"
+        );
+        assert_eq!(Constraint::Min(10.0).diagnostic_excerpt(), "min(10)");
+    }
+
+    #[test]
+    fn diagnostic_excerpt_keeps_at_most_160_scalars_and_never_splits_an_escape() {
+        let exact = Constraint::Default(serde_json::json!("é".repeat(151)));
+        assert_eq!(exact.diagnostic_excerpt().chars().count(), 160, "`default(` + 151 + `)` fits");
+        assert!(!exact.diagnostic_excerpt().contains('…'));
+
+        let over = Constraint::Default(serde_json::json!("é".repeat(152)));
+        let excerpt = over.diagnostic_excerpt();
+        assert_eq!(excerpt.chars().count(), 160);
+        assert!(excerpt.ends_with("é…"), "{excerpt}");
+
+        // `default('` is 9 scalars; 147 `x` and a space reach 157, and the
+        // next escape (`\u{1b}`, 6 scalars) would pass 159, so it is
+        // dropped whole.
+        let escapes = Constraint::Default(serde_json::json!(format!("{} \u{1b}{}", "x".repeat(147), "y".repeat(20))));
+        let excerpt = escapes.diagnostic_excerpt();
+        assert!(excerpt.chars().count() <= 160, "{excerpt}");
+        assert!(excerpt.ends_with(" …"), "the escape is not split: {excerpt}");
     }
 
     /// Serializes `source`, asserts the canonical spelling, and asserts that

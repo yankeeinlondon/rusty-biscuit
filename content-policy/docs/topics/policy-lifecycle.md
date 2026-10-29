@@ -1,3 +1,6 @@
+---
+kind: canonical-documentation
+---
 # Policy Evaluation and Renewal
 
 **Status: in progress.** Every rule is built end to end: the time and
@@ -92,6 +95,17 @@ A duration is a positive whole number with one unit: `d` (days), `wk` (weeks),
 a day the destination month lacks moves back to that month's last day: January
 31 plus `1mo` is February 28 in a non-leap year. Only dates are supported;
 timestamps are not.
+
+Rule spelling is strict. Spaces (U+0020 only) may surround an argument, and
+nothing else is loose:
+
+| Spelling | Valid |
+| --- | --- |
+| `ValidFor(3mo)`, `ValidFor( 3mo , @last_updated )`, `ValidFor(3mo,2026-09-28)` | Yes |
+| `ValidFor (3mo)`, `ValidFor(3 mo)`, a tab inside the parentheses, or a space before or after the whole rule | No |
+| `ValidFor(03mo)`, `ValidFor(+3mo)`, `ValidFor(1.5mo)`, `ValidFor(mo)` | No: the count is a whole number written without a sign or leading zero |
+| `ValidFor(3MO)`, `ValidFor(3w)`, `ValidFor(3days)` | No: units are exactly `d`, `wk`, `mo`, and `yr`, in lowercase |
+| `ValidFor(3mo, @a.b)`, `ValidFor(3mo, @1x)`, `ValidFor(3mo, last_updated)` | No: a reference is `@` and one top-level property name |
 
 Policies live under the `content_policy` key by default (snake_case, like the
 repository's other frontmatter keys); a caller can choose a different key.
@@ -930,11 +944,34 @@ content_policy: "policy[](min(1))@../../../content-policy/schemas/content-policy
 ```
 
 so in every Markdown document, with no `$schema` of its own, `content_policy`
-is optional but, when present, must be a non-empty list of `policy` entries.
+is optional and gains no default. A non-null value must be a non-empty list
+of `policy` entries; the schema accepts an explicit `null` under Darkmatter's
+optional-property rules, while the policy parser rejects it.
 The same checks run in DMLS, in `md compose`, and in `md schema validate`.
 Darkmatter compiles the schema in, so an installed `md` or `dmls` applies it
 outside a checkout. A document whose own `$schema` declares `content_policy`
 replaces this typing.
+
+For example, save this as `notes.md`:
+
+```yaml
+---
+last_updated: 2026-09-28
+content_policy:
+  - ValidFor(3mo)
+  - rule: ValidUntil(2027-01-01)
+    action: archive
+---
+```
+
+`md schema validate notes.md` checks the declaration and exits successfully.
+Change `archive` to `delete` and it exits `1`, identifying the second entry's
+action. This command does not decide whether the document is fresh; use
+`policy check notes.md` for that verdict. To remove the built-in checks from
+`md schema validate`, pass `--disable baseline-schema`. The document's own
+schema and matching trigger schemas still apply. The full
+[baseline selection rules](../../../darkmatter/docs/topics/schemas/definition.md#selecting-the-baseline)
+also cover custom baselines and environment settings.
 
 The schema flags, before the document is ever evaluated:
 
@@ -955,13 +992,16 @@ Each problem names the entry it belongs to. With
 `{action: archive}` as the second entry, the missing `rule` is reported on
 the entry itself, `/content_policy/1`, at the start of its mapping.
 
-The schema is a convenience; evaluation is the authority and checks more.
-These values pass the schema but fail evaluation:
+The schema checks a subset of the declaration parser's rules.
+`Policy::from_declaration` is the authority for declaration validity; it
+rejects the following values without reading evidence or consulting a clock.
+They pass the schema's patterns or optional-property rules:
 
-| Value | Why evaluation rejects it |
+| Value | Why the declaration parser rejects it |
 | --- | --- |
-| `ValidUntil(2027-02-30)` | The schema checks a date's shape, not whether the day exists |
-| `ValidFor(99999999999999999999d)` | The duration overflows |
+| `ValidUntil(2027-02-30)`, `ValidFor(3mo, 2026-13-01)` | The schema checks a date's shape, not whether the day exists |
+| `ValidFor(99999999999999999999d)` | The count does not fit a 32-bit unsigned integer |
+| `ValidFor(4294967295yr, 2026-01-01)` | The inline baseline plus the duration falls outside the supported calendar range |
 | `FileChanged(vault:notes.md, @fp)`, `FileChanged(https://example.com/a.md, @fp)` | The schema cannot see a `vault:` or URL prefix, or a drive letter |
 | `FileChanged(docs/{{HOME}}.md, @fp)` | The schema sees `{{` only at the start of a path |
 | `[Evergreen, "ValidFor(3mo)"]` | `Evergreen` must be the only entry; the schema judges each entry on its own |
@@ -973,6 +1013,20 @@ the schema nor the parser checks whether the file exists or stays inside the
 boundary: `FileChanged(does/not/exist.md, @fp)` passes both, and only
 evaluation reports it.
 
+The other direction never happens: every spelling the parser accepts passes
+the schema. The schema's rule patterns are lexical only. They repeat the
+parser's spelling (rule names, units, `@name` references, `YYYY-MM-DD` date
+shape, and where spaces may go) but none of its semantic checks, and the
+differences in the table above are intentional. The patterns are written by
+hand, so a change to the parser's spelling, such as a new unit or rule form,
+updates `content-policy/schemas/content-policy.yaml` in the same change.
+`darkmatter/lib/tests/l1/content_policy_duration_parity.rs` holds one roster
+of every rule form and every unit, each in its default-baseline,
+property-baseline, and inline-date spelling, with whitespace variants,
+references, and malformed spellings. It checks the parser, each pattern
+compiled alone, and the schema as Darkmatter's base frontmatter schema
+applies it, so a pattern that falls behind the parser fails there.
+
 Schema checks are passive. They never read the watched file, compare a
 fingerprint, renew a baseline, or stamp `last_updated`, and they leave the
 document's bytes unchanged.
@@ -982,7 +1036,7 @@ Templates are checked when they have a value. `md compose` checks a
 DMLS does not report a `{{ … }}` value at all. A whole-value frontmatter shell
 command, `$(…)`, is checked after it runs: `content_policy: "$(cat policy.txt)"`
 fails `md compose` when the command prints anything other than a valid policy
-list, with or without `--no-trigger-schemas`. Shell text that compose never
+list, with or without `--disable schema-triggers`. Shell text that compose never
 runs, such as `$(…)` inside a list item, is judged as written.
 
 In the editor, DMLS completes inside a compact entry, after `rule:` and
@@ -995,9 +1049,10 @@ value both offer the seven example rules the schema suggests: `Evergreen`,
 the `Evergreen` alternative, and Darkmatter keeps each suggestion that any rule
 form accepts.
 
-Setting a document's `$schema` to the file itself validates nothing, because
-the file declares types and no properties. A document can type a property of
-its own with the same entries:
+Setting a document's `$schema` to the file itself does not type its
+`content_policy` property: the file declares reusable entry types rather than
+that property. To type a property of your own, save the schema as
+`content-policy.yaml` beside the document and import its `policy` type:
 
 ```yaml
 ---

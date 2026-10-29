@@ -44,9 +44,7 @@ const INVENTORY: &[(&str, &str, Coverage)] = &[
     ("TestLookup", "markdown/compose/expression/mod.rs", Coverage::Fixture),
     ("Nothing", "markdown/compose/expression/absence.rs", Coverage::Fixture),
     ("FixtureLookup", "markdown/compose/expression/semantics.rs", Coverage::Fixture),
-    ("FsLookup", "markdown/compose/expression/catalog/mod.rs", Coverage::Fixture),
-    ("FixtureLookup", "markdown/compose/expression/catalog/mod.rs", Coverage::Fixture),
-    ("MapLookup", "markdown/compose/expression/catalog/mod.rs", Coverage::Fixture),
+    ("FixtureLookup", "markdown/compose/expression/catalog/tests.rs", Coverage::Fixture),
 ];
 
 /// Every `impl … EvaluationLookup for <Type>` outside a comment, as
@@ -178,7 +176,7 @@ fn every_production_lookup_keeps_bare_names_out_of_ctx() {
             }
             "FrontmatterSeedState" => {
                 let seed = FrontmatterSeedState::new(
-                    [("env".to_string(), json!(DOCUMENT_ENV))].into_iter().collect(),
+                    serde_json::Map::from_iter([("env".to_string(), json!(DOCUMENT_ENV))]),
                     context(),
                 );
                 assert_bare_name_is_a_document_property(name, &seed);

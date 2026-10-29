@@ -1,0 +1,23 @@
+---
+proxy_before_launch: @BEFORE@
+initialize:
+  - append_line: ["trace.log", "event hop-@HOP@:initialize"]
+start:
+  - append_line: ["trace.log", "event hop-@HOP@:start"]
+  - when: "proxy_before_launch"
+    then:
+      - proxy: "./@ID@.hop-@NEXT@.md"
+success:
+  - append_line: ["trace.log", "event hop-@HOP@:success"]
+  - proxy: "./@ID@.hop-@NEXT@.md"
+blocked:
+  - append_line: ["trace.log", "event hop-@HOP@:blocked"]
+  - append_line: ["trace.log", "err {{ err.code || 'uncoded: ' + err.msg }}"]
+failure:
+  - append_line: ["trace.log", "event hop-@HOP@:failure"]
+  - append_line: ["trace.log", "err {{ err.code || 'uncoded: ' + err.msg }}"]
+finalize:
+  - append_line: ["trace.log", "event hop-@HOP@:finalize"]
+  - append_line: ["trace.log", "err {{ err ? (err.code || 'uncoded: ' + err.msg) : 'none' }}"]
+---
+Hop @HOP@

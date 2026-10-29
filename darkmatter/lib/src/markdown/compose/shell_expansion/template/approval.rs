@@ -185,3 +185,93 @@ impl TemplateApprovalView {
         }
     }
 }
+
+/// The policy rules that would approve one command without asking, as
+/// alternatives: adding every line of any one alternative to the whitelist
+/// approves the command. Built from the same choices an approval prompt
+/// offers, so a hint never names a rule the approval model would ignore.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SuggestedRules {
+    pub alternatives: Vec<Vec<String>>,
+}
+
+impl SuggestedRules {
+    /// The rules for a command whose resolved bytes are `exact` (one key per
+    /// chain segment), whose shape is `shape`, and whose programs are
+    /// `programs`, limited to the choices in `offered`.
+    pub fn new(
+        offered: OfferedChoices,
+        exact: Option<&[String]>,
+        shape: Option<&TemplateShape>,
+        programs: &[String],
+    ) -> Self {
+        let mut alternatives = Vec::new();
+        if let Some(keys) = exact.filter(|keys| offered.exact && !keys.is_empty()) {
+            alternatives.push(keys.iter().map(|key| format!("exact {key}")).collect());
+        }
+        if let Some(shape) = shape.filter(|_| offered.shape) {
+            alternatives.push(vec![format!("template {}", shape.canonical_text())]);
+        }
+        if offered.prefix && !programs.is_empty() {
+            let mut seen = HashSet::new();
+            alternatives.push(
+                programs
+                    .iter()
+                    .filter(|program| seen.insert(program.as_str()))
+                    .map(|program| format!("prefix {program}"))
+                    .collect(),
+            );
+        }
+        Self { alternatives }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.alternatives.is_empty()
+    }
+
+    /// The alternatives as whitelist-file lines, two-space indented. When an
+    /// alternative needs several lines (a chain), each alternative is headed
+    /// by a `#` comment, which the policy loader ignores, so a copied block
+    /// still loads.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::compose::shell_expansion::template::{OfferedChoices, SuggestedRules};
+    ///
+    /// let keys = [r#"git commit -m """#.to_string()];
+    /// let rules = SuggestedRules::new(OfferedChoices::resolved_bytes(), Some(&keys), None, &["git".to_string()]);
+    /// assert_eq!(rules.render(), "  exact git commit -m \"\"\n  prefix git");
+    /// ```
+    pub fn render(&self) -> String {
+        let grouped = self.alternatives.iter().any(|lines| lines.len() > 1);
+        let mut out = Vec::new();
+        for (index, lines) in self.alternatives.iter().enumerate() {
+            if grouped {
+                let lead = if index == 0 { "" } else { "or " };
+                out.push(format!("  # {lead}all of:"));
+            }
+            out.extend(lines.iter().map(|line| format!("  {line}")));
+        }
+        out.join("\n")
+    }
+}
+
+#[cfg(test)]
+mod suggested_rules_tests {
+    use super::*;
+
+    /// A chain's exact keys and prefixes are each one alternative of several
+    /// lines, headed by comments the policy loader skips; choices the prompt
+    /// would not offer are never suggested.
+    #[test]
+    fn a_chain_groups_its_lines_and_unoffered_choices_are_omitted() {
+        let keys = ["a 1".to_string(), "b 2".to_string()];
+        let programs = ["a".to_string(), "b".to_string(), "a".to_string()];
+        let rules = SuggestedRules::new(OfferedChoices::resolved_bytes(), Some(&keys), None, &programs);
+        assert_eq!(rules.render(), "  # all of:\n  exact a 1\n  exact b 2\n  # or all of:\n  prefix a\n  prefix b");
+
+        let nothing_offered = OfferedChoices { exact: false, shape: false, prefix: false };
+        assert!(SuggestedRules::new(nothing_offered, Some(&keys), None, &programs).is_empty());
+    }
+}

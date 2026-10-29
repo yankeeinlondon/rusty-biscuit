@@ -8,9 +8,14 @@
 # application data beside Claudine's controls is kept. `sequence` is declared
 # only by sequence.yaml, which every document with a non-null `sequence`
 # selects.
-kind: trigger-schema
+#
+# `composed` and `failed` are Darkmatter's names for the events Claudine
+# calls `start` and `blocked`. The payload types them as null, overriding the
+# baseline's `md` stacks, so a value under either is an error whose
+# description names the Claudine event to write instead.
+kind: schema-trigger
 match:
-    any:
+    group:
         - initialize: string(required)
         - initialize: number(required)
         - initialize: boolean(required)
@@ -67,7 +72,7 @@ match:
         - model: object(required)
         - model: "unknown[](required)"
 $schema:
-    prompt: "string -> the prompt sent to the agent; inline-compose requires it once caller overlays are applied"
+    prompt: prompt@./document.yaml
     agent:
         - "string -> the agent (provider) to run"
         - "string[](min(1)) -> agents to try, in preference order"
@@ -76,12 +81,8 @@ $schema:
         - "string[] -> models to try, in preference order"
     interactive: "boolean -> run the agent interactively instead of headless"
     "$schema": "schema -> the document's own SimplifiedSchema, referenced file, or root union; applied after this catalog"
-    hash:
-        - "string -> stored shorthand hash; managed by Darkmatter and Claudine's completion"
-        - kind: "enum(fm, body, simple, structured, detailed; default(simple)) -> hash resolution stored in longhand form"
-          value: "unknown -> stored hash payload"
-          ignored: "string[] -> extra frontmatter keys ignored during hash computation"
-    last_updated: "date -> managed content-change date in YYYY-MM-DD form; stamped by Claudine's completion"
+    hash: hash@./document.yaml
+    last_updated: last_updated@./document.yaml
     loop: "loop@./lifecycle.yaml -> run the prompt repeatedly; beside `sequence:`, the sequence's loop"
     argv: "string[] -> arguments passed through to the agent"
     title: "string -> the document's title"
@@ -93,6 +94,8 @@ $schema:
     failure: "stack@./lifecycle.yaml -> actions run after a failed run"
     cancelled: "cancelled-stack@./lifecycle.yaml -> opt into cancellation; actions run when cancelled"
     finalize: "stack@./lifecycle.yaml -> actions run last, whatever the outcome"
+    composed: "null -> Claudine names this event `start`; write `start:` instead of `composed:`"
+    failed: "null -> Claudine names this event `blocked`; write `blocked:` instead of `failed:`"
     timeout: "string(not-empty) -> the run's overall timeout, such as 30m"
     step_timeout: "string(not-empty) -> the timeout for one sequence step"
     timeout_warn: "string(not-empty) -> when to warn that the run timeout is near"

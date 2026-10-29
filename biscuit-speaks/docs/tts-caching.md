@@ -1,4 +1,5 @@
 ---
+kind: canonical-documentation
 blast_radius:
   - biscuit-speaks/lib/src/audio_cache.rs
   - biscuit-speaks/lib/src/cache.rs
@@ -44,7 +45,7 @@ The key is hashed with xxHash (via `biscuit-hash`) to produce a 16-character hex
 {temp_dir}/biscuit-speaks-{hash}.{format}
 ```
 
-For example: `/tmp/biscuit-speaks-a1b2c3d4e5f6g7h8.wav`
+For example: `/tmp/biscuit-speaks-a1b2c3d4e5f60718.wav`
 
 ### Speed Inclusion Rules
 
@@ -102,13 +103,31 @@ Providers that do **not** use audio caching:
 
 ### Atomic Writes
 
-The `write_atomic()` function in `audio_cache.rs` prevents partial writes from corrupting cache files:
+`write_atomic()` in `audio_cache.rs` writes byte responses into a uniquely
+named temporary file beside the final entry, flushes them with `sync_all()`,
+and publishes the complete file by renaming it into place. A failed write,
+flush, or publication removes the temporary file and leaves an existing entry
+untouched. Readers never see a partially written replacement.
 
-1. Write data to a uniquely-named temp file in the same directory (using PID + timestamp)
-2. `sync_all()` to flush to disk
-3. `rename()` to the final path (atomic on POSIX filesystems)
+ElevenLabs uses this for API response bytes and default-voice records. Both
+publications run on Tokio's blocking pool and are awaited, so a file write
+never stalls the async worker that is running the request, even on a
+single-threaded runtime. They fail differently:
 
-ElevenLabs uses this for API response bytes. The CLI-based providers have their tool write a staging file beside the entry and rename it into place, as described above.
+| Publication | Write fails, or the blocking task panics |
+| --- | --- |
+| Synthesized audio | preparation fails with `TtsError::TempFileError` |
+| Default-voice record | a warning is logged and preparation continues |
+
+A record failure only costs a later detached request its network-free voice
+lookup, so it never fails the speech. Dropping the caller while a publication
+is running does not cancel it: the blocking task owns its bytes and
+destination and finishes the write and rename, so the entry ends complete or
+absent, never partial. The caller just never sees the result. The network
+request, playback, and the cache-hit check stay on the async side.
+
+The command-line providers instead ask their tool to write a staging file beside
+the entry and rename it into place, as described above.
 
 ### Cache Lifetime
 
@@ -178,13 +197,50 @@ deadline.
 
 ## Preparing Speech
 
-`Speak::prepare` fills the audio file cache ahead of time, so the phrase plays
-at once when it is needed. It synthesizes the phrase into the cache and plays
-nothing. It also starts no scheduler and reserves no spool slot.
+Call `Speak::prepare` when you know a phrase before you need to speak it. It
+synthesizes the phrase into the audio file cache without playing anything,
+starting a scheduler, or reserving a playback slot. Later playback with the
+same resolved settings can skip synthesis. Detached playback still waits its
+turn in Playa's ordered queue, so a cache hit does not guarantee immediate
+audible output.
+
+Preparation is an awaited operation, available with or without the `playa`
+feature. It does not start background work for the caller; applications such
+as Claudine decide when to run it in a background task. `play_detached`
+requires `playa` and returns after handing a job to the playback queue.
+
+For example, with Kokoro installed and its model configured, prepare a
+specific voice and play it later:
 
 ```rust
-// On macOS: an explicit speed fixes Say's rate, and the system voice resolves.
-let config = TtsConfig::new().with_speed(SpeedLevel::Fast);
+use biscuit_speaks::{HostTtsProvider, Speak, TtsConfig, TtsFailoverStrategy, TtsProvider};
+
+let config = TtsConfig::new()
+    .with_voice("af_heart")
+    .with_failover(TtsFailoverStrategy::SpecificProvider(
+        TtsProvider::Host(HostTtsProvider::KokoroTts),
+    ));
+let prepared = Speak::new("the build is green")
+    .with_config(config.clone())
+    .prepare().await?;
+
+// Later, in a build with the playa feature:
+prepared.play_detached().await?;
+// A new builder can reuse the same cached file too.
+Speak::new("the build is green").with_config(config).play_detached().await?;
+```
+
+The returned builder retains its selected settings. On macOS, this matters
+when the system voice changes between preparation and playback:
+
+```rust
+use biscuit_speaks::{HostTtsProvider, Speak, SpeedLevel, TtsConfig, TtsFailoverStrategy, TtsProvider};
+
+let config = TtsConfig::new()
+    .with_speed(SpeedLevel::Fast)
+    .with_failover(TtsFailoverStrategy::SpecificProvider(
+        TtsProvider::Host(HostTtsProvider::Say),
+    ));
 let prepared = Speak::new("the build is green").with_config(config.clone()).prepare().await?;
 // The system voice changes here.
 prepared.play().await?; // still the voice it prepared with: a cache hit
@@ -192,7 +248,9 @@ Speak::new("the build is green").with_config(config).play().await?; // the new v
 ```
 
 Normal-speed Say never prepares (see [Say's system defaults](#says-system-defaults)),
-which is why the example asks for an explicit speed.
+which is why the example asks for an explicit speed. This example also assumes
+the system voice lookup succeeds; otherwise preparation succeeds without a
+file and playback synthesizes normally.
 
 ### The returned object and a fresh object
 
@@ -234,6 +292,10 @@ Only the first available provider for the failover strategy is prepared. If
 that provider fails to construct, resolve, or synthesize, `prepare` returns the
 error and tries no other provider. That is narrower than playback, which fails
 over. A strategy with no candidate returns `NoProvidersAvailable`.
+Preparation uses the normal provider ordering and availability rules. It does
+not add cloud providers to automatic host selection; choose a cloud provider
+through the failover configuration when you want to use one. A provider listed
+in the enum but not implemented returns its unsupported-provider error.
 
 `prepare` succeeds without caching anything when:
 
@@ -251,6 +313,13 @@ voice listing, network request, subprocess, cache read, or cache write happens,
 and the builder is returned unchanged (an earlier preparation is kept). The
 same holds for a direct `TtsExecutor::prepare` call, with or without the
 `playa` feature.
+
+Provider implementations expose the same operation through
+`TtsExecutor::prepare(&self, text, config)`, whose returned future is `Send`.
+Its default implementation succeeds without work, as used by eSpeak and SAPI.
+File-producing providers override it to fill the shared cache. The trait
+method returns `Result<(), TtsError>` rather than a retained builder; use
+`Speak::prepare` when you need to keep the resolved settings for later playback.
 
 Preparation can make a billed ElevenLabs request. Two concurrent preparations
 of the same phrase may both synthesize; atomic publication still leaves one

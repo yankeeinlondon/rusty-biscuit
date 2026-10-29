@@ -1,3 +1,6 @@
+---
+kind: canonical-documentation
+---
 # DMLS Editor Setup
 
 The Darkmatter Language Server (`dmls`) speaks standard LSP 3.17 over stdio, so
@@ -44,8 +47,8 @@ attached.
 ## Root marker and configuration
 
 `dmls` treats a `.dmls.toml` file at the workspace root as both an editor root
-marker and its configuration source (layered under LSP
-`workspace/configuration`). A minimal file:
+marker and its configuration source (overridden by the editor's
+`workspace/didChangeConfiguration` settings). A minimal file:
 
 ```toml
 # .dmls.toml
@@ -55,6 +58,10 @@ enable = true
 # path_style = "shortest"    # shortest | relative | root-relative
 
 [schema]
+strict = false
+
+# Warn on call arguments that may be null or whose type is unknown.
+[expressions]
 strict = false
 
 # Activate an extension baseline schema by name → path + globs. The path
@@ -73,8 +80,10 @@ strict = false
 Claudine's schemas need no extension entry. They are trigger schemas, which
 `dmls` discovers in the document's schema roots: a document under `claudine/`
 reaches `claudine/schemas/` automatically, and a document elsewhere needs the
-complete five-file bundle in the repository root's `schemas/`, an absolute
-`SCHEMAS_DIR`, or `~/schemas`. `dmls` reads them from disk only and uses them
+complete seven-file trigger bundle in the repository root's `schemas/`, an absolute
+`SCHEMAS_DIR`, or `~/schemas`. Copy `globals.yaml` and its companion
+`globals.lifecycle.json` too for Claudine-specific globals and lifecycle
+analysis. `dmls` reads these files from disk only and uses the trigger bundle
 for diagnostics, completion, and hover. See
 [DMLS Schema Support](../../../docs/topics/schemas/dmls-schema-support.md#claudine-documents).
 
@@ -90,8 +99,8 @@ setting an Error. Findings are shown when the server starts and again after
 every `workspace/didChangeConfiguration`, never per formatting request, so a
 legacy key keeps warning once per configuration change until it is migrated.
 
-See [spec.md](../../../features/2026-07-04-dmls/spec.md) § Configuration for the
-full key list.
+See [DMLS Configuration](../../../docs/lsp/configuration.md) for the full key
+list.
 
 ## Formatting
 

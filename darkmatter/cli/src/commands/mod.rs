@@ -1,6 +1,7 @@
 //! Subcommand dispatch for the `md` CLI.
 
-use crate::args::{Cli, Command as CliCommand, OutputFormat, SchemaTarget};
+use crate::args::policy::{self, PolicyCommand};
+use crate::args::{Cli, Command as CliCommand, ComposeOutputFormat, OutputFormat, SchemaTarget};
 use crate::io::load_markdown;
 use crate::request::MdRequest;
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
@@ -17,14 +18,16 @@ mod graph;
 mod hash;
 mod render;
 pub mod schema;
+mod trigger_findings;
 mod validate;
 
 use code_block::run_code_block;
-use compose::{ComposeAllowFlags, build_remote_read_config, parse_compose_positionals, run_compose};
+use compose::{build_remote_read_config, parse_compose_positionals, run_compose};
 use frontmatter::{run_edit, run_get, run_rm, run_set};
 use hash::run_hash;
 
 pub use clean::{CleanOptions, CleanSchemaFlags, run_clean};
+pub use compose::report::ReportedExit;
 pub use render::run_render;
 
 /// Validates that top-level CLI options are not combined with subcommands.
@@ -42,6 +45,9 @@ pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
     }
     if cli.save {
         conflicts.push("--save");
+    }
+    if !cli.deny.is_empty() {
+        conflicts.push("--deny");
     }
 
     if conflicts.is_empty() {
@@ -62,11 +68,13 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             output,
             show,
             indent,
+            deny,
             features,
         } => {
+            let policy = policy::resolve_for(PolicyCommand::Render, &[], &deny, &[], None)?;
             // `md --feature a render --feature b` turns on both.
             let features = [cli.features.as_slice(), features.as_slice()].concat();
-            run_render(input.as_ref(), output, show, indent, &features, cli, request)?;
+            run_render(input.as_ref(), output, show, indent, policy.denies("style"), &features, cli, request)?;
         }
         CliCommand::Clean {
             input,
@@ -79,9 +87,15 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             json,
             schema,
             baseline_schema,
-            no_baseline_schema,
-            no_trigger_schemas,
+            disable,
         } => {
+            let policy = policy::resolve_for(
+                PolicyCommand::Clean,
+                &[],
+                &[],
+                &disable,
+                baseline_schema.is_some().then_some("--baseline-schema <PATH>"),
+            )?;
             let options = CleanOptions {
                 save,
                 indent,
@@ -93,8 +107,8 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                 schema: CleanSchemaFlags {
                     schema,
                     baseline_schema,
-                    no_baseline_schema,
-                    no_trigger_schemas,
+                    no_baseline_schema: policy.disables("baseline-schema"),
+                    no_schema_triggers: policy.disables("schema-triggers"),
                 },
             };
             run_clean(input.as_ref(), &options, request)?;
@@ -109,21 +123,13 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             compact,
             loose,
             indent,
-            allow_missing_hyperlinks,
-            allow_missing_image_refs,
-            allow_missing_transclusions,
-            allow_any_missing_reference,
-            allow_ctx_override,
-            allow_invalid_frontmatter_assignment,
-            allow_reassigned_frontmatter_property,
             baseline_schema,
-            no_baseline_schema,
-            no_trigger_schemas,
+            allow,
+            deny,
+            disable,
             timeout,
-            allow_shell_timeout,
             shell,
             perf,
-            allow_host,
             remote_concurrency,
             remote_ttl,
             remote_refresh,
@@ -133,44 +139,50 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             let parsed = parse_compose_positionals(&args)?;
             let mode = clean::resolve_list_spacing(compact, loose)
                 .unwrap_or(darkmatter::markdown::cleanup::rules::ListItemPadding::Preserve);
-            let allow = ComposeAllowFlags {
-                hyperlinks: allow_missing_hyperlinks || allow_any_missing_reference,
-                image_refs: allow_missing_image_refs || allow_any_missing_reference,
-                transclusions: allow_missing_transclusions || allow_any_missing_reference,
-            };
+            let policy = policy::resolve_for(
+                PolicyCommand::Compose,
+                &allow,
+                &deny,
+                &disable,
+                baseline_schema.is_some().then_some("--baseline-schema <PATH>"),
+            )?;
             let remote_config = build_remote_read_config(
-                &allow_host,
+                policy.hosts(),
                 remote_concurrency,
                 remote_ttl,
                 remote_refresh,
                 remote_freshness,
             );
-            run_compose(
+            let report = output == ComposeOutputFormat::ReportJson;
+            if report {
+                compose::reject_report_conflicts(show, shell)?;
+            }
+            let sink = report.then(compose::report::ReportSink::default);
+            let result = run_compose(
                 parsed.input.as_ref(),
                 state.as_deref(),
                 set.as_deref(),
                 parsed.shorthand_setters,
-                output,
+                output.document_format(),
                 show,
                 frontmatter,
                 mode,
                 indent,
-                &allow,
-                allow_ctx_override,
-                allow_invalid_frontmatter_assignment,
-                allow_reassigned_frontmatter_property,
+                &policy,
                 baseline_schema.as_ref(),
-                no_baseline_schema,
-                no_trigger_schemas,
                 timeout,
-                allow_shell_timeout,
                 shell,
                 perf,
                 remote_config,
                 cache_root.as_ref(),
                 cli,
                 request,
-            )?;
+                sink.as_ref(),
+            );
+            match sink {
+                Some(sink) => sink.finish(result)?,
+                None => result?,
+            }
         }
         CliCommand::Toc { input, json } => {
             let md = load_markdown(input.as_ref(), request)?;
@@ -300,18 +312,25 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
             SchemaTarget::Validate {
                 inputs,
                 schema,
-                no_baseline_schema,
                 format,
                 quiet,
-                no_trigger_schemas,
+                disable,
             } => {
+                let policy = policy::resolve_for(
+                    PolicyCommand::SchemaValidate,
+                    &[],
+                    &[],
+                    &disable,
+                    schema.is_some().then_some("--schema <PATH>"),
+                )?;
                 schema::run_validate(
                     &inputs,
                     schema.as_deref(),
-                    no_baseline_schema,
+                    policy.disables("baseline-schema"),
                     format,
                     quiet,
-                    no_trigger_schemas,
+                    policy.disables("schema-triggers"),
+                    cli.verbose,
                     request,
                 )?;
             }

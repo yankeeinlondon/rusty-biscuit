@@ -58,6 +58,8 @@ pub struct DiscordWebhookConfig {
 **MessageRef**: `MessageRef::DiscordWebhook { webhook_id, channel_id, message_id, thread_id }`.
 **Markdown renderer**: Shares the same `markdown/discord.rs` renderer as the bot adapter.
 
+**Long content**: `content` over `CONTENT_MAX_CHARS` (2000 chars) is split by `markdown::split::split_to_char_limit` (paragraph → line → char boundary; fences closed/reopened) and sent as consecutive posts; embed and attachments ride on the last post. Receipt = first post's id; `metadata["post_count"]` and `metadata["post_message_ids"]` are set only when more than one post was sent. A failed later post returns its error after the earlier posts are already visible. The bot adapter does not split yet.
+
 **Reply enforcement**: `validate::normalize_dispatch` returns `MessengerError::UnsupportedFeature { provider: DiscordWebhook, feature: "replies" }` before any network call when `reply_to` is set — this hard-error fires in both strict and best-effort modes.
 
 **URL parsing**: `try_new` parses `/webhooks/{id}/{token}` segments out of the full URL, validates the webhook id, and returns `MessengerError::InvalidMessage` for malformed input. Optional `thread_id` values are validated as numeric Discord snowflakes before a request is sent.

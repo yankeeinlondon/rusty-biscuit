@@ -1,0 +1,88 @@
+{
+  "definitions": [
+    {
+      "at": "file value",
+      "definition": [
+        {
+          "uri": "<root-uri>/repo/claudine/lib/tasks/notes/plan.md",
+          "range": {
+            "start": {
+              "line": 0,
+              "character": 0
+            },
+            "end": {
+              "line": 0,
+              "character": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "at": "second file value",
+      "definition": [
+        {
+          "uri": "<root-uri>/repo/claudine/lib/tasks/notes/spec.md",
+          "range": {
+            "start": {
+              "line": 0,
+              "character": 0
+            },
+            "end": {
+              "line": 0,
+              "character": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "at": "file-typed key",
+      "definition": []
+    },
+    {
+      "at": "file-typed expression value",
+      "definition": []
+    },
+    {
+      "at": "lifecycle verb value",
+      "definition": []
+    },
+    {
+      "at": "schema property type",
+      "definition": []
+    },
+    {
+      "at": "body",
+      "definition": []
+    }
+  ],
+  "document_links": [
+    {
+      "range": {
+        "start": {
+          "line": 15,
+          "character": 6
+        },
+        "end": {
+          "line": 15,
+          "character": 21
+        }
+      },
+      "target": "<root-uri>/repo/claudine/lib/tasks/notes/plan.md"
+    },
+    {
+      "range": {
+        "start": {
+          "line": 25,
+          "character": 6
+        },
+        "end": {
+          "line": 25,
+          "character": 21
+        }
+      },
+      "target": "<root-uri>/repo/claudine/lib/tasks/notes/spec.md"
+    }
+  ]
+}

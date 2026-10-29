@@ -1,0 +1,3 @@
+kind: schema
+types:
+  choice: "middle_choice@./middle.yaml"

@@ -20,7 +20,7 @@ impl Loader<'_> {
             crate::composition::lifecycle_actions::for_each_action_mut(lifecycle.stack_mut(signal), &mut |action| {
                 if result.is_err() { return; }
                 let property = action.path.to_string();
-                let scope = SiteScope { origin, label, property, state, placement };
+                let scope = SiteScope { origin, label, property, state, placement, guard: None };
                 result = (|| {
                     match &mut action.kind {
                         LifecycleActionKind::Shell(shell) => {

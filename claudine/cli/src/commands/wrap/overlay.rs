@@ -92,6 +92,7 @@ pub(crate) fn materialize_passthrough_harness_seed(
         file_resolution_context: source_context.file_resolution_context().clone(),
         compose_context: Some(context),
         document_epoch: Some(document_epoch),
+        frontmatter_view: super::harness_orch::MaterializedHarnessPrompt::view_of(&live_frontmatter),
         live_frontmatter,
         runtime_state,
         lifecycle: None,

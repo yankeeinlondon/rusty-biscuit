@@ -23,7 +23,7 @@ fn write(path: &Path, contents: &str) {
     std::fs::write(path, contents).expect("write fixture");
 }
 
-const TRIGGER: &str = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: claudine.yaml\n";
+const TRIGGER: &str = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: claudine.yaml\n";
 const PAYLOAD: &str = "$schema:\n  model: string(required)\n";
 
 /// A repository `{dir}/repo` with packages `pkg-a` and `pkg-b` (neither has a
@@ -230,7 +230,7 @@ fn an_inline_payload_with_nested_imports_and_examples_is_shared() {
     let fixture = Fixture::new();
     fixture.write(
         "schemas/claudine.trigger.yaml",
-        "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema:\n  owner: \"Person@./types/person.yaml\"\n",
+        "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema:\n  owner: \"Person@./types/person.yaml\"\n",
     );
     fixture.write("schemas/types/person.yaml", "$schema:\n  Person: \"string(example(./person-example.yaml))\"\n");
     fixture.write(
@@ -282,7 +282,7 @@ fn eighteen_distinct_keys_fit_and_a_repeat_scan_resolves_nothing() {
         for trigger in ["claudine", "inline-compose", "sequence"] {
             write(
                 &package.join(format!("schemas/{trigger}.trigger.yaml")),
-                &format!("kind: trigger-schema\nmatch:\n  {trigger}: string(required)\n$schema: {trigger}.yaml\n"),
+                &format!("kind: schema-trigger\nmatch:\n  {trigger}: string(required)\n$schema: {trigger}.yaml\n"),
             );
             write(&package.join(format!("schemas/{trigger}.yaml")), PAYLOAD);
         }
@@ -363,6 +363,17 @@ fn a_file_added_to_a_schema_root_is_resolved_again() {
     assert_eq!(payload_properties(&registry), ["model"]);
 }
 
+/// The trigger `scan` skipped because its payload failed: the scan itself
+/// succeeds, and the trigger is reported instead of installed.
+fn skipped_by_payload_failure(context: &FileResolutionContext) -> crate::markdown::schemas::InvalidTriggerFinding {
+    let registry = scan(context).expect("a failed payload skips its trigger, not the scan");
+    assert!(registry.triggers.is_empty(), "a failed payload is never installed");
+    let [finding] = registry.findings() else {
+        panic!("one finding expected: {:?}", registry.findings());
+    };
+    finding.clone()
+}
+
 /// A failed resolution counts as a miss and is never kept, so the next
 /// lookup tries again.
 #[test]
@@ -373,7 +384,7 @@ fn a_failed_resolution_is_a_miss_and_is_not_kept() {
 
     for attempt in 0..2 {
         let tally = PayloadMemoTally::start();
-        assert!(scan(&document).is_err(), "attempt {attempt} must fail");
+        skipped_by_payload_failure(&document);
         assert_eq!(tally.counts(), MISS, "attempt {attempt}");
     }
 }
@@ -522,7 +533,7 @@ macro_rules! nearer_candidate_cases {
 nearer_candidate_cases! {
     a_nearer_payload_path_is_resolved_again:
         files [
-            ("schemas/claudine.trigger.yaml", "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: shared/deep/payload.yaml\n"),
+            ("schemas/claudine.trigger.yaml", "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: shared/deep/payload.yaml\n"),
             ("shared/deep/payload.yaml", PAYLOAD),
         ],
         nearer "schemas/shared/deep/payload.yaml" => "$schema:\n  owner: string(required)\n",
@@ -563,7 +574,8 @@ fn an_explicit_relative_reference_gains_no_fallback() {
 
     for attempt in 0..2 {
         let tally = PayloadMemoTally::start();
-        assert!(scan(&document).is_err(), "attempt {attempt}: `./` must not fall back to the root");
+        // `./` must not fall back to the root.
+        skipped_by_payload_failure(&document);
         assert_eq!(tally.counts(), MISS, "attempt {attempt}");
     }
 

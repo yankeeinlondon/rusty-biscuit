@@ -1,0 +1,289 @@
+//! Pure runtime-dispatch decisions for lifecycle [`StackControl`] outcomes.
+//!
+//! The stack executor ([`super::executor`]) resolves a matched control action
+//! into a [`StackControl`]. The host's runtime then has to translate that into
+//! concrete control flow: retry the attempt, resume the provider session, hand
+//! off to another document, requeue for later, or stop.
+//!
+//! This module isolates the *decision* — given the terminal event, the
+//! control, and the current attempt state, what should the runtime do? —
+//! from the *effect* (re-entering the host's loop, mutating document state,
+//! sleeping). Keeping the decision pure means every control branch can be
+//! unit-tested without starting a provider.
+
+use std::time::Duration;
+
+use super::actions::RetryBackoff;
+use super::executor::StackControl;
+
+/// The concrete runtime action a terminal-event [`StackControl`] resolves to.
+///
+/// This is what the host's runtime acts on after a `blocked`/`failure` (or a
+/// downgraded terminal) event reports its control. Each variant maps to one
+/// branch of the loop's control flow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ControlDispatch {
+    /// Re-enter the loop for another attempt. The runtime should sleep for
+    /// `delay` (already adjusted for backoff), then `continue` the loop.
+    ///
+    /// `reenter_preflight` re-enters the pre-flight/start path (no provider
+    /// invocation existed yet); otherwise the provider is invoked again.
+    Retry {
+        /// How long to wait before the next attempt (post-backoff).
+        delay: Duration,
+        /// True when the provider had **not** launched this iteration (re-run
+        /// pre-flight/start); false when it had (re-invoke the provider).
+        /// Derived from launch state, not the event — so a `retry` recovers
+        /// uniformly from `blocked` (pre-launch) or `failure`/`finalize`
+        /// (post-launch).
+        reenter_preflight: bool,
+    },
+
+    /// Resume the provider session with a follow-up message. The runtime
+    /// must have a session; absence is a hard error (see
+    /// [`ControlDispatch::ResumeWithoutSession`]).
+    Resume {
+        /// The follow-up prompt to deliver on resume.
+        message: String,
+    },
+
+    /// The control requested resume but no session is available — a hard
+    /// error the runtime surfaces rather than silently dropping.
+    ResumeWithoutSession,
+
+    /// Hand off to another prompt document, entering at its own
+    /// `initialize` (a fresh prompt run including pre-flight).
+    Proxy {
+        /// The target prompt reference (e.g. `@prompts/foo.md`).
+        target: String,
+    },
+
+    /// Push this prompt onto the deferred-execution (`rendezvous`) queue,
+    /// then exit this run.
+    Defer {
+        /// Evaluated delay duration string.
+        delay: String,
+        /// Optional human-readable reason.
+        reason: Option<String>,
+    },
+
+    /// The retry/resume attempt ceiling has been reached; no further
+    /// attempts. The runtime falls through to its normal terminal handling.
+    Exhausted,
+
+    /// End the event cleanly with the outcome unchanged (`Stop`, or any
+    /// control that has no runtime effect here).
+    Stop,
+}
+
+/// Decide what the runtime should do for a lifecycle-event control.
+///
+/// `attempt` is the 1-based current attempt counter, and `control_budget` is
+/// the per-control retry/resume ceiling already chosen for this control's first
+/// firing (`1 + max_attempts`, in absolute attempt-counter terms). When
+/// `attempt` has reached the budget the dispatch is
+/// [`ControlDispatch::Exhausted`].
+///
+/// `has_session` reports whether a provider session is available (only
+/// matters for `Resume`). `provider_launched` reports whether the provider
+/// child had launched this iteration; it decides whether a `Retry` re-enters
+/// pre-flight (pre-launch) or re-invokes the provider (post-launch).
+///
+/// ## Uniformity
+///
+/// This decision is **event-agnostic**: every lifecycle event's stack
+/// dispatches a control the same way. Which control is *valid* in which event
+/// is decided when the stack is parsed, not here — so there is no per-signal
+/// gate. `Stop`/`Skip`/`Error` carry no runtime recovery
+/// effect and resolve to [`ControlDispatch::Stop`] (their terminal-outcome
+/// effects are applied by the caller at the event boundary).
+pub fn decide_control(
+    control: &StackControl,
+    attempt: u32,
+    control_budget: u32,
+    has_session: bool,
+    provider_launched: bool,
+) -> ControlDispatch {
+    match control {
+        // A `break` ends its event like `stop`; its loop reads the break from
+        // the slot the executor recorded it in.
+        StackControl::Stop | StackControl::Skip | StackControl::Error { .. } | StackControl::Break { .. } => {
+            ControlDispatch::Stop
+        }
+        StackControl::Retry {
+            max_attempts,
+            backoff,
+            delay,
+            // The overlay is not a dispatch decision; the host reads it from
+            // the control when it applies the re-entry.
+            overlay: _,
+        } => {
+            // `control_budget` carries the absolute attempt ceiling derived
+            // from `max_attempts` when the control first fired. When this is
+            // the first firing (budget not yet established) derive it here.
+            let budget = if control_budget == 0 {
+                attempt.saturating_add(*max_attempts)
+            } else {
+                control_budget
+            };
+            if attempt >= budget {
+                return ControlDispatch::Exhausted;
+            }
+            let base = parse_delay(delay);
+            // `retry_index` is how many retries this control has already
+            // consumed: the first retry (attempt == budget - max_attempts)
+            // applies the base delay, each subsequent one doubles under
+            // exponential backoff.
+            let consumed = attempt.saturating_sub(budget.saturating_sub(*max_attempts));
+            let adjusted = compute_backoff_delay(base, *backoff, consumed);
+            ControlDispatch::Retry {
+                delay: adjusted,
+                reenter_preflight: !provider_launched,
+            }
+        }
+        StackControl::Resume {
+            message,
+            max_attempts,
+        } => {
+            let budget = if control_budget == 0 {
+                attempt.saturating_add(*max_attempts)
+            } else {
+                control_budget
+            };
+            if attempt >= budget {
+                return ControlDispatch::Exhausted;
+            }
+            if !has_session {
+                return ControlDispatch::ResumeWithoutSession;
+            }
+            ControlDispatch::Resume {
+                message: message.clone(),
+            }
+        }
+        StackControl::Proxy { target, .. } => ControlDispatch::Proxy {
+            target: target.clone(),
+        },
+        StackControl::Defer { delay, reason } => ControlDispatch::Defer {
+            delay: delay.clone(),
+            reason: reason.clone(),
+        },
+    }
+}
+
+/// Compute the absolute attempt ceiling for a control's first firing.
+///
+/// `attempt` is the attempt at which the control fired; `max_attempts` is
+/// the additional attempts requested. The ceiling is the attempt counter
+/// value at which no further retries are permitted.
+pub fn control_budget_for(attempt: u32, max_attempts: u32) -> u32 {
+    attempt.saturating_add(max_attempts)
+}
+
+/// Apply the backoff strategy to a base delay for the `retry_index`-th retry
+/// (0-based: the first retry uses the base delay unchanged).
+///
+/// Under [`RetryBackoff::Exponential`] the delay doubles per retry; under
+/// [`RetryBackoff::Fixed`] it is constant. Doubling saturates at
+/// [`Duration::MAX`] rather than overflowing.
+pub fn compute_backoff_delay(
+    base: Duration,
+    backoff: RetryBackoff,
+    retry_index: u32,
+) -> Duration {
+    match backoff {
+        RetryBackoff::Fixed => base,
+        RetryBackoff::Exponential => {
+            let factor = 2u64.checked_pow(retry_index).unwrap_or(u64::MAX);
+            base.checked_mul(u32::try_from(factor).unwrap_or(u32::MAX))
+                .unwrap_or(Duration::MAX)
+        }
+    }
+}
+
+/// The maximum number of `proxy(...)` hand-offs permitted in a single run.
+///
+/// A `proxy` chain longer than this — even without a repeated document — is
+/// treated as runaway control flow and stopped with a typed error.
+pub const MAX_PROXY_HOPS: usize = 16;
+
+/// Return the stable lexical identity used for one proxy-chain entry.
+///
+/// This removes `.` and collapses `..` without consulting the filesystem, so
+/// retry/proxy re-materialization cannot change identity through a different
+/// spelling of the same path. Symlinks remain unresolved: authored/worktree
+/// identity is lexical and this function is not a sandbox boundary.
+#[must_use]
+pub fn proxy_path_identity(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+
+    let mut normalized = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match normalized.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    normalized.pop();
+                }
+                Some(Component::ParentDir) | None if !normalized.has_root() => {
+                    normalized.push(component.as_os_str());
+                }
+                Some(Component::Prefix(_)) if !normalized.has_root() => {
+                    normalized.push(component.as_os_str());
+                }
+                _ => {}
+            },
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
+/// Whether a `proxy` hand-off to `target` is permitted given the chain of
+/// documents already proxied to in this run.
+///
+/// `chain` is the ordered list of resolved documents already visited by proxy
+/// in this run. A hand-off is rejected when `target` already appears in the
+/// chain (a self-proxy or an A→B→A cycle) or when accepting it would exceed
+/// [`MAX_PROXY_HOPS`].
+///
+/// A chain entry matches by [`proxy_path_identity`], or, when both files
+/// exist, by canonical path: a target resolved through the launch directory
+/// carries its physical spelling (macOS `/private/var/…`) while the entry
+/// document may keep the argv spelling (`/var/…`), and those are one document.
+///
+/// The host's effectful swap (re-materialize, re-parse the lifecycle, reset
+/// the run guard) only runs when this returns `true`.
+pub fn proxy_handoff_allowed(chain: &[std::path::PathBuf], target: &std::path::Path) -> bool {
+    if super::policy::proxy_budget_exhausted(chain.len()) {
+        return false;
+    }
+    let target_identity = proxy_path_identity(target);
+    let target_physical = std::fs::canonicalize(target).ok();
+    !chain.iter().any(|path| {
+        proxy_path_identity(path) == target_identity
+            || target_physical
+                .as_ref()
+                .is_some_and(|physical| std::fs::canonicalize(path).ok().as_ref() == Some(physical))
+    })
+}
+
+/// Parse a lifecycle delay string (e.g. `"5m"`, `"30 sec"`) into a
+/// [`Duration`].
+///
+/// Uses the [`super::duration`] grammar, where a delay must be greater than
+/// zero. An unparseable, zero, or empty value yields [`Duration::ZERO`] — a
+/// delay is advisory pacing, not a correctness gate, so a malformed value
+/// degrades to "no wait" rather than aborting the run.
+pub fn parse_delay(raw: &str) -> Duration {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Duration::ZERO;
+    }
+    match super::duration::parse_duration_secs(trimmed) {
+        Ok(secs) if secs > 0.0 => Duration::from_secs_f64(secs),
+        _ => Duration::ZERO,
+    }
+}
+
+#[cfg(test)]
+mod tests;

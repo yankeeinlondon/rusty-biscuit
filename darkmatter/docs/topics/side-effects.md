@@ -1,9 +1,10 @@
+---
+kind: canonical-documentation
+---
 # Side Effects
 
 > **Status: v1 catalog implemented.** The frontmatter, file/directory, and
 > host-policy-gated network verbs ship as `darkmatter::effects::EffectEngine`.
-> The full specification lives in the completed feature
-> [`more-context-variables`](../../features/_completed/2026-03-29-more-context-variables/spec.md).
 
 Side Effects are the counterpart to the read-only [Expression Engine](./darkmatter-expressions.md).
 Where expression functions only *report* on state, side effects **mutate**
@@ -15,15 +16,28 @@ by hard boundaries.
 | | Expression functions | Side effects |
 |---|---|---|
 | Purpose | read / report | mutate |
-| Runs during `md compose`? | yes | **never** |
-| Invoked by | the compose pipeline | an external orchestrator only |
+| Runs during `md compose`? | yes | only from a [lifecycle event](./lifecycle/index.md) action |
+| Invoked by | the compose pipeline | a lifecycle host (`md compose`, Claudine) |
 | Module | `compose::expression` | `effects` (separate) |
 
-Composing a document is **pure** — it never triggers a side effect. The
-side-effect engine is a library surface that only a host invokes at
-well-defined moments — for example, Claudine's
-[lifecycle events](../../../claudine/features/2026-05-12-lifecycle/spec.md).
-Darkmatter owns the engine; the host drives it.
+Evaluating an expression does not call the effects engine. Its operations
+run only as actions of a [lifecycle event](./lifecycle/index.md), which a host fires at well-defined
+moments. `md compose` is such a host, so an `ensure_file` in `initialize` can
+create the file the body then includes:
+
+```yaml
+initialize:
+    - ensure_file: ["notes.md", "# Notes"]   # creates notes.md only if it is missing
+```
+
+`md render`, `md schema validate`, DMLS, and the library compose API without
+a lifecycle host do not dispatch these operations. Darkmatter owns the
+engine; the host drives it.
+
+This boundary concerns the effects engine. Composition can also execute
+shell directives when enabled; see [the compose command](../cli/compose.md)
+for that separate behavior. Schema validation and editor requests never
+execute either kind of operation.
 
 ## The Read/Write Seam
 
@@ -34,6 +48,20 @@ at evaluation, not syntax:
 - side-effect **arguments** are evaluated by the read-only expression evaluator
   (so `upper(...)`, `frontmatter(...)`, and `{{ }}` interpolation work inside
   arguments)
+- the evaluated arguments then **bind** to the verb's typed signature, by the
+  same rule as an expression-function call, before anything is written. A
+  value that fits no signature stops the action with the expression layer's
+  call-binding error, naming the argument; the engine is never called, and
+  `no_error` does not hide it. The engine receives the bound values, so a
+  number given for a text parameter arrives as its text, and the selected
+  signature picks the `ensure_file` form:
+
+  ```yaml
+  composed:
+      - ensure_file: ["count.txt", 3]                # writes the text 3
+      - merge_frontmatter: ["doc.md", "{{ 5 }}"]     # fails before writing: obj must be an object
+  ```
+
 - only the outer **dispatch** mutates
 
 ## Safety Boundaries
@@ -61,9 +89,6 @@ Both enforced inside Darkmatter, both configured by the host:
 Markdown frontmatter writers re-hash a `hash:` property automatically by
 default. Full-file overwrite and deletion are expressly out of scope for v1.
 
-See the [spec](../../features/_completed/2026-03-29-more-context-variables/spec.md)
-for the full technical design, signatures, and host integration surface.
-
 `http_post` uses the same `biscuit-file` fetch policy as compose remote reads,
 so denied hosts are rejected before any network request is attempted.
 
@@ -71,5 +96,4 @@ so denied hosts are rejected before any network request is attempted.
 
 - [Darkmatter Expressions](./darkmatter-expressions.md)
 - [Context Variables](state-management/context-variables.md)
-</content>
-</invoke>
+- [Lifecycle Events](./lifecycle/index.md)

@@ -1,8 +1,12 @@
+---
+kind: canonical-documentation
+---
+
 # Context Variables
 
 Context variables are variables which Darkmatter provides to the **Interpolation** process as a key/value dictionary under the name of `ctx`.
 
-Every variable on this page has a lazy twin at `current.<key>`: the same key and value type, observed when the reference is evaluated rather than captured once at the start of the request. Use `ctx.*` for a stable value across the whole composition and `current.*` when a fact may have changed since launch. See [Namespaces](./darkmatter-expressions.md#namespaces) for the lazy roots' freshness, memo scope, and cost.
+Every variable on this page has a lazy twin at `current.<key>`: the same key and value type, observed when the reference is evaluated rather than captured once at the start of the request. Use `ctx.*` for a stable value across the whole composition and `current.*` when a fact may have changed since launch. See [Namespaces](../darkmatter-expressions.md#namespaces) for the lazy roots' freshness, memo scope, and cost.
 
 ## Overcoming `ctx` Conflicts
 
@@ -16,7 +20,7 @@ Every variable on this page has a lazy twin at `current.<key>`: the same key and
 - If there is a `ctx` property defined on the page that is _not_ a dictionary then we will:
 
     - By default return an error and stop composition
-    - If the user uses the `--allow-ctx-override` CLI switch, downgrade to a warning and proceed with composition using the runtime context
+    - If the user uses the `--allow ctx-override` CLI switch, downgrade to a warning and proceed with composition using the runtime context
 
 ## Timing in Compose
 
@@ -93,8 +97,8 @@ Variables are organized into capture groups. The expensive I/O for each group ru
 
 The per-variable reference below is **generated** from the schema-derived
 `ctx.*` catalog — the exact output of `md schema about --verbose`. It is
-projected from the base frontmatter schema
-(`darkmatter/docs/schemas/darkmatter.yaml`), so it can never drift from
+projected from the global catalog's `ctx` declaration
+(`darkmatter/schemas/partials/context-variables.yaml`), so it can never drift from
 validation. Do not hand-edit the block between the markers; a parity test
 (`context_variables_doc_matches_generated_catalog`) regenerates it and its
 failure message prints the up-to-date block to paste back.

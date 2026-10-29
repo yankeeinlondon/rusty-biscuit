@@ -82,9 +82,9 @@ pub(super) fn dispatch_terminal_control(
     };
 
     // The ledger seeds its chain with the originating document and extends it
-    // on every approved hop, so the active document is always already in it —
-    // no "is the current document counted yet" arithmetic, which is what the
-    // four open-coded chain checks each answered differently.
+    // on every approved hop, so the active document is always already in it:
+    // its length is the count the policy kernel's proxy budget reads
+    // (`policy::proxy_budget_exhausted`).
     let proxy_hops_used = ledger.chain().len();
     let decision = decide_lifecycle_transition(&LifecycleTransitionInput {
         event: lifecycle_guard
@@ -194,13 +194,20 @@ pub(super) fn dispatch_terminal_control(
             lifecycle_guard.reset_for_next_iteration();
             TerminalControlAction::Continue
         }
-        LifecycleTransitionDecision::Abort(LifecycleTransitionAbort::ResumeWithoutSession) => {
-            TerminalControlAction::Abort(
-                CompositionError::LifecycleResumeWithoutSession {
-                    source_path: prompt_state.source_path.clone(),
-                }
-                .into(),
+        LifecycleTransitionDecision::Abort(
+            abort @ (LifecycleTransitionAbort::ResumeWithoutSession
+            | LifecycleTransitionAbort::DeferredExecutionUnsupported),
+        ) => {
+            // `defer` is accepted in every event, but its runtime home (the
+            // rendezvous deferred-execution scheduler) is not ready to receive
+            // prompts yet, so it is refused rather than enqueued; the enqueue
+            // machinery (`enqueue_requeue_entry`) is retained for when it lands.
+            let error = CompositionError::from_lifecycle_refusal(
+                &claudine::composition::lifecycle::policy::Refusal::Abort(abort),
+                &prompt_state.source_path,
             )
+            .expect("a resume or defer refusal maps to its error");
+            TerminalControlAction::Abort(error.into())
         }
         LifecycleTransitionDecision::ProxyHandoff { target } => {
             // Everything a *provider attempt* can know about a hand-off: the
@@ -224,21 +231,6 @@ pub(super) fn dispatch_terminal_control(
                     ledger.chain().to_vec(),
                 ),
             ))
-        }
-        LifecycleTransitionDecision::Abort(
-            LifecycleTransitionAbort::DeferredExecutionUnsupported,
-        ) => {
-            // `defer` (deferred re-execution) is accepted in every event, but its
-            // runtime home — the rendezvous deferred-execution scheduler — is not
-            // ready to receive prompts yet, so surface a clear "not implemented"
-            // error rather than enqueuing. The rendezvous enqueue machinery
-            // (`enqueue_requeue_entry`) is retained for when it lands.
-            TerminalControlAction::Abort(
-                CompositionError::LifecycleDeferNotImplemented {
-                    source_path: prompt_state.source_path.clone(),
-                }
-                .into(),
-            )
         }
         LifecycleTransitionDecision::Abort(LifecycleTransitionAbort::ProxyBudgetExhausted) => {
             TerminalControlAction::Abort(CompositionError::LifecycleProxyCycle {

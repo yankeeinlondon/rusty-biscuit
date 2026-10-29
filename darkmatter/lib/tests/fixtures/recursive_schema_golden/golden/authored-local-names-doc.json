@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "base": {
+      "type": "number"
+    },
+    "mid": {
+      "type": "number"
+    },
+    "local": {
+      "type": "number"
+    },
+    "remote": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "base",
+    "mid",
+    "local",
+    "remote"
+  ]
+}

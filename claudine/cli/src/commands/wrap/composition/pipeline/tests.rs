@@ -1,3 +1,4 @@
+use claudine::composition::LifecycleRunGuardExt;
 use super::*;
 
 #[test]
@@ -72,7 +73,7 @@ fn cancelled_initialize_route(control: serde_json::Value, cleanup: serde_json::V
     let engine = EffectEngine::builder().mutation_root(dir.path()).auto_rehash(false).build();
     let init = StackExecutionContext {
         seq: None, signal: LifecycleSignal::Initialize, scope: None,
-        frontmatter: frontmatter.as_object().unwrap(), live_frontmatter: None,
+        frontmatter: &darkmatter::markdown::compose::SharedFrontmatter::from(frontmatter.as_object().unwrap().clone()), live_frontmatter: None,
         runtime_state: None, err: None, timing: None, current: None, group: None,
         loop_values: None, base_dir: Some(dir.path()), ctx_base_dir: Some(dir.path()),
         prepared_context: Some(&context), file_resolution_context: &resolution,

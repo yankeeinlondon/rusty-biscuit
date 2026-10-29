@@ -332,6 +332,13 @@ pub(crate) fn prepare_resolved(
     // the complete chain.
     check_runtime_blacklists(&effective, &display_command, &runtime_snapshot.user_blacklist)?;
 
+    let suggested_rules = || {
+        let offered = template.map_or_else(template::OfferedChoices::resolved_bytes, |site| site.offered());
+        let programs: Vec<String> = executables_with_args(&effective).into_iter().map(|(exe, _)| exe).collect();
+        let shape = template.map(|site| site.shape());
+        Box::new(template::SuggestedRules::new(offered, Some(&normalized_commands), shape.as_ref(), &programs))
+    };
+
     // Session approvals are keyed by mode and policy root: these are
     // resolved-byte keys, which a template approval never matches.
     let policy_root = template::ApprovalKey::policy_root_of(policy_paths);
@@ -393,6 +400,7 @@ pub(crate) fn prepare_resolved(
                 whitelist_path: Box::new(policy_paths.whitelist.clone()),
                 blacklist_path: Box::new(policy_paths.blacklist.clone()),
                 origin: directive.origin.clone(),
+                suggested_rules: suggested_rules(),
             });
         }
 
@@ -504,6 +512,7 @@ pub(crate) fn prepare_resolved(
             whitelist_path: Box::new(policy_paths.whitelist.clone()),
             blacklist_path: Box::new(policy_paths.blacklist.clone()),
             origin: directive.origin.clone(),
+            suggested_rules: suggested_rules(),
         })
     }
 }
@@ -757,13 +766,16 @@ pub(crate) fn execute_prepared_directive(
     )?;
 
     if fresh && let Some(timeout) = execution.timeout_fallback {
-        let warning = ComposeWarning::new(
-            "shell_expansion",
-            format!(
-                "Shell command timed out after {timeout:?} at {}: '{}'; replaced with an empty string",
-                prepared.effective.origin, prepared.display_command
-            ),
-        );
+        let warning = ComposeWarning {
+            code: Some(crate::markdown::compose::policy::SHELL_TIMEOUT_CODE.to_string()),
+            ..ComposeWarning::new(
+                "shell_expansion",
+                format!(
+                    "Shell command timed out after {timeout:?} at {}: '{}'; replaced with an empty string",
+                    prepared.effective.origin, prepared.display_command
+                ),
+            )
+        };
         warnings.push(locate_warning(warning, &prepared.effective.origin));
     }
 

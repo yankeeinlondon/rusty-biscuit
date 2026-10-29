@@ -19,7 +19,6 @@
 //! body for instructions; later stages rewrite whole text and scan nothing.
 
 use std::borrow::Cow;
-use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
 use crate::markdown::Markdown;
@@ -448,9 +447,7 @@ fn push_segment(segments: &mut Vec<Segment>, output: usize, origin: usize, len: 
 }
 
 fn hash_text(text: &str) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    text.hash(&mut hasher);
-    hasher.finish()
+    biscuit_hash::xx_hash(text)
 }
 
 #[cfg(test)]

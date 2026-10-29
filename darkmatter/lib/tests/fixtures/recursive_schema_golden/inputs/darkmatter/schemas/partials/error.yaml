@@ -1,0 +1,21 @@
+# The `err` type: the active failure a lifecycle event reads. `kind`,
+# `variant`, and `msg` are always present; the diagnostic facets and their
+# conveniences are present only when the failure is classifiable.
+kind: schema
+types:
+    err:
+        kind: "string(generated; required) -> Deprecated spelling of `category`; a facet-less action failure carries the failure's source type."
+        variant: "string(generated; required) -> Deprecated spelling of `code`; a facet-less action failure carries the failing verb."
+        msg: "string(generated; required) -> Concise, single-line message for the failure."
+        code: "string(generated; suggest(composition.invalid_file_reference, cap.plan_limit, timeout.step_silence)) -> A stable dotted code that identifies the error."
+        category: "string(generated; suggest(composition, cap, timeout, provider, document, vcs, io, config, usage, runaway, auth, internal)) -> Coarse domain: the dotted prefix of `code`."
+        disposition: "string(generated; suggest(transient, throttled, correctable, needs_input, unrecoverable)) -> Generic handling strategy."
+        origin: "string(generated; suggest(provider, author, caller, environment, internal)) -> Who must remediate."
+        severity: "string(generated; suggest(info, warning, error)) -> Operator-facing severity."
+        detail: "object(generated) -> The code's instance payload; every field the code declares is present, `null` when unavailable."
+        is_transient: "boolean(generated) -> Whether `disposition` is `transient`."
+        is_throttled: "boolean(generated) -> Whether `disposition` is `throttled`."
+        is_correctable: "boolean(generated) -> Whether `disposition` is `correctable`."
+        reset_at: "string(generated) -> `detail.reset_at`, or null when the code carries no such field."
+        retry_after_ms: "number(integer; generated) -> `detail.retry_after_ms`, or null when the code carries no such field."
+        cause: "object(generated) -> The next registered diagnostic below this one, or null when the chain has none."

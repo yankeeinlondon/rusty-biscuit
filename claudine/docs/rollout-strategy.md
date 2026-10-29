@@ -25,9 +25,16 @@ the pipeline.
 - Every spec's `depends-on` names only specs earlier in the pipeline, so running
   in order always satisfies it.
 - Every design decision was made with the owner on 2026-10-10 and is written
-  into the spec that implements it. A spec has no open questions; if an
-  implementing agent finds one anyway, it stops and reports it rather than
-  choosing.
+  into the spec that implements it. A spec has no open questions. A
+  recommendation a spec or plan records is decided, not pending. If an
+  implementing agent finds a new gap anyway, it decides it and records the
+  decision, the alternatives, the reason, and the downsides in the
+  implementation log; it never defers requested scope. Only a surprise that
+  changes what the spec promises and has no recommendable option pauses the
+  plan.
+- The last phase of each spec's plan checks the later specs and plans in this
+  pipeline against what the implementation learned, and updates them
+  directly.
 - Agents stop at "implementation complete, ready for review". Moving a spec to
   `_completed` is the author's act.
 

@@ -3,6 +3,7 @@ pub mod discord;
 pub mod parse;
 pub mod plain_text;
 pub mod slack_mrkdwn;
+pub mod split;
 pub mod telegram_html;
 
 use crate::receipt::ProviderKind;

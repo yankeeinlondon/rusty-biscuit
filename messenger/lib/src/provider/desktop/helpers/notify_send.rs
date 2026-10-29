@@ -33,6 +33,7 @@ const ACTIONS_MIN_PATCH: u32 = 8;
 /// Helper backend that delivers via libnotify's `notify-send`.
 pub(crate) struct NotifySendHelper {
     pub(crate) path: PathBuf,
+    pub(crate) timeout_ms: u64,
     /// Parsed libnotify version, if it could be probed. `None` means
     /// `--version` failed; treat as old (no actions support).
     pub(crate) version: Option<(u32, u32, u32)>,
@@ -41,7 +42,11 @@ pub(crate) struct NotifySendHelper {
 impl NotifySendHelper {
     /// Build a helper from sniff detection data.
     pub(crate) fn new(path: PathBuf, version: Option<(u32, u32, u32)>) -> Self {
-        Self { path, version }
+        Self {
+            path,
+            version,
+            timeout_ms: TIMEOUT_MS,
+        }
     }
 
     /// Whether this notify-send is new enough to support `-A id=Label`.
@@ -173,7 +178,7 @@ impl HelperBackend for NotifySendHelper {
         request: &DesktopNotificationRequest,
     ) -> Result<DesktopNotificationReceipt, HelperError> {
         let args = self.build_args(request);
-        let output = run_expect_success(&self.path, &args, None, Some(TIMEOUT_MS)).await?;
+        let output = run_expect_success(&self.path, &args, None, Some(self.timeout_ms)).await?;
         let actions_dropped = !request.actions.is_empty() && !self.supports_actions();
         Self::parse_output(request, &output.stdout, actions_dropped)
     }
@@ -186,7 +191,7 @@ impl HelperBackend for NotifySendHelper {
         let mut request = request.clone();
         request.replace_id = Some(id.to_string());
         let args = self.build_args(&request);
-        let output = run_expect_success(&self.path, &args, None, Some(TIMEOUT_MS)).await?;
+        let output = run_expect_success(&self.path, &args, None, Some(self.timeout_ms)).await?;
         let actions_dropped = !request.actions.is_empty() && !self.supports_actions();
         let mut receipt = Self::parse_output(&request, &output.stdout, actions_dropped)?;
         receipt

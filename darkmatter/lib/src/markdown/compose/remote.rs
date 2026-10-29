@@ -168,7 +168,7 @@ impl RemoteReadConfig {
 
     /// The allowlist entries that are HTTP host patterns.
     ///
-    /// `--allow-host` is also the ICMP grant entry point (R6). A strict CIDR
+    /// `--allow host=HOST` is also the ICMP grant entry point (R6). A strict CIDR
     /// entry names an address range, which no URL host can ever spell, so it
     /// authorizes ICMP only and is withheld from the HTTP allowlist rather than
     /// left to fail an exact-string comparison. A bare IP literal keeps its

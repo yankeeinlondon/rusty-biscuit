@@ -100,14 +100,14 @@ fn style_markdown_completion_and_validation_agree_with_the_rules() {
     // validation, on its own line; every value it accepts is not.
     let cases = [
         ("indentation", "3", false),
-        ("indentation", "\"4\"", false),
+        ("indentation", "\"4\"", true),
         ("indentation", "preserve", true),
-        ("unwrap", "\"true\"", false),
+        ("unwrap", "\"true\"", true),
         ("unwrap", "true", true),
-        ("fixed-width", "\"80\"", false),
+        ("fixed-width", "\"80\"", true),
         ("fixed-width", "0", false),
         ("fixed-width", "true", true),
-        ("default-language", "5", false),
+        ("default-language", "5", true),
         ("default-language", "\"\"", true),
         ("list-item-padding", "two", false),
         ("bogus", "true", false),

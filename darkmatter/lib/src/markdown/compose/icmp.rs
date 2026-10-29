@@ -1,7 +1,7 @@
 //! The request's ICMP effect authority behind `ping` and `ping_under` (R6).
 //!
 //! ICMP is a separate grant from HTTP fetch permission even though both are
-//! spelled with `--allow-host`. An entry that parses as an IP literal or a
+//! spelled with `--allow host=HOST`. An entry that parses as an IP literal or a
 //! strict CIDR is an ICMP grant; a hostname or wildcard never authorizes an
 //! address indirectly, and a CIDR never widens
 //! [`FetchPolicy`](biscuit_file::FetchPolicy) (see
@@ -34,7 +34,7 @@ use super::expression::ExpressionError;
 /// The warning stage ICMP denials are reported under.
 const STAGE: &str = "icmp";
 
-/// One `--allow-host` entry that named an ICMP capability.
+/// One `--allow host=HOST` entry that named an ICMP capability.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum IcmpGrant {
     /// An exact address. A grant that spelled a zone (`fe80::1%en0`) permits
@@ -45,7 +45,7 @@ enum IcmpGrant {
 }
 
 impl IcmpGrant {
-    /// The grant an `--allow-host` entry names, or `None` for a hostname or
+    /// The grant an `--allow host=HOST` entry names, or `None` for a hostname or
     /// wildcard pattern.
     fn parse(entry: &str) -> Option<Self> {
         if let Ok(network) = entry.parse::<IpNet>() {
@@ -214,7 +214,7 @@ impl IcmpAuthority {
             lock(&self.warnings).push(ComposeWarning::new(
                 STAGE,
                 format!(
-                    "<inverse>{function}()</inverse> did not probe <blue>{target}</blue>: no <dim>--allow-host</dim> entry grants ICMP to that address"
+                    "<inverse>{function}()</inverse> did not probe <blue>{target}</blue>: no <dim>--allow host=…</dim> entry grants ICMP to that address"
                 ),
             ));
             return Ok(None);

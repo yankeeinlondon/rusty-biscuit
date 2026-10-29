@@ -66,7 +66,7 @@ fn compose_fails_on_a_mixed_frontmatter_failure() {
         "---\ntitle: Hello\nnote: \"x {{ min(1) }} y\"\n---\nbody {{ note }}\n",
     );
 
-    assert!(failure.stderr.contains("min() requires 2 arguments"), "{}", failure.stderr);
+    assert!(failure.stderr.contains("min: no signature takes 1 argument"), "{}", failure.stderr);
     assert!(failure.stderr.contains("Expression at line: 3, column: 10"), "{}", failure.stderr);
     assert!(failure.stderr.contains("3 │ note: \"x {{ min(1) }} y\""), "{}", failure.stderr);
     assert!(!failure.stderr.contains("title:"), "only the failing key is excerpted: {}", failure.stderr);
@@ -81,7 +81,7 @@ fn compose_fails_on_a_block_scalar_frontmatter_failure_with_its_locus() {
         "---\ntitle: Hello\nnote: |\n  first\n  x {{ min(1) }} y\n---\nbody {{ note }}\n",
     );
 
-    assert!(failure.stderr.contains("min() requires 2 arguments"), "{}", failure.stderr);
+    assert!(failure.stderr.contains("min: no signature takes 1 argument"), "{}", failure.stderr);
     assert!(failure.stderr.contains("Expression at line: 5, column: 5"), "{}", failure.stderr);
 }
 
@@ -107,7 +107,7 @@ fn compose_fails_once_on_an_aliased_frontmatter_failure_at_its_anchor() {
         "---\ndefaults:\n  greeting: &shared \"café — {{ min(1) }}\"\ntitle: *shared\n---\nbody {{ title }}\n",
     );
 
-    assert!(failure.stderr.contains("min() requires 2 arguments"), "{}", failure.stderr);
+    assert!(failure.stderr.contains("min: no signature takes 1 argument"), "{}", failure.stderr);
     assert!(failure.stderr.contains("Expression at line: 3, column: 29"), "{}", failure.stderr);
     assert_eq!(failure.stderr.matches("Expression at line:").count(), 1, "{}", failure.stderr);
 }
@@ -123,7 +123,7 @@ fn compose_fails_on_an_unprovable_alias_at_the_alias_token() {
         "---\n? &shared \"x {{ min(1) }}\"\n: held # &shared\ncafé: *shared\n---\nbody\n",
     );
 
-    assert!(failure.stderr.contains("min() requires 2 arguments"), "{}", failure.stderr);
+    assert!(failure.stderr.contains("min: no signature takes 1 argument"), "{}", failure.stderr);
     assert!(failure.stderr.contains("Expression at line: 4, column: 7"), "{}", failure.stderr);
     assert_eq!(failure.stderr.matches("Expression at line:").count(), 1, "{}", failure.stderr);
 }

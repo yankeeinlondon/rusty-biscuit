@@ -39,6 +39,7 @@ pub(crate) mod prep;
 mod setters;
 
 pub(crate) use setters::{json_type_name, merge_set_overrides, parse_composition_positionals};
+pub(crate) use loop_run::{TriggerWarningDrain, emit_trigger_warnings};
 
 /// Shared flags for composition commands.
 ///

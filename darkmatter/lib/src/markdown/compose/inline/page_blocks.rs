@@ -8,6 +8,8 @@ use super::super::page_blocks;
 use super::super::shell_expansion;
 use super::super::context::report::CandidateLocus;
 use super::super::{ComposeReport, ComposeWarning, EffectiveState};
+use super::super::pipeline::{FinalVerdict, ReportWatch};
+use super::super::schema_validation::PreparedSchemas;
 use tracing::debug;
 
 /// Runs page blocks (conditional content regions) and carries `body` past
@@ -19,8 +21,10 @@ pub(crate) fn run_stage(
     runtime: &shell_expansion::types::PipelineRuntime,
     report: &mut ComposeReport,
     body: &mut BodyProvenance,
+    schemas: &PreparedSchemas,
 ) -> MarkdownResult<()> {
     debug!("compose: running page blocks");
+    let mut watch = ReportWatch::new(report, options, FinalVerdict { markdown, state, schemas });
     let source = markdown.source_context_for_errors();
     body.data.ensure_describes(markdown.content())?;
     let regions = page_blocks::parser::parse_page_blocks_in(
@@ -56,13 +60,27 @@ pub(crate) fn run_stage(
         options.expression_resolution_context(&runtime.remote_fetch),
     );
     let recorded = report.unknown_root_candidates.len();
-    let (rendered, edits) = page_blocks::engine::render_page_blocks_with_edits(
+    // A blocking finding stops before the next condition runs: a condition
+    // may compose nested content.
+    let mut stopped = None;
+    let mut stop = |report: &ComposeReport| match watch.as_mut().map(|watch| watch.check(report)) {
+        Some(Err(error)) => {
+            stopped = Some(error);
+            true
+        }
+        _ => false,
+    };
+    let rendered = page_blocks::engine::render_page_blocks_with_edits(
         markdown.content(),
         &regions,
         &lookup,
         report,
         source,
+        &mut stop,
     )?;
+    let Some((rendered, edits)) = rendered else {
+        return Err(stopped.expect("the stop recorded its error"));
+    };
     report.unknown_root_candidates.relocate_from(recorded, |locus| match locus {
         CandidateLocus::BodyLine(line) => {
             super::super::unknown_identifiers::directive_locus(markdown, *line)

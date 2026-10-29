@@ -63,7 +63,7 @@ success:
           - warn: "{{ link(file) }} records a different agent or model than the one assigned ({{agent}} / {{model}})"
           - error: "the research document records the wrong agent or model"
     - set:
-          contract: "$(md schema validate '{{file}}' --no-trigger-schemas --format json)::result"
+          contract: "$(md schema validate '{{file}}' --disable schema-triggers --format json)::result"
     - when: "!contract.ok"
       then:
           - warn: "{{topic}} research for **{{seq.name}}** does not satisfy its contract"
@@ -148,7 +148,7 @@ The fleet runs two checks when you finish and rejects a document that fails
 either. Run both yourself before you finish:
 
 ```sh
-md schema validate '{{file}}' --no-trigger-schemas
+md schema validate '{{file}}' --disable schema-triggers
 python3 '{{ctx.repo_root}}/claudine/docs/research/reasoning-level/_relations.py' '{{file}}'
 ```
 

@@ -1,1 +1,1 @@
-{"file":"doc.md","valid":false,"schema":null,"problems":[{"path":"/status","property":null,"message":"\"orange\" is not one of \"draft\", \"published\" or \"archived\"","kind":"invalid","line":4,"column":9,"arm_index":null,"description":null}]}
+{"file":"doc.md","problems":[{"arm_index":null,"column":9,"description":null,"kind":"invalid","line":4,"message":"\"orange\" is not one of \"draft\", \"published\" or \"archived\"","path":"/status","property":null}],"schema":null,"valid":false}

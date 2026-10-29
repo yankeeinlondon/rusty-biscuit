@@ -47,7 +47,7 @@ available for fresh preparation. Ordinary strings and document-authored file
 references keep their existing source-relative and repository-aware rules.
 
 1. **Frontmatter Interpolation (pass 1)** - `{{ variable }}` in frontmatter resolves before effective state is built; materialized caller-file parameters already expose their origin-resolved native values, and keys referencing an authored whole-value `$(...)` are deferred to pass 2; each string is scanned once (see [Inserted Text Is Data](#inserted-text-is-data))
-2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping pending values. Each pass gets a `schema_validation::PendingDeferral` saying what a later stage will resolve: `BeforeShell` defers an authored whole-value `$(...)` key (even after pass 1 interpolated its arguments), a value holding an authored `{{ }}` template, and the `provisional_keys` a non-deferring pass 1 (shell discovery) resolved from a command's unexpanded text; `$(...)` text anywhere else is never expanded and is judged now. Other data (a data override, an expression result, a decoded literal token) is never pending. Deferral applies only when frontmatter shell expansion is enabled (or `defer_shell_pending_schema_problems`); when it is disabled every problem fails fast. After shell expansion and interpolation pass 2, `run_with_registry` runs again against the same effective schema (document, baseline, matched triggers) and judges the resolved values with `PendingDeferral::Final` (nothing deferred). The only opt-out is `ComposeOptions::with_caller_owned_post_shell_verdict(true)` (set by Claudine's `canonical_compose_options`, whose `prepare_*_with_schema` re-validates and drops invalid optionals): then, unless `trigger_schemas` is on, compose runs only `verify_projection_stability` and `validate_typed_shell_values`. **Trap:** never gate this pass on `trigger_schemas` alone — `--no-trigger-schemas` removes trigger schemas, not the document/baseline verdict on resolved values
+2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Converts** values to their declared types at every declared depth through the shared coercion engine (default-on, e.g. the string `"true"` → real boolean; each top-level property commits on its own) and writes the converted values back into frontmatter, skipping pending values. The passive call check (`call_precheck.rs`) runs before this stage and before frontmatter interpolation. Each pass gets a `schema_validation::PendingDeferral` saying what a later stage will resolve: `BeforeShell` defers an authored whole-value `$(...)` key (even after pass 1 interpolated its arguments), a problem whose own path (or nearest existing ancestor) holds an authored `{{ }}` template the schema did not already accept as `deferred` (`schemas::awaits_rendering`, shared with `validate_with_options(Defer)` and Claudine's launch pre-validation; a literal sibling's problem, and an unknown or missing key on a collection, are always reported; `PendingDeferral::defers_problem`), and the `provisional_keys` a non-deferring pass 1 (shell discovery) resolved from a command's unexpanded text; `$(...)` text anywhere else is never expanded and is judged now. Other data (a data override, an expression result, a decoded literal token) is never pending. Deferral applies only when frontmatter shell expansion is enabled (or `defer_shell_pending_schema_problems`); when it is disabled every problem fails fast. After shell expansion and interpolation pass 2, `run_with_registry` runs again against the same effective schema (document, baseline, matched triggers) and judges the resolved values with `PendingDeferral::Final` (nothing deferred). The only opt-out is `ComposeOptions::with_caller_owned_post_shell_verdict(true)` (set by Claudine's `canonical_compose_options`, whose `prepare_*_with_schema` re-validates and drops invalid optionals): then, unless `trigger_schemas` is on, compose runs only `verify_projection_stability` and `validate_typed_shell_values`. **Trap:** never gate this pass on `trigger_schemas` alone — `--disable schema-triggers` removes trigger schemas, not the document/baseline verdict on resolved values
 3. **Frontmatter Shell Expansion** - top-level frontmatter values whose *authored source* is a whole-value `$(cmd)` execute after interpolation and write trimmed `stdout` back into frontmatter. Tokens in executed position follow the `$()` token-resolution ladder (literal → `name(...)` safe function → executable → frontmatter property → null); an all-expression `$()` is rejected with a `{{ }}` suggestion
 4. **Frontmatter Interpolation (pass 2)** - resolves the keys deferred in pass 1 against the now-concrete shell-expanded values
 5. **Text Replacement** - `replace:` frontmatter replaces literal strings
@@ -219,8 +219,10 @@ preflight discovery) may tolerate.
 no group: each reached call walks history from the file-resolution
 `repository_root` and renders through the capture's `render_recent_commits`.
 It is the lazy half of the first variable/function pair (R29): `ctx.recent_commits`
-is the eager snapshot of the same descriptor, and one descriptor entry projects
-both so the variable and the function cannot drift.
+is the eager snapshot in the same rendering. Both use the catalog's one
+`recent-commits` named type (the function returns it; `context-variables.yaml`
+imports it as `recent-commits(generated; required)@darkmatter:functions`), and
+each side's description names the other; there is no shared descriptor entry.
 
 `has_agentic_cli(agent)` demands `Agent`; the capture retains a lazily scanned
 `InstalledAiClients` `PATH` index that every clone of the request shares, and a
@@ -254,7 +256,7 @@ plus only the frontmatter keys the content authored; nested warnings carry an
 
 `ping(address, timeout?)` and `ping_under(address, timeout, attempts?)` are
 network effects under their own grant, separate from HTTP fetch permission even
-though both are spelled `--allow-host`. `ComposeOptions::icmp` is an
+though both are spelled `--allow host=HOST`. `ComposeOptions::icmp` is an
 `IcmpAuthority` (`compose/icmp.rs`) projected into every `ResolutionContext` the
 request builds; its grants are derived from `remote_read_config.allowed_hosts`
 on each projection, so the flag stays the single entry point. An exact IP
@@ -562,17 +564,30 @@ message). The moving parts:
 
 - **One classifier.** `expression::absence::AbsenceScope` is threaded through
   `evaluate_expr`, so observation follows evaluation. An unchosen branch or a
-  short-circuited operand is never read, so it never warns. Handled: a
-  fallback primary (and every operand of a primary `a || b || "d"` chain), a
-  ternary condition, the condition's own root in its branches when the
-  condition is a bare variable, and a direct argument of an absence predicate.
-  "Direct" is strict: `x == 1 ? …`, `!x`, `is_empty(lower(x))` all warn.
+  short-circuited operand is never read, so it never warns. Handled
+  (intentional-absence policy, never a presence proof): a fallback primary
+  (and every operand of a primary `a || b || "d"` chain), a ternary
+  condition, and a direct argument bound to a parameter declaring `| null`,
+  whatever the function returns, of a call that is not itself another
+  non-logical call's argument (`AbsenceScope::call_argument` →
+  `FunctionRegistration::handles_absence_at`, per argument, every overload
+  taking that many arguments). Also handled: a
+  read the shared branch facts prove present — the scope carries a
+  `TypeScope` (`TypeScope::assume`, computed only when observing): a ternary
+  branch gets its own side of the condition, an `and`/`&&` operand the earlier
+  operands' true side, an `or`/`||` operand their false side;
+  `TypeScope::guards_path_or_ancestor` covers the proven path and below, never
+  a sibling. "Direct" is strict: `x == 1 ? …`, `!x`, `is_empty(lower(x))` all
+  warn (the inner call is `is_empty`'s argument, so it handles nothing;
+  `AbsenceScope.consumed_by_call`, never the return type), `lower(x)` and
+  `is_null(x) && y` do not (`and`/`or` are operators), and
+  `x ? "a" : x` warns for the false branch.
   `when=` and `$()` ternary conditions are gates, not absence checks: a bare
   unknown `when="x"` warns.
-- **Absence predicates** are the `predicates::ABSENCE_PREDICATES` binding group
-  (`is_null`, `is_empty`, aliases), read through
-  `functions::is_absence_predicate`. Never spell the names in a walker. The
-  rule is interim (spec Resolved Decision 9).
+- **No function-name list.** Absence handling is decided by declared types
+  only, so a host function with a `| null` parameter is handled like a
+  built-in. `unknown_identifier_warning.rs::absence_handling_names_no_function`
+  fails if a named predicate group comes back.
 - **Observation is opt-in.** `evaluate`/`evaluate_condition`/`Evaluator::eval`
   are unchanged; surfaces call `evaluate_observed`,
   `conditions::evaluate_condition_observed`, or build the `Evaluator` with
@@ -727,7 +742,9 @@ Uses first truthy value, or the fallback.
 - `>=` - greater than or equal
 - `<` - less than
 
-Numeric strings auto-convert for comparisons.
+`==`/`!=` are strict (same runtime type and value; `5 == "5"` is false, a
+missing value equals only `null`). The ordering operators convert numeric
+strings to numbers.
 
 ### Helper Functions
 
@@ -1035,22 +1052,35 @@ frontmatter `$( … )`) and reports one `ShellCandidate` per site in
 and `offered()` retain program-hole restrictions for byte-only host commands.
 A site is matched
 to its resolved bytes by document order (`resolved`); a count mismatch leaves
-it unlinked rather than guessed. `CandidateScope::build` types holes from the
-owner's schema (assembled lazily, only for a site with holes), marks a hole
+it unlinked rather than guessed. `CandidateScope::build` requires the site's
+`TypeScope` (its `DeclaredTypes` carry the owner's schema, assembled lazily
+only for a site with holes, and the host roots), types holes through
+`project_types(&TypeScope)`, marks a hole
 `HoleTiming::Deferred` when it reads a root from
 `ComposeOptions::with_deferred_shell_roots` directly or through a derived
 frontmatter key (`derived_deferred_keys`, inherited by children), and raises
 `ShellExpansionError::MissingValue` for an approval-time hole that evaluates
-to `null`. A deferred site is `ModeRequirement::TemplateRequired`, contributes
+to `null` unless `ScopedType::guard_presence` proves that expression at the
+site: then the hole is `HoleTiming::Guarded { guard, roots }` (also for a late
+hole a guard proves) and the site `TemplateRequired`. Body sites are typed
+on the true side of their enclosing `::block when=` guards,
+`page_blocks::BodyGuards::scan(authored body)` + `enclosing_line`/`enclosing`
+(by authored body line or byte offset) + `guards::within`: discovery
+(`DiscoverySiteContext::build`) and the compose pass (`SiteScope::site`, from
+`inline/shell_expansion.rs` and `BlockTemplates::guards`) must pass the same
+guards or the shape will not match its approval. Frontmatter `$( … )` sites
+pass `&[]` (never guarded). A deferred site is `ModeRequirement::TemplateRequired`, contributes
 no entry, and is `TemplateGrammar` if its text is not a template. A host that
 places commands late (Claudine's later sequence tasks) adds
 `DeferredShellRoots::with_placeholders_template_required()`: every site with a
 placeholder is then `TemplateRequired` too. `DeferredShellRoots::late_roots_of`
 is the one root-read check (a late root matches only a bare read; `fm.<root>`
 is the document's property; a derived key matches either way), and
-`derived_deferred_keys` and `compose::authored_shell_template` are public so a
-host building its own candidates (Claudine's sequence `shell:` tasks and stack
-`set` values) shares them.
+`derived_deferred_keys`, `value_read_roots` (the keys one value reads, which
+`derived_deferred_keys` follows), and `compose::authored_shell_template` are
+public so a host building its own candidates (Claudine's sequence `shell:`
+tasks and stack `set` values) shares them; Claudine scans a preparation's seed
+once and each step's overlay alone.
 `MissingValue`/`TemplateGrammar` are `shell_input_violation()`s, fatal through
 transclusion notices and nested `||`. `ComposeOptions.pre_approved_commands`
 is `ShellPreApprovals` (exact bytes + shapes; a `HashSet<String>` converts to
@@ -1094,11 +1124,15 @@ path included) so chain `template` blacklists reach bytes.
 **Shared API for hosts (`template/fill.rs`, `template/target.rs`).**
 `HoleEvaluator` (closures and `LookupEvaluator<L: EvaluationLookup>`),
 `fill_template(&CommandTemplate, &dyn HoleEvaluator, Option<&SiteValues>) ->
-Result<FilledChain, HoleError>` (evaluate once → null/container/NUL refusal →
-`HoleValidator::accepts` on the original value → `scalar_string` → concatenate;
+Result<FilledChain, HoleError>` (evaluate once per distinct expression →
+null/container/NUL refusal → `HoleValidator::accepts` on the original value →
+`HoleType::refinement` (the guard-narrowed type, `RejectReason::GuardRefinement`)
+→ `scalar_string` → concatenate;
 `HoleError::into_shell_error` maps to `MissingValue`/`TemplateValueRejected`/
 `ExpressionEvaluation`), `resolve_late_values(sites, eval) -> LateValues`
-(only `HoleTiming::Deferred` holes, keyed by host site id + hole index),
+(only `HoleTiming::Deferred` holes, keyed by host site id + hole index; never
+`Guarded`; it checks the declaration and records the refinement verdict for
+`fill_template` to enforce),
 `resolve_direct_target(program, path, cwd)` (Windows `.exe`/`.com` only; Unix
 ELF/Mach-O/fat or `#!`). `TemplateValueRejected` and `TemplateTarget` are
 `shell_input_violation()`s like `MissingValue`. The native argv recorder for
@@ -1144,7 +1178,9 @@ and DMLS: at most one result suffix, no suffix twice, no trailing text. A
 suffix is never part of the approved bytes. `ResolvedShellValue` and
 `execute_resolved_shell_values` (`frontmatter_shell_expansion/assignment.rs`)
 serve a `$( … )` that runs outside a compose (Claudine's lifecycle `set`): bytes
-are fixed at `resolve`, and every execution gets a fresh cache. A value given
+are fixed at `resolve`, and every execution gets a fresh cache. `resolve` takes
+its state as a closure, called only for a ternary's branches, so a plain
+command never materializes the document. A value given
 `with_template` runs as its typed template instead (`prepare_template_value` →
 `site::prepare_site`, pre-approved by shape; `with_late_values` fills barrier
 values; `execute_shell_values_with` takes the host's `HoleEvaluator`), and

@@ -1,0 +1,743 @@
+### hover is_array
+**`is_array(x: unknown | null) -> boolean`**
+
+Returns true when the value is an array.
+### hover is_empty
+**`is_empty(x: unknown | null) -> boolean`**
+
+Returns true when the value is null, empty text, an empty array, or an empty object.
+### hover is_integer
+**`is_integer(val: unknown | null) -> boolean`**
+
+Returns true when the value is a number with no fractional part; text is never an integer.
+### hover is_negative
+**`is_negative(val: number | null) -> boolean`**
+
+Returns true when the number is less than zero; null is false.
+### hover is_null
+**`is_null(x: unknown | null) -> boolean`**
+
+Returns true when the value is null.
+### hover is_number
+**`is_number(x: unknown | null) -> boolean`**
+
+Returns true when the value is a number; numeric text such as `"4"` is not.
+### hover is_object
+**`is_object(x: unknown | null) -> boolean`**
+
+Returns true when the value is an object.
+### hover is_positive
+**`is_positive(val: number | null) -> boolean`**
+
+Returns true when the number is greater than zero; null is false.
+### hover is_string
+**`is_string(x: unknown | null) -> boolean`**
+
+Returns true when the value is text.
+### hover abs
+**`abs(x: number) -> number`**
+
+Returns the absolute value of a number.
+### hover max
+**`max(a: number, b: number) -> number`**
+
+Returns the larger of two numbers.
+### hover min
+**`min(a: number, b: number) -> number`**
+
+Returns the smaller of two numbers.
+### hover round
+**`round(x: numberlike, [fallback: number]) -> number`**
+
+Rounds a number or numeric text to the nearest whole number, halfway values away from zero. When `x` is not a number or numeric text, a supplied `fallback` is rounded and returned instead; without one the call is a type error.
+### hover contains
+**`contains(haystack: string | unknown[] | object | null, needle: unknown | null) -> boolean`**
+
+Returns true when the needle occurs in the haystack. Text is searched for a case-sensitive substring; array elements and object values (never keys) are compared by their rendered text, so `4` matches `"4"`. A null needle renders as empty text, and a null haystack is false.
+### hover first
+**`first(x: unknown[] | null) -> unknown`**
+
+Returns the first element of a list, or null when the list is empty or null.
+### hover has_key
+**`has_key(obj: object | null, key: string | null) -> boolean`**
+
+Returns true when the object has the given key; a null object or key is false.
+### hover keys
+**`keys(obj: object | null) -> string[]`**
+
+Returns the keys of a map in the order they were written; a null map has no keys. Its counterpart is `values`.
+### hover last
+**`last(x: unknown[] | null) -> unknown`**
+
+Returns the last element of a list, or null when the list is empty or null.
+### hover length
+**`length(val: string | unknown[] | object) -> number`**
+
+Counts the characters of text, the elements of an array, or the keys of an object; a number counts the characters of its displayed text. A boolean is a type error.
+### hover values
+**`values(obj: object | null) -> unknown[]`**
+
+Returns the values of a map in the order their keys were written; a null map has no values. Its counterpart is `keys`.
+### hover ends_with
+**`ends_with(x: string | null, find: string | null) -> boolean`**
+
+Returns true when the text ends with the given suffix (case-sensitive); null is false.
+### hover starts_with
+**`starts_with(x: string | null, find: string | null) -> boolean`**
+
+Returns true when the text starts with the given prefix (case-sensitive); null is false.
+### hover camel_case
+**`camel_case(x: string | null) -> string | null`**
+
+Converts text to camelCase; null passes through.
+### hover capitalize
+**`capitalize(x: string | null) -> string | null`**
+
+Capitalizes the first character of the text; null passes through.
+### hover ensure_leading
+**`ensure_leading(var: string | number | null, prefix: string | number | null) -> string | number | null`**
+
+Ensures the text form of a value starts with a prefix, adding it only when missing. A value that already starts with it is returned unchanged, and a number given a numeric prefix stays a number. Null passes through.
+### hover ensure_trailing
+**`ensure_trailing(var: string | number | null, postfix: string | number | null) -> string | number | null`**
+
+Ensures the text form of a value ends with a postfix, adding it only when missing. A value that already ends with it is returned unchanged, and a number given a numeric postfix stays a number. Null passes through.
+### hover kebab_case
+**`kebab_case(x: string | null) -> string | null`**
+
+Converts text to kebab-case; null passes through.
+### hover lower
+**`lower(x: string | null) -> string | null`**
+
+Converts text to lowercase; null passes through.
+### hover pascal_case
+**`pascal_case(x: string | null) -> string | null`**
+
+Converts text to PascalCase; null passes through.
+### hover replace
+**`replace(x: string | null, find: string | null, replacement: string | null) -> string | null`**
+
+Replaces every literal, case-sensitive occurrence of a substring; an empty `find` changes nothing. Null passes through.
+### hover replace_first
+**`replace_first(x: string | null, find: string | null, replacement: string | null) -> string | null`**
+
+Replaces the first literal, case-sensitive occurrence of a substring; an empty `find` changes nothing. Null passes through.
+### hover replace_last
+**`replace_last(x: string | null, find: string | null, replacement: string | null) -> string | null`**
+
+Replaces the last literal, case-sensitive occurrence of a substring; an empty `find` changes nothing. Null passes through.
+### hover snake_case
+**`snake_case(x: string | null) -> string | null`**
+
+Converts text to snake_case; null passes through.
+### hover title_case
+**`title_case(x: string | null) -> string | null`**
+
+Converts text to Title Case; null passes through.
+### hover trim
+**`trim(text: string | null) -> string | null`**
+
+Removes leading and trailing whitespace; null passes through.
+### hover upper
+**`upper(x: string | null) -> string | null`**
+
+Converts text to uppercase; null passes through.
+### hover without_date
+**`without_date(string: string | null) -> string | null`**
+
+Removes every substring that is a real YYYY-MM-DD calendar date, leaving the surrounding text untouched; null passes through.
+### hover terminal
+**`terminal(content: string | null) -> string | null`**
+
+Renders Prose markup to terminal text with ANSI SGR sequences; null passes through.
+### hover date
+**`date(iso: date | datetime | null, fmt: enum('MMMM Do',short,'MMMM Do [YYYY]',short-optional,'MMMM Do YYYY','D MMMM [YYYY]','D MMMM YYYY','ddd, MMMM Do, YYYY',long) | null) -> string | null`**
+
+Formats an ISO date or datetime in a named format. `short` is `MMMM Do`, `short-optional` is `MMMM Do [YYYY]`, and `long` is `ddd, MMMM Do, YYYY`; a `[YYYY]` year appears only when it is not the current year. Null passes through.
+### hover is_date
+**`is_date(x: unknown | null) -> boolean`**
+
+Returns true when the value is text holding a valid ISO date (YYYY-MM-DD).
+### hover is_date_time
+**`is_date_time(x: unknown | null) -> boolean`**
+
+Returns true when the value is text holding a valid ISO datetime, with or without an offset.
+### hover is_date_time_utc
+**`is_date_time_utc(x: unknown | null) -> boolean`**
+
+Same as is_date_time; a datetime's format does not depend on the time zone.
+### hover is_date_utc
+**`is_date_utc(x: unknown | null) -> boolean`**
+
+Same as is_date; a date's format does not depend on the time zone.
+### hover is_this_month
+**`is_this_month(x: unknown | null) -> boolean`**
+
+Returns true when the value is an ISO date or datetime in the current local month.
+### hover is_this_month_utc
+**`is_this_month_utc(x: unknown | null) -> boolean`**
+
+Returns true when the value is an ISO date or datetime in the current UTC month.
+### hover is_this_year
+**`is_this_year(x: unknown | null) -> boolean`**
+
+Returns true when the value is an ISO date or datetime in the current local year.
+### hover is_this_year_utc
+**`is_this_year_utc(x: unknown | null) -> boolean`**
+
+Returns true when the value is an ISO date or datetime in the current UTC year.
+### hover is_today
+**`is_today(x: unknown | null) -> boolean`**
+
+Returns true when the value is an ISO date or datetime that falls on today's local date.
+### hover is_today_utc
+**`is_today_utc(x: unknown | null) -> boolean`**
+
+Returns true when the value is an ISO date or datetime that falls on today's UTC date.
+### hover is_tomorrow
+**`is_tomorrow(x: unknown | null) -> boolean`**
+
+Returns true when the value is an ISO date or datetime that falls on tomorrow's local date.
+### hover is_tomorrow_utc
+**`is_tomorrow_utc(x: unknown | null) -> boolean`**
+
+Returns true when the value is an ISO date or datetime that falls on tomorrow's UTC date.
+### hover is_yesterday
+**`is_yesterday(x: unknown | null) -> boolean`**
+
+Returns true when the value is an ISO date or datetime that falls on yesterday's local date.
+### hover is_yesterday_utc
+**`is_yesterday_utc(x: unknown | null) -> boolean`**
+
+Returns true when the value is an ISO date or datetime that falls on yesterday's UTC date.
+### hover date_delta
+**`date_delta(date1: date | datetime, date2: date | datetime, diff: string(pattern('(?i)^\\s*[0-9]+\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\s*$'))) -> boolean | error`**
+
+Returns true when the two dates are at least the given duration apart, in either order. A duration is a whole count and a unit, such as `14d`, `2mo`, or `1 hour`; `m` means minutes and `mo` months.
+### hover newer_than
+**`newer_than(date1: date | datetime, date2: date | datetime, diff: string(pattern('(?i)^\\s*[0-9]+\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\s*$'))) -> boolean | error`**
+
+Returns true when date1 is at least the given duration newer (later) than date2.
+### hover older_than
+**`older_than(date1: date | datetime, date2: date | datetime, diff: string(pattern('(?i)^\\s*[0-9]+\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\s*$'))) -> boolean | error`**
+
+Returns true when date1 is at least the given duration older (earlier) than date2.
+### hover and
+**`and(...values: unknown | null) -> boolean`**
+
+Returns true when every argument is truthy, evaluating them in order and stopping at the first falsy one.
+### hover or
+**`or(...values: unknown | null) -> boolean`**
+
+Returns true when any argument is truthy, evaluating them in order and stopping at the first truthy one.
+### hover number
+**`number(x: numberlike, [fallback: number]) -> number`**
+
+Converts a number or numeric text to a number. When `x` cannot convert (malformed text, null, a boolean, a list, an object, or a number that cannot be held exactly), a supplied `fallback` is returned instead; without one the call is a type error. The fallback must itself be a number.
+### hover absolute
+**`absolute(file: file | null) -> file | null | error`**
+
+Returns the absolute path a file reference names, in native spelling. A missing target returns the first location it would be resolved at, so the result does not prove the file exists. Rejects HTTP(S) URLs; null passes through.
+### hover basename
+**`basename(file: file | null) -> string | null | error`**
+
+Returns the final path component, including its extension; null passes through.
+### hover basename_without_index
+**`basename_without_index(file: file | null) -> string | null | error`**
+
+Returns the basename with any index suffix (`-NNN`) removed from its stem; null passes through.
+### hover code_link
+**`code_link(file: file | null) -> string | null | error`**
+
+Creates a Markdown link to a local file whose text is its relative path as inline code. Destinations, null handling, and errors match link().
+
+**`code_link(target: file | null, desc: string | null) -> string | null | error`**
+
+Creates a Markdown link whose text is the description as inline code; brackets and backslashes are kept as written. Destinations, null handling, and errors match link().
+### hover decrement_file_index
+**`decrement_file_index(file: file | null) -> file | null | error`**
+
+Decrements the numeric index suffix, clamped at 0, in the resolved file's directory; an unindexed name gets index 0. An absolute input returns an absolute path; null passes through.
+### hover dir_leading
+**`dir_leading(file: file | null) -> string | null | error`**
+
+Returns the directory path above the last directory segment, dropping the basename and its parent (the complement of file_trailing); empty when there is none. Null passes through.
+### hover dirname
+**`dirname(file: file | null) -> string | null | error`**
+
+Returns the directory portion of the display path; an absolute input returns its absolute parent directory. Null passes through.
+### hover ext
+**`ext(file: file | null) -> string | null | error`**
+
+Returns the final extension without its leading dot, or empty text when there is none; null passes through.
+### hover file_exists
+**`file_exists(value: unknown | null) -> boolean | error`**
+
+Returns true when the file exists, locally or as a fetched remote URL. The argument is inspected, never converted, so null, a number, a boolean, an array, or an object is false, and so is text that is not a well-formed file reference (`""`, `https://`), which is never looked up. A resolution failure (a tree escape or a missing home, vault, or repository anchor), a probe failure, or a failed remote fetch is an error.
+### hover file_index
+**`file_index(file: file | null) -> number | null | error`**
+
+Returns the numeric index suffix of the file's stem, or -1 when it has none; null passes through.
+### hover file_trailing
+**`file_trailing(file: file | null) -> string | null | error`**
+
+Returns the last directory segment plus the basename, or the basename alone when there is no directory; null passes through.
+### hover find_files
+**`find_files(pattern: string | null) -> file[] | error`**
+
+Returns every file a glob reference matches (`&dir/**/name.md`, `^docs/*.md`) as absolute paths, merged across every root of its prefix: the most local root first, then the shallowest, then by path component. A bare pattern searches the document's folder, then the repository root. A matched file symlink whose target leaves the file tree is skipped with a `dm.glob.skipped_symlink` warning, and a directory the search cannot read is an error. A null pattern lists nothing.
+### hover find_first_index
+**`find_first_index(file: file | null) -> file | null | error`**
+
+Returns the lowest-indexed existing member of the file's index family in its directory, the unindexed base sorting first; returns the input when no member exists. An absolute input returns an absolute path; null passes through.
+### hover find_last_index
+**`find_last_index(file: file | null) -> file | null | error`**
+
+Returns the highest-indexed existing member of the file's index family in its directory; returns the input when no member exists. An absolute input returns an absolute path; null passes through.
+### hover frontmatter
+**`frontmatter(file: file | null) -> object | null | error`**
+
+Reads the frontmatter of a Markdown file as an object; null passes through. A missing or unparsable file is an error.
+
+**`frontmatter(file: file | null, prop: string) -> unknown | error`**
+
+Reads one top-level frontmatter property of a Markdown file, or null when the property is absent or the file is null.
+### hover has_binary
+**`has_binary(name_or_path: string | null) -> boolean`**
+
+Returns true when the command is found on PATH or is an existing executable absolute path; the same check as has_command. The command is never run.
+### hover has_command
+**`has_command(cmd: string | null) -> boolean`**
+
+Returns true when the command is found on PATH or is an existing executable absolute path; it is never run. Null, empty text, and a relative path with a directory part are false.
+### hover increment_file_index
+**`increment_file_index(file: file | null) -> file | null | error`**
+
+Increments the numeric index suffix, preserving its zero-padding width, in the resolved file's directory; an unindexed name gets index 2. An absolute input returns an absolute path; null passes through.
+### hover is_file_type
+**`is_file_type(value: unknown | null) -> boolean`**
+
+Returns true when the value is text that is a well-formed file reference (a local, Windows, project, vault, recursive, or HTTP(S) reference, on every host); it never resolves, reads, or fetches anything, so true does not mean the file exists. Empty text, malformed reference syntax, and every non-text value are false.
+### hover is_indexed_file
+**`is_indexed_file(file: file | null) -> boolean | error`**
+
+Returns true when the file's stem ends in a numeric index suffix (`base-NNN`); null is false.
+### hover join
+**`join(left: string | null, right: string | null) -> string | null | error`**
+
+Joins two path strings with normalized separators and validates the result as a path; HTTP(S) arguments are rejected. Null passes through.
+### hover link
+**`link(file: file | null) -> string | null | error`**
+
+Creates a Markdown link to a local file, using its relative path as the link text and its absolute path as the destination. HTTP(S) URLs are rejected because they need a description; null passes through.
+
+**`link(target: file | null, desc: string | null) -> string | null | error`**
+
+Creates a Markdown link to a local file or an HTTP(S) URL with the given description as its text; null passes through.
+### hover markdown_body_empty
+**`markdown_body_empty(file: file | null) -> boolean | error`**
+
+Returns true when the Markdown file's body holds only whitespace; null is false.
+### hover markdown_title
+**`markdown_title(file: file | null) -> string | null | error`**
+
+Returns the Markdown file's frontmatter `title`, else its first H1 heading, else null; null passes through.
+### hover parent_dir
+**`parent_dir(file: file | null) -> string | null | error`**
+
+Returns the directory segment immediately above the basename, or empty text when there is none; null passes through.
+### hover relative
+**`relative(file: file | null) -> file | null | error`**
+
+Returns a best-effort relative path from the document's base directory, with forward slashes; null passes through.
+### hover try_frontmatter
+**`try_frontmatter(file: file | null) -> object | null`**
+
+Reads the frontmatter of a Markdown file as `{ok, value, error}`. A file that reads and parses gives `ok` true and the frontmatter as `value`; a missing, unreadable, or unparsable file gives `ok` false and its reason as `error` instead of failing. Null passes through.
+### hover validate_schema
+**`validate_schema(file: file | null) -> boolean | null | error`**
+
+Returns whether a Markdown document's frontmatter is valid against its declared schema; a document that declares no schema is valid. Null passes through; a file that cannot be loaded, or a schema that cannot be processed, is an error.
+
+**`validate_schema(file: file | null, obj: object) -> boolean | null | error`**
+
+Merges `obj` over a Markdown document's frontmatter (nested objects merge; supplied values, arrays, and explicit nulls win) and returns whether the combined page is valid against its schema. Validation happens in memory; the file and `obj` are never modified.
+### hover has_local_skill
+**`has_local_skill(name: string | null) -> boolean | error`**
+
+Returns true when a skill directory with this name exists in a local-scoped skill root of the executing agent. Null and empty text are false; a name with a path separator is an error.
+### hover has_skill
+**`has_skill(name: string | null) -> boolean | error`**
+
+Returns true when a skill directory with this name exists in a user-scoped or local-scoped skill root of the executing agent. Null and empty text are false; a name with a path separator is an error.
+### hover as_csv
+**`as_csv(list: unknown[] | null) -> string | null`**
+
+Joins a list into comma-separated text (`, ` between elements); null passes through.
+### hover as_json
+**`as_json(list: unknown[] | null) -> string | null`**
+
+Renders a list as compact JSON, the explicit spelling of how a bare array renders in text. An empty list renders as `[]`; null passes through.
+### hover as_json5
+**`as_json5(list: unknown[] | null) -> string | null`**
+
+Renders a list as compact single-line JSON5, with single-quoted strings and unquoted object keys where they are valid identifiers. An empty list renders as `[]`; null passes through.
+### hover as_line_separated
+**`as_line_separated(list: unknown[] | null) -> string | null`**
+
+Joins a list into newline-separated text, one element per line; null passes through.
+### hover as_ordered_list
+**`as_ordered_list(list: unknown[] | null) -> string | null`**
+
+Renders a list as a Markdown ordered list, nesting nested arrays and object-array shapes as indented sublists; null passes through.
+### hover as_space_separated
+**`as_space_separated(list: unknown[] | null) -> string | null`**
+
+Joins a list into space-separated text; null passes through.
+### hover as_tsv
+**`as_tsv(list: unknown[] | null) -> string | null`**
+
+Joins a list into tab-separated text; null passes through.
+### hover as_unordered_list
+**`as_unordered_list(list: unknown[] | null) -> string | null`**
+
+Renders a list as a Markdown unordered list, nesting nested arrays and object-array shapes as indented sublists; null passes through.
+### hover branch_exists_on_remote
+**`branch_exists_on_remote() -> boolean | error`**
+
+Returns whether the caller's current branch exists on the selected remote, from its live ref advertisement or authoritative provider API.
+
+**`branch_exists_on_remote(branch: string) -> boolean | error`**
+
+Returns whether the exact branch exists on the selected remote, from its live ref advertisement or authoritative provider API.
+
+**`branch_exists_on_remote(branch: string, remote: string) -> boolean | error`**
+
+Returns whether the exact branch exists on the named remote, from its live ref advertisement or authoritative provider API.
+### hover predict_conflicts
+**`predict_conflicts(branch: string | null) -> string[] | null | error`**
+
+Returns the repository-relative paths that would conflict if the named local branch were merged into the caller's current branch; null passes through.
+### hover recent_commits
+**`recent_commits(count: number(integer;min(1))) -> recent-commits | error`**
+
+Returns the newest `count` commits of the caller's repository, newest first, rendered as `ctx.recent_commits` renders them. `ctx.recent_commits` holds the last 10, captured at the start of execution; `recent_commits(count)` returns the newest `count`, evaluated at call time. Commits that touched no files are left out, so the list can be shorter than `count`; it is empty outside a repository.
+### hover remote_vendor
+**`remote_vendor([remote: string]) -> enum('',github,gitlab,gitea,forgejo,bitbucket,azure_devops,aws_code_commit,source_hut) | error`**
+
+Returns the canonical provider token for the selected configured remote, probing an ambiguous self-hosted server only when allowlisted.
+### hover pr
+**`pr(id: number(integer;min(1)) | string(min(1))) -> string | error`**
+
+Returns one pull or merge request, addressed by number or canonical URL, in canonical Markdown form.
+### hover pr_list
+**`pr_list(query: object) -> string[] | error`**
+
+Queries pull or merge requests with the canonical bounded filter vocabulary. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds.
+
+**`pr_list(count: number(integer;min(1);max(100))) -> string[] | error`**
+
+Lists the most recent `count` pull or merge requests, from 1 to 100.
+
+**Query keys** — `remote`, `state`, `draft`, `source_branch`, `target_branch`, `author`, `assignee`, `reviewer`, `labels`, `milestone`, `search`, `commit`, `created_after`, `created_before`, `updated_after`, `updated_before`, `sort`, `direction`, `limit`
+
+**Enums** — `state`: `open`, `closed`, `merged` · `sort`: `created`, `updated`, `provider-default` · `direction`: `ascending`, `descending`
+
+**Bounds** — `limit` defaults to 20, hard maximum 100; results are newest-first. Unknown keys, invalid enum values, inverted date ranges, and `sort: "provider-default"` combined with `direction` are rejected before any provider request.
+### hover cicd
+**`cicd(id: number(integer;min(1)) | string(min(1))) -> string | error`**
+
+Returns one provider-addressable CI/CD job, addressed by number or canonical URL, in canonical Markdown form.
+### hover cicd_list
+**`cicd_list(query: object) -> string[] | error`**
+
+Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds.
+
+**`cicd_list(count: number(integer;min(1);max(100))) -> string[] | error`**
+
+Lists the most recent `count` CI/CD jobs, from 1 to 100.
+
+**Query keys** — `remote`, `statuses`, `name`, `stage`, `workflow`, `parent`, `branch`, `commit`, `actor`, `trigger`, `created_after`, `created_before`, `updated_after`, `updated_before`, `direction`, `limit`
+
+**Enums** — `statuses`: `success`, `failed`, `cancelled`, `queued`, `running`, `manual`, `skipped` · `direction`: `ascending`, `descending`
+
+**Bounds** — `limit` defaults to 20, hard maximum 100; results are newest-first. `stage` is honored only where the provider exposes stage data (GitLab). Unknown keys, invalid enum values, and inverted date ranges are rejected before any provider request.
+### hover can_execute
+**`can_execute(name: string | null) -> boolean`**
+
+Returns true when the name is a binary, an alias, a shell builtin, or a user function (has_binary, then the login-shell probes). Null and empty text are false; the name is never run.
+### hover has_alias
+**`has_alias(name: string | null) -> boolean`**
+
+Returns true when the name is an alias in the login shell ($SHELL, or pwsh then powershell.exe on Windows). Any probe failure, null, and empty text are false; the name is never run.
+### hover has_builtin_function
+**`has_builtin_function(name: string | null) -> boolean`**
+
+Returns true when the name is a shell builtin (or a PowerShell cmdlet) in the login shell. Any probe failure, null, and empty text are false; the name is never run.
+### hover has_user_function
+**`has_user_function(name: string | null) -> boolean`**
+
+Returns true when the name is a user-defined function in the login shell. Any probe failure, null, and empty text are false; the name is never run.
+### hover has_agentic_cli
+**`has_agentic_cli(agent: agentic-cli | null) -> boolean | error`**
+
+Returns true when the named agentic CLI is installed on PATH, from the request's captured agent observation. Names are the Claudine provider roster slugs and their aliases; null is false.
+### hover package
+**`package(where: file) -> string | error`**
+
+Returns the name of the package containing the path, from the captured repository observation. Returns empty text outside the repository, outside a monorepo, or when no package contains the path.
+### hover package_area
+**`package_area(where: file) -> string | error`**
+
+Returns the name of the package area containing the path, from the captured repository observation. Returns empty text outside the repository, outside a monorepo, or when no area contains the path.
+### hover ipv4
+**`ipv4([filter: string]) -> string[] | error`**
+
+Returns the host's IPv4 addresses, excluding loopback and link-local, from the request's captured network observation. A valid CIDR filter selects addresses inside that network (and can include loopback or link-local); any other filter is a substring match over the default set.
+### hover ipv6
+**`ipv6([filter: string]) -> string[] | error`**
+
+Returns the host's IPv6 addresses, excluding loopback and link-local; scoped addresses keep their %scope suffix. Filters behave as in ipv4.
+### hover ping
+**`ping(address: ip-address, [timeout: number]) -> boolean | null | error`**
+
+Sends one ICMP echo to an IP address and returns true when it replies within `timeout` milliseconds (default 100, at most 60000). Returns null with a warning when the address is not granted through --allow host=HOST, false when there is no reply, and an error when the host cannot send ICMP.
+### hover ping_under
+**`ping_under(address: ip-address, timeout: number, [attempts: number(integer;min(1);max(100))]) -> boolean | enum(unstable) | null | error`**
+
+Sends `attempts` ICMP echoes (default 3) one after another, each with a timeout of `timeout` milliseconds. Returns true when every reply arrives in time, false when none does, and "unstable" otherwise. Consent and error rules match ping.
+### hover as_markdown
+**`as_markdown(content: string | null) -> string | null | error`**
+
+Composes the text as Markdown through the root document's request (same context, base directory, consent, and recursion budget) and returns the composed Markdown; null passes through.
+### completion ''
+fm	fm	ReservedRoot	Some("reserved root")	Some("The document's frontmatter values.")
+ctx.cwd	ctx.cwd	ContextVariable	Some("string")	Some("Absolute launch directory captured when the composition request began, or null when ambient capture failed.")
+ctx.self	ctx.self	ContextVariable	Some("string")	Some("Absolute canonical native path of the root document, or null for URL and in-memory roots.")
+ctx.last_updated	ctx.last_updated	ContextVariable	Some("datetime")	Some("Filesystem modification time of the root document, or null when unavailable or for URL and in-memory roots.")
+ctx.hash	ctx.hash	ContextVariable	Some("string")	Some("The root document's '<frontmatter>-<body>' xxHash of its source as loaded, matching `md hash`, or null for URL and in-memory roots.")
+ctx.id	ctx.id	ContextVariable	Some("string")	Some("xxHash identifying this execution of the root document: its source, ctx.timestamp_ms, host name, repository name, and a per-execution random nonce.")
+ctx.sid	ctx.sid	ContextVariable	Some("string")	Some("Full hexadecimal BLAKE3 digest of the same inputs as ctx.id. A cryptographic digest, not a secret.")
+ctx.now	ctx.now	ContextVariable	Some("datetime")	Some("Local date and time in ISO-8601 format.")
+ctx.now_utc	ctx.now_utc	ContextVariable	Some("datetime")	Some("UTC date and time in ISO-8601 format.")
+ctx.today	ctx.today	ContextVariable	Some("date")	Some("Local date in ISO-8601 format.")
+ctx.today_utc	ctx.today_utc	ContextVariable	Some("date")	Some("UTC date in ISO-8601 format.")
+ctx.yesterday	ctx.yesterday	ContextVariable	Some("date")	Some("Local date for yesterday in ISO-8601 format.")
+ctx.yesterday_utc	ctx.yesterday_utc	ContextVariable	Some("date")	Some("UTC date for yesterday in ISO-8601 format.")
+ctx.tomorrow	ctx.tomorrow	ContextVariable	Some("date")	Some("Local date for tomorrow in ISO-8601 format.")
+ctx.tomorrow_utc	ctx.tomorrow_utc	ContextVariable	Some("date")	Some("UTC date for tomorrow in ISO-8601 format.")
+ctx.day	ctx.day	ContextVariable	Some("string")	Some("Full day of week name, local time.")
+ctx.day_utc	ctx.day_utc	ContextVariable	Some("string")	Some("Full day of week name, UTC.")
+ctx.day_abbr	ctx.day_abbr	ContextVariable	Some("string")	Some("Abbreviated day of week name, local time.")
+ctx.day_abbr_utc	ctx.day_abbr_utc	ContextVariable	Some("string")	Some("Abbreviated day of week name, UTC.")
+ctx.year	ctx.year	ContextVariable	Some("string")	Some("Current year, local time.")
+ctx.year_utc	ctx.year_utc	ContextVariable	Some("string")	Some("Current year, UTC.")
+ctx.month	ctx.month	ContextVariable	Some("string")	Some("Current month as a zero-padded number, local time.")
+ctx.month_name	ctx.month_name	ContextVariable	Some("string")	Some("Current month name, local time.")
+ctx.month_name_abbr	ctx.month_name_abbr	ContextVariable	Some("string")	Some("Abbreviated current month name, local time.")
+ctx.day_of_month	ctx.day_of_month	ContextVariable	Some("string")	Some("Current day of month.")
+ctx.day_of_month_suffixed	ctx.day_of_month_suffixed	ContextVariable	Some("string")	Some("Current day of month with ordinal suffix.")
+ctx.time	ctx.time	ContextVariable	Some("string")	Some("Local time in 12-hour format with AM/PM.")
+ctx.time_military	ctx.time_military	ContextVariable	Some("string")	Some("Local time in 24-hour format.")
+ctx.time_utc	ctx.time_utc	ContextVariable	Some("string")	Some("UTC time in 12-hour format with AM/PM.")
+ctx.time_military_utc	ctx.time_military_utc	ContextVariable	Some("string")	Some("UTC time in 24-hour format.")
+ctx.timezone	ctx.timezone	ContextVariable	Some("string")	Some("Local timezone abbreviation, or null when unavailable.")
+ctx.timezone_offset	ctx.timezone_offset	ContextVariable	Some("string")	Some("Local UTC offset.")
+ctx.timezone_iana	ctx.timezone_iana	ContextVariable	Some("string")	Some("Local IANA timezone name, or null when unavailable.")
+ctx.start_of_week_sun	ctx.start_of_week_sun	ContextVariable	Some("date")	Some("Start of the current Sunday-based week, local time.")
+ctx.end_of_week_sun	ctx.end_of_week_sun	ContextVariable	Some("date")	Some("End of the current Sunday-based week, local time.")
+ctx.start_of_week_mon	ctx.start_of_week_mon	ContextVariable	Some("date")	Some("Start of the current Monday-based week, local time.")
+ctx.end_of_week_mon	ctx.end_of_week_mon	ContextVariable	Some("date")	Some("End of the current Monday-based week, local time.")
+ctx.start_of_week_sun_utc	ctx.start_of_week_sun_utc	ContextVariable	Some("date")	Some("Start of the current Sunday-based week, UTC.")
+ctx.end_of_week_sun_utc	ctx.end_of_week_sun_utc	ContextVariable	Some("date")	Some("End of the current Sunday-based week, UTC.")
+ctx.start_of_week_mon_utc	ctx.start_of_week_mon_utc	ContextVariable	Some("date")	Some("Start of the current Monday-based week, UTC.")
+ctx.end_of_week_mon_utc	ctx.end_of_week_mon_utc	ContextVariable	Some("date")	Some("End of the current Monday-based week, UTC.")
+ctx.season	ctx.season	ContextVariable	Some("string")	Some("Current meteorological season.")
+ctx.timestamp	ctx.timestamp	ContextVariable	Some("number(integer)")	Some("Current Unix timestamp in seconds.")
+ctx.timestamp_ms	ctx.timestamp_ms	ContextVariable	Some("number(integer)")	Some("Current Unix timestamp in milliseconds.")
+ctx.utc	ctx.utc	ContextVariable	Some("datetime")	Some("Alias for now_utc.")
+ctx.dow	ctx.dow	ContextVariable	Some("string")	Some("Alias for day.")
+ctx.dow_abbr	ctx.dow_abbr	ContextVariable	Some("string")	Some("Alias for day_abbr.")
+ctx.repo	ctx.repo	ContextVariable	Some("string")	Some("Repository name from the preferred remote URL, or null when unavailable.")
+ctx.repo_root	ctx.repo_root	ContextVariable	Some("string")	Some("Absolute repository root path, or null when unavailable.")
+ctx.branch	ctx.branch	ContextVariable	Some("string")	Some("Current local Git branch name, or null outside a repository or at detached HEAD.")
+ctx.worktree	ctx.worktree	ContextVariable	Some("string")	Some("Current linked Git worktree name, or null in the main worktree or outside a repository.")
+ctx.recent_commits	ctx.recent_commits	ContextVariable	Some("string[]")	Some("Recent commits of the captured repository, newest first. Each element is one commit rendered exactly as `sniff repo recent-commits --plain` renders it (a multi-line block). `ctx.recent_commits` holds the last 10, captured at the start of execution; `recent_commits(count)` returns the newest `count`, evaluated at call time. Empty outside a repository.")
+ctx.is_monorepo	ctx.is_monorepo	ContextVariable	Some("boolean")	Some("Whether the current repository is a monorepo.")
+ctx.package_root	ctx.package_root	ContextVariable	Some("string")	Some("Absolute current package root path, or null when unavailable.")
+ctx.package_area_root	ctx.package_area_root	ContextVariable	Some("string")	Some("Absolute current package area root path, or null when unavailable.")
+ctx.packages	ctx.packages	ContextVariable	Some("string[]")	Some("Package names, or null when unavailable.")
+ctx.package_areas	ctx.package_areas	ContextVariable	Some("string[]")	Some("Package area names, or null when unavailable.")
+ctx.current_package	ctx.current_package	ContextVariable	Some("string")	Some("Current package name, or null when unavailable.")
+ctx.current_package_area	ctx.current_package_area	ContextVariable	Some("string")	Some("Current package area, or null when unavailable.")
+ctx.area	ctx.area	ContextVariable	Some("string")	Some("Scoped area name.")
+ctx.area_description	ctx.area_description	ContextVariable	Some("string")	Some("Human-readable scoped area description.")
+ctx.area_root	ctx.area_root	ContextVariable	Some("string")	Some("Absolute scoped area root path.")
+ctx.current_packages	ctx.current_packages	ContextVariable	Some("string[]")	Some("Packages under the current directory.")
+ctx.depends_on	ctx.depends_on	ContextVariable	Some("object[]")	Some("Workspace-internal package dependencies. Each item is an object with a `package` (string) field and a `dependencies` (string[]) field listing the packages it depends on.")
+ctx.used_by	ctx.used_by	ContextVariable	Some("object[]")	Some("Workspace-internal package reverse dependencies. Each item is an object with a `package` (string) field and a `users` (string[]) field listing the packages that depend on it.")
+ctx.dirty_files	ctx.dirty_files	ContextVariable	Some("string[]")	Some("Dirty file paths.")
+ctx.merge_conflicts	ctx.merge_conflicts	ContextVariable	Some("string[]")	Some("Repository-relative paths currently in an unresolved Git index state.")
+ctx.dirty_source_code_files	ctx.dirty_source_code_files	ContextVariable	Some("string[]")	Some("Dirty source-code file paths.")
+ctx.staged_files	ctx.staged_files	ContextVariable	Some("string[]")	Some("Staged file paths.")
+ctx.untracked_files	ctx.untracked_files	ContextVariable	Some("string[]")	Some("Untracked file paths.")
+ctx.dirty_packages	ctx.dirty_packages	ContextVariable	Some("string[]")	Some("Dirty package names.")
+ctx.dirty_package_areas	ctx.dirty_package_areas	ContextVariable	Some("string[]")	Some("Dirty package area names.")
+ctx.staged_packages	ctx.staged_packages	ContextVariable	Some("string[]")	Some("Staged package names.")
+ctx.staged_package_areas	ctx.staged_package_areas	ContextVariable	Some("string[]")	Some("Staged package area names.")
+ctx.current_package_has_staged_files	ctx.current_package_has_staged_files	ContextVariable	Some("boolean")	Some("Whether the current package has staged files.")
+ctx.current_package_area_has_staged_files	ctx.current_package_area_has_staged_files	ContextVariable	Some("boolean")	Some("Whether the current package area has staged files.")
+ctx.current_package_has_dirty_files	ctx.current_package_has_dirty_files	ContextVariable	Some("boolean")	Some("Whether the current package has dirty files.")
+ctx.current_package_area_has_dirty_files	ctx.current_package_area_has_dirty_files	ContextVariable	Some("boolean")	Some("Whether the current package area has dirty files.")
+ctx.programming_languages_in_repo	ctx.programming_languages_in_repo	ContextVariable	Some("string[]")	Some("Programming languages in the repository, or null when unavailable.")
+ctx.programming_language	ctx.programming_language	ContextVariable	Some("string")	Some("Context-sensitive primary programming language, or null when unavailable.")
+ctx.package_manager	ctx.package_manager	ContextVariable	Some("string")	Some("Context-sensitive package manager, or null when unavailable.")
+ctx.docs_readme	ctx.docs_readme	ContextVariable	Some("string[]")	Some("README paths, scope-filtered.")
+ctx.docs_blast_radius	ctx.docs_blast_radius	ContextVariable	Some("string[]")	Some("Docs with blast_radius frontmatter, scope-filtered.")
+ctx.docs_drift	ctx.docs_drift	ContextVariable	Some("string[]")	Some("Docs at risk of drift from source changes.")
+ctx.docs_skill	ctx.docs_skill	ContextVariable	Some("string")	Some("Repo-relative path to the best matching skill file, or null when unavailable.")
+ctx.os	ctx.os	ContextVariable	Some("string")	Some("Operating system name, or null when unavailable.")
+ctx.hostname	ctx.hostname	ContextVariable	Some("string")	Some("Host name reported by the operating system, or null when unavailable.")
+ctx.os_distro	ctx.os_distro	ContextVariable	Some("string")	Some("Linux distribution name, empty on macOS and Windows.")
+ctx.os_package_manager	ctx.os_package_manager	ContextVariable	Some("string")	Some("Primary system package manager, or null when unavailable.")
+ctx.os_version	ctx.os_version	ContextVariable	Some("string")	Some("Operating system version.")
+ctx.memory_total	ctx.memory_total	ContextVariable	Some("string")	Some("Total system memory in bytes, or null when unavailable.")
+ctx.memory_used	ctx.memory_used	ContextVariable	Some("string")	Some("Percentage of memory currently used, or null when unavailable.")
+ctx.memory_avail	ctx.memory_avail	ContextVariable	Some("string")	Some("Available system memory in bytes, or null when unavailable.")
+ctx.cpu_cores	ctx.cpu_cores	ContextVariable	Some("number(integer)")	Some("Number of logical CPU cores, or null when unavailable.")
+ctx.cpu_arch	ctx.cpu_arch	ContextVariable	Some("string")	Some("CPU architecture, or null when unavailable.")
+ctx.gpu	ctx.gpu	ContextVariable	Some("string")	Some("GPU device names, or null when unavailable.")
+ctx.tailnet	ctx.tailnet	ContextVariable	Some("boolean")	Some("Whether any host interface has an address in the CGNAT range 100.64.0.0/10 (Tailscale). Other VPNs and CGNAT ISPs using that range also report true.")
+ctx.gateway	ctx.gateway	ContextVariable	Some("string")	Some("Primary IPv4 gateway address, or null without a default route or when the default route has no gateway address.")
+ctx.gateway_v6	ctx.gateway_v6	ContextVariable	Some("string")	Some("Primary IPv6 gateway address, with a %scope suffix for link-local gateways, or null without a default route or when the default route has no gateway address.")
+ctx.agent	ctx.agent	ContextVariable	Some("string")	Some("The agentic CLI provider being used in the current session.")
+ctx.model	ctx.model	ContextVariable	Some("string")	Some("Active model identifier, trimmed from the MODEL env var; defaults to \"default\".")
+is_array(x)	is_array	Function	Some("is_array(x: unknown | null) -> boolean")	Some("Returns true when the value is an array.")
+is_empty(x)	is_empty	Function	Some("is_empty(x: unknown | null) -> boolean")	Some("Returns true when the value is null, empty text, an empty array, or an empty object.")
+is_integer(val)	is_integer	Function	Some("is_integer(val: unknown | null) -> boolean")	Some("Returns true when the value is a number with no fractional part; text is never an integer.")
+is_negative(val)	is_negative	Function	Some("is_negative(val: number | null) -> boolean")	Some("Returns true when the number is less than zero; null is false.")
+is_null(x)	is_null	Function	Some("is_null(x: unknown | null) -> boolean")	Some("Returns true when the value is null.")
+is_number(x)	is_number	Function	Some("is_number(x: unknown | null) -> boolean")	Some("Returns true when the value is a number; numeric text such as `\"4\"` is not.")
+is_object(x)	is_object	Function	Some("is_object(x: unknown | null) -> boolean")	Some("Returns true when the value is an object.")
+is_positive(val)	is_positive	Function	Some("is_positive(val: number | null) -> boolean")	Some("Returns true when the number is greater than zero; null is false.")
+is_string(x)	is_string	Function	Some("is_string(x: unknown | null) -> boolean")	Some("Returns true when the value is text.")
+abs(x)	abs	Function	Some("abs(x: number) -> number")	Some("Returns the absolute value of a number.")
+max(a, b)	max	Function	Some("max(a: number, b: number) -> number")	Some("Returns the larger of two numbers.")
+min(a, b)	min	Function	Some("min(a: number, b: number) -> number")	Some("Returns the smaller of two numbers.")
+round(x, [fallback])	round	Function	Some("round(x: numberlike, [fallback: number]) -> number")	Some("Rounds a number or numeric text to the nearest whole number, halfway values away from zero. When `x` is not a number or numeric text, a supplied `fallback` is rounded and returned instead; without one the call is a type error.")
+contains(haystack, needle)	contains	Function	Some("contains(haystack: string | unknown[] | object | null, needle: unknown | null) -> boolean")	Some("Returns true when the needle occurs in the haystack. Text is searched for a case-sensitive substring; array elements and object values (never keys) are compared by their rendered text, so `4` matches `\"4\"`. A null needle renders as empty text, and a null haystack is false.")
+first(x)	first	Function	Some("first(x: unknown[] | null) -> unknown")	Some("Returns the first element of a list, or null when the list is empty or null.")
+has_key(obj, key)	has_key	Function	Some("has_key(obj: object | null, key: string | null) -> boolean")	Some("Returns true when the object has the given key; a null object or key is false.")
+keys(obj)	keys	Function	Some("keys(obj: object | null) -> string[]")	Some("Returns the keys of a map in the order they were written; a null map has no keys. Its counterpart is `values`.")
+last(x)	last	Function	Some("last(x: unknown[] | null) -> unknown")	Some("Returns the last element of a list, or null when the list is empty or null.")
+length(val)	length	Function	Some("length(val: string | unknown[] | object) -> number")	Some("Counts the characters of text, the elements of an array, or the keys of an object; a number counts the characters of its displayed text. A boolean is a type error.")
+values(obj)	values	Function	Some("values(obj: object | null) -> unknown[]")	Some("Returns the values of a map in the order their keys were written; a null map has no values. Its counterpart is `keys`.")
+ends_with(x, find)	ends_with	Function	Some("ends_with(x: string | null, find: string | null) -> boolean")	Some("Returns true when the text ends with the given suffix (case-sensitive); null is false.")
+starts_with(x, find)	starts_with	Function	Some("starts_with(x: string | null, find: string | null) -> boolean")	Some("Returns true when the text starts with the given prefix (case-sensitive); null is false.")
+camel_case(x)	camel_case	Function	Some("camel_case(x: string | null) -> string | null")	Some("Converts text to camelCase; null passes through.")
+capitalize(x)	capitalize	Function	Some("capitalize(x: string | null) -> string | null")	Some("Capitalizes the first character of the text; null passes through.")
+ensure_leading(var, prefix)	ensure_leading	Function	Some("ensure_leading(var: string | number | null, prefix: string | number | null) -> string | number | null")	Some("Ensures the text form of a value starts with a prefix, adding it only when missing. A value that already starts with it is returned unchanged, and a number given a numeric prefix stays a number. Null passes through.")
+ensure_trailing(var, postfix)	ensure_trailing	Function	Some("ensure_trailing(var: string | number | null, postfix: string | number | null) -> string | number | null")	Some("Ensures the text form of a value ends with a postfix, adding it only when missing. A value that already ends with it is returned unchanged, and a number given a numeric postfix stays a number. Null passes through.")
+kebab_case(x)	kebab_case	Function	Some("kebab_case(x: string | null) -> string | null")	Some("Converts text to kebab-case; null passes through.")
+lower(x)	lower	Function	Some("lower(x: string | null) -> string | null")	Some("Converts text to lowercase; null passes through.")
+pascal_case(x)	pascal_case	Function	Some("pascal_case(x: string | null) -> string | null")	Some("Converts text to PascalCase; null passes through.")
+replace(x, find, replacement)	replace	Function	Some("replace(x: string | null, find: string | null, replacement: string | null) -> string | null")	Some("Replaces every literal, case-sensitive occurrence of a substring; an empty `find` changes nothing. Null passes through.")
+replace_first(x, find, replacement)	replace_first	Function	Some("replace_first(x: string | null, find: string | null, replacement: string | null) -> string | null")	Some("Replaces the first literal, case-sensitive occurrence of a substring; an empty `find` changes nothing. Null passes through.")
+replace_last(x, find, replacement)	replace_last	Function	Some("replace_last(x: string | null, find: string | null, replacement: string | null) -> string | null")	Some("Replaces the last literal, case-sensitive occurrence of a substring; an empty `find` changes nothing. Null passes through.")
+snake_case(x)	snake_case	Function	Some("snake_case(x: string | null) -> string | null")	Some("Converts text to snake_case; null passes through.")
+title_case(x)	title_case	Function	Some("title_case(x: string | null) -> string | null")	Some("Converts text to Title Case; null passes through.")
+trim(text)	trim	Function	Some("trim(text: string | null) -> string | null")	Some("Removes leading and trailing whitespace; null passes through.")
+upper(x)	upper	Function	Some("upper(x: string | null) -> string | null")	Some("Converts text to uppercase; null passes through.")
+without_date(string)	without_date	Function	Some("without_date(string: string | null) -> string | null")	Some("Removes every substring that is a real YYYY-MM-DD calendar date, leaving the surrounding text untouched; null passes through.")
+terminal(content)	terminal	Function	Some("terminal(content: string | null) -> string | null")	Some("Renders Prose markup to terminal text with ANSI SGR sequences; null passes through.")
+date(iso, fmt)	date	Function	Some("date(iso: date | datetime | null, fmt: enum('MMMM Do',short,'MMMM Do [YYYY]',short-optional,'MMMM Do YYYY','D MMMM [YYYY]','D MMMM YYYY','ddd, MMMM Do, YYYY',long) | null) -> string | null")	Some("Formats an ISO date or datetime in a named format. `short` is `MMMM Do`, `short-optional` is `MMMM Do [YYYY]`, and `long` is `ddd, MMMM Do, YYYY`; a `[YYYY]` year appears only when it is not the current year. Null passes through.")
+is_date(x)	is_date	Function	Some("is_date(x: unknown | null) -> boolean")	Some("Returns true when the value is text holding a valid ISO date (YYYY-MM-DD).")
+is_date_time(x)	is_date_time	Function	Some("is_date_time(x: unknown | null) -> boolean")	Some("Returns true when the value is text holding a valid ISO datetime, with or without an offset.")
+is_date_time_utc(x)	is_date_time_utc	Function	Some("is_date_time_utc(x: unknown | null) -> boolean")	Some("Same as is_date_time; a datetime's format does not depend on the time zone.")
+is_date_utc(x)	is_date_utc	Function	Some("is_date_utc(x: unknown | null) -> boolean")	Some("Same as is_date; a date's format does not depend on the time zone.")
+is_this_month(x)	is_this_month	Function	Some("is_this_month(x: unknown | null) -> boolean")	Some("Returns true when the value is an ISO date or datetime in the current local month.")
+is_this_month_utc(x)	is_this_month_utc	Function	Some("is_this_month_utc(x: unknown | null) -> boolean")	Some("Returns true when the value is an ISO date or datetime in the current UTC month.")
+is_this_year(x)	is_this_year	Function	Some("is_this_year(x: unknown | null) -> boolean")	Some("Returns true when the value is an ISO date or datetime in the current local year.")
+is_this_year_utc(x)	is_this_year_utc	Function	Some("is_this_year_utc(x: unknown | null) -> boolean")	Some("Returns true when the value is an ISO date or datetime in the current UTC year.")
+is_today(x)	is_today	Function	Some("is_today(x: unknown | null) -> boolean")	Some("Returns true when the value is an ISO date or datetime that falls on today's local date.")
+is_today_utc(x)	is_today_utc	Function	Some("is_today_utc(x: unknown | null) -> boolean")	Some("Returns true when the value is an ISO date or datetime that falls on today's UTC date.")
+is_tomorrow(x)	is_tomorrow	Function	Some("is_tomorrow(x: unknown | null) -> boolean")	Some("Returns true when the value is an ISO date or datetime that falls on tomorrow's local date.")
+is_tomorrow_utc(x)	is_tomorrow_utc	Function	Some("is_tomorrow_utc(x: unknown | null) -> boolean")	Some("Returns true when the value is an ISO date or datetime that falls on tomorrow's UTC date.")
+is_yesterday(x)	is_yesterday	Function	Some("is_yesterday(x: unknown | null) -> boolean")	Some("Returns true when the value is an ISO date or datetime that falls on yesterday's local date.")
+is_yesterday_utc(x)	is_yesterday_utc	Function	Some("is_yesterday_utc(x: unknown | null) -> boolean")	Some("Returns true when the value is an ISO date or datetime that falls on yesterday's UTC date.")
+date_delta(date1, date2, diff)	date_delta	Function	Some("date_delta(date1: date | datetime, date2: date | datetime, diff: string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$'))) -> boolean | error")	Some("Returns true when the two dates are at least the given duration apart, in either order. A duration is a whole count and a unit, such as `14d`, `2mo`, or `1 hour`; `m` means minutes and `mo` months.")
+newer_than(date1, date2, diff)	newer_than	Function	Some("newer_than(date1: date | datetime, date2: date | datetime, diff: string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$'))) -> boolean | error")	Some("Returns true when date1 is at least the given duration newer (later) than date2.")
+older_than(date1, date2, diff)	older_than	Function	Some("older_than(date1: date | datetime, date2: date | datetime, diff: string(pattern('(?i)^\\\\s*[0-9]+\\\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\\\s*$'))) -> boolean | error")	Some("Returns true when date1 is at least the given duration older (earlier) than date2.")
+and(...)	and	Function	Some("and(...values: unknown | null) -> boolean")	Some("Returns true when every argument is truthy, evaluating them in order and stopping at the first falsy one.")
+or(...)	or	Function	Some("or(...values: unknown | null) -> boolean")	Some("Returns true when any argument is truthy, evaluating them in order and stopping at the first truthy one.")
+number(x, [fallback])	number	Function	Some("number(x: numberlike, [fallback: number]) -> number")	Some("Converts a number or numeric text to a number. When `x` cannot convert (malformed text, null, a boolean, a list, an object, or a number that cannot be held exactly), a supplied `fallback` is returned instead; without one the call is a type error. The fallback must itself be a number.")
+absolute(file)	absolute	Function	Some("absolute(file: file | null) -> file | null | error")	Some("Returns the absolute path a file reference names, in native spelling. A missing target returns the first location it would be resolved at, so the result does not prove the file exists. Rejects HTTP(S) URLs; null passes through.")
+basename(file)	basename	Function	Some("basename(file: file | null) -> string | null | error")	Some("Returns the final path component, including its extension; null passes through.")
+basename_without_index(file)	basename_without_index	Function	Some("basename_without_index(file: file | null) -> string | null | error")	Some("Returns the basename with any index suffix (`-NNN`) removed from its stem; null passes through.")
+code_link(file)	code_link	Function	Some("code_link(file: file | null) -> string | null | error")	Some("Creates a Markdown link to a local file whose text is its relative path as inline code. Destinations, null handling, and errors match link().")
+code_link(target, desc)	code_link	Function	Some("code_link(target: file | null, desc: string | null) -> string | null | error")	Some("Creates a Markdown link whose text is the description as inline code; brackets and backslashes are kept as written. Destinations, null handling, and errors match link().")
+decrement_file_index(file)	decrement_file_index	Function	Some("decrement_file_index(file: file | null) -> file | null | error")	Some("Decrements the numeric index suffix, clamped at 0, in the resolved file's directory; an unindexed name gets index 0. An absolute input returns an absolute path; null passes through.")
+dir_leading(file)	dir_leading	Function	Some("dir_leading(file: file | null) -> string | null | error")	Some("Returns the directory path above the last directory segment, dropping the basename and its parent (the complement of file_trailing); empty when there is none. Null passes through.")
+dirname(file)	dirname	Function	Some("dirname(file: file | null) -> string | null | error")	Some("Returns the directory portion of the display path; an absolute input returns its absolute parent directory. Null passes through.")
+ext(file)	ext	Function	Some("ext(file: file | null) -> string | null | error")	Some("Returns the final extension without its leading dot, or empty text when there is none; null passes through.")
+file_exists(value)	file_exists	Function	Some("file_exists(value: unknown | null) -> boolean | error")	Some("Returns true when the file exists, locally or as a fetched remote URL. The argument is inspected, never converted, so null, a number, a boolean, an array, or an object is false, and so is text that is not a well-formed file reference (`\"\"`, `https://`), which is never looked up. A resolution failure (a tree escape or a missing home, vault, or repository anchor), a probe failure, or a failed remote fetch is an error.")
+file_index(file)	file_index	Function	Some("file_index(file: file | null) -> number | null | error")	Some("Returns the numeric index suffix of the file's stem, or -1 when it has none; null passes through.")
+file_trailing(file)	file_trailing	Function	Some("file_trailing(file: file | null) -> string | null | error")	Some("Returns the last directory segment plus the basename, or the basename alone when there is no directory; null passes through.")
+find_files(pattern)	find_files	Function	Some("find_files(pattern: string | null) -> file[] | error")	Some("Returns every file a glob reference matches (`&dir/**/name.md`, `^docs/*.md`) as absolute paths, merged across every root of its prefix: the most local root first, then the shallowest, then by path component. A bare pattern searches the document's folder, then the repository root. A matched file symlink whose target leaves the file tree is skipped with a `dm.glob.skipped_symlink` warning, and a directory the search cannot read is an error. A null pattern lists nothing.")
+find_first_index(file)	find_first_index	Function	Some("find_first_index(file: file | null) -> file | null | error")	Some("Returns the lowest-indexed existing member of the file's index family in its directory, the unindexed base sorting first; returns the input when no member exists. An absolute input returns an absolute path; null passes through.")
+find_last_index(file)	find_last_index	Function	Some("find_last_index(file: file | null) -> file | null | error")	Some("Returns the highest-indexed existing member of the file's index family in its directory; returns the input when no member exists. An absolute input returns an absolute path; null passes through.")
+frontmatter(file)	frontmatter	Function	Some("frontmatter(file: file | null) -> object | null | error")	Some("Reads the frontmatter of a Markdown file as an object; null passes through. A missing or unparsable file is an error.")
+frontmatter(file, prop)	frontmatter	Function	Some("frontmatter(file: file | null, prop: string) -> unknown | error")	Some("Reads one top-level frontmatter property of a Markdown file, or null when the property is absent or the file is null.")
+has_binary(name_or_path)	has_binary	Function	Some("has_binary(name_or_path: string | null) -> boolean")	Some("Returns true when the command is found on PATH or is an existing executable absolute path; the same check as has_command. The command is never run.")
+has_command(cmd)	has_command	Function	Some("has_command(cmd: string | null) -> boolean")	Some("Returns true when the command is found on PATH or is an existing executable absolute path; it is never run. Null, empty text, and a relative path with a directory part are false.")
+increment_file_index(file)	increment_file_index	Function	Some("increment_file_index(file: file | null) -> file | null | error")	Some("Increments the numeric index suffix, preserving its zero-padding width, in the resolved file's directory; an unindexed name gets index 2. An absolute input returns an absolute path; null passes through.")
+is_file_type(value)	is_file_type	Function	Some("is_file_type(value: unknown | null) -> boolean")	Some("Returns true when the value is text that is a well-formed file reference (a local, Windows, project, vault, recursive, or HTTP(S) reference, on every host); it never resolves, reads, or fetches anything, so true does not mean the file exists. Empty text, malformed reference syntax, and every non-text value are false.")
+is_indexed_file(file)	is_indexed_file	Function	Some("is_indexed_file(file: file | null) -> boolean | error")	Some("Returns true when the file's stem ends in a numeric index suffix (`base-NNN`); null is false.")
+join(left, right)	join	Function	Some("join(left: string | null, right: string | null) -> string | null | error")	Some("Joins two path strings with normalized separators and validates the result as a path; HTTP(S) arguments are rejected. Null passes through.")
+link(file)	link	Function	Some("link(file: file | null) -> string | null | error")	Some("Creates a Markdown link to a local file, using its relative path as the link text and its absolute path as the destination. HTTP(S) URLs are rejected because they need a description; null passes through.")
+link(target, desc)	link	Function	Some("link(target: file | null, desc: string | null) -> string | null | error")	Some("Creates a Markdown link to a local file or an HTTP(S) URL with the given description as its text; null passes through.")
+markdown_body_empty(file)	markdown_body_empty	Function	Some("markdown_body_empty(file: file | null) -> boolean | error")	Some("Returns true when the Markdown file's body holds only whitespace; null is false.")
+markdown_title(file)	markdown_title	Function	Some("markdown_title(file: file | null) -> string | null | error")	Some("Returns the Markdown file's frontmatter `title`, else its first H1 heading, else null; null passes through.")
+parent_dir(file)	parent_dir	Function	Some("parent_dir(file: file | null) -> string | null | error")	Some("Returns the directory segment immediately above the basename, or empty text when there is none; null passes through.")
+relative(file)	relative	Function	Some("relative(file: file | null) -> file | null | error")	Some("Returns a best-effort relative path from the document's base directory, with forward slashes; null passes through.")
+try_frontmatter(file)	try_frontmatter	Function	Some("try_frontmatter(file: file | null) -> object | null")	Some("Reads the frontmatter of a Markdown file as `{ok, value, error}`. A file that reads and parses gives `ok` true and the frontmatter as `value`; a missing, unreadable, or unparsable file gives `ok` false and its reason as `error` instead of failing. Null passes through.")
+validate_schema(file)	validate_schema	Function	Some("validate_schema(file: file | null) -> boolean | null | error")	Some("Returns whether a Markdown document's frontmatter is valid against its declared schema; a document that declares no schema is valid. Null passes through; a file that cannot be loaded, or a schema that cannot be processed, is an error.")
+validate_schema(file, obj)	validate_schema	Function	Some("validate_schema(file: file | null, obj: object) -> boolean | null | error")	Some("Merges `obj` over a Markdown document's frontmatter (nested objects merge; supplied values, arrays, and explicit nulls win) and returns whether the combined page is valid against its schema. Validation happens in memory; the file and `obj` are never modified.")
+has_local_skill(name)	has_local_skill	Function	Some("has_local_skill(name: string | null) -> boolean | error")	Some("Returns true when a skill directory with this name exists in a local-scoped skill root of the executing agent. Null and empty text are false; a name with a path separator is an error.")
+has_skill(name)	has_skill	Function	Some("has_skill(name: string | null) -> boolean | error")	Some("Returns true when a skill directory with this name exists in a user-scoped or local-scoped skill root of the executing agent. Null and empty text are false; a name with a path separator is an error.")
+as_csv(list)	as_csv	Function	Some("as_csv(list: unknown[] | null) -> string | null")	Some("Joins a list into comma-separated text (`, ` between elements); null passes through.")
+as_json(list)	as_json	Function	Some("as_json(list: unknown[] | null) -> string | null")	Some("Renders a list as compact JSON, the explicit spelling of how a bare array renders in text. An empty list renders as `[]`; null passes through.")
+as_json5(list)	as_json5	Function	Some("as_json5(list: unknown[] | null) -> string | null")	Some("Renders a list as compact single-line JSON5, with single-quoted strings and unquoted object keys where they are valid identifiers. An empty list renders as `[]`; null passes through.")
+as_line_separated(list)	as_line_separated	Function	Some("as_line_separated(list: unknown[] | null) -> string | null")	Some("Joins a list into newline-separated text, one element per line; null passes through.")
+as_ordered_list(list)	as_ordered_list	Function	Some("as_ordered_list(list: unknown[] | null) -> string | null")	Some("Renders a list as a Markdown ordered list, nesting nested arrays and object-array shapes as indented sublists; null passes through.")
+as_space_separated(list)	as_space_separated	Function	Some("as_space_separated(list: unknown[] | null) -> string | null")	Some("Joins a list into space-separated text; null passes through.")
+as_tsv(list)	as_tsv	Function	Some("as_tsv(list: unknown[] | null) -> string | null")	Some("Joins a list into tab-separated text; null passes through.")
+as_unordered_list(list)	as_unordered_list	Function	Some("as_unordered_list(list: unknown[] | null) -> string | null")	Some("Renders a list as a Markdown unordered list, nesting nested arrays and object-array shapes as indented sublists; null passes through.")
+branch_exists_on_remote()	branch_exists_on_remote	Function	Some("branch_exists_on_remote() -> boolean | error")	Some("Returns whether the caller's current branch exists on the selected remote, from its live ref advertisement or authoritative provider API.")
+branch_exists_on_remote(branch)	branch_exists_on_remote	Function	Some("branch_exists_on_remote(branch: string) -> boolean | error")	Some("Returns whether the exact branch exists on the selected remote, from its live ref advertisement or authoritative provider API.")
+branch_exists_on_remote(branch, remote)	branch_exists_on_remote	Function	Some("branch_exists_on_remote(branch: string, remote: string) -> boolean | error")	Some("Returns whether the exact branch exists on the named remote, from its live ref advertisement or authoritative provider API.")
+predict_conflicts(branch)	predict_conflicts	Function	Some("predict_conflicts(branch: string | null) -> string[] | null | error")	Some("Returns the repository-relative paths that would conflict if the named local branch were merged into the caller's current branch; null passes through.")
+recent_commits(count)	recent_commits	Function	Some("recent_commits(count: number(integer;min(1))) -> recent-commits | error")	Some("Returns the newest `count` commits of the caller's repository, newest first, rendered as `ctx.recent_commits` renders them. `ctx.recent_commits` holds the last 10, captured at the start of execution; `recent_commits(count)` returns the newest `count`, evaluated at call time. Commits that touched no files are left out, so the list can be shorter than `count`; it is empty outside a repository.")
+remote_vendor([remote])	remote_vendor	Function	Some("remote_vendor([remote: string]) -> enum('',github,gitlab,gitea,forgejo,bitbucket,azure_devops,aws_code_commit,source_hut) | error")	Some("Returns the canonical provider token for the selected configured remote, probing an ambiguous self-hosted server only when allowlisted.")
+pr(id)	pr	Function	Some("pr(id: number(integer;min(1)) | string(min(1))) -> string | error")	Some("Returns one pull or merge request, addressed by number or canonical URL, in canonical Markdown form.")
+pr_list(query)	pr_list	Function	Some("pr_list(query: object) -> string[] | error")	Some("Queries pull or merge requests with the canonical bounded filter vocabulary. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds.")
+pr_list(count)	pr_list	Function	Some("pr_list(count: number(integer;min(1);max(100))) -> string[] | error")	Some("Lists the most recent `count` pull or merge requests, from 1 to 100.")
+cicd(id)	cicd	Function	Some("cicd(id: number(integer;min(1)) | string(min(1))) -> string | error")	Some("Returns one provider-addressable CI/CD job, addressed by number or canonical URL, in canonical Markdown form.")
+cicd_list(query)	cicd_list	Function	Some("cicd_list(query: object) -> string[] | error")	Some("Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds.")
+cicd_list(count)	cicd_list	Function	Some("cicd_list(count: number(integer;min(1);max(100))) -> string[] | error")	Some("Lists the most recent `count` CI/CD jobs, from 1 to 100.")
+can_execute(name)	can_execute	Function	Some("can_execute(name: string | null) -> boolean")	Some("Returns true when the name is a binary, an alias, a shell builtin, or a user function (has_binary, then the login-shell probes). Null and empty text are false; the name is never run.")
+has_alias(name)	has_alias	Function	Some("has_alias(name: string | null) -> boolean")	Some("Returns true when the name is an alias in the login shell ($SHELL, or pwsh then powershell.exe on Windows). Any probe failure, null, and empty text are false; the name is never run.")
+has_builtin_function(name)	has_builtin_function	Function	Some("has_builtin_function(name: string | null) -> boolean")	Some("Returns true when the name is a shell builtin (or a PowerShell cmdlet) in the login shell. Any probe failure, null, and empty text are false; the name is never run.")
+has_user_function(name)	has_user_function	Function	Some("has_user_function(name: string | null) -> boolean")	Some("Returns true when the name is a user-defined function in the login shell. Any probe failure, null, and empty text are false; the name is never run.")
+has_agentic_cli(agent)	has_agentic_cli	Function	Some("has_agentic_cli(agent: agentic-cli | null) -> boolean | error")	Some("Returns true when the named agentic CLI is installed on PATH, from the request's captured agent observation. Names are the Claudine provider roster slugs and their aliases; null is false.")
+package(where)	package	Function	Some("package(where: file) -> string | error")	Some("Returns the name of the package containing the path, from the captured repository observation. Returns empty text outside the repository, outside a monorepo, or when no package contains the path.")
+package_area(where)	package_area	Function	Some("package_area(where: file) -> string | error")	Some("Returns the name of the package area containing the path, from the captured repository observation. Returns empty text outside the repository, outside a monorepo, or when no area contains the path.")
+ipv4([filter])	ipv4	Function	Some("ipv4([filter: string]) -> string[] | error")	Some("Returns the host's IPv4 addresses, excluding loopback and link-local, from the request's captured network observation. A valid CIDR filter selects addresses inside that network (and can include loopback or link-local); any other filter is a substring match over the default set.")
+ipv6([filter])	ipv6	Function	Some("ipv6([filter: string]) -> string[] | error")	Some("Returns the host's IPv6 addresses, excluding loopback and link-local; scoped addresses keep their %scope suffix. Filters behave as in ipv4.")
+ping(address, [timeout])	ping	Function	Some("ping(address: ip-address, [timeout: number]) -> boolean | null | error")	Some("Sends one ICMP echo to an IP address and returns true when it replies within `timeout` milliseconds (default 100, at most 60000). Returns null with a warning when the address is not granted through --allow host=HOST, false when there is no reply, and an error when the host cannot send ICMP.")
+ping_under(address, timeout, [attempts])	ping_under	Function	Some("ping_under(address: ip-address, timeout: number, [attempts: number(integer;min(1);max(100))]) -> boolean | enum(unstable) | null | error")	Some("Sends `attempts` ICMP echoes (default 3) one after another, each with a timeout of `timeout` milliseconds. Returns true when every reply arrives in time, false when none does, and \"unstable\" otherwise. Consent and error rules match ping.")
+as_markdown(content)	as_markdown	Function	Some("as_markdown(content: string | null) -> string | null | error")	Some("Composes the text as Markdown through the root document's request (same context, base directory, consent, and recursion budget) and returns the composed Markdown; null passes through.")
+### unknown-function messages
+uper: `uper` is not a Darkmatter expression function
+lenght: `lenght` is not a Darkmatter expression function
+nope_nothing: `nope_nothing` is not a Darkmatter expression function

@@ -1,0 +1,815 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "context": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cwd": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Absolute launch directory captured when the composition request began, or null when ambient capture failed.",
+              "x-darkmatter-generated": true
+            },
+            "self": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Absolute canonical native path of the root document, or null for URL and in-memory roots.",
+              "x-darkmatter-generated": true
+            },
+            "last_updated": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "format": "darkmatter-datetime"
+                }
+              ],
+              "description": "Filesystem modification time of the root document, or null when unavailable or for URL and in-memory roots.",
+              "x-darkmatter-generated": true
+            },
+            "hash": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "The root document's '<frontmatter>-<body>' xxHash of its source as loaded, matching `md hash`, or null for URL and in-memory roots.",
+              "x-darkmatter-generated": true
+            },
+            "id": {
+              "type": "string",
+              "description": "xxHash identifying this execution of the root document: its source, ctx.timestamp_ms, host name, repository name, and a per-execution random nonce.",
+              "x-darkmatter-generated": true
+            },
+            "sid": {
+              "type": "string",
+              "description": "Full hexadecimal BLAKE3 digest of the same inputs as ctx.id. A cryptographic digest, not a secret.",
+              "x-darkmatter-generated": true
+            },
+            "now": {
+              "type": "string",
+              "format": "darkmatter-datetime",
+              "description": "Local date and time in ISO-8601 format.",
+              "x-darkmatter-generated": true
+            },
+            "now_utc": {
+              "type": "string",
+              "format": "darkmatter-datetime",
+              "description": "UTC date and time in ISO-8601 format.",
+              "x-darkmatter-generated": true
+            },
+            "today": {
+              "type": "string",
+              "format": "date",
+              "description": "Local date in ISO-8601 format.",
+              "x-darkmatter-generated": true
+            },
+            "today_utc": {
+              "type": "string",
+              "format": "date",
+              "description": "UTC date in ISO-8601 format.",
+              "x-darkmatter-generated": true
+            },
+            "yesterday": {
+              "type": "string",
+              "format": "date",
+              "description": "Local date for yesterday in ISO-8601 format.",
+              "x-darkmatter-generated": true
+            },
+            "yesterday_utc": {
+              "type": "string",
+              "format": "date",
+              "description": "UTC date for yesterday in ISO-8601 format.",
+              "x-darkmatter-generated": true
+            },
+            "tomorrow": {
+              "type": "string",
+              "format": "date",
+              "description": "Local date for tomorrow in ISO-8601 format.",
+              "x-darkmatter-generated": true
+            },
+            "tomorrow_utc": {
+              "type": "string",
+              "format": "date",
+              "description": "UTC date for tomorrow in ISO-8601 format.",
+              "x-darkmatter-generated": true
+            },
+            "day": {
+              "type": "string",
+              "description": "Full day of week name, local time.",
+              "x-darkmatter-generated": true
+            },
+            "day_utc": {
+              "type": "string",
+              "description": "Full day of week name, UTC.",
+              "x-darkmatter-generated": true
+            },
+            "day_abbr": {
+              "type": "string",
+              "description": "Abbreviated day of week name, local time.",
+              "x-darkmatter-generated": true
+            },
+            "day_abbr_utc": {
+              "type": "string",
+              "description": "Abbreviated day of week name, UTC.",
+              "x-darkmatter-generated": true
+            },
+            "year": {
+              "type": "string",
+              "description": "Current year, local time.",
+              "x-darkmatter-generated": true
+            },
+            "year_utc": {
+              "type": "string",
+              "description": "Current year, UTC.",
+              "x-darkmatter-generated": true
+            },
+            "month": {
+              "type": "string",
+              "description": "Current month as a zero-padded number, local time.",
+              "x-darkmatter-generated": true
+            },
+            "month_name": {
+              "type": "string",
+              "description": "Current month name, local time.",
+              "x-darkmatter-generated": true
+            },
+            "month_name_abbr": {
+              "type": "string",
+              "description": "Abbreviated current month name, local time.",
+              "x-darkmatter-generated": true
+            },
+            "day_of_month": {
+              "type": "string",
+              "description": "Current day of month.",
+              "x-darkmatter-generated": true
+            },
+            "day_of_month_suffixed": {
+              "type": "string",
+              "description": "Current day of month with ordinal suffix.",
+              "x-darkmatter-generated": true
+            },
+            "time": {
+              "type": "string",
+              "description": "Local time in 12-hour format with AM/PM.",
+              "x-darkmatter-generated": true
+            },
+            "time_military": {
+              "type": "string",
+              "description": "Local time in 24-hour format.",
+              "x-darkmatter-generated": true
+            },
+            "time_utc": {
+              "type": "string",
+              "description": "UTC time in 12-hour format with AM/PM.",
+              "x-darkmatter-generated": true
+            },
+            "time_military_utc": {
+              "type": "string",
+              "description": "UTC time in 24-hour format.",
+              "x-darkmatter-generated": true
+            },
+            "timezone": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Local timezone abbreviation, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "timezone_offset": {
+              "type": "string",
+              "description": "Local UTC offset.",
+              "x-darkmatter-generated": true
+            },
+            "timezone_iana": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Local IANA timezone name, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "start_of_week_sun": {
+              "type": "string",
+              "format": "date",
+              "description": "Start of the current Sunday-based week, local time.",
+              "x-darkmatter-generated": true
+            },
+            "end_of_week_sun": {
+              "type": "string",
+              "format": "date",
+              "description": "End of the current Sunday-based week, local time.",
+              "x-darkmatter-generated": true
+            },
+            "start_of_week_mon": {
+              "type": "string",
+              "format": "date",
+              "description": "Start of the current Monday-based week, local time.",
+              "x-darkmatter-generated": true
+            },
+            "end_of_week_mon": {
+              "type": "string",
+              "format": "date",
+              "description": "End of the current Monday-based week, local time.",
+              "x-darkmatter-generated": true
+            },
+            "start_of_week_sun_utc": {
+              "type": "string",
+              "format": "date",
+              "description": "Start of the current Sunday-based week, UTC.",
+              "x-darkmatter-generated": true
+            },
+            "end_of_week_sun_utc": {
+              "type": "string",
+              "format": "date",
+              "description": "End of the current Sunday-based week, UTC.",
+              "x-darkmatter-generated": true
+            },
+            "start_of_week_mon_utc": {
+              "type": "string",
+              "format": "date",
+              "description": "Start of the current Monday-based week, UTC.",
+              "x-darkmatter-generated": true
+            },
+            "end_of_week_mon_utc": {
+              "type": "string",
+              "format": "date",
+              "description": "End of the current Monday-based week, UTC.",
+              "x-darkmatter-generated": true
+            },
+            "season": {
+              "type": "string",
+              "description": "Current meteorological season.",
+              "x-darkmatter-generated": true
+            },
+            "timestamp": {
+              "type": "integer",
+              "x-darkmatter-integer": true,
+              "description": "Current Unix timestamp in seconds.",
+              "x-darkmatter-generated": true
+            },
+            "timestamp_ms": {
+              "type": "integer",
+              "x-darkmatter-integer": true,
+              "description": "Current Unix timestamp in milliseconds.",
+              "x-darkmatter-generated": true
+            },
+            "utc": {
+              "type": "string",
+              "format": "darkmatter-datetime",
+              "description": "Alias for now_utc.",
+              "x-darkmatter-generated": true
+            },
+            "dow": {
+              "type": "string",
+              "description": "Alias for day.",
+              "x-darkmatter-generated": true
+            },
+            "dow_abbr": {
+              "type": "string",
+              "description": "Alias for day_abbr.",
+              "x-darkmatter-generated": true
+            },
+            "repo": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Repository name from the preferred remote URL, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "repo_root": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Absolute repository root path, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "branch": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Current local Git branch name, or null outside a repository or at detached HEAD.",
+              "x-darkmatter-generated": true
+            },
+            "worktree": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Current linked Git worktree name, or null in the main worktree or outside a repository.",
+              "x-darkmatter-generated": true
+            },
+            "recent_commits": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Recent commits of the captured repository, newest first. Each element is one commit rendered exactly as `sniff repo recent-commits --plain` renders it (a multi-line block). `ctx.recent_commits` holds the last 10, captured at the start of execution; `recent_commits(count)` returns the newest `count`, evaluated at call time. Empty outside a repository.",
+              "x-darkmatter-generated": true
+            },
+            "is_monorepo": {
+              "type": "boolean",
+              "description": "Whether the current repository is a monorepo.",
+              "x-darkmatter-generated": true
+            },
+            "package_root": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Absolute current package root path, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "package_area_root": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Absolute current package area root path, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "packages": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ],
+              "description": "Package names, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "package_areas": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ],
+              "description": "Package area names, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "current_package": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Current package name, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "current_package_area": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Current package area, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "area": {
+              "type": "string",
+              "description": "Scoped area name.",
+              "x-darkmatter-generated": true
+            },
+            "area_description": {
+              "type": "string",
+              "description": "Human-readable scoped area description.",
+              "x-darkmatter-generated": true
+            },
+            "area_root": {
+              "type": "string",
+              "description": "Absolute scoped area root path.",
+              "x-darkmatter-generated": true
+            },
+            "current_packages": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Packages under the current directory.",
+              "x-darkmatter-generated": true
+            },
+            "depends_on": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "description": "Workspace-internal package dependencies. Each item is an object with a `package` (string) field and a `dependencies` (string[]) field listing the packages it depends on.",
+              "x-darkmatter-generated": true
+            },
+            "used_by": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "description": "Workspace-internal package reverse dependencies. Each item is an object with a `package` (string) field and a `users` (string[]) field listing the packages that depend on it.",
+              "x-darkmatter-generated": true
+            },
+            "dirty_files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Dirty file paths.",
+              "x-darkmatter-generated": true
+            },
+            "merge_conflicts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Repository-relative paths currently in an unresolved Git index state.",
+              "x-darkmatter-generated": true
+            },
+            "dirty_source_code_files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Dirty source-code file paths.",
+              "x-darkmatter-generated": true
+            },
+            "staged_files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Staged file paths.",
+              "x-darkmatter-generated": true
+            },
+            "untracked_files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Untracked file paths.",
+              "x-darkmatter-generated": true
+            },
+            "dirty_packages": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Dirty package names.",
+              "x-darkmatter-generated": true
+            },
+            "dirty_package_areas": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Dirty package area names.",
+              "x-darkmatter-generated": true
+            },
+            "staged_packages": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Staged package names.",
+              "x-darkmatter-generated": true
+            },
+            "staged_package_areas": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Staged package area names.",
+              "x-darkmatter-generated": true
+            },
+            "current_package_has_staged_files": {
+              "type": "boolean",
+              "description": "Whether the current package has staged files.",
+              "x-darkmatter-generated": true
+            },
+            "current_package_area_has_staged_files": {
+              "type": "boolean",
+              "description": "Whether the current package area has staged files.",
+              "x-darkmatter-generated": true
+            },
+            "current_package_has_dirty_files": {
+              "type": "boolean",
+              "description": "Whether the current package has dirty files.",
+              "x-darkmatter-generated": true
+            },
+            "current_package_area_has_dirty_files": {
+              "type": "boolean",
+              "description": "Whether the current package area has dirty files.",
+              "x-darkmatter-generated": true
+            },
+            "programming_languages_in_repo": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ],
+              "description": "Programming languages in the repository, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "programming_language": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Context-sensitive primary programming language, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "package_manager": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Context-sensitive package manager, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "docs_readme": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "README paths, scope-filtered.",
+              "x-darkmatter-generated": true
+            },
+            "docs_blast_radius": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Docs with blast_radius frontmatter, scope-filtered.",
+              "x-darkmatter-generated": true
+            },
+            "docs_drift": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Docs at risk of drift from source changes.",
+              "x-darkmatter-generated": true
+            },
+            "docs_skill": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Repo-relative path to the best matching skill file, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "os": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Operating system name, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "hostname": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Host name reported by the operating system, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "os_distro": {
+              "type": "string",
+              "description": "Linux distribution name, empty on macOS and Windows.",
+              "x-darkmatter-generated": true
+            },
+            "os_package_manager": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Primary system package manager, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "os_version": {
+              "type": "string",
+              "description": "Operating system version.",
+              "x-darkmatter-generated": true
+            },
+            "memory_total": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Total system memory in bytes, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "memory_used": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Percentage of memory currently used, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "memory_avail": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Available system memory in bytes, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "cpu_cores": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "Number of logical CPU cores, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "cpu_arch": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "CPU architecture, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "gpu": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "GPU device names, or null when unavailable.",
+              "x-darkmatter-generated": true
+            },
+            "tailnet": {
+              "type": "boolean",
+              "description": "Whether any host interface has an address in the CGNAT range 100.64.0.0/10 (Tailscale). Other VPNs and CGNAT ISPs using that range also report true.",
+              "x-darkmatter-generated": true
+            },
+            "gateway": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Primary IPv4 gateway address, or null without a default route or when the default route has no gateway address.",
+              "x-darkmatter-generated": true
+            },
+            "gateway_v6": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "Primary IPv6 gateway address, with a %scope suffix for link-local gateways, or null without a default route or when the default route has no gateway address.",
+              "x-darkmatter-generated": true
+            },
+            "agent": {
+              "type": "string",
+              "description": "The agentic CLI provider being used in the current session.",
+              "x-darkmatter-generated": true
+            },
+            "model": {
+              "type": "string",
+              "description": "Active model identifier, trimmed from the MODEL env var; defaults to \"default\".",
+              "x-darkmatter-generated": true
+            }
+          }
+        }
+      ]
+    }
+  }
+}

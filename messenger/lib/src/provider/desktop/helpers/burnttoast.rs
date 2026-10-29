@@ -41,6 +41,7 @@ const ACTIVATION_MARKER: &str = "__MESSENGER_ACTIVATION__";
 /// Helper backend that delivers via the BurntToast PowerShell module.
 pub(crate) struct BurntToastHelper {
     pub(crate) pwsh_path: PathBuf,
+    pub(crate) notice_timeout_ms: u64,
     pub(crate) app_id: String,
     /// Tracks whether the AppID has been registered with BurntToast in this
     /// process. The registration is cheap once but we still avoid re-running
@@ -71,6 +72,7 @@ impl BurntToastHelper {
         Self {
             pwsh_path,
             app_id,
+            notice_timeout_ms: NOTICE_TIMEOUT_MS,
             app_id_registered: OnceLock::new(),
         }
     }
@@ -292,7 +294,7 @@ impl BurntToastHelper {
             &self.pwsh_path,
             &args,
             Some(&script),
-            Some(NOTICE_TIMEOUT_MS),
+            Some(self.notice_timeout_ms),
         )
         .await?;
         if output.status != 0 {
@@ -339,7 +341,7 @@ impl HelperBackend for BurntToastHelper {
         let timeout_ms = if interactive {
             None
         } else {
-            Some(NOTICE_TIMEOUT_MS)
+            Some(self.notice_timeout_ms)
         };
         let output = spawn_helper(&self.pwsh_path, &args, Some(&script), timeout_ms).await?;
         if output.status != 0 {
@@ -365,7 +367,7 @@ impl HelperBackend for BurntToastHelper {
             &self.pwsh_path,
             &args,
             Some(&script),
-            Some(NOTICE_TIMEOUT_MS),
+            Some(self.notice_timeout_ms),
         )
         .await?;
         if output.status != 0 {

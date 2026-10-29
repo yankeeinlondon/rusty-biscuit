@@ -41,9 +41,10 @@ use crate::events::GlobalSettings;
 /// Submit every early `say`/`speak` phrase of one prepared document.
 ///
 /// The one entry point a document's bootstrap, stabilized reread, loop
-/// refresh, retry/resume, and `proxy` target preparation call; a future
-/// `prep` directive calls it too. `settings` are the invocation's bridged
-/// user settings, which a document's lifecycle also plays speech with: every
+/// refresh, retry/resume, `proxy` target, and container preparation call.
+/// `prep` targets enter through their command's preparation. `settings` are
+/// the invocation's bridged user settings, which a document's lifecycle also
+/// plays speech with: every
 /// candidate is prepared with their configuration, and the first submission
 /// that carries phrases decides the gates from them. `inputs` is only built when the
 /// handle is live and the lifecycle speaks, so a silent document costs

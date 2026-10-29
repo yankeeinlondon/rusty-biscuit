@@ -5,8 +5,11 @@
 //!
 //! The order is fixed: evaluate, refuse a missing value (`null`), a container
 //! (array or object), or an embedded NUL, validate the original value without
-//! coercion, convert it with [`scalar_string`], then concatenate. A value is
-//! never parsed for quotes, whitespace, operators, or further placeholders.
+//! coercion against the declaration and then against the guard refinement
+//! the site was approved under, convert it with [`scalar_string`], then
+//! concatenate. A value is never parsed for quotes, whitespace, operators, or
+//! further placeholders. An expression that fills several holes of one
+//! command is evaluated once, and that one checked value fills each of them.
 //!
 //! [`fill_template`] is shared by every adapter that runs a template:
 //! Darkmatter's own `::shell`, `::shell-block`, and frontmatter `$( … )`
@@ -14,6 +17,8 @@
 //! shells). A host that validates late values at a barrier before any command
 //! runs calls [`resolve_late_values`] there and hands each site's
 //! [`SiteValues`] to [`fill_template`], so no placeholder is evaluated twice.
+//! A [`HoleTiming::Guarded`] hole is never part of that barrier: it is read
+//! by [`fill_template`] when its guarded command is reached.
 
 use super::{ArgPart, CommandTemplate, FilledChain, FilledSegment, HoleTiming, HoleType, HoleValidator, Placeholder};
 use crate::markdown::compose::expression::{EvaluationLookup, ExpressionError, evaluate, parse, scalar_string};
@@ -100,6 +105,11 @@ pub enum RejectReason {
     /// The declared type or one of its constraints rejected the original
     /// value. Nothing is coerced first: a number never passes `alphanumeric`.
     DeclaredType,
+    /// The value passes its declaration but not the narrower type an
+    /// enclosing guard established, under which the command was approved:
+    /// the value changed after the guard, or the guard was not what selected
+    /// the command.
+    GuardRefinement,
 }
 
 impl std::fmt::Display for RejectReason {
@@ -108,6 +118,7 @@ impl std::fmt::Display for RejectReason {
             Self::NotScalar => "is an array or object, not a string, number, or boolean",
             Self::EmbeddedNul => "contains a NUL byte",
             Self::DeclaredType => "does not satisfy its declared type",
+            Self::GuardRefinement => "does not satisfy the type its enclosing guard narrowed it to",
         })
     }
 }
@@ -163,13 +174,23 @@ impl HoleError {
 /// index among the template's placeholders in authored order.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SiteValues {
-    holes: BTreeMap<usize, String>,
+    holes: BTreeMap<usize, LateHole>,
+}
+
+/// One late hole's barrier result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LateHole {
+    text: String,
+    /// Whether the value also passed the hole's guard refinement. The barrier
+    /// runs whether or not the guarded command is reached, so a failure is
+    /// reported only by [`fill_template`], when the command is.
+    refinement_holds: bool,
 }
 
 impl SiteValues {
     /// The validated, converted text of hole `index`, when it was resolved.
     pub fn get(&self, index: usize) -> Option<&str> {
-        self.holes.get(&index).map(String::as_str)
+        self.holes.get(&index).map(|hole| hole.text.as_str())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -242,6 +263,10 @@ pub struct LateValueError {
 /// before any of its commands runs when one of its late values is missing or
 /// invalid.
 ///
+/// A [`HoleTiming::Guarded`] hole is skipped: its guard may not select its
+/// command. A deferred hole's guard refinement is likewise checked only when
+/// [`fill_template`] uses the value.
+///
 /// ## Errors
 ///
 /// The first failing hole, in site order then authored order.
@@ -256,11 +281,17 @@ where
             if !matches!(placeholder.timing, HoleTiming::Deferred { .. }) {
                 continue;
             }
-            let text = resolve_hole(placeholder, evaluator).map_err(|error| LateValueError {
+            let checked = check_hole(placeholder, evaluator).map_err(|error| LateValueError {
                 site: id.to_string(),
                 error,
             })?;
-            values.holes.insert(index, text);
+            values.holes.insert(
+                index,
+                LateHole {
+                    text: scalar_string(&checked.value),
+                    refinement_holds: checked.refinement_holds,
+                },
+            );
         }
         late.sites.insert(id.to_string(), values);
     }
@@ -270,9 +301,11 @@ where
 /// Fills every hole of `template`, producing one string per argument.
 ///
 /// A hole whose index `late` holds takes that already validated text; every
-/// other hole is evaluated once through `evaluator`, now. Every hole of every
-/// segment is filled before this returns, so a chain whose `&&`/`||` would
-/// skip a segment still has that segment's values checked.
+/// other hole is evaluated through `evaluator`, now, once per distinct
+/// expression. Every value is checked against the hole's declaration and its
+/// guard refinement. Every hole of every segment is filled before this
+/// returns, so a chain whose `&&`/`||` would skip a segment still has that
+/// segment's values checked.
 ///
 /// The returned chain has not been checked against any blacklist; call
 /// [`check_filled_chain`](crate::markdown::compose::shell_expansion::check_filled_chain)
@@ -281,7 +314,8 @@ where
 /// ## Errors
 ///
 /// The first hole, in authored order, that is missing, refused, or fails to
-/// evaluate.
+/// evaluate. A value that passes its declaration but not its guard
+/// refinement is [`RejectReason::GuardRefinement`].
 ///
 /// ## Examples
 ///
@@ -304,6 +338,7 @@ pub fn fill_template(
     late: Option<&SiteValues>,
 ) -> Result<FilledChain, HoleError> {
     let mut index = 0;
+    let mut resolved: Vec<(&str, String)> = Vec::new();
     let mut segments = Vec::with_capacity(template.segments.len());
     for segment in &template.segments {
         let mut args = Vec::with_capacity(segment.args.len());
@@ -313,9 +348,19 @@ pub fn fill_template(
                 match part {
                     ArgPart::Literal(literal) => text.push_str(literal),
                     ArgPart::Hole(placeholder) => {
-                        match late.and_then(|late| late.get(index)) {
-                            Some(value) => text.push_str(value),
-                            None => text.push_str(&resolve_hole(placeholder, evaluator)?),
+                        match late.and_then(|late| late.holes.get(&index)) {
+                            Some(hole) if !hole.refinement_holds => {
+                                return Err(refinement_rejected(placeholder));
+                            }
+                            Some(hole) => text.push_str(&hole.text),
+                            None => match resolved.iter().find(|(expression, _)| *expression == placeholder.expression) {
+                                Some((_, value)) => text.push_str(value),
+                                None => {
+                                    let value = resolve_hole(placeholder, evaluator)?;
+                                    text.push_str(&value);
+                                    resolved.push((&placeholder.expression, value));
+                                }
+                            },
                         }
                         index += 1;
                     }
@@ -333,8 +378,26 @@ pub fn fill_template(
     Ok(FilledChain { segments })
 }
 
-/// Evaluates one placeholder and turns its value into argument text.
+/// Evaluates one placeholder, checks it against its declaration and guard
+/// refinement, and turns its value into argument text.
 fn resolve_hole(placeholder: &Placeholder, evaluator: &dyn HoleEvaluator) -> Result<String, HoleError> {
+    let checked = check_hole(placeholder, evaluator)?;
+    if !checked.refinement_holds {
+        return Err(refinement_rejected(placeholder));
+    }
+    Ok(scalar_string(&checked.value))
+}
+
+/// A value that passed its declaration, and whether it passed the hole's
+/// guard refinement too.
+struct CheckedValue {
+    value: Value,
+    refinement_holds: bool,
+}
+
+/// Evaluates one placeholder and checks the original value against its
+/// declaration. The guard refinement's verdict is returned, not enforced.
+fn check_hole(placeholder: &Placeholder, evaluator: &dyn HoleEvaluator) -> Result<CheckedValue, HoleError> {
     let expression = placeholder.expression.clone();
     let value = evaluator.evaluate(&placeholder.expression).map_err(|source| HoleError::Evaluation {
         expression: expression.clone(),
@@ -354,7 +417,26 @@ fn resolve_hole(placeholder: &Placeholder, evaluator: &dyn HoleEvaluator) -> Res
     if !placeholder.typing.validator.accepts(&value) {
         return Err(rejected(RejectReason::DeclaredType));
     }
-    Ok(scalar_string(&value))
+    let refinement_holds = placeholder
+        .typing
+        .refinement
+        .as_ref()
+        .is_none_or(|refinement| refinement.accepts(&value));
+    Ok(CheckedValue { value, refinement_holds })
+}
+
+/// The refusal of a value its guard refinement rejects.
+fn refinement_rejected(placeholder: &Placeholder) -> HoleError {
+    let narrowed = placeholder
+        .typing
+        .refinement
+        .as_ref()
+        .map_or_else(String::new, |refinement| refinement.text());
+    HoleError::Rejected {
+        expression: placeholder.expression.clone(),
+        declared_type: format!("{} narrowed to {narrowed}", placeholder.typing.declared_text()),
+        reason: RejectReason::GuardRefinement,
+    }
 }
 
 impl HoleType {
@@ -363,7 +445,7 @@ impl HoleType {
     pub fn declared_text(&self) -> String {
         match &self.validator {
             HoleValidator::FallbackScalar => "string".to_string(),
-            HoleValidator::Declared(def) => super::typing::declaration_text(def),
+            HoleValidator::Declared { definition, .. } => super::typing::declaration_text(definition),
         }
     }
 }

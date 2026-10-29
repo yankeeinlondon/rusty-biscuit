@@ -6,6 +6,9 @@
 //! (`tests/fixtures/research/lifecycle/fleet/`) at the fixed document paths.
 #![cfg(feature = "research")]
 
+#[path = "support/research_snapshot.rs"]
+mod research_snapshot;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -83,6 +86,20 @@ impl Repo {
 
     fn root(&self) -> &Path {
         self.dir.path()
+    }
+
+    fn published_fixture(label: &str, updates: &BTreeMap<PlatformId, String>) -> Self {
+        let seed = Self::new();
+        let snapshot = research_snapshot::snapshot(seed.root(), label, |root| {
+            let loader = research_loader(Workspace::new(root).expect("absolute"));
+            generate(&loader, &BTreeMap::new(), &today(), Options::default()).expect("baseline fixture");
+            if !updates.is_empty() {
+                generate(&loader, updates, &today(), Options::default()).expect("updated fixture");
+            }
+        });
+        let dir = tempfile::tempdir().expect("tempdir");
+        research_snapshot::copy_tree(&snapshot, dir.path());
+        Self { loader: research_loader(Workspace::new(dir.path()).expect("absolute")), dir }
     }
 
     fn workspace(&self) -> &Workspace {
@@ -165,6 +182,32 @@ fn show(diagnostics: &[messenger::research::Diagnostic]) -> String {
 }
 
 // ---- the fixture -------------------------------------------------------------
+
+#[test]
+fn fixture_snapshots_invalidate_on_input_edits_and_keep_mutations_private() {
+    let seed = tempfile::tempdir().unwrap();
+    fs::write(seed.path().join("input"), "first").unwrap();
+    let label = format!("snapshot-contract-{:?}", seed.path());
+    let preparations = std::cell::Cell::new(0);
+    let prepare = |root: &Path| {
+        preparations.set(preparations.get() + 1);
+        fs::write(root.join("output"), fs::read(root.join("input")).unwrap()).unwrap();
+    };
+    let first = research_snapshot::snapshot(seed.path(), &label, prepare);
+    assert_eq!(research_snapshot::snapshot(seed.path(), &label, prepare), first);
+    assert_eq!(preparations.get(), 1);
+    fs::write(seed.path().join("input"), "second").unwrap();
+    let second = research_snapshot::snapshot(seed.path(), &label, prepare);
+    assert_ne!(first, second);
+    assert_eq!(preparations.get(), 2);
+    assert_eq!(fs::read(second.join("output")).unwrap(), b"second");
+    let private = tempfile::tempdir().unwrap();
+    research_snapshot::copy_tree(&first, private.path());
+    fs::write(private.path().join("output"), "mutated").unwrap();
+    assert_eq!(fs::read(first.join("output")).unwrap(), b"first");
+    fs::remove_dir_all(first).unwrap();
+    fs::remove_dir_all(second).unwrap();
+}
 
 #[test]
 fn the_fleet_fixture_is_a_clean_accepted_fleet() {
@@ -423,79 +466,97 @@ fn interruption_points(artifacts: usize) -> Vec<Point> {
     points
 }
 
-#[test]
-fn a_generation_interrupted_before_selection_recovers_to_the_old_snapshot() {
-    assert_interruptions_recover(|point| !matches!(point, Point::AfterSelection | Point::BeforeCleanup));
+macro_rules! publication_interruption_tests {
+    ($($name:ident => $point:expr),+ $(,)?) => {
+        const TESTED_INTERRUPTION_POINTS: &[Point] = &[$($point),+];
+        $(
+            #[test]
+            fn $name() {
+                assert_interruption_recovers($point);
+            }
+        )+
+    };
+}
+
+publication_interruption_tests! {
+    interrupted_before_staging => Point::BeforeStaging,
+    interrupted_during_staging => Point::DuringStaging,
+    interrupted_staged_without_journal => Point::StagedNoJournal,
+    interrupted_before_selection => Point::BeforeSelection,
+    interrupted_replacing_artifact_1 => Point::MidReplacement(1),
+    interrupted_replacing_artifact_2 => Point::MidReplacement(2),
+    interrupted_replacing_artifact_3 => Point::MidReplacement(3),
+    interrupted_replacing_artifact_4 => Point::MidReplacement(4),
+    interrupted_replacing_artifact_5 => Point::MidReplacement(5),
+    interrupted_replacing_artifact_6 => Point::MidReplacement(6),
+    interrupted_replacing_artifact_7 => Point::MidReplacement(7),
+    interrupted_replacing_artifact_8 => Point::MidReplacement(8),
+    interrupted_before_manifest => Point::BeforeManifest,
+    interrupted_after_selection => Point::AfterSelection,
+    interrupted_before_cleanup => Point::BeforeCleanup,
 }
 
 #[test]
-fn a_generation_interrupted_after_selection_recovers_to_the_new_snapshot() {
-    assert_interruptions_recover(|point| matches!(point, Point::AfterSelection | Point::BeforeCleanup));
+fn every_publication_interruption_point_has_a_test() {
+    assert_eq!(TESTED_INTERRUPTION_POINTS, interruption_points(PlatformId::ALL.len() + 3));
 }
 
-fn assert_interruptions_recover(selects: impl Fn(Point) -> bool) {
+fn assert_interruption_recovers(point: Point) {
     let update = edit(&fleet_text(PlatformId::Discord), "  value: 2000\n", "  value: 4000\n");
     let updates = BTreeMap::from([(PlatformId::Discord, update)]);
 
-    // The expected new snapshot, from a clean run.
-    let reference = Repo::new();
-    reference.generate().expect("generate");
-    let old_tree = reference.tree();
-    reference.generate_with(&updates, Options::default()).expect("update");
+    let reference = Repo::published_fixture("updated-discord", &updates);
+    let repo = Repo::published_fixture("baseline", &BTreeMap::new());
+    let old_tree = repo.tree();
     let new_tree = reference.tree();
     assert_ne!(old_tree, new_tree);
-    let artifacts = 7; // five documents, catalog, summary
+    assert_eq!(read_verified(reference.workspace()).unwrap().files.len(), PlatformId::ALL.len() + 3);
+    let error = repo
+        .generate_with(&updates, Options { interrupt_at: Some(point), ..Options::default() })
+        .expect_err("interrupted");
+    assert!(matches!(error, GenerateError::Publish(PublishError::Interrupted(at)) if at == point), "{point}: {error}");
 
-    for point in interruption_points(artifacts).into_iter().filter(|point| selects(*point)) {
-        let repo = Repo::new();
-        repo.generate().expect("generate");
-        let error = repo
-            .generate_with(&updates, Options { interrupt_at: Some(point), ..Options::default() })
-            .expect_err("interrupted");
-        assert!(matches!(error, GenerateError::Publish(PublishError::Interrupted(at)) if at == point), "{point}: {error}");
-
-        let selected_new = matches!(point, Point::AfterSelection | Point::BeforeCleanup);
-        // A verified read sees one whole snapshot or refuses; never a mixture.
-        match read_verified(repo.workspace()) {
-            Ok(verified) => {
-                let expected = if selected_new { &new_tree } else { &old_tree };
-                for (path, bytes) in &verified.files {
-                    assert_eq!(Some(bytes), expected.get(path), "{point}: {path}");
-                }
+    let selected_new = matches!(point, Point::AfterSelection | Point::BeforeCleanup);
+    // A verified read sees one whole snapshot or refuses; never a mixture.
+    match read_verified(repo.workspace()) {
+        Ok(verified) => {
+            let expected = if selected_new { &new_tree } else { &old_tree };
+            for (path, bytes) in &verified.files {
+                assert_eq!(Some(bytes), expected.get(path), "{point}: {path}");
             }
-            Err(PublishError::Inconsistent { .. }) => {
-                assert!(matches!(point, Point::MidReplacement(_) | Point::BeforeManifest), "{point}: refused");
-            }
-            Err(other) => panic!("{point}: {other}"),
         }
-
-        let journal_pending = publish::pending(repo.workspace());
-        assert_eq!(
-            journal_pending,
-            !matches!(point, Point::BeforeStaging | Point::DuringStaging | Point::StagedNoJournal | Point::BeforeCleanup),
-            "{point}"
-        );
-        if journal_pending {
-            assert!(matches!(repo.generate(), Err(GenerateError::Publish(PublishError::RecoveryRequired))), "{point}");
-            assert!(matches!(check(&repo.loader, &today()), Err(GenerateError::Publish(PublishError::RecoveryRequired))), "{point}");
+        Err(PublishError::Inconsistent { .. }) => {
+            assert!(matches!(point, Point::MidReplacement(_) | Point::BeforeManifest), "{point}: refused");
         }
-
-        let outcome = recover(repo.workspace(), Options::default()).expect("recover");
-        let expected_outcome = match point {
-            Point::BeforeSelection | Point::MidReplacement(_) | Point::BeforeManifest => Recovery::RolledBack,
-            Point::AfterSelection => Recovery::RolledForward,
-            _ => Recovery::Clean,
-        };
-        assert_eq!(outcome, expected_outcome, "{point}");
-        assert_eq!(repo.tree(), if selected_new { new_tree.clone() } else { old_tree.clone() }, "{point}");
-        assert!(repo.state_is_clean(), "{point}: leftovers");
-        let leftovers: Vec<String> = repo.tree().into_keys().filter(|path| path.ends_with(".publish-tmp")).collect();
-        assert!(leftovers.is_empty(), "{point}: {leftovers:?}");
-
-        // A follow-up generation succeeds and converges on the new snapshot.
-        repo.generate_with(&updates, Options::default()).expect("follow-up");
-        assert_eq!(repo.tree(), new_tree, "{point}");
+        Err(other) => panic!("{point}: {other}"),
     }
+
+    let journal_pending = publish::pending(repo.workspace());
+    assert_eq!(
+        journal_pending,
+        !matches!(point, Point::BeforeStaging | Point::DuringStaging | Point::StagedNoJournal | Point::BeforeCleanup),
+        "{point}"
+    );
+    if journal_pending {
+        assert!(matches!(repo.generate(), Err(GenerateError::Publish(PublishError::RecoveryRequired))), "{point}");
+        assert!(matches!(check(&repo.loader, &today()), Err(GenerateError::Publish(PublishError::RecoveryRequired))), "{point}");
+    }
+
+    let outcome = recover(repo.workspace(), Options::default()).expect("recover");
+    let expected_outcome = match point {
+        Point::BeforeSelection | Point::MidReplacement(_) | Point::BeforeManifest => Recovery::RolledBack,
+        Point::AfterSelection => Recovery::RolledForward,
+        _ => Recovery::Clean,
+    };
+    assert_eq!(outcome, expected_outcome, "{point}");
+    assert_eq!(repo.tree(), if selected_new { new_tree.clone() } else { old_tree.clone() }, "{point}");
+    assert!(repo.state_is_clean(), "{point}: leftovers");
+    let leftovers: Vec<String> = repo.tree().into_keys().filter(|path| path.ends_with(".publish-tmp")).collect();
+    assert!(leftovers.is_empty(), "{point}: {leftovers:?}");
+
+    // A follow-up generation succeeds and converges on the new snapshot.
+    repo.generate_with(&updates, Options::default()).expect("follow-up");
+    assert_eq!(repo.tree(), new_tree, "{point}");
 }
 
 #[test]

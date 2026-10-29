@@ -1,0 +1,17 @@
+# scenario: success
+# doc: success.md
+# given: invoked as `claudine compose --claude --yolo success.md` from the directory holding the fixture documents
+# given: every provider launch exits 0 with a result
+# given: shell approval is granted by --yolo
+event initialize
+state counter=1
+event start
+shell start
+work fresh 0
+event success
+state counter=2
+event finalize
+err none
+state counter=2
+shell finalize
+exit 0

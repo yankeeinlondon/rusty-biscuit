@@ -43,9 +43,19 @@ impl Markdown {
     /// the root document between its frontmatter and its body.
     pub(crate) fn run_root_pipeline_hooked(
         &mut self,
-        mut options: crate::markdown::compose::ComposeRequest,
+        options: crate::markdown::compose::ComposeRequest,
         hook: Option<&mut super::ResolvedFrontmatterHook<'_>>,
     ) -> MarkdownResult<ComposeReport> {
+        self.run_root_pipeline_collecting(options, hook).0
+    }
+
+    /// [`run_root_pipeline_hooked`](Self::run_root_pipeline_hooked), also
+    /// returning, on failure, the warnings the failed documents had reported.
+    pub(crate) fn run_root_pipeline_collecting(
+        &mut self,
+        mut options: crate::markdown::compose::ComposeRequest,
+        hook: Option<&mut super::ResolvedFrontmatterHook<'_>>,
+    ) -> (MarkdownResult<ComposeReport>, Vec<ComposeWarning>) {
         // A constructor has no document, so `ComposeOptions::new` captures no
         // discovered `ctx.*` group. This is the first point that has both: an
         // extendable context grows to the groups this document names, and the
@@ -119,7 +129,10 @@ impl Markdown {
         let current = options.current_authority();
         let glob_warnings = options.glob_warnings.clone();
         let node = Self::pipeline_node(&options);
-        let mut report = self.run_compose_pipeline_node(options, &mut runtime, node, hook)?;
+        let mut report = match self.run_compose_pipeline_node(options, &mut runtime, node, hook) {
+            Ok(report) => report,
+            Err(error) => return (Err(error), runtime.take_failed_warnings()),
+        };
         report.cache_stats = Some(runtime.cache.stats());
         let remote_fetch_stats = runtime.remote_fetch.stats();
         report.warnings.extend(remote_fetch_stats.cache_compose_warnings());
@@ -127,14 +140,16 @@ impl Markdown {
         report.warnings.extend(icmp.take_warnings());
         report.warnings.extend(current.take_warnings());
         report.add_warnings(glob_warnings.take_warnings());
-        Ok(report)
+        (Ok(report), Vec::new())
     }
 
     /// Internal recursive pipeline runner shared by root and child documents.
     ///
     /// Frontmatter is resolved in a fixed order before the body stages run:
-    /// **Interp pass 1 → Schema Validation → Shell Expansion → Interp pass 2**.
-    /// Pass 1 resolves `{{ }}` against seed values; schema validation and
+    /// **Call check → Interp pass 1 → Schema Validation → Shell Expansion →
+    /// Interp pass 2**. The call check is passive: it rejects the document
+    /// when an authored call on the composed surface is proven wrong against
+    /// the schema's declared types, before anything is evaluated. Pass 1 resolves `{{ }}` against seed values; schema validation and
     /// coercion run next; authored `$(...)` frontmatter values then expand;
     /// pass 2 resolves only the keys that were deferred because they
     /// referenced shell-pending values. Every authored value is scanned once
@@ -193,356 +208,14 @@ impl Markdown {
         }
         let nested = super::nested::NestedCompose::install(&mut options, runtime, self);
 
+        // Outside the closure, so a failure can still hand on what it reported.
+        // Boxed and built out of line, like `finish_document`: this frame
+        // recurs once per nested composition, and the depth limit's test runs
+        // at the edge of the 2 MiB test stack.
+        let mut report = new_document_report();
         let result = (|| {
-            let mut report = ComposeReport::new();
-            let mut perf = perf::PerfCollector::new(options.perf_enabled);
-
-            let mut provenance = prepare_frontmatter_for_compose(self, &options);
-            let mut deferred_keys = Vec::new();
-            let mut provisional_keys = std::collections::HashSet::new();
-
-            // Caller file parameters are invocation-owned semantic inputs.
-            // Project them from their captured origins before the
-            // first frontmatter dependency graph consumes their values. The
-            // same schema assembly and projection are retained for validation,
-            // post-shell trigger matching, and final body presentation.
-            let mut trigger_registry = None;
-            let prepared_schemas =
-                schema_validation::prepare_schemas(self, &options, &mut trigger_registry)?;
-            let caller_projection = schema_validation::prepare_caller_projection(
-                self,
-                &options,
-                &prepared_schemas,
-                provenance.data(),
-            )?;
-            caller_projection.install(self);
-            caller_projection.install_provenance(&mut options);
-
-            let shell_expansion_enabled =
-                options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
-
-            // The pre-approval gate collects from the document as prepared,
-            // before any scan: after frontmatter pass 1 a produced value (an
-            // expression result, a decoded literal token) would read as
-            // authored text, and a `$( … )` it holds as a command to approve.
-            let preflight_source = (preflight_gate_applies(&options, runtime)
-                && !runtime
-                    .preflight_validated()
-                    .load(std::sync::atomic::Ordering::Acquire))
-            .then(|| self.clone());
-
-            // Frontmatter Interpolation: resolve {{ }} in frontmatter values
-            // before EffectiveState is built, since it mutates frontmatter
-            // inputs that drive later stages.
-            //
-            // When shell expansion is also enabled, defer any templated key
-            // that references a shell-pending value (top-level `$(...)`). A
-            // second interpolation pass after shell expansion will resolve
-            // those keys against the shell-expanded values.
-            if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
-                let fm_start = perf.is_enabled().then(std::time::Instant::now);
-                // Capture the on-disk locus before borrowing frontmatter so a
-                // failure can render an OSC8 link, its authored span, and a
-                // focused excerpt instead of the late-binding fallback.
-                let fm_source_ctx = self.full_source_context_for_errors();
-                let fm_authored_ctx = self.loaded_source_context_for_errors();
-                let fm_report = frontmatter_interpolation::interpolate_frontmatter_located(
-                    self.frontmatter_mut(),
-                    &mut provenance,
-                    options.context(),
-                    options.expression_failure_policy(),
-                    frontmatter_interpolation::FrontmatterPass::First {
-                        defer_shell_pending: shell_expansion_enabled,
-                    },
-                    Some(options.frontmatter_resolution_context()),
-                    &options.exclude_keys,
-                    &options.name_coercion_keys,
-                )
-                .map_err(|failure| {
-                    attribute_frontmatter_failure(failure, &options, fm_authored_ctx, &fm_source_ctx)
-                })?;
-                report.frontmatter_interpolations_applied = fm_report.replacements;
-                deferred_keys = fm_report.deferred_keys;
-                provisional_keys = fm_report.provisional_keys;
-                report.add_warnings(fm_report.warnings);
-                add_frontmatter_candidates(&mut report, "frontmatter-interpolation", fm_report.missing_roots);
-                if let Some(start) = fm_start {
-                    perf.record(
-                        perf::PerfMetricKind::FrontmatterInterpolation,
-                        start.elapsed(),
-                    );
-                }
-            }
-
-            // Surface the set of deferred keys that are actually present in
-            // this document's frontmatter (DM1 metadata). Lets callers
-            // distinguish "raw because deferred" from "raw because composition
-            // failed" for dry-run labeling and diagnostics.
-            if !options.exclude_keys.is_empty() {
-                let fm = self.frontmatter().as_map();
-                report.deferred_frontmatter_keys = options
-                    .exclude_keys
-                    .iter()
-                    .filter(|k| fm.contains_key(*k))
-                    .cloned()
-                    .collect();
-            }
-
-            // Schema Validation: check frontmatter against $schema or baseline
-            // AFTER frontmatter interpolation so template values like
-            // `runtime_agent: '{{ env.AGENT }}'` are evaluated to their
-            // resolved form before being checked. Runs BEFORE shell
-            // expansion so the validator can fail-fast without triggering
-            // (potentially expensive or side-effectful) shell commands when
-            // the resolved frontmatter is invalid. This stage also coerces
-            // schema-recognized scalars (e.g. the string "true" against a
-            // boolean field) and writes the real types back into frontmatter,
-            // so later stages and the composed output see coerced values.
-            //
-            // Problems on values a later stage resolves (a whole-value
-            // `$(...)`, a template reading one, or a key pass 1 resolved from a
-            // command's unexpanded text) are deferred to the post-shell pass
-            // below; see `schema_validation::PendingDeferral`. Internal
-            // non-terminal passes (shell-command discovery) that strip
-            // FrontmatterShellExpansion set
-            // `ComposeOptions::defer_shell_pending_schema_problems` so a
-            // still-literal `$(...)` value is deferred rather than reported as a
-            // final violation here.
-            // Trigger-schema registry shared across both schema-validation
-            // passes: the first pass (here) scans the `schemas/` ancestry from
-            // disk; the post-shell pass below reuses that registry instead of
-            // re-walking it (F8). Matching is re-evaluated against the current
-            // frontmatter in each pass regardless.
-            {
-                let sv_start = perf.is_enabled().then(std::time::Instant::now);
-                let schema_consumer = runtime
-                    .transclusion
-                    .root_path()
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| schema_validation::source_path(self, &options));
-                schema_validation::run_with_registry(
-                    self,
-                    &options,
-                    &prepared_schemas,
-                    &caller_projection,
-                    provenance.data(),
-                    schema_validation::PendingDeferral::BeforeShell {
-                        provenance: &provenance,
-                        provisional: &provisional_keys,
-                    },
-                    &schema_consumer,
-                    &mut report,
-                )?;
-                if let Some(start) = sv_start {
-                    perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
-                }
-            }
-
-            // Pre-Flight validation (v2 design step 4): when the caller
-            // supplies a pre-approved command set, verify up-front that it
-            // covers every command the condition-blind collector discovers —
-            // before any frontmatter `$(...)`, body `::shell`, or shell block
-            // executes. This removes the failure mode where an earlier
-            // frontmatter command runs before a later body or shell-block
-            // command is found unapproved. Root-only because the
-            // collector already walks every child, nested `as_markdown` content
-            // included; gated on a shell-executing
-            // operation being enabled so the collection's own internal inline
-            // compose (which disables shell execution) cannot recurse. A
-            // frontmatter-surface compose checks its frontmatter commands only,
-            // so it never dereferences the body graph.
-            if let Some(preflight_source) = &preflight_source {
-                super::preflight::validate_pre_approved(preflight_source, &options)?;
-                runtime
-                    .preflight_validated()
-                    .store(true, std::sync::atomic::Ordering::Release);
-            }
-
-            // Frontmatter Shell Expansion: execute $(cmd) in frontmatter values
-            // before EffectiveState is built, since the expanded values must be
-            // visible to all later stages.
-            if shell_expansion_enabled {
-                let fse_start = perf.is_enabled().then(std::time::Instant::now);
-                let fse_ctx = self.full_source_context_for_errors();
-                // A `$( … )` command's placeholders are typed by the document's
-                // schema; it is assembled only when a value can hold one.
-                let fse_templates = self
-                    .frontmatter()
-                    .as_map()
-                    .values()
-                    .any(|value| value.as_str().is_some_and(|text| text.contains("$(")))
-                    .then(|| frontmatter_shell_expansion::FrontmatterTemplates {
-                        schema: prepared_schemas.effective_for(self).and_then(|effective| effective.simplified),
-                        ctx: shell_expansion::site::authored_context(self, None),
-                    });
-                let fse_report = frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
-                    self.frontmatter_mut(),
-                    &options,
-                    runtime,
-                    &mut provenance,
-                    &fse_ctx,
-                    fse_templates.as_ref(),
-                )?;
-                report.frontmatter_shell_expansions_applied = fse_report.replacements;
-                report.shell_approvals_used += fse_report.approvals_used;
-                report.add_warnings(fse_report.warnings);
-                add_frontmatter_candidates(
-                    &mut report,
-                    "frontmatter-shell-ternary",
-                    fse_report.missing_roots,
-                );
-                if let Some(start) = fse_start {
-                    perf.record(
-                        perf::PerfMetricKind::FrontmatterShellExpansion,
-                        start.elapsed(),
-                    );
-                }
-
-                // Second interpolation pass: templated keys that referenced
-                // shell-pending values were deferred above. Now that shell
-                // expansion has produced concrete values, resolve exactly those
-                // keys from their authored text. Every other value, shell
-                // output included, is data and is not scanned again.
-                if options.is_enabled(ComposeOperation::FrontmatterInterpolation)
-                    && fse_report.replacements > 0
-                    && !deferred_keys.is_empty()
-                {
-                    let fm_start = perf.is_enabled().then(std::time::Instant::now);
-                    let fm_source_ctx = self.full_source_context_for_errors();
-                    let fm_authored_ctx = self.loaded_source_context_for_errors();
-                    let fm_report = frontmatter_interpolation::interpolate_frontmatter_located(
-                        self.frontmatter_mut(),
-                        &mut provenance,
-                        options.context(),
-                        options.expression_failure_policy(),
-                        frontmatter_interpolation::FrontmatterPass::Deferred(&deferred_keys),
-                        Some(options.frontmatter_resolution_context()),
-                        &options.exclude_keys,
-                        &options.name_coercion_keys,
-                    )
-                    .map_err(|failure| {
-                        attribute_frontmatter_failure(failure, &options, fm_authored_ctx, &fm_source_ctx)
-                    })?;
-                    report.frontmatter_interpolations_applied += fm_report.replacements;
-                    report.add_warnings(fm_report.warnings);
-                    add_frontmatter_candidates(&mut report, "frontmatter-interpolation", fm_report.missing_roots);
-                    if let Some(start) = fm_start {
-                        perf.record(
-                            perf::PerfMetricKind::FrontmatterInterpolation,
-                            start.elapsed(),
-                        );
-                    }
-                }
-
-                // Schema applicability is a function of the current
-                // frontmatter snapshot. Re-assemble after shell expansion and
-                // interpolation pass 2 so concrete values can select a
-                // different root-union arm as well as activate or deactivate
-                // trigger payloads, then judge the values the first pass
-                // deferred as pending. `--no-trigger-schemas` removes trigger
-                // schemas from this pass, never the document and baseline
-                // verdict. Only a caller that re-validates the post-shell
-                // frontmatter itself takes that verdict over; compose then
-                // checks caller-file classification and the values a result
-                // suffix typed, which that caller does not judge, unless
-                // trigger schemas (also unseen by it) are in play.
-                if options.trigger_schemas || !options.caller_owns_post_shell_verdict {
-                    let schema_consumer = runtime
-                        .transclusion
-                        .root_path()
-                        .map(Path::to_path_buf)
-                        .unwrap_or_else(|| schema_validation::source_path(self, &options));
-                    schema_validation::run_with_registry(
-                        self,
-                        &options,
-                        &prepared_schemas,
-                        &caller_projection,
-                        provenance.data(),
-                        if options.caller_owns_post_shell_verdict {
-                            schema_validation::PendingDeferral::CallerOwned
-                        } else {
-                            schema_validation::PendingDeferral::Final
-                        },
-                        &schema_consumer,
-                        &mut report,
-                    )?;
-                } else {
-                    schema_validation::verify_projection_stability(
-                        self,
-                        &options,
-                        &prepared_schemas,
-                        &caller_projection,
-                        provenance.data(),
-                    )?;
-                    schema_validation::validate_typed_shell_values(
-                        self,
-                        &options,
-                        &prepared_schemas,
-                        &fse_report.typed_keys,
-                    )?;
-                }
-            }
-
-            // The host's hook sees the frontmatter every frontmatter command
-            // has resolved, and may change the environment the body then
-            // renders with (a launch identity chosen from that frontmatter).
-            if let Some(hook) = hook.as_mut() {
-                let mut env = options.context().env().clone();
-                hook(self.frontmatter(), &mut env)?;
-                if &env != options.context().env() {
-                    *options.context_mut().env_mut() = env;
-                    if let Some(nested) = &nested {
-                        nested.align_environment(options.context().env());
-                    }
-                }
-            }
-
-            // Build effective state for replacement/interpolation and condition checks.
-            let esb_start = perf.is_enabled().then(std::time::Instant::now);
-            let effective_state = document_state_builder(self, &options)
-                .with_presentation_values(caller_projection.presentation_values())
-                .with_current_authority(options.current_authority())
-                .build()?;
-            if let Some(start) = esb_start {
-                perf.record(perf::PerfMetricKind::EffectiveStateBuild, start.elapsed());
-            }
-
-            // Convert ctx diagnostics to compose warnings
-            let source_display = match &options.source {
-                ComposeSource::File(p) => abbreviate_path(p, options.resolution_context().home_dir()),
-                ComposeSource::Url(u) => u.to_string(),
-                ComposeSource::Unknown => "unknown".to_string(),
-            };
-            for diag in effective_state.ctx_diagnostics() {
-                let warning = match diag {
-                    context::ContextMergeDiagnostic::UserCtxMerged { colliding_keys }
-                        if colliding_keys.is_empty() =>
-                    {
-                        // No warning needed when merge succeeded without collisions
-                        continue;
-                    }
-                    context::ContextMergeDiagnostic::UserCtxMerged { colliding_keys } => {
-                        let keys_list = colliding_keys.join(", ");
-                        ComposeWarning::new(
-                            "context",
-                            format!(
-                                "the <blue>{source_display}</blue> document <i>defines</i> a <inverse>ctx</inverse> property and keys [<dim>{keys_list}</dim>] in the <inverse>ctx</inverse> dictionary conflict with those provided by Darkmatter's normal context dictionary!"
-                            ),
-                        )
-                    }
-                    context::ContextMergeDiagnostic::InvalidUserCtxReplaced => ComposeWarning::new(
-                        "context",
-                        "Document ctx was not an object; replaced with runtime context",
-                    ),
-                    context::ContextMergeDiagnostic::PartialRuntimeCapture { area, detail } => {
-                        ComposeWarning::new(
-                            "context",
-                            format!("Partial runtime capture for {area}: {detail}"),
-                        )
-                    }
-                };
-                report.warnings.push(warning);
-            }
+            let prepared = self.prepare_document(&mut options, runtime, &mut report, &mut hook, nested.as_ref())?;
+            let PreparedDocument { mut perf, provenance, prepared_schemas, effective_state } = *prepared;
 
             let mut transclusion_ran = false;
             // Body provenance lives until the transclusion directive parse,
@@ -553,6 +226,13 @@ impl Markdown {
                 if !options.is_enabled(*operation) {
                     continue;
                 }
+                // The state and schema are final here, so an undeclared read
+                // is judged now: a blocking one stops the next stage.
+                stop_if_blocked(
+                    &report,
+                    &options,
+                    Some(FinalVerdict { markdown: self, state: &effective_state, schemas: &prepared_schemas }),
+                )?;
 
                 info!(operation = ?operation, phase = ?operation.phase(), "compose: running operation");
                 match operation.phase() {
@@ -601,6 +281,7 @@ impl Markdown {
                         self.run_transclusion_phase(
                             &enabled_transclusion_ops,
                             &effective_state,
+                            &prepared_schemas,
                             &options,
                             runtime,
                             &mut report,
@@ -647,8 +328,9 @@ impl Markdown {
                 perf.set_capture_timings(options.context().capture_timings().to_vec());
             }
             report.perf = perf.finish();
-            Ok(report)
+            Ok(())
         })();
+        let result = finish_document(result, report, runtime);
 
         let result = match nested {
             Some(nested) => nested.finish(result, runtime),
@@ -660,6 +342,702 @@ impl Markdown {
         }
 
         result
+    }
+}
+
+/// What a document's frontmatter stages leave for its body stages.
+struct PreparedDocument {
+    perf: perf::PerfCollector,
+    provenance: super::value_origin::FrontmatterProvenance,
+    prepared_schemas: schema_validation::PreparedSchemas,
+    effective_state: super::EffectiveState,
+}
+
+impl Markdown {
+    /// Runs every stage before the body's: frontmatter preparation,
+    /// interpolation, schema validation, shell expansion, the host hook, and
+    /// the effective state build.
+    ///
+    /// Out of line, like `finish_document`: none of its temporaries is live
+    /// when the body stages recurse through nested compositions, so they stay
+    /// out of the pipeline frame that recurs once per level.
+    #[inline(never)]
+    fn prepare_document(
+        &mut self,
+        options: &mut crate::markdown::compose::ComposeRequest,
+        runtime: &mut shell_expansion::types::PipelineRuntime,
+        report: &mut ComposeReport,
+        hook: &mut Option<&mut super::ResolvedFrontmatterHook<'_>>,
+        nested: Option<&super::nested::NestedCompose>,
+    ) -> MarkdownResult<Box<PreparedDocument>> {
+        let mut perf = perf::PerfCollector::new(options.perf_enabled);
+
+        let mut provenance = prepare_frontmatter_for_compose(self, options);
+        let mut deferred_keys = Vec::new();
+        let mut provisional_keys = std::collections::HashSet::new();
+
+        // Caller file parameters are invocation-owned semantic inputs.
+        // Project them from their captured origins before the
+        // first frontmatter dependency graph consumes their values. The
+        // same schema assembly and projection are retained for validation,
+        // post-shell trigger matching, and final body presentation.
+        let mut trigger_registry = None;
+        let prepared_schemas =
+            schema_validation::prepare_schemas(self, options, &mut trigger_registry)?;
+        // A skipped schema trigger is reported before anything can fail or
+        // run, so a later failure still carries it, and a policy denying it
+        // stops the document before its first effect.
+        let consumer = schema_validation::source_path(self, options);
+        for finding in prepared_schemas.discovery_findings() {
+            report.add_warning(ComposeWarning::from_invalid_trigger(finding, consumer.clone()));
+        }
+        stop_if_blocked(report, options, None)?;
+        let caller_projection = schema_validation::prepare_caller_projection(
+            self,
+            options,
+            &prepared_schemas,
+            provenance.data(),
+        )?;
+        caller_projection.install(self);
+        caller_projection.install_provenance(options);
+
+        // A call the design-time check proves wrong rejects the document
+        // before any of its expressions (and so any sibling effect) runs.
+        run_call_precheck(self, &provenance, options, &prepared_schemas, report)?;
+        report.passive_warnings = report.warnings.len();
+
+        let shell_expansion_enabled =
+            options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
+
+        // The pre-approval gate collects from the document as prepared,
+        // before any scan: after frontmatter pass 1 a produced value (an
+        // expression result, a decoded literal token) would read as
+        // authored text, and a `$( … )` it holds as a command to approve.
+        let preflight_source = (preflight_gate_applies(options, runtime)
+            && !runtime
+                .preflight_validated()
+                .load(std::sync::atomic::Ordering::Acquire))
+        .then(|| self.clone());
+
+        // Frontmatter Interpolation: resolve {{ }} in frontmatter values
+        // before EffectiveState is built, since it mutates frontmatter
+        // inputs that drive later stages.
+        //
+        // When shell expansion is also enabled, defer any templated key
+        // that references a shell-pending value (top-level `$(...)`). A
+        // second interpolation pass after shell expansion will resolve
+        // those keys against the shell-expanded values.
+        if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
+            let fm_start = perf.is_enabled().then(std::time::Instant::now);
+            let fm_report = interpolate_frontmatter_pass(
+                self,
+                &mut provenance,
+                options,
+                report,
+                frontmatter_interpolation::FrontmatterPass::First {
+                    defer_shell_pending: shell_expansion_enabled,
+                },
+            )?;
+            report.frontmatter_interpolations_applied = fm_report.replacements;
+            deferred_keys = fm_report.deferred_keys;
+            provisional_keys = fm_report.provisional_keys;
+            report.add_warnings(fm_report.warnings);
+            add_frontmatter_candidates(report, "frontmatter-interpolation", fm_report.missing_roots);
+            if let Some(start) = fm_start {
+                perf.record(
+                    perf::PerfMetricKind::FrontmatterInterpolation,
+                    start.elapsed(),
+                );
+            }
+        }
+
+        // Surface the set of deferred keys that are actually present in
+        // this document's frontmatter (DM1 metadata). Lets callers
+        // distinguish "raw because deferred" from "raw because composition
+        // failed" for dry-run labeling and diagnostics.
+        if !options.exclude_keys.is_empty() {
+            let fm = self.frontmatter().as_map();
+            report.deferred_frontmatter_keys = options
+                .exclude_keys
+                .iter()
+                .filter(|k| fm.contains_key(*k))
+                .cloned()
+                .collect();
+        }
+
+        // Schema Validation: check frontmatter against $schema or baseline
+        // AFTER frontmatter interpolation so template values like
+        // `runtime_agent: '{{ env.AGENT }}'` are evaluated to their
+        // resolved form before being checked. Runs BEFORE shell
+        // expansion so the validator can fail-fast without triggering
+        // (potentially expensive or side-effectful) shell commands when
+        // the resolved frontmatter is invalid. This stage also coerces
+        // schema-recognized scalars (e.g. the string "true" against a
+        // boolean field) and writes the real types back into frontmatter,
+        // so later stages and the composed output see coerced values.
+        //
+        // Problems on values a later stage resolves (a whole-value
+        // `$(...)`, a template reading one, or a key pass 1 resolved from a
+        // command's unexpanded text) are deferred to the post-shell pass
+        // below; see `schema_validation::PendingDeferral`. Internal
+        // non-terminal passes (shell-command discovery) that strip
+        // FrontmatterShellExpansion set
+        // `ComposeOptions::defer_shell_pending_schema_problems` so a
+        // still-literal `$(...)` value is deferred rather than reported as a
+        // final violation here.
+        // Trigger-schema registry shared across both schema-validation
+        // passes: the first pass (here) scans the `schemas/` ancestry from
+        // disk; the post-shell pass below reuses that registry instead of
+        // re-walking it (F8). Matching is re-evaluated against the current
+        // frontmatter in each pass regardless.
+        {
+            let sv_start = perf.is_enabled().then(std::time::Instant::now);
+            let schema_consumer = runtime
+                .transclusion
+                .root_path()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| schema_validation::source_path(self, options));
+            schema_validation::run_with_registry(
+                self,
+                options,
+                &prepared_schemas,
+                &caller_projection,
+                provenance.data(),
+                schema_validation::PendingDeferral::BeforeShell {
+                    provenance: &provenance,
+                    provisional: &provisional_keys,
+                },
+                &schema_consumer,
+                report,
+            )?;
+            if let Some(start) = sv_start {
+                perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
+            }
+        }
+
+        // Pre-Flight validation (v2 design step 4): when the caller
+        // supplies a pre-approved command set, verify up-front that it
+        // covers every command the condition-blind collector discovers —
+        // before any frontmatter `$(...)`, body `::shell`, or shell block
+        // executes. This removes the failure mode where an earlier
+        // frontmatter command runs before a later body or shell-block
+        // command is found unapproved. Root-only because the
+        // collector already walks every child, nested `as_markdown` content
+        // included; gated on a shell-executing
+        // operation being enabled so the collection's own internal inline
+        // compose (which disables shell execution) cannot recurse. A
+        // frontmatter-surface compose checks its frontmatter commands only,
+        // so it never dereferences the body graph.
+        if let Some(preflight_source) = &preflight_source {
+            super::preflight::validate_pre_approved(preflight_source, options, report)?;
+            runtime
+                .preflight_validated()
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+
+        // A blocking warning reported so far stops the document before
+        // its first frontmatter command runs. Undeclared reads wait: their
+        // verdict needs the final frontmatter and schema.
+        stop_if_blocked(report, options, None)?;
+
+        // Frontmatter Shell Expansion: execute $(cmd) in frontmatter values
+        // before EffectiveState is built, since the expanded values must be
+        // visible to all later stages.
+        if shell_expansion_enabled {
+            let fse_start = perf.is_enabled().then(std::time::Instant::now);
+            let fse_ctx = self.full_source_context_for_errors();
+            // A `$( … )` command's placeholders are typed by the document's
+            // schema; it is assembled only when a value can hold one.
+            let fse_templates = self
+                .frontmatter()
+                .as_map()
+                .values()
+                .any(|value| value.as_str().is_some_and(|text| text.contains("$(")))
+                .then(|| frontmatter_shell_expansion::FrontmatterTemplates {
+                    effective: prepared_schemas.effective_for(self),
+                    ctx: shell_expansion::site::authored_context(self, None),
+                });
+            let fse_report = frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
+                self.frontmatter_mut(),
+                options,
+                runtime,
+                &mut provenance,
+                &fse_ctx,
+                fse_templates.as_ref(),
+            )?;
+            report.frontmatter_shell_expansions_applied = fse_report.replacements;
+            report.shell_approvals_used += fse_report.approvals_used;
+            report.add_warnings(fse_report.warnings);
+            add_frontmatter_candidates(
+                report,
+                "frontmatter-shell-ternary",
+                fse_report.missing_roots,
+            );
+            if let Some(start) = fse_start {
+                perf.record(
+                    perf::PerfMetricKind::FrontmatterShellExpansion,
+                    start.elapsed(),
+                );
+            }
+
+            // Second interpolation pass: templated keys that referenced
+            // shell-pending values were deferred above. Now that shell
+            // expansion has produced concrete values, resolve exactly those
+            // keys from their authored text. Every other value, shell
+            // output included, is data and is not scanned again.
+            if options.is_enabled(ComposeOperation::FrontmatterInterpolation)
+                && fse_report.replacements > 0
+                && !deferred_keys.is_empty()
+            {
+                let fm_start = perf.is_enabled().then(std::time::Instant::now);
+                let fm_report = interpolate_frontmatter_pass(
+                    self,
+                    &mut provenance,
+                    options,
+                    report,
+                    frontmatter_interpolation::FrontmatterPass::Deferred(&deferred_keys),
+                )?;
+                report.frontmatter_interpolations_applied += fm_report.replacements;
+                report.add_warnings(fm_report.warnings);
+                add_frontmatter_candidates(report, "frontmatter-interpolation", fm_report.missing_roots);
+                if let Some(start) = fm_start {
+                    perf.record(
+                        perf::PerfMetricKind::FrontmatterInterpolation,
+                        start.elapsed(),
+                    );
+                }
+            }
+
+            // Schema applicability is a function of the current
+            // frontmatter snapshot. Re-assemble after shell expansion and
+            // interpolation pass 2 so concrete values can select a
+            // different root-union arm as well as activate or deactivate
+            // trigger payloads, then judge the values the first pass
+            // deferred as pending. `--disable schema-triggers` removes trigger
+            // schemas from this pass, never the document and baseline
+            // verdict. Only a caller that re-validates the post-shell
+            // frontmatter itself takes that verdict over; compose then
+            // checks caller-file classification and the values a result
+            // suffix typed, which that caller does not judge, unless
+            // trigger schemas (also unseen by it) are in play.
+            if options.trigger_schemas || !options.caller_owns_post_shell_verdict {
+                let schema_consumer = runtime
+                    .transclusion
+                    .root_path()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| schema_validation::source_path(self, options));
+                schema_validation::run_with_registry(
+                    self,
+                    options,
+                    &prepared_schemas,
+                    &caller_projection,
+                    provenance.data(),
+                    if options.caller_owns_post_shell_verdict {
+                        schema_validation::PendingDeferral::CallerOwned
+                    } else {
+                        schema_validation::PendingDeferral::Final
+                    },
+                    &schema_consumer,
+                    report,
+                )?;
+            } else {
+                schema_validation::verify_projection_stability(
+                    self,
+                    options,
+                    &prepared_schemas,
+                    &caller_projection,
+                    provenance.data(),
+                )?;
+                schema_validation::validate_typed_shell_values(
+                    self,
+                    options,
+                    &prepared_schemas,
+                    &fse_report.typed_keys,
+                )?;
+            }
+        }
+
+        // The host's hook sees the frontmatter every frontmatter command
+        // has resolved, and may change the environment the body then
+        // renders with (a launch identity chosen from that frontmatter).
+        if let Some(hook) = hook.as_mut() {
+            let mut env = options.context().env().clone();
+            hook(self.frontmatter(), &mut env)?;
+            if &env != options.context().env() {
+                *options.context_mut().env_mut() = env;
+                if let Some(nested) = &nested {
+                    nested.align_environment(options.context().env());
+                }
+            }
+        }
+
+        // Build effective state for replacement/interpolation and condition checks.
+        let esb_start = perf.is_enabled().then(std::time::Instant::now);
+        let effective_state = document_state_builder(self, options)
+            .with_presentation_values(caller_projection.presentation_values())
+            .with_current_authority(options.current_authority())
+            .build()?;
+        if let Some(start) = esb_start {
+            perf.record(perf::PerfMetricKind::EffectiveStateBuild, start.elapsed());
+        }
+
+        // Convert ctx diagnostics to compose warnings
+        let source_display = match &options.source {
+            ComposeSource::File(p) => abbreviate_path(p, options.resolution_context().home_dir()),
+            ComposeSource::Url(u) => u.to_string(),
+            ComposeSource::Unknown => "unknown".to_string(),
+        };
+        for diag in effective_state.ctx_diagnostics() {
+            let warning = match diag {
+                context::ContextMergeDiagnostic::UserCtxMerged { colliding_keys }
+                    if colliding_keys.is_empty() =>
+                {
+                    // No warning needed when merge succeeded without collisions
+                    continue;
+                }
+                context::ContextMergeDiagnostic::UserCtxMerged { colliding_keys } => {
+                    let keys_list = colliding_keys.join(", ");
+                    ComposeWarning::new(
+                        "context",
+                        format!(
+                            "the <blue>{source_display}</blue> document <i>defines</i> a <inverse>ctx</inverse> property and keys [<dim>{keys_list}</dim>] in the <inverse>ctx</inverse> dictionary conflict with those provided by Darkmatter's normal context dictionary!"
+                        ),
+                    )
+                }
+                context::ContextMergeDiagnostic::InvalidUserCtxReplaced => ctx_override_warning(),
+                context::ContextMergeDiagnostic::PartialRuntimeCapture { area, detail } => {
+                    ComposeWarning::new(
+                        "context",
+                        format!("Partial runtime capture for {area}: {detail}"),
+                    )
+                }
+            };
+            report.warnings.push(warning);
+        }
+
+        Ok(Box::new(PreparedDocument { perf, provenance, prepared_schemas, effective_state }))
+    }
+}
+
+/// What makes an undeclared-property candidate's verdict final: the
+/// document with its frontmatter complete, its effective state, and its
+/// schemas.
+#[derive(Clone, Copy)]
+pub(crate) struct FinalVerdict<'a> {
+    pub(crate) markdown: &'a Markdown,
+    pub(crate) state: &'a super::EffectiveState,
+    pub(crate) schemas: &'a schema_validation::PreparedSchemas,
+}
+
+/// Stops the document when a warning it has reported blocks under the
+/// request's [`BlockingPolicy`](super::policy::BlockingPolicy), or, given a
+/// `verdict`, an undeclared read it would report does.
+///
+/// Called where runtime warnings become known and before the next stage,
+/// command, or expression, so the stop precedes any later effect; earlier
+/// effects are not undone. It evaluates nothing. A blocking stop a nested
+/// `as_markdown` child reported is returned here too, even when an `||`
+/// fallback absorbed the call's failure. Pre-flight discovery
+/// (`defer_expression_failures`) is never stopped here: it reads content the
+/// real run may skip, and the real run owns the verdict.
+///
+/// ## Errors
+///
+/// [`MarkdownError::BlockedDiagnostics`](crate::markdown::types::MarkdownError::BlockedDiagnostics)
+/// with the blocking warnings and, as earlier ones, the rest, in report order.
+pub(crate) fn stop_if_blocked(
+    report: &ComposeReport,
+    options: &crate::markdown::compose::ComposeRequest,
+    verdict: Option<FinalVerdict<'_>>,
+) -> MarkdownResult<()> {
+    stop_if_blocked_with(report, options, verdict, &[], &[])
+}
+
+/// [`stop_if_blocked`] over `report` plus what a running stage has found but
+/// not yet added to it: its `stage_warnings` (reported after the report's) and
+/// the undeclared-read `stage_candidates` (judged only given a `verdict`).
+pub(crate) fn stop_if_blocked_with(
+    report: &ComposeReport,
+    options: &crate::markdown::compose::ComposeRequest,
+    verdict: Option<FinalVerdict<'_>>,
+    stage_warnings: &[ComposeWarning],
+    stage_candidates: &[super::context::report::UnknownRootCandidate],
+) -> MarkdownResult<()> {
+    let policy = options.blocking_policy();
+    if policy.is_empty() || options.defer_expression_failures {
+        return Ok(());
+    }
+    if let Some(stop) = options.nested_compose.take_blocked() {
+        return Err(stop);
+    }
+    let pending = verdict
+        .map(|verdict| {
+            let mut pending = super::unknown_identifiers::pending_warnings(
+                report,
+                verdict.markdown,
+                options,
+                verdict.state,
+                verdict.schemas,
+            );
+            pending.extend(super::unknown_identifiers::undeclared_warnings(
+                stage_candidates,
+                verdict.markdown,
+                options,
+                verdict.state,
+                verdict.schemas,
+            ));
+            pending
+        })
+        .unwrap_or_default();
+    policy_stop(policy, report.warnings.iter().chain(stage_warnings).chain(&pending))
+}
+
+/// [`stop_if_blocked`] over warnings a pass found ahead of any composition
+/// report: the pre-flight walk's skipped triggers, judged before the
+/// approvals that permit the walk's commands to run.
+///
+/// ## Errors
+///
+/// As [`stop_if_blocked`], over `warnings` alone.
+pub(crate) fn stop_if_warnings_blocked(
+    options: &crate::markdown::compose::ComposeRequest,
+    warnings: &[ComposeWarning],
+) -> MarkdownResult<()> {
+    let policy = options.blocking_policy();
+    if policy.is_empty() || options.defer_expression_failures {
+        return Ok(());
+    }
+    policy_stop(policy, warnings.iter())
+}
+
+/// The policy stop over `warnings`, in report order, when one blocks.
+fn policy_stop<'w>(
+    policy: &super::policy::BlockingPolicy,
+    warnings: impl Iterator<Item = &'w ComposeWarning> + Clone,
+) -> MarkdownResult<()> {
+    if !warnings.clone().any(|warning| policy.blocks_warning(warning)) {
+        return Ok(());
+    }
+    let (blocking, earlier) = warnings.cloned().partition(|warning| policy.blocks_warning(warning));
+    Err(crate::markdown::types::MarkdownError::BlockedDiagnostics { blocking, earlier })
+}
+
+/// The mark to start at, and the roots an evaluator has recorded since a mark,
+/// each with where it was read.
+pub(crate) type MissingRootsSince<'a> =
+    (usize, &'a dyn Fn(usize) -> Vec<(String, super::context::report::CandidateLocus)>);
+
+/// A stage's check before each expression; see [`blocking_guard`].
+pub(crate) type BlockingGuard<'a> = Box<dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()> + 'a>;
+
+/// The check a stage makes before each expression it evaluates (see
+/// [`BeforeEval`](super::interpolation::BeforeEval)), or `None` without a
+/// blocking policy: it stops the stage when a warning the stage reported
+/// blocks, or, given a `verdict` and `missing_roots`, an undeclared read it
+/// made does, so a later expression's effect (a nested shell) never runs.
+///
+/// Each call judges only what the stage reported since the last, so a stage
+/// pays O(its warnings and reads) beyond evaluation; `report` is read in full
+/// only to build the stop.
+pub(crate) fn blocking_guard<'a>(
+    report: &'a ComposeReport,
+    options: &'a crate::markdown::compose::ComposeRequest,
+    verdict: Option<FinalVerdict<'a>>,
+    missing_roots: Option<MissingRootsSince<'a>>,
+) -> Option<BlockingGuard<'a>> {
+    use super::context::report::UnknownRootCandidate;
+    let policy = options.blocking_policy();
+    if policy.is_empty() || options.defer_expression_failures {
+        return None;
+    }
+    let mut seen: Vec<ComposeWarning> = Vec::new();
+    let mut candidates: Vec<UnknownRootCandidate> = Vec::new();
+    let mut missing_roots = verdict.and(missing_roots);
+    // Boxed: the guard is held across expression evaluation, which recurs
+    // through nested compositions, so its captures stay off that stack.
+    Some(Box::new(move |new: &[ComposeWarning]| {
+        let mut blocked = new.iter().any(|warning| policy.blocks_warning(warning));
+        seen.extend_from_slice(new);
+        if let (Some(verdict), Some((checked, since))) = (verdict, missing_roots.as_mut()) {
+            let first_new = candidates.len();
+            for (root, locus) in since(*checked) {
+                *checked += 1;
+                let known = |candidate: &UnknownRootCandidate| candidate.root == root;
+                if !report.unknown_root_candidates.as_slice().iter().any(known) && !candidates.iter().any(known) {
+                    candidates.push(UnknownRootCandidate { root, stage: "interpolation", locus });
+                }
+            }
+            blocked = blocked
+                || (candidates.len() > first_new
+                    && super::unknown_identifiers::undeclared_warnings(
+                        &candidates[first_new..],
+                        verdict.markdown,
+                        options,
+                        verdict.state,
+                        verdict.schemas,
+                    )
+                    .iter()
+                    .any(|warning| policy.blocks_warning(warning)));
+        }
+        if blocked {
+            return stop_if_blocked_with(report, options, verdict, &seen, &candidates);
+        }
+        // A nested child's stop that an `||` fallback absorbed.
+        options.nested_compose.take_blocked().map_or(Ok(()), Err)
+    }))
+}
+
+/// The check a stage that adds its findings straight to the report (page-block
+/// and transclusion `when=` conditions) makes before each condition it
+/// evaluates; `None` without a blocking policy. Like [`blocking_guard`], each
+/// check judges only what the report gained since the last.
+pub(crate) struct ReportWatch<'a> {
+    options: &'a crate::markdown::compose::ComposeRequest,
+    verdict: FinalVerdict<'a>,
+    warnings: usize,
+    candidates: usize,
+}
+
+impl<'a> ReportWatch<'a> {
+    pub(crate) fn new(
+        report: &ComposeReport,
+        options: &'a crate::markdown::compose::ComposeRequest,
+        verdict: FinalVerdict<'a>,
+    ) -> Option<Self> {
+        let active = !options.blocking_policy().is_empty() && !options.defer_expression_failures;
+        active.then(|| Self {
+            options,
+            verdict,
+            warnings: report.warnings.len(),
+            candidates: report.unknown_root_candidates.len(),
+        })
+    }
+
+    /// Stops when a warning or undeclared read `report` gained since the last
+    /// check blocks (see [`stop_if_blocked`]).
+    pub(crate) fn check(&mut self, report: &ComposeReport) -> MarkdownResult<()> {
+        let policy = self.options.blocking_policy();
+        let warnings = report.warnings.get(self.warnings..).unwrap_or_default();
+        let candidates = report.unknown_root_candidates.as_slice().get(self.candidates..).unwrap_or_default();
+        self.warnings = report.warnings.len();
+        self.candidates = report.unknown_root_candidates.len();
+        let blocked = warnings.iter().any(|warning| policy.blocks_warning(warning))
+            || (!candidates.is_empty()
+                && super::unknown_identifiers::undeclared_warnings(
+                    candidates,
+                    self.verdict.markdown,
+                    self.options,
+                    self.verdict.state,
+                    self.verdict.schemas,
+                )
+                .iter()
+                .any(|warning| policy.blocks_warning(warning)));
+        if blocked {
+            return stop_if_blocked(report, self.options, Some(self.verdict));
+        }
+        self.options.nested_compose.take_blocked().map_or(Ok(()), Err)
+    }
+}
+
+/// Runs one frontmatter interpolation pass, attributing a failure to where
+/// the failing value came from. A blocking warning one expression reports
+/// stops the next, which may compose nested content that runs a shell.
+///
+/// Out of line, like `finish_document`: its guard and failure temporaries
+/// would otherwise sit in the pipeline frame that recurs once per nested
+/// composition.
+#[inline(never)]
+fn interpolate_frontmatter_pass(
+    markdown: &mut Markdown,
+    provenance: &mut super::value_origin::FrontmatterProvenance,
+    options: &crate::markdown::compose::ComposeRequest,
+    report: &ComposeReport,
+    pass: frontmatter_interpolation::FrontmatterPass<'_>,
+) -> MarkdownResult<frontmatter_interpolation::FrontmatterInterpolationReport> {
+    // Capture the on-disk locus before borrowing frontmatter so a failure can
+    // render an OSC8 link, its authored span, and a focused excerpt instead of
+    // the late-binding fallback.
+    let fm_source_ctx = markdown.full_source_context_for_errors();
+    let fm_authored_ctx = markdown.loaded_source_context_for_errors();
+    let mut guard = blocking_guard(report, options, None, None);
+    frontmatter_interpolation::interpolate_frontmatter_located(
+        markdown.frontmatter_mut(),
+        provenance,
+        options.context(),
+        options.expression_failure_policy(),
+        pass,
+        Some(options.frontmatter_resolution_context()),
+        &options.exclude_keys,
+        &options.name_coercion_keys,
+        guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
+    )
+    .map_err(|failure| attribute_frontmatter_failure(failure, options, fm_authored_ctx, &fm_source_ctx))
+}
+
+/// Runs the passive call check and adds its warnings to `report`; the
+/// warnings found before a rejection are reported with it, as a later
+/// stage's failure keeps the earlier warnings.
+///
+/// Out of line, like `finish_document`: its temporaries would otherwise sit
+/// in the pipeline frame that recurs once per nested composition.
+#[inline(never)]
+fn run_call_precheck(
+    markdown: &Markdown,
+    provenance: &super::value_origin::FrontmatterProvenance,
+    options: &crate::markdown::compose::ComposeRequest,
+    prepared_schemas: &schema_validation::PreparedSchemas,
+    report: &mut ComposeReport,
+) -> MarkdownResult<()> {
+    use super::call_precheck::{PrecheckFailure, check_document};
+    let effective = prepared_schemas.effective_for(markdown);
+    match check_document(markdown, provenance, options, effective.as_ref()) {
+        Ok(warnings) => {
+            report.add_warnings(warnings);
+            Ok(())
+        }
+        Err(PrecheckFailure::Frontmatter { failure, earlier }) => {
+            report.add_warnings(earlier);
+            Err(attribute_frontmatter_failure(
+                failure,
+                options,
+                markdown.loaded_source_context_for_errors(),
+                &markdown.full_source_context_for_errors(),
+            ))
+        }
+        Err(PrecheckFailure::Body { error, earlier }) => {
+            report.add_warnings(earlier);
+            Err(*error)
+        }
+        // A blocking finding is known before anything runs, so it stops the
+        // document here rather than after its effects.
+        Err(PrecheckFailure::Blocked { blocking, rest }) => {
+            Err(crate::markdown::types::MarkdownError::BlockedDiagnostics {
+                blocking,
+                earlier: report.warnings.iter().cloned().chain(rest).collect(),
+            })
+        }
+    }
+}
+
+#[inline(never)]
+fn new_document_report() -> Box<ComposeReport> {
+    Box::default()
+}
+
+/// A document's report on success; on failure, the error, with the warnings
+/// the document had reported kept in `runtime` for the root.
+#[inline(never)]
+fn finish_document(
+    result: MarkdownResult<()>,
+    report: Box<ComposeReport>,
+    runtime: &shell_expansion::types::PipelineRuntime,
+) -> MarkdownResult<ComposeReport> {
+    match result {
+        Ok(()) => Ok(*report),
+        Err(error) => {
+            runtime.record_failed_document(report.warnings);
+            Err(error)
+        }
     }
 }
 
@@ -744,4 +1122,14 @@ pub(crate) fn document_state_builder(
         .with_context(options.context().clone())
         .with_allow_ctx_override(options.allow_ctx_override)
         .with_name_coercion_keys(options.name_coercion_keys.clone())
+}
+
+/// The warning of a non-object `ctx` replaced by the runtime context. Out of
+/// line: the pipeline's frame recurs once per nested composition.
+#[inline(never)]
+fn ctx_override_warning() -> ComposeWarning {
+    ComposeWarning {
+        code: Some(super::policy::CTX_OVERRIDE_CODE.to_string()),
+        ..ComposeWarning::new("context", "Document ctx was not an object; replaced with runtime context")
+    }
 }

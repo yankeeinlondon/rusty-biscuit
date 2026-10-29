@@ -324,24 +324,11 @@ impl EffectEngine {
     }
 }
 
-/// Strips a leading `file://` and collapses doubled `/` (engine-local copy of
-/// the expression-engine normalization, kept here to avoid coupling).
+/// Strips a leading `file://` (engine-local copy of the expression engine's
+/// `file://` input adapter, kept here to avoid coupling); separators are
+/// left untouched so a UNC path keeps its meaning.
 fn normalize_path_arg(raw: &str) -> String {
-    let stripped = raw.strip_prefix("file://").unwrap_or(raw);
-    let mut out = String::with_capacity(stripped.len());
-    let mut prev_slash = false;
-    for ch in stripped.chars() {
-        if ch == '/' {
-            if !prev_slash {
-                out.push(ch);
-            }
-            prev_slash = true;
-        } else {
-            out.push(ch);
-            prev_slash = false;
-        }
-    }
-    out
+    raw.strip_prefix("file://").unwrap_or(raw).to_string()
 }
 
 #[cfg(test)]

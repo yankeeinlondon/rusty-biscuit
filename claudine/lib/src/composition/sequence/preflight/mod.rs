@@ -37,9 +37,9 @@ use std::sync::Arc;
 use darkmatter::markdown::Markdown;
 
 use super::super::lifecycle::bindings::{
-    LifecycleScope, approval_diagnostics, unavailable_root,
+    LifecycleScope, approval_diagnostics_prepared, unavailable_root,
 };
-use darkmatter::markdown::compose::{ComposeContext, EffectiveState};
+use darkmatter::markdown::compose::{ComposeContext, EffectiveState, SharedFrontmatter};
 use serde_json::{Map, Value};
 
 use super::super::authored_order::AuthoredOrder;
@@ -66,8 +66,14 @@ pub use shape::{
 
 use darkmatter::markdown::compose::shell_expansion::template::{
     CommandSite, CommandTemplate, DeferredShellRoots, HoleError, HoleEvaluator, HoleTiming,
-    LateValues, ModeRequirement, ShellCandidate, derived_deferred_keys, parse_authored,
+    LateValues, ModeRequirement, ShellCandidate, TemplateGrammarError, derived_deferred_keys,
+    parse_authored_prepared,
 };
+use darkmatter::markdown::compose::expression::{
+    DeclaredTypes, GuardOrigin, Polarity, PreparedInterpolation, PreparedInterpolationView, TypeScope,
+};
+use super::super::schema::globals::claudine_globals;
+use super::super::lifecycle::shell_template::{placeholder_guard, placeholder_guard_expr, retime_guarded};
 use darkmatter::markdown::compose::{ShellCommandOrigin, ShellExpansionError};
 use std::collections::HashSet;
 
@@ -132,17 +138,31 @@ pub struct PreflightGraph {
     pub root_lifecycle: Option<crate::composition::LifecycleConfig>,
     /// Authorization granted by the graph audit, separate from discovery.
     shell_authorization: std::sync::Arc<std::sync::Mutex<GraphShellAuthorization>>,
+    /// The invocation's parses of container sources and referenced data
+    /// documents, shared by every nested preparation that runs under this
+    /// graph.
+    nested_sources: NestedSources,
     /// One node per step, in sequence order.
     pub steps: Vec<PreflightStep>,
     /// Every prompt document reachable from the graph, deduplicated by
-    /// canonical path in first-encounter order.
+    /// canonical path in first-encounter order. Only the walk appends to it,
+    /// so [`Self::prompt_document`]'s index stays in step with it.
     pub prompt_documents: Vec<PromptDocument>,
     /// Every task command reachable from the graph that is approved as
-    /// resolved bytes, in discovery order.
+    /// resolved bytes, in discovery order. Only the walk appends to it.
     pub shell_commands: Vec<DiscoveredCommand>,
     /// Every task command with placeholders, including resolved-byte sites
     /// without a valid template shape, in discovery order: one per site, never merged.
+    /// Only the walk appends to it.
     pub template_candidates: Vec<ShellCandidate>,
+    /// [`Self::prompt_documents`] positions by path.
+    prompt_index: HashMap<PathBuf, usize>,
+    /// The command text of every [`Self::shell_commands`] entry.
+    command_index: HashSet<String>,
+    /// [`Self::template_candidates`] positions, in discovery order, by
+    /// [`ShellCandidate::authored`] (`None` for a site whose template grammar
+    /// failed).
+    candidate_index: HashMap<Option<String>, Vec<usize>>,
     /// Every reference to a prompt document, with what its discovery needs:
     /// the referencing task's position and its parameters. A document
     /// referenced from two positions is discovered once for each.
@@ -264,15 +284,51 @@ impl PreflightGraph {
         self.authored_sources.entry(path.to_path_buf()).or_insert_with(|| std::fs::read(path).ok());
     }
 
-    /// Unchanged source bytes retain their audited nodes; live variables still
+    /// Whether every file in `paths` still holds the bytes this graph's walk
+    /// captured: a container whose own sources ([`PreflightGroup::sources`])
+    /// are unchanged retains its audited node, and live variables still
     /// resolve at each container preparation boundary.
-    pub(crate) fn sources_unchanged(&self) -> bool {
-        !self.authored_sources.is_empty() && self.authored_sources.iter().all(|(path, original)| {
-            match (original, std::fs::read(path)) {
-                (Some(original), Ok(current)) => original == &current,
-                _ => false,
-            }
+    ///
+    /// Reads only `paths`. `false` when `paths` is empty, or when one of them
+    /// was never captured, was unreadable when captured, or cannot be read now.
+    pub(crate) fn sources_unchanged(&self, paths: &[PathBuf]) -> bool {
+        !paths.is_empty() && paths.iter().all(|path| {
+            let Some(Some(original)) = self.authored_sources.get(path) else { return false };
+            crate::note_work!(FreshnessSourceReads, 1);
+            std::fs::read(path).is_ok_and(|current| original == &current)
         })
+    }
+
+    fn push_prompt_document(&mut self, document: PromptDocument) {
+        self.prompt_index.insert(document.path.clone(), self.prompt_documents.len());
+        self.prompt_documents.push(document);
+    }
+
+    fn push_shell_command(&mut self, command: DiscoveredCommand) {
+        self.command_index.insert(command.command.clone());
+        self.shell_commands.push(command);
+    }
+
+    fn push_template_candidate(&mut self, candidate: ShellCandidate) {
+        self.candidate_index.entry(candidate.authored().map(str::to_owned)).or_default()
+            .push(self.template_candidates.len());
+        self.template_candidates.push(candidate);
+    }
+
+    /// Whether some [`Self::shell_commands`] entry is exactly `command`.
+    pub(crate) fn contains_shell_command(&self, command: &str) -> bool {
+        self.command_index.contains(command)
+    }
+
+    /// The [`Self::template_candidates`] whose [`ShellCandidate::authored`]
+    /// is `authored`, in discovery order.
+    pub(crate) fn candidates_authored(&self, authored: Option<&str>) -> impl Iterator<Item = &ShellCandidate> {
+        self.candidate_index.get(&authored.map(str::to_owned)).into_iter().flatten()
+            .map(|&index| &self.template_candidates[index])
+    }
+
+    pub(crate) fn nested_sources(&self) -> &NestedSources {
+        &self.nested_sources
     }
 
     pub(crate) fn settle_container_events(
@@ -313,10 +369,9 @@ impl PreflightGraph {
         let Some((approved, _)) = authorization.as_ref() else { return };
         for site in &mut task.shell_sites {
             if site.mode == SiteMode::Template { continue; }
-            let candidate = self.template_candidates.iter().find(|candidate| {
+            let candidate = self.candidates_authored(Some(site.authored.as_str())).find(|candidate| {
                 candidate.site.source_file == site.source_file
                     && candidate.site.origin == site_origin(&site.property)
-                    && candidate.authored() == Some(site.authored.as_str())
             });
             let Some(candidate) = candidate else { continue };
             let exact = candidate.resolved.as_ref().is_some_and(|keys| {
@@ -337,7 +392,7 @@ impl PreflightGraph {
 
     /// The prompt document at `path`, if the graph reached one.
     pub fn prompt_document(&self, path: &Path) -> Option<&PromptDocument> {
-        self.prompt_documents.iter().find(|d| d.path == path)
+        self.prompt_index.get(path).map(|&index| &self.prompt_documents[index])
     }
 
     /// Reject a nested `{{ … }}` span inside a single-pass lifecycle literal in
@@ -470,29 +525,158 @@ pub fn build_preflight_graph_with_invocation(
     Ok(loader.finish())
 }
 
-fn load_preparation_source(path: &Path) -> Result<ResolvedCompositionSource, CompositionError> {
-    let original_text = std::fs::read_to_string(path).map_err(|source| CompositionError::MarkdownLoad {
-        path: path.to_path_buf(), source: super::super::error::MarkdownLoadCause::Read(source),
-    })?;
-    let markdown = if path.extension().and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown"))
-    {
-        Markdown::try_from(path).map_err(|source| CompositionError::MarkdownLoad {
+/// A container's authoring document as one nested preparation read it: the
+/// Markdown view its reread [`Loader`] walks, and the same parse in the common
+/// value model, where the container's pointer finds its authored task.
+#[derive(Debug)]
+pub(crate) struct NestedSource {
+    source: ResolvedCompositionSource,
+    document: Value,
+}
+
+/// The latest parse of each authoring document nested preparation has read
+/// during one invocation, and of each referenced data document any walk has
+/// read, by canonical path. Clones share the entries.
+///
+/// Every preparation still reads the file; an entry is reused only when its
+/// text equals what was just read, so a document a task changed on disk is
+/// parsed again and seen exactly as a fresh read would see it. Only a
+/// successful parse is kept, so a broken document fails again with its own
+/// error at every preparation that reads it.
+#[derive(Clone, Default)]
+pub(crate) struct NestedSources {
+    sources: Arc<std::sync::Mutex<HashMap<PathBuf, Arc<NestedSource>>>>,
+    documents: Arc<std::sync::Mutex<HashMap<PathBuf, Arc<ReferencedDocument>>>>,
+}
+
+impl std::fmt::Debug for NestedSources {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("NestedSources").finish_non_exhaustive()
+    }
+}
+
+impl NestedSources {
+    fn load(&self, path: &Path) -> Result<Arc<NestedSource>, CompositionError> {
+        let text = std::fs::read_to_string(path).map_err(|source| CompositionError::MarkdownLoad {
+            path: path.to_path_buf(), source: super::super::error::MarkdownLoadCause::Read(source),
+        })?;
+        let key = canonical(path);
+        let cached = self.sources.lock().ok()
+            .and_then(|entries| entries.get(&key).filter(|entry| entry.source.original_text == text).cloned());
+        if let Some(cached) = cached {
+            return Ok(cached);
+        }
+        let parsed = Arc::new(parse_nested_source(path, text)?);
+        if let Ok(mut entries) = self.sources.lock() {
+            entries.insert(key, Arc::clone(&parsed));
+        }
+        Ok(parsed)
+    }
+
+    /// The parse of the referenced data document at `path` whose bytes are
+    /// `read`, the walk's own read of the file.
+    ///
+    /// A data format parses `read` itself, so the entry's key is exactly the
+    /// bytes it parsed. A Markdown document is parsed by Darkmatter's own
+    /// read and keyed by the text that read parsed. An unreadable or
+    /// non-UTF-8 data file (`read` is `None`, or not text) is handed to
+    /// [`super::data::load_document`] unmemoized, so its error is exactly the
+    /// one a parse reports.
+    fn document(&self, path: &Path, read: Option<&[u8]>) -> Result<Arc<ReferencedDocument>, CompositionError> {
+        let key = canonical(path);
+        if let Some(read) = read {
+            let cached = self.documents.lock().ok()
+                .and_then(|entries| entries.get(&key).filter(|entry| entry.text == read).cloned());
+            if let Some(cached) = cached {
+                return Ok(cached);
+            }
+        }
+        let (loaded, parsed) = if super::data::is_markdown(path) {
+            let (loaded, parsed) = super::data::load_markdown_document(path)?;
+            (loaded, parsed.map(String::into_bytes))
+        } else if let Some(text) = read.and_then(|read| std::str::from_utf8(read).ok()) {
+            (super::data::load_document_from_text(path, text)?, Some(text.as_bytes().to_vec()))
+        } else {
+            (super::data::load_document(path)?, None)
+        };
+        crate::note_work!(ReferencedDocumentParse, 1);
+        crate::note_work!(ReferencedDocumentNodes, crate::work_counters::nodes(&loaded.value));
+        let memoized = parsed.is_some();
+        let document = Arc::new(ReferencedDocument {
+            text: parsed.unwrap_or_default(),
+            value: loaded.value,
+            orders: Arc::new(loaded.orders),
+            checked: std::sync::Mutex::new(Vec::new()),
+            catalog_index: std::sync::OnceLock::new(),
+        });
+        if memoized && let Ok(mut entries) = self.documents.lock() {
+            entries.insert(key, Arc::clone(&document));
+        }
+        Ok(document)
+    }
+}
+
+/// A referenced data document (`kind: task`/`group`/`group-catalog`, or a
+/// referenced sequence file) as one parse read it. Every reference borrows
+/// it; a reference takes only the entry it names.
+#[derive(Debug)]
+pub(crate) struct ReferencedDocument {
+    /// The bytes the parse was keyed by.
+    text: Vec<u8>,
+    value: Value,
+    orders: Arc<darkmatter::markdown::MappingOrders>,
+    /// The retired-name presence sets
+    /// ([`retired_names_present`](crate::composition::lifecycle::bindings::retired_names_present))
+    /// of caller values the document's retired-read check has passed under:
+    /// the check reads nothing else, so it cannot fail under one of them.
+    checked: std::sync::Mutex<Vec<u16>>,
+    /// A catalog's `groups:` positions by entry name, built on first
+    /// selection, so selecting one entry does not scan the others.
+    catalog_index: std::sync::OnceLock<HashMap<String, Vec<usize>>>,
+}
+
+impl ReferencedDocument {
+    fn checked_under(&self, present: u16) -> bool {
+        self.checked.lock().is_ok_and(|checked| checked.contains(&present))
+    }
+
+    fn record_checked(&self, present: u16) {
+        if let Ok(mut checked) = self.checked.lock() && !checked.contains(&present) {
+            checked.push(present);
+        }
+    }
+}
+
+/// Parse a container's authoring document once for both views
+/// [`NestedSource`] holds. `text` is what the caller read, and a data format
+/// parses exactly it; a Markdown document keeps the text its own parse read
+/// instead. Either way the memo key is the parsed revision.
+fn parse_nested_source(path: &Path, text: String) -> Result<NestedSource, CompositionError> {
+    crate::note_work!(NestedSourceParse, 1);
+    let (markdown, original_text, document) = if super::data::is_markdown(path) {
+        let markdown = Markdown::try_from(path).map_err(|source| CompositionError::MarkdownLoad {
             path: path.to_path_buf(), source: super::super::error::MarkdownLoadCause::Parse(Box::new(source)),
-        })?
+        })?;
+        let original_text = markdown.loaded_text().map_or(text, str::to_owned);
+        let document = crate::composition::prepare::frontmatter_to_value(markdown.frontmatter());
+        (markdown, original_text, document)
     } else {
-        let loaded = super::data::load_document(path)?;
+        let loaded = super::data::load_document_from_text(path, &text)?;
         let root = expect_object(&loaded.value, "container source", path)?;
         let mut frontmatter = darkmatter::markdown::Frontmatter::new();
         for (key, value) in root {
-            frontmatter.insert(&key, value).map_err(|source| CompositionError::MarkdownLoad {
+            frontmatter.insert(key, value).map_err(|source| CompositionError::MarkdownLoad {
                 path: path.to_path_buf(), source: super::super::error::MarkdownLoadCause::Parse(Box::new(source)),
             })?;
         }
-        Markdown::with_frontmatter(frontmatter.with_mapping_orders(loaded.orders), "")
+        let markdown = Markdown::with_frontmatter(frontmatter.with_mapping_orders(loaded.orders), "");
+        (markdown, text, loaded.value)
     };
-    Ok(ResolvedCompositionSource {
-        original_ref: path.to_string_lossy().into_owned(), resolved_path: path.to_path_buf(), original_text, markdown,
+    Ok(NestedSource {
+        source: ResolvedCompositionSource {
+            original_ref: path.to_string_lossy().into_owned(), resolved_path: path.to_path_buf(), original_text, markdown,
+        },
+        document,
     })
 }
 
@@ -508,20 +692,29 @@ fn load_preparation_source(path: &Path) -> Result<ResolvedCompositionSource, Com
 /// `supplied` holds the invocation setters and runtime mutations: a
 /// referenced document's events and children read them above its own
 /// authored properties, where an inline list reads `state`.
+///
+/// The source is read from disk every time, and parsed only when its text
+/// differs from the last parse `sources` holds for it (the invocation graph's
+/// [`PreflightGraph::nested_sources`]), so sibling containers authored in one
+/// unchanged file share one parse. Referenced data documents (a group file or
+/// catalog, a `kind: task` file, a referenced sequence file) are reread the
+/// same way and share that memo.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare_nested_sequence(
     task: &PreflightTask, frozen: &PreflightSequence, state: &EffectiveState, supplied: Map<String, Value>,
     context: ComposeContext, resolution: &biscuit_file::FileResolutionContext, in_group: bool,
+    sources: &NestedSources,
 ) -> Result<(PreflightSequence, PreflightGraph), CompositionError> {
-    let source = load_preparation_source(&task.origin_path)?;
-    let document = super::data::load_document(&task.origin_path)?.value;
-    let raw_task = document.pointer(task.authored.pointer()).and_then(Value::as_object)
+    let nested = sources.load(&task.origin_path)?;
+    let raw_task = nested.document.pointer(task.authored.pointer()).and_then(Value::as_object)
         .ok_or_else(|| CompositionError::SequenceInvalid("nested sequence disappeared before preparation".into()))?;
     let value = raw_task.get("sequence").ok_or_else(|| CompositionError::SequenceInvalid(
         "nested `sequence:` executable changed before preparation".into(),
     ))?;
-    let mut loader = Loader::new(&source, context, resolution.clone());
-    loader.step_frontmatter = Arc::new(state.data().clone());
+    let mut loader = Loader::new(&nested.source, context, resolution.clone());
+    loader.graph.nested_sources = sources.clone();
+    loader.step_frontmatter = state.data().clone();
+    crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(loader.step_frontmatter.owned()));
     loader.caller_setters = supplied;
     loader.ancestry.push((canonical(&task.origin_path), None));
     let mut sequence = loader.load_sequence(
@@ -543,17 +736,18 @@ pub(crate) fn prepare_nested_sequence(
 /// everything else, including events and `variables`, comes from the reread.
 pub(crate) fn prepare_nested_group(
     task: &PreflightTask, frozen: &PreflightGroup, state: &EffectiveState, context: ComposeContext,
-    resolution: &biscuit_file::FileResolutionContext,
+    resolution: &biscuit_file::FileResolutionContext, sources: &NestedSources,
 ) -> Result<(PreflightGroup, PreflightGraph), CompositionError> {
-    let source = load_preparation_source(&task.origin_path)?;
-    let document = super::data::load_document(&task.origin_path)?.value;
-    let raw_task = document.pointer(task.authored.pointer()).and_then(Value::as_object)
+    let nested = sources.load(&task.origin_path)?;
+    let raw_task = nested.document.pointer(task.authored.pointer()).and_then(Value::as_object)
         .ok_or_else(|| CompositionError::SequenceInvalid("group disappeared before preparation".into()))?;
     let value = raw_task.get("group").ok_or_else(|| CompositionError::SequenceInvalid(
         "group executable changed before preparation".into(),
     ))?;
-    let mut loader = Loader::new(&source, context, resolution.clone());
-    loader.step_frontmatter = Arc::new(state.data().clone());
+    let mut loader = Loader::new(&nested.source, context, resolution.clone());
+    loader.graph.nested_sources = sources.clone();
+    loader.step_frontmatter = state.data().clone();
+    crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(loader.step_frontmatter.owned()));
     loader.ancestry.push((canonical(&task.origin_path), None));
     let mut group = loader.load_group(
         value, &task.origin_path, &task.label, &property_child(&task.diagnostic.task_property, "group"),
@@ -561,6 +755,7 @@ pub(crate) fn prepare_nested_group(
     )?;
     group.tasks = frozen.tasks.clone();
     group.loop_config = frozen.loop_config.clone();
+    group.sources = frozen.sources.clone();
     Ok((group, loader.graph))
 }
 
@@ -573,8 +768,9 @@ struct Loader<'a> {
     /// Immutable parsed data files and their authored key order, reusable
     /// across independent branches (spec → *Task Resolution*: sharing parsed
     /// data is allowed; effective parameters and runtime state stay
-    /// invocation-local).
-    documents: HashMap<PathBuf, (Value, Arc<darkmatter::markdown::MappingOrders>)>,
+    /// invocation-local). The first read of a file in this walk decides its
+    /// revision for the rest of the walk.
+    documents: HashMap<PathBuf, Arc<ReferencedDocument>>,
     source: &'a ResolvedCompositionSource,
     /// The invoking document's canonical path, used for write-back collisions.
     source_path: PathBuf,
@@ -585,14 +781,30 @@ struct Loader<'a> {
     invocation: Option<&'a InvocationContext>,
     source_contexts: HashMap<PathBuf, SourceContext>,
     /// The frontmatter the current step's early-binding state was built
-    /// from, kept on each approval so a task can re-resolve it.
-    step_frontmatter: Arc<Map<String, Value>>,
+    /// from, kept on each approval so a task can re-resolve it. A root step's
+    /// view shares [`Self::step_seed`] under the step's own overlay.
+    step_frontmatter: SharedFrontmatter,
     /// The keys of [`Self::step_frontmatter`] whose value reads a late root,
     /// directly or through another such key.
     step_derived: HashSet<String>,
+    /// The root steps' common frontmatter, decoded once per walk: the
+    /// invoking document's frontmatter under the caller's values. Each step's
+    /// view clones it, which shares its values, `sequence:` included.
+    step_seed: SharedFrontmatter,
+    /// The keys of [`Self::step_seed`] whose value reads a late root, scanned
+    /// once per walk.
+    seed_derived: HashSet<String>,
+    /// Owner documents whose frontmatter a group has already checked for
+    /// retired sequence names. The check reads only the document and the
+    /// fixed caller values, so it cannot fail a second time.
+    checked_group_owners: HashSet<PathBuf>,
+    /// Where each recorded prompt reference sits in
+    /// `graph.prompt_references`, by its document, position, and group
+    /// membership: a new reference is compared only with those it could equal.
+    prompt_reference_index: HashMap<(PathBuf, TaskPosition, bool), Vec<usize>>,
     /// The sequence source's simplified schema, which types the placeholders
     /// of tasks it authors. Loaded on first use.
-    source_schema: Option<Option<darkmatter::markdown::schemas::SimplifiedSchema>>,
+    source_schema: Option<Option<darkmatter::markdown::schemas::EffectiveSchema>>,
     /// The invocation's caller values, above the document and below the
     /// step's reserved overlay. A nested preparation also carries the runtime
     /// writes so far, which a referenced sequence document reads above its
@@ -601,6 +813,14 @@ struct Loader<'a> {
     /// Keys an inline container event of the graph may write, collected as
     /// the walk reads them; [`Self::finish`] adds every retained stack's.
     written_keys: HashSet<String>,
+    /// The `when:` of a `task:` reference, with its authored location, for
+    /// the task its file declares: the reference's guard decides whether that
+    /// task runs, above one the file declares. Taken by the next task loaded.
+    guard_override: Option<(String, String)>,
+    /// Every path this walk referenced, in order, one entry per reference:
+    /// a group takes the slice its own load appended as its
+    /// [`PreflightGroup::sources`].
+    capture_log: Vec<PathBuf>,
 }
 
 /// Where in the sequence a task being loaded sits.
@@ -628,11 +848,17 @@ impl<'a> Loader<'a> {
             file_resolution_context,
             invocation: None,
             source_contexts: HashMap::new(),
-            step_frontmatter: Arc::default(),
+            step_frontmatter: SharedFrontmatter::default(),
             step_derived: HashSet::new(),
+            step_seed: SharedFrontmatter::default(),
+            seed_derived: HashSet::new(),
+            checked_group_owners: HashSet::new(),
+            prompt_reference_index: HashMap::new(),
             source_schema: None,
             caller_setters: Map::new(),
             written_keys: HashSet::new(),
+            guard_override: None,
+            capture_log: Vec::new(),
         }
     }
 
@@ -653,17 +879,23 @@ impl<'a> Loader<'a> {
             file_resolution_context: source_context.file_resolution_context().clone(),
             invocation: Some(invocation),
             source_contexts: HashMap::from([(source_path, source_context)]),
-            step_frontmatter: Arc::default(),
+            step_frontmatter: SharedFrontmatter::default(),
             step_derived: HashSet::new(),
+            step_seed: SharedFrontmatter::default(),
+            seed_derived: HashSet::new(),
+            checked_group_owners: HashSet::new(),
+            prompt_reference_index: HashMap::new(),
             source_schema: None,
             caller_setters: Map::new(),
             written_keys: HashSet::new(),
+            guard_override: None,
+            capture_log: Vec::new(),
         }
     }
 
     fn walk_plan(&mut self, plan: &SequencePlan) -> Result<(), CompositionError> {
         let source_path = self.source.resolved_path.clone();
-        self.graph.capture_source(&source_path);
+        self.capture_source(&source_path);
         let mut authored = crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter());
         if let Value::Object(values) = &mut authored {
             // The plan owns the already-resolved sequence configuration.
@@ -680,22 +912,20 @@ impl<'a> Loader<'a> {
         // references the sequence source itself closes a cycle rather than
         // recursing forever.
         self.ancestry.push((self.source_path.clone(), None));
-        self.step_frontmatter = Arc::new(authored.as_object().into_iter().flat_map(|map| map.iter()).map(|(key,value)| (key.clone(),value.clone())).collect());
+        self.step_frontmatter = authored.as_object().cloned().unwrap_or_default().into();
+        crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
+        crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(self.step_frontmatter.iter()));
         self.step_derived = derived_deferred_keys(self.step_frontmatter.iter(), &sequence_deferred_roots(), &HashSet::new());
         let state = reapproval::early_binding_state(&self.step_frontmatter, self.context.clone())?;
         let mut lifecycle = parse_lifecycle_config(&authored, &source_path)?;
         self.prepare_container_events(&mut lifecycle, &source_path, "root sequence", &state,
             Placement { position: TaskPosition::First, in_group: false })?;
         self.graph.root_lifecycle = Some(lifecycle);
+        self.seed_steps();
         for (index, step) in plan.steps.iter().enumerate() {
             let label = format!("step {} (`{}`)", index + 1, step.state.id);
             let property = format!("tasks[{index}]");
-            self.step_frontmatter = Arc::new(self.step_frontmatter(plan, index));
-            self.step_derived = derived_deferred_keys(
-                self.step_frontmatter.iter(),
-                &sequence_deferred_roots(),
-                &HashSet::new(),
-            );
+            self.enter_step(plan, index);
             let state = reapproval::early_binding_state(&self.step_frontmatter, self.context.clone())?;
             // The root sequence is first, so its first step is; a nested
             // sequence would apply the same rule to its own children.
@@ -728,16 +958,10 @@ impl<'a> Loader<'a> {
         Ok(())
     }
 
-    /// The early-binding frontmatter for one step: the invoking document's
-    /// frontmatter, then the caller's values, under this step's reserved
-    /// overlay.
-    ///
-    /// This is exactly the state a shell command sees at its turn, minus the
-    /// runtime mutation layer — which is why a later task's command is
-    /// approved only as a template, read again when it runs.
-    fn step_frontmatter(&self, plan: &SequencePlan, index: usize) -> Map<String, Value> {
-        let overlay = super::build_step_overlay(plan, index);
-        let mut frontmatter: Map<String, Value> = self
+    /// Decode the root steps' common frontmatter ([`Self::step_seed`]) and
+    /// scan it for late reads, once for the whole walk.
+    fn seed_steps(&mut self) {
+        let mut seed: Map<String, Value> = self
             .source
             .markdown
             .frontmatter()
@@ -746,11 +970,30 @@ impl<'a> Loader<'a> {
             // Composition reads a stored literal token as its text.
             .map(|(k, v)| (k.clone(), crate::composition::closure::stored_text(v)))
             .collect();
-        frontmatter.extend(self.caller_setters.iter().map(|(k, v)| (k.clone(), v.clone())));
-        if let Value::Object(overrides) = overlay.as_set_overrides(None) {
-            frontmatter.extend(overrides);
-        }
-        frontmatter
+        seed.extend(self.caller_setters.iter().map(|(k, v)| (k.clone(), v.clone())));
+        crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(seed.iter()));
+        crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(seed.iter()));
+        self.seed_derived = derived_deferred_keys(seed.iter(), &sequence_deferred_roots(), &HashSet::new());
+        self.step_seed = seed.into();
+    }
+
+    /// Make root step `index` current: its early-binding frontmatter
+    /// ([`Self::step_frontmatter`]) and late keys ([`Self::step_derived`]).
+    ///
+    /// The frontmatter is the invoking document's, then the caller's values,
+    /// under this step's reserved overlay: exactly the state a shell command
+    /// sees at its turn, minus the runtime mutation layer — which is why a
+    /// later task's command is approved only as a template, read again when
+    /// it runs. It shares [`Self::step_seed`] and owns only the overlay.
+    fn enter_step(&mut self, plan: &SequencePlan, index: usize) {
+        let Value::Object(overlay) = super::build_step_overlay(plan, index).as_set_overrides(None) else {
+            unreachable!("a step overlay is a mapping");
+        };
+        crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(overlay.iter()));
+        let mut frontmatter = self.step_seed.clone();
+        frontmatter.extend(overlay.iter().map(|(key, value)| (key.clone(), value.clone())));
+        self.step_derived = overlay_derived(&self.step_seed, &self.seed_derived, &overlay, &frontmatter);
+        self.step_frontmatter = frontmatter;
     }
 
     /// Expand a step's declared executable into a task node.
@@ -803,6 +1046,11 @@ impl<'a> Loader<'a> {
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
+        let (when, when_property) = match self.guard_override.take() {
+            Some(reference) => reference,
+            None => (option_string(options, "when").unwrap_or_default(), property_child(property, "when")),
+        };
+        let guard = TaskGuard::parse(&when, when_property.clone());
 
         let mut preflight_approvals = Vec::new();
         let mut shell_sites = Vec::new();
@@ -812,7 +1060,7 @@ impl<'a> Loader<'a> {
                 let reference = expect_reference(value, "prompt", label)?;
                 let document = self.load_prompt(&reference, origin)?;
                 let with = option_map(options, "with");
-                let prepared = self.record_prompt_reference(&document, &with, origin, state, placement);
+                let prepared = self.record_prompt_reference(&document, &with, origin, state, placement, guard.as_ref());
                 provider = Some(self.predict_provider(&document, &with, &prepared, origin, property)?);
                 PreflightAction::Prompt {
                     path: document,
@@ -826,6 +1074,7 @@ impl<'a> Loader<'a> {
                     property: property_child(property, field.key()),
                     state,
                     placement,
+                    guard: guard.as_ref(),
                 };
                 let (commands, approvals, sites) = self.resolve_shell_commands(value, &site)?;
                 preflight_approvals = approvals;
@@ -858,6 +1107,7 @@ impl<'a> Loader<'a> {
             }
             ExecutableField::Task => {
                 let reference = expect_reference(value, "task", label)?;
+                self.guard_override = (!when.is_empty()).then(|| (when.clone(), when_property.clone()));
                 let mut task = self.load_external_task(
                     &reference,
                     origin,
@@ -920,6 +1170,7 @@ impl<'a> Loader<'a> {
             property: property.to_string(),
             state,
             placement,
+            guard: None,
         };
         self.collect_lifecycle_shell(&mut task, &site)?;
         Ok(task)
@@ -948,19 +1199,20 @@ impl<'a> Loader<'a> {
                 let context = self.source_context_for(origin);
                 let resolution = context.as_ref().map(SourceContext::file_resolution_context)
                     .unwrap_or(&self.file_resolution_context);
-                let globals = self.step_frontmatter.iter().map(|(k,v)| (k.clone(),v.clone())).collect();
-                let plan = source_resolution::load_referenced_sequence(
-                    &reference, &path, origin, &globals, true, resolution,
+                let plan = source_resolution::plan_referenced_sequence(
+                    &reference, &path, &document.value, Arc::clone(&document.orders),
+                    origin, &self.step_frontmatter, true, resolution,
                 )?;
                 // A reference to a whole sequence document brings the
                 // document's events and its authored properties; an offset or
                 // operator selects a list of steps, which has neither.
                 let frontmatter = (reference.offset.is_none() && reference.operator.is_none())
-                    .then(|| document.as_object().cloned()).flatten();
+                    .then(|| document.value.as_object().cloned()).flatten();
+                crate::note_work!(ReferencedDocumentNodes, frontmatter.as_ref().map_or(0, crate::work_counters::value_nodes));
                 let events = frontmatter.clone().unwrap_or_default();
                 let child_authored = if let Some(offset) = &reference.offset {
                     offset.split('.').fold(order, |cursor, segment| cursor.child(segment))
-                } else if document.is_array() { order } else { order.child("sequence") };
+                } else if document.value.is_array() { order } else { order.child("sequence") };
                 (plan, path, child_authored, events, true, frontmatter)
             }
             _ => return Err(CompositionError::SequenceInvalid(
@@ -992,8 +1244,10 @@ impl<'a> Loader<'a> {
             let mut values: Map<String, Value> = authored.iter()
                 .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value))).collect();
             values.extend(self.caller_setters.iter().map(|(key, value)| (key.clone(), value.clone())));
+            crate::note_work!(PreflightStepFrontmatterNodes, crate::work_counters::value_nodes(values.iter()));
+            crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(values.iter()));
             let derived = derived_deferred_keys(values.iter(), &sequence_deferred_roots(), &HashSet::new());
-            (std::mem::replace(&mut self.step_frontmatter, Arc::new(values)),
+            (std::mem::replace(&mut self.step_frontmatter, values.into()),
              std::mem::replace(&mut self.step_derived, derived))
         });
         let result = self.load_sequence_children(
@@ -1055,10 +1309,10 @@ impl<'a> Loader<'a> {
     ) -> Result<PreflightTask, CompositionError> {
         let path = self.resolve_reference(reference, origin)?;
         let (document, authored) = self.load_data_document(&path)?;
-        let root = expect_object(&document, "task file", &path)?;
+        let root = expect_object(&document.value, "task file", &path)?;
 
-        expect_kind(&root, "task", &path)?;
-        let (field, value, options) = parse_task_object(&root, &path, "")?;
+        expect_kind(root, "task", &path)?;
+        let (field, value, options) = parse_task_object(root, &path, "")?;
 
         let nested_label = format!(
             "{label} → task `{}`",
@@ -1081,9 +1335,40 @@ impl<'a> Loader<'a> {
         result
     }
 
-    /// Resolve a `group:` value into a group node.
+    /// Capture `path`'s bytes for the graph (first reference only) and log
+    /// the reference for the groups being loaded.
+    fn capture_source(&mut self, path: &Path) {
+        self.graph.capture_source(path);
+        self.capture_log.push(path.to_path_buf());
+    }
+
+    /// Resolve a `group:` value authored in `origin` into a group node, recording the files
+    /// its preparation reads ([`PreflightGroup::sources`]): `origin` and every
+    /// file the group's own load referenced.
     #[allow(clippy::too_many_arguments)]
     fn load_group(
+        &mut self,
+        value: &Value,
+        origin: &Path,
+        label: &str,
+        property: &str,
+        authored: &AuthoredOrder,
+        state: &EffectiveState,
+        position: TaskPosition,
+    ) -> Result<PreflightGroup, CompositionError> {
+        let start = self.capture_log.len();
+        // Logged, not captured: the walk captured the authoring document
+        // before it reached the group, and a reread must not read it again.
+        self.capture_log.push(origin.to_path_buf());
+        let mut group = self.load_group_unrecorded(value, origin, label, property, authored, state, position)?;
+        let mut seen = HashSet::new();
+        group.sources = self.capture_log[start..].iter()
+            .filter(|path| seen.insert(path.as_path())).cloned().collect();
+        Ok(group)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn load_group_unrecorded(
         &mut self,
         value: &Value,
         origin: &Path,
@@ -1101,19 +1386,19 @@ impl<'a> Loader<'a> {
                 let (name, reference) = split_catalog_reference(raw);
                 let path = self.resolve_reference(&reference, origin)?;
                 let (document, document_authored) = self.load_data_document(&path)?;
-                let root = expect_object(&document, "group file", &path)?;
+                let root = expect_object(&document.value, "group file", &path)?;
 
                 // A catalog selects one named entry, so the group's authored
                 // root is that entry's pointer, not the file root.
                 let selected_entry = name.clone();
                 let (group_map, group_authored, group_property) = match name {
                     Some(name) => {
-                        let (index, map) = select_catalog_group(&root, &name, &path)?;
+                        let (index, map) = select_catalog_group(&document, root, &name, &path)?;
                         (map, document_authored.child("groups").at(index), format!("groups[{index}]"))
                     }
                     None => {
-                        expect_kind(&root, "group", &path)?;
-                        (root.clone(), document_authored, String::new())
+                        expect_kind(root, "group", &path)?;
+                        (root, document_authored, String::new())
                     }
                 };
 
@@ -1123,7 +1408,7 @@ impl<'a> Loader<'a> {
                 );
                 self.enter_reference(&path, selected_entry)?;
                 let result = self.build_group(
-                    &group_map,
+                    group_map,
                     &path,
                     &nested_label,
                     &group_property,
@@ -1193,13 +1478,30 @@ impl<'a> Loader<'a> {
                 Box::new(PreflightLoop { config: block.config, location: loop_location })
             });
         self.prepare_container_events(&mut lifecycle, origin, label, state, Placement { position, in_group: true })?;
-        let owner = self.documents.get(origin).map(|(value, _)| value.clone())
-            .unwrap_or_else(|| crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter()));
-        crate::composition::lifecycle::bindings::reject_removed_sequence_reads(
-            origin, crate::composition::lifecycle::bindings::AuthoredDocument {
-                frontmatter: &owner, body: "", body_line_offset: 0,
-            }, Some(&Value::Object(self.caller_setters.clone())), Some(&lifecycle),
-        )?;
+        let source_owner;
+        let referenced_owner = self.documents.get(origin).cloned();
+        let owner = match &referenced_owner {
+            Some(document) => &document.value,
+            None => {
+                source_owner = crate::composition::prepare::frontmatter_to_value(self.source.markdown.frontmatter());
+                &source_owner
+            }
+        };
+        let supplied = Value::Object(self.caller_setters.clone());
+        let document = crate::composition::lifecycle::bindings::AuthoredDocument {
+            frontmatter: owner, body: "", body_line_offset: 0,
+        };
+        // The owner's frontmatter is scanned once per walk; every group still
+        // checks its own events.
+        if self.checked_group_owners.insert(canonical(origin)) {
+            crate::composition::lifecycle::bindings::reject_removed_sequence_reads(
+                origin, document, Some(&supplied), Some(&lifecycle),
+            )?;
+        } else {
+            crate::composition::lifecycle::bindings::reject_removed_lifecycle_reads(
+                origin, owner, Some(&supplied), &lifecycle,
+            )?;
+        }
 
         let max_parallel = match map.get("max_parallel") {
             None | Some(Value::Null) => None,
@@ -1287,6 +1589,7 @@ impl<'a> Loader<'a> {
             tasks,
             origin_path: origin.to_path_buf(),
             loop_config,
+            sources: Vec::new(),
         };
 
         if group.execution == GroupExecution::Parallel {
@@ -1325,7 +1628,7 @@ impl<'a> Loader<'a> {
                         pending.extend(nested.steps.iter().filter_map(|step| step.task.as_ref()));
                         if nested.steps.iter().any(|step| step.task.is_none()) {
                             let inline = self.documents.get(&nested.origin_path)
-                                .is_some_and(|(document, _)| document.get("prompt").is_some_and(Value::is_string))
+                                .is_some_and(|document| document.value.get("prompt").is_some_and(Value::is_string))
                                 || (nested.origin_path == self.source_path && self.source_inline_compose());
                             if inline { targets.insert(nested.origin_path.clone()); }
                         }
@@ -1359,7 +1662,7 @@ impl<'a> Loader<'a> {
     /// the explicit `sequence:` executable so its container owns the lifecycle.
     fn load_prompt(&mut self, reference: &str, origin: &Path) -> Result<PathBuf, CompositionError> {
         let path = self.resolve_reference(reference, origin)?;
-        self.graph.capture_source(&path);
+        self.capture_source(&path);
         if let Some(existing) = self.graph.prompt_document(&path) {
             let _ = existing;
             return Ok(path);
@@ -1386,7 +1689,7 @@ impl<'a> Loader<'a> {
         let inline_compose = matches!(frontmatter.as_map().get("prompt"), Some(Value::String(_)));
         let has_schema = frontmatter.as_map().contains_key("$schema");
 
-        self.graph.prompt_documents.push(PromptDocument {
+        self.graph.push_prompt_document(PromptDocument {
             path: path.clone(),
             markdown,
             inline_compose,
@@ -1475,6 +1778,9 @@ impl<'a> Loader<'a> {
             let stage_scope = SiteScope {
                 label: &stage_label,
                 property: property_child(&scope.property, stage.key()),
+                // A task's guard narrows only what the sequence evaluates for
+                // it; its stacks are typed unguarded.
+                guard: None,
                 ..*scope
             };
             for (index, (kind, raw)) in shape::collect_stack_shell_sites(&stack).into_iter().enumerate() {
@@ -1510,7 +1816,11 @@ impl<'a> Loader<'a> {
     /// otherwise — a later task, or a late value (`outputs`, `loop`, `group`,
     /// or a step value derived from one) — it is approved only by its typed
     /// shape. Either way every approval-time value is resolved here, and a
-    /// missing one (`null`) fails preflight before any step runs.
+    /// missing one (`null`) fails preflight before any step runs, unless the
+    /// task's `when:` guard ([`SiteScope::guard`]) proves that placeholder
+    /// present: then the command is approved only by its shape and reads the
+    /// value once the guard selects the task. A late value the guard proves
+    /// present is read then too, not at the step barrier.
     ///
     /// A first-task command's resolved bytes are what it runs: a target-identity
     /// root (`ctx.agent`, `ctx.model`, `env.AGENT`, `env.MODEL`) is rejected
@@ -1540,16 +1850,17 @@ impl<'a> Loader<'a> {
             label: label.to_string(),
         };
 
-        // The command a set value runs is the one inside `$( … )`.
-        let (authored, parsed) = match &kind {
-            ShellSiteKind::Command => (raw.to_string(), parse_authored(raw)),
+        // The command a set value runs is the one inside `$( … )`; `span`
+        // places it in `raw`, and a conditional is never a template.
+        let (authored, span, conditional) = match &kind {
+            ShellSiteKind::Command => (raw.to_string(), 0..raw.len(), false),
             ShellSiteKind::SetValue { key } => {
                 let ctx = biscuit_terminal::errors::SourceContext::new(
                     origin.to_path_buf(),
                     origin.to_path_buf(),
                     raw.to_string(),
                 );
-                darkmatter::markdown::compose::authored_shell_template(raw, key, &ctx).ok_or_else(
+                let command = darkmatter::markdown::compose::authored_shell_command(raw, key, &ctx).ok_or_else(
                     || CompositionError::SequenceShellResolution {
                         command: raw.to_string(),
                         task: label.to_string(),
@@ -1558,7 +1869,8 @@ impl<'a> Loader<'a> {
                             .to_string(),
                         source: None,
                     },
-                )?
+                )?;
+                (command.command.to_string(), command.span, command.conditional)
             }
         };
 
@@ -1572,54 +1884,67 @@ impl<'a> Loader<'a> {
             });
         }
 
-        self.refuse_unapprovable_reads(raw, scope)?;
+        // Every occurrence is parsed here, once; each static analysis below
+        // reads this collection and the whole of it is dropped on return.
+        let prepared = PreparedInterpolation::new(raw);
+        let raw_view = prepared.view(0..raw.len());
+        let authored_view = prepared.view(span);
+
+        self.refuse_unapprovable_reads(raw, &prepared, scope)?;
 
         // Type each placeholder against the authoring document's schema and
         // mark the ones that read a late value.
+        // A `shell:` command is typed on the true side of its task's guard:
+        // the guard selected the task before the command runs.
         let roots = sequence_deferred_roots();
         let schema = self.owner_schema(origin);
+        let declared = DeclaredTypes::for_schema(schema.as_ref())
+            .with_host_globals(&SEQUENCE_HOST_GLOBALS)
+            .with_global_catalog(claudine_globals());
+        let types = site_types(&declared, scope.guard);
+        let parsed = if conditional {
+            Err(TemplateGrammarError::Conditional)
+        } else {
+            parse_authored_prepared(authored_view.clone())
+        };
         let parsed = parsed.map(|mut template| {
-            template.project_types(schema.as_ref(), &SEQUENCE_HOST_GLOBALS);
-            mark_late_holes(&mut template, &roots, &self.step_derived);
+            template.project_types_prepared(authored_view.clone(), &types);
+            mark_late_holes(&mut template, &authored_view, &roots, &self.step_derived);
+            // A late value the guard proves present is read by the command
+            // once the guard selects the task, never by the step barrier.
+            for placeholder in template.placeholders_mut() {
+                if let HoleTiming::Deferred { roots } = &placeholder.timing
+                    && let Some(guard) = authored_view
+                        .placeholder_at(&placeholder.span)
+                        .and_then(|occurrence| occurrence.expr())
+                        .and_then(|expr| placeholder_guard_expr(expr, &types))
+                {
+                    placeholder.timing = HoleTiming::Guarded { guard, roots: roots.clone() };
+                }
+            }
             template
         });
         let holes: Vec<(String, bool)> = match &parsed {
             Ok(template) => template
                 .placeholders()
-                .map(|hole| {
-                    (
-                        hole.expression.clone(),
-                        matches!(hole.timing, HoleTiming::Deferred { .. }),
-                    )
-                })
+                .map(|hole| (hole.expression.clone(), hole.timing.is_late()))
                 .collect(),
-            Err(_) => darkmatter::markdown::compose::expression::ExpressionFinder::scan_plain(raw)
-                .expressions
-                .into_iter()
-                .map(|location| {
-                    let late = roots.late_roots_of(&location.expression, &self.step_derived).is_some();
-                    (location.expression, late)
+            Err(_) => raw_view
+                .placeholders()
+                .map(|occurrence| {
+                    let late = occurrence
+                        .expr()
+                        .is_some_and(|expr| roots.late_roots_of_expr(expr, &self.step_derived).is_some());
+                    (occurrence.text().to_string(), late)
                 })
                 .collect(),
         };
         let any_late = holes.iter().any(|(_, late)| *late);
         let template_required = any_late || scope.placement.position == TaskPosition::Later;
         let template_result = parsed.clone();
-        let parsed = match parsed {
+        let mut parsed = match parsed {
             Ok(template) => Some(template),
-            Err(reason) if template_required => {
-                return Err(self.site_failure(
-                    raw,
-                    scope,
-                    ShellExpansionError::TemplateGrammar {
-                        ctx: Box::new(self.authored_context(origin, &authored)),
-                        command: authored.clone(),
-                        reason,
-                        origin: site_origin(&scope.property),
-                    },
-                    "it must run as a template, but it is not a valid template".to_string(),
-                ));
-            }
+            Err(reason) if template_required => return Err(self.grammar_failure(raw, &authored, scope, reason)),
             Err(_) => None,
         };
 
@@ -1633,28 +1958,49 @@ impl<'a> Loader<'a> {
             .map(|(expression, _)| expression.as_str())
             .collect();
         let resolved = self.resolve_approval_time(raw, !any_late, &approval_time, scope)?;
-        if let Some(expression) = resolved.missing {
-            return Err(self.site_failure(
-                raw,
-                scope,
-                ShellExpansionError::MissingValue {
-                    ctx: Box::new(self.authored_context(origin, &authored)),
-                    command: authored.clone(),
-                    expression: expression.to_string(),
-                    origin: site_origin(&scope.property),
-                },
-                format!(
-                    "it reads `{expression}`, which is missing; a shell command never runs with a \
-                     missing value"
-                ),
-            ));
+        // A missing value fails preflight unless the task's guard proves that
+        // very placeholder present; then the command reads it when it runs.
+        let mut guarded = Vec::new();
+        for expression in &resolved.missing {
+            // The first raw occurrence with this text; equal text has equal
+            // syntax, so its retained expression stands for them all.
+            let guard = raw_view
+                .placeholders()
+                .find(|occurrence| occurrence.text() == *expression)
+                .and_then(|occurrence| occurrence.expr())
+                .and_then(|expr| placeholder_guard_expr(expr, &types));
+            let Some(guard) = guard else {
+                return Err(self.site_failure(
+                    raw,
+                    scope,
+                    ShellExpansionError::MissingValue {
+                        ctx: Box::new(self.authored_context(origin, &authored)),
+                        command: authored.clone(),
+                        expression: expression.to_string(),
+                        origin: site_origin(&scope.property),
+                    },
+                    format!(
+                        "it reads `{expression}`, which is missing; a shell command never runs with a \
+                         missing value"
+                    ),
+                ));
+            };
+            guarded.push((expression.to_string(), guard));
+        }
+        let template_required = template_required || !guarded.is_empty();
+        match (&mut parsed, &template_result) {
+            (Some(template), _) => retime_guarded(template, &guarded),
+            (None, Err(reason)) if template_required => {
+                return Err(self.grammar_failure(raw, &authored, scope, reason.clone()));
+            }
+            (None, _) => {}
         }
 
         if !template_required {
             let bytes = resolved.bytes.expect("a site with no late value resolves its bytes");
             let command_start = self.graph.shell_commands.len();
             let (bytes, set_value) = self.record_resolved_bytes(raw, &bytes, &kind, scope)?;
-            self.graph.template_candidates.push(ShellCandidate {
+            self.graph.push_template_candidate(ShellCandidate {
                 authored_command: authored.clone(),
                 site: CommandSite {
                     source_file: origin.to_path_buf(),
@@ -1675,7 +2021,7 @@ impl<'a> Loader<'a> {
         }
 
         let template = parsed.expect("a template-required site parsed or failed above");
-        self.graph.template_candidates.push(ShellCandidate {
+        self.graph.push_template_candidate(ShellCandidate {
             authored_command: authored.clone(),
             site: CommandSite {
                 source_file: origin.to_path_buf(),
@@ -1697,7 +2043,12 @@ impl<'a> Loader<'a> {
     /// Refuse a shell command that reads a value no approval can cover: `err`,
     /// `timing`, or `current` (even beside a late root), `group` outside a
     /// group, a target-identity root, or an unknown function.
-    fn refuse_unapprovable_reads(&self, raw: &str, scope: &SiteScope<'_>) -> Result<(), CompositionError> {
+    fn refuse_unapprovable_reads(
+        &self,
+        raw: &str,
+        prepared: &PreparedInterpolation,
+        scope: &SiteScope<'_>,
+    ) -> Result<(), CompositionError> {
         let label = scope.label;
         // The sequence approval scope declares every value that does not exist
         // yet unavailable, and `current` is refused with them, in any branch.
@@ -1705,7 +2056,7 @@ impl<'a> Loader<'a> {
         // stands. A parse failure is left to the resolution below, which
         // reports it typed.
         let scope_id = LifecycleScope::SequenceShellApproval;
-        if let Ok(diagnostics) = approval_diagnostics(raw, scope_id) {
+        if let Ok(diagnostics) = approval_diagnostics_prepared(prepared, scope_id) {
             for diagnostic in diagnostics {
                 let root = unavailable_root(&diagnostic.error).map(str::to_string);
                 let late = match root.as_deref() {
@@ -1735,7 +2086,7 @@ impl<'a> Loader<'a> {
                 });
             }
         }
-        if let Some(root) = shape::first_target_identity_root(raw) {
+        if let Some(root) = shape::first_target_identity_root_prepared(prepared) {
             return Err(CompositionError::SequenceShellTargetIdentity {
                 command: raw.to_string(),
                 root,
@@ -1789,10 +2140,12 @@ impl<'a> Loader<'a> {
             unreachable!("an array subtree composes to an array");
         };
         let reads = composed.split_off(usize::from(with_bytes));
-        let missing = holes
-            .iter()
-            .zip(&reads)
-            .find_map(|(hole, read)| read.is_null().then_some(*hole));
+        let mut missing: Vec<&'h str> = Vec::new();
+        for (hole, read) in holes.iter().zip(&reads) {
+            if read.is_null() && !missing.contains(hole) {
+                missing.push(hole);
+            }
+        }
         let bytes = composed.pop().map(|resolved| match resolved {
             Value::String(text) => text,
             other => other.to_string(),
@@ -1802,7 +2155,7 @@ impl<'a> Loader<'a> {
             approved: bytes.clone(),
             origin: scope.origin.to_path_buf(),
             label: scope.label.to_string(),
-            frontmatter: Arc::clone(&self.step_frontmatter),
+            frontmatter: self.step_frontmatter.clone(),
             state_context: scope.state.context().clone(),
             runtime_context: runtime_context.clone(),
             file_resolution_context: file_resolution_context.clone(),
@@ -1825,7 +2178,7 @@ impl<'a> Loader<'a> {
         scope: &SiteScope<'_>,
     ) -> Result<(String, Option<darkmatter::markdown::compose::ResolvedShellValue>), CompositionError> {
         let ShellSiteKind::SetValue { key } = kind else {
-            self.graph.shell_commands.push(DiscoveredCommand {
+            self.graph.push_shell_command(DiscoveredCommand {
                 command: resolved.to_string(),
                 source_file: scope.origin.to_path_buf(),
                 origin: scope.label.to_string(),
@@ -1850,7 +2203,10 @@ impl<'a> Loader<'a> {
             key,
             raw,
             resolved,
-            (*self.step_frontmatter).clone(),
+            || {
+                crate::note_work!(ShellValueStateNodes, crate::work_counters::value_nodes(self.step_frontmatter.owned()));
+                self.step_frontmatter.clone()
+            },
             &self.context,
             resolution,
         )
@@ -1861,13 +2217,35 @@ impl<'a> Loader<'a> {
             source: Some(Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error)))),
         })?;
         for command in value.commands() {
-            self.graph.shell_commands.push(DiscoveredCommand {
+            self.graph.push_shell_command(DiscoveredCommand {
                 command,
                 source_file: scope.origin.to_path_buf(),
                 origin: format!("{} `set.{key}`", scope.label),
             });
         }
         Ok((resolved.to_string(), Some(value)))
+    }
+
+    /// The failure of a site that must run as its template but whose
+    /// command `authored` is not a valid one.
+    fn grammar_failure(
+        &self,
+        raw: &str,
+        authored: &str,
+        scope: &SiteScope<'_>,
+        reason: darkmatter::markdown::compose::shell_expansion::template::TemplateGrammarError,
+    ) -> CompositionError {
+        self.site_failure(
+            raw,
+            scope,
+            ShellExpansionError::TemplateGrammar {
+                ctx: Box::new(self.authored_context(scope.origin, authored)),
+                command: authored.to_string(),
+                reason,
+                origin: site_origin(&scope.property),
+            },
+            "it must run as a template, but it is not a valid template".to_string(),
+        )
     }
 
     /// A typed site failure carrying Darkmatter's shell error as its cause.
@@ -1894,11 +2272,11 @@ impl<'a> Loader<'a> {
         )
     }
 
-    /// The simplified schema of the document that authored a task, which
-    /// types its placeholders. Only the sequence source declares one; a
+    /// The effective schema of the document that authored a task, whose
+    /// authored projection and recursive definitions type its placeholders. Only the sequence source declares one; a
     /// `kind: task`/`kind: group` data file has none, so its placeholders fall
     /// back to `string`.
-    fn owner_schema(&mut self, origin: &Path) -> Option<darkmatter::markdown::schemas::SimplifiedSchema> {
+    fn owner_schema(&mut self, origin: &Path) -> Option<darkmatter::markdown::schemas::EffectiveSchema> {
         if canonical(origin) != self.source_path {
             return None;
         }
@@ -1912,8 +2290,7 @@ impl<'a> Loader<'a> {
                 &darkmatter::markdown::compose::CallerInputRecords::default(),
             )
             .ok()
-            .flatten()
-            .and_then(|effective| effective.simplified);
+            .flatten();
             self.source_schema = Some(loaded);
         }
         self.source_schema.clone().flatten()
@@ -1927,6 +2304,12 @@ impl<'a> Loader<'a> {
     /// entry is evaluated now, against the step's early-binding values, so
     /// the document's commands see it as they will at the task's turn.
     ///
+    /// `guard` is the task's `when:`, read with the step's bindings before any
+    /// `with` value binds. A whole `{{ … }}` value it proves present but that
+    /// is `null` now is late too, so the document reads it when the guard has
+    /// selected the task, and its own barrier checks it then. The guard never
+    /// narrows the document itself.
+    ///
     /// An entry whose evaluation fails is late for shell discovery, because
     /// `with` otherwise binds only at the task's turn, but [`PreparedWith`]
     /// keeps its cause so provider prediction can fail a selection input that
@@ -1938,7 +2321,13 @@ impl<'a> Loader<'a> {
         origin: &Path,
         state: &EffectiveState,
         placement: Placement,
+        guard: Option<&TaskGuard>,
     ) -> PreparedWith {
+        let schema = guard.and_then(|_| self.owner_schema(origin));
+        let declared = DeclaredTypes::for_schema(schema.as_ref())
+            .with_host_globals(&SEQUENCE_HOST_GLOBALS)
+            .with_global_catalog(claudine_globals());
+        let types = site_types(&declared, guard);
         let mut deferred: Vec<String> =
             derived_deferred_keys(with.iter(), &sequence_deferred_roots(), &self.step_derived)
                 .into_iter()
@@ -1963,6 +2352,10 @@ impl<'a> Loader<'a> {
                 &self.context,
                 &file_resolution_context,
             ) {
+                // A whole value the task's guard proves present, but missing
+                // now, binds at the task's turn: the document treats it as late
+                // rather than as a `null` it would refuse.
+                Ok(Ok(Value::Null)) if guard_proves_whole_value(value, &types) => deferred.push(key.clone()),
                 Ok(Ok(resolved)) => {
                     evaluated.insert(key.clone(), resolved);
                 }
@@ -1986,7 +2379,12 @@ impl<'a> Loader<'a> {
             with: evaluated.clone(),
             deferred_with: deferred.clone(),
         };
-        if !self.graph.prompt_references.contains(&reference) {
+        let bucket = self.prompt_reference_index
+            .entry((reference.path.clone(), reference.position, reference.in_group))
+            .or_default();
+        crate::note_work!(PromptReferenceCompare, bucket.len());
+        if !bucket.iter().any(|index| self.graph.prompt_references[*index] == reference) {
+            bucket.push(self.graph.prompt_references.len());
             self.graph.prompt_references.push(reference);
         }
         PreparedWith { evaluated, deferred, failed }
@@ -1995,6 +2393,10 @@ impl<'a> Loader<'a> {
     /// Predict a prompt task's provider from its document, its `with`, and the
     /// caller's setters (see [`providers`]). Read-only: a document value is
     /// evaluated against early-binding state, and nothing else runs.
+    ///
+    /// The document's frontmatter and the step state are borrowed, not
+    /// copied; [`providers::predict`] builds state only for a hint that reads
+    /// an expression.
     fn predict_provider(
         &mut self,
         document: &Path,
@@ -2003,22 +2405,18 @@ impl<'a> Loader<'a> {
         origin: &Path,
         task_property: &str,
     ) -> Result<providers::ProviderPrediction, CompositionError> {
-        let frontmatter: Map<String, Value> = self
-            .graph
-            .prompt_document(document)
-            .map(|loaded| {
-                loaded.markdown.frontmatter().as_map().iter()
-                    .map(|(key, value)| (key.clone(), value.clone())).collect()
-            })
-            .unwrap_or_default();
         let file_resolution_context = self
             .source_context_for(document)
             .map(|context| context.file_resolution_context().clone())
             .unwrap_or_else(|| self.file_resolution_context.clone());
-        let context = self.context.clone();
-        let step_frontmatter = Arc::clone(&self.step_frontmatter);
+        let no_frontmatter = darkmatter::markdown::FrontmatterMap::new();
+        let frontmatter = self
+            .graph
+            .prompt_document(document)
+            .map_or(&no_frontmatter, |loaded| loaded.markdown.frontmatter().as_map());
+        let context = &self.context;
         let layers = providers::HintLayers {
-            document: &frontmatter,
+            document: frontmatter,
             document_path: document,
             with,
             with_evaluated: &prepared.evaluated,
@@ -2026,13 +2424,16 @@ impl<'a> Loader<'a> {
             with_failed: &prepared.failed,
             with_origin: origin,
             task_property,
-            step_frontmatter: &step_frontmatter,
+            step_frontmatter: &self.step_frontmatter,
             caller_setters: &self.caller_setters,
             sequence_path: &self.source.resolved_path,
         };
         let mut evaluate = |value: &Value, values: &Map<String, Value>| {
-            let state = reapproval::early_binding_state(values, context.clone())?;
-            Ok(reapproval::compose_approval_value(value, document, &state, &context, &file_resolution_context)?
+            // A copy of the prompt document's state, which does not grow with
+            // the sequence.
+            crate::note_work!(EarlyBindingStateNodes, crate::work_counters::value_nodes(values.iter()));
+            let state = reapproval::early_binding_state(&values.clone().into(), context.clone())?;
+            Ok(reapproval::compose_approval_value(value, document, &state, context, &file_resolution_context)?
                 .map_err(|error| crate::composition::lifecycle_context::LifecycleCause::new(Box::new(error).into())))
         };
         providers::predict(&layers, &mut evaluate)
@@ -2124,7 +2525,15 @@ impl<'a> Loader<'a> {
         Some(context)
     }
 
-    /// Load and cache a data document (`kind: task`/`group`/`group-catalog`).
+    /// Load and cache a data document (`kind: task`/`group`/`group-catalog`,
+    /// or a referenced sequence file), shared rather than copied: a reference
+    /// borrows the document and takes only what it names.
+    ///
+    /// The first load in a walk reads the file and reuses the invocation's
+    /// parse ([`NestedSources`]) when the bytes are unchanged, so a nested
+    /// preparation sees a rewritten file but does not parse an unchanged one
+    /// again. The retired-read check runs once per document and distinct
+    /// set of retired names the caller values declare.
     ///
     /// The returned cursor is rooted at that document, not at the referencing
     /// one: crossing a file boundary replaces both the order source and the
@@ -2132,21 +2541,29 @@ impl<'a> Loader<'a> {
     fn load_data_document(
         &mut self,
         path: &Path,
-    ) -> Result<(Value, AuthoredOrder), CompositionError> {
-        self.graph.capture_source(path);
-        if let Some((value, orders)) = self.documents.get(path) {
-            return Ok((value.clone(), AuthoredOrder::at_root(Arc::clone(orders))));
+    ) -> Result<(Arc<ReferencedDocument>, AuthoredOrder), CompositionError> {
+        self.capture_source(path);
+        if let Some(document) = self.documents.get(path) {
+            return Ok((Arc::clone(document), AuthoredOrder::at_root(Arc::clone(&document.orders))));
         }
-        let loaded = super::data::load_document(path)?;
-        crate::composition::lifecycle::bindings::reject_removed_sequence_reads(
-            path, crate::composition::lifecycle::bindings::AuthoredDocument {
-                frontmatter: &loaded.value, body: "", body_line_offset: 0,
-            }, Some(&Value::Object(self.caller_setters.clone())), None,
-        )?;
-        let orders = Arc::new(loaded.orders);
-        self.documents
-            .insert(path.to_path_buf(), (loaded.value.clone(), Arc::clone(&orders)));
-        Ok((loaded.value, AuthoredOrder::at_root(orders)))
+        let read = self.graph.authored_sources.get(path).and_then(Option::as_deref);
+        let document = self.graph.nested_sources.document(path, read)?;
+        let present = crate::composition::lifecycle::bindings::retired_names_present(&self.caller_setters);
+        if !document.checked_under(present) {
+            crate::note_work!(ReferencedDocumentNodes, crate::work_counters::nodes(&document.value));
+            crate::composition::lifecycle::bindings::reject_removed_sequence_reads(
+                path, crate::composition::lifecycle::bindings::AuthoredDocument {
+                    frontmatter: &document.value, body: "", body_line_offset: 0,
+                }, Some(&Value::Object(self.caller_setters.clone())), None,
+            )?;
+            document.record_checked(present);
+        }
+        // That check is the frontmatter half of a group owner's check
+        // (`build_group`), under the same caller values.
+        self.checked_group_owners.insert(canonical(path));
+        self.documents.insert(path.to_path_buf(), Arc::clone(&document));
+        let orders = Arc::clone(&document.orders);
+        Ok((document, AuthoredOrder::at_root(orders)))
     }
 
     fn check_cycle(&self, path: &Path) -> Result<(), CompositionError> {
@@ -2201,6 +2618,41 @@ struct SiteScope<'s> {
     property: String,
     state: &'s EffectiveState,
     placement: Placement,
+    /// The task's `when:` guard, for a site the sequence evaluates for the
+    /// task (its `shell:` command); `None` for its `setup:`/`teardown:` stacks
+    /// and for a container's events.
+    guard: Option<&'s TaskGuard>,
+}
+
+/// A task's `when:` guard, parsed passively, as the values the sequence
+/// evaluates for that task are checked under it.
+struct TaskGuard {
+    when: darkmatter::markdown::compose::expression::Expr,
+    /// The guard's authored location, `tasks[2].when`.
+    origin: GuardOrigin,
+}
+
+impl TaskGuard {
+    /// The guard authored as `when` at `property`, or `None` when there is
+    /// none or it does not parse: a malformed guard fails when the task
+    /// evaluates it, as before, and proves nothing here.
+    fn parse(when: &str, property: String) -> Option<Self> {
+        if when.is_empty() {
+            return None;
+        }
+        let when = darkmatter::markdown::compose::expression::parse_condition(when).ok()?;
+        Some(Self { when, origin: GuardOrigin::new(property) })
+    }
+}
+
+/// The type scope of a site whose declared layer is `declared`: unguarded, or
+/// narrowed by `guard`.
+fn site_types<'d>(declared: &'d DeclaredTypes<'d>, guard: Option<&TaskGuard>) -> TypeScope<'d> {
+    let site = TypeScope::unguarded(declared);
+    match guard {
+        Some(guard) => site.assume_at(&guard.when, Polarity::True, guard.origin.clone()),
+        None => site,
+    }
 }
 
 /// One prepared site and what its task records about it.
@@ -2217,24 +2669,62 @@ struct PreparedSite {
 /// The approval-time reads of one site.
 struct ApprovalTimeValues<'h> {
     bytes: Option<String>,
-    /// The first approval-time placeholder that read `null`.
-    missing: Option<&'h str>,
+    /// Every approval-time placeholder that read `null`, in authored order.
+    missing: Vec<&'h str>,
     approval: Option<reapproval::ApprovalRecordOwned>,
 }
 
+/// Whether `value` is one whole-value `{{ … }}` span whose expression a guard
+/// in `types` proves present.
+fn guard_proves_whole_value(value: &Value, types: &TypeScope<'_>) -> bool {
+    let Value::String(text) = value else { return false };
+    if !darkmatter::markdown::compose::expression::is_whole_value_span(text) {
+        return false;
+    }
+    let found = darkmatter::markdown::compose::expression::ExpressionFinder::scan_plain(text);
+    found.expressions.first().is_some_and(|location| placeholder_guard(&location.expression, types).is_some())
+}
+
+/// The late keys of a step view: `seed`'s, which `seed_derived` holds, under
+/// `overlay`.
+///
+/// Only the overlay is scanned when it cannot change what the seed derives:
+/// it shadows no seed key, and none of its own keys reads a late value. A
+/// seed key can then only read an overlay key that is not late, so the seed's
+/// keys are what a scan of the whole view would find. Otherwise the whole view
+/// is scanned, so transitive reads stay exact.
+fn overlay_derived(
+    seed: &SharedFrontmatter,
+    seed_derived: &HashSet<String>,
+    overlay: &Map<String, Value>,
+    view: &SharedFrontmatter,
+) -> HashSet<String> {
+    crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(overlay.iter()));
+    let derived = derived_deferred_keys(overlay.iter(), &sequence_deferred_roots(), seed_derived);
+    if derived.len() == seed_derived.len() && !overlay.keys().any(|key| seed.contains_key(key)) {
+        return derived;
+    }
+    crate::note_work!(PreflightDeferredScanNodes, crate::work_counters::value_nodes(view.iter()));
+    derived_deferred_keys(view.iter(), &sequence_deferred_roots(), &HashSet::new())
+}
+
 /// Mark each placeholder of `template` that reads a late root, directly or
-/// through a step value derived from one.
-fn mark_late_holes(template: &mut CommandTemplate, roots: &DeferredShellRoots, derived: &HashSet<String>) {
-    use darkmatter::markdown::compose::shell_expansion::template::ArgPart;
-    for segment in &mut template.segments {
-        for arg in &mut segment.args {
-            for part in &mut arg.parts {
-                if let ArgPart::Hole(hole) = part
-                    && let Some(late) = roots.late_roots_of(&hole.expression, derived)
-                {
-                    hole.timing = HoleTiming::Deferred { roots: late };
-                }
-            }
+/// through a step value derived from one. Each hole's syntax is the retained
+/// occurrence at its span in `view`; a hole whose expression did not parse
+/// reads nothing.
+fn mark_late_holes(
+    template: &mut CommandTemplate,
+    view: &PreparedInterpolationView<'_>,
+    roots: &DeferredShellRoots,
+    derived: &HashSet<String>,
+) {
+    for hole in template.placeholders_mut() {
+        if let Some(late) = view
+            .placeholder_at(&hole.span)
+            .and_then(|occurrence| occurrence.expr())
+            .and_then(|expr| roots.late_roots_of_expr(expr, derived))
+        {
+            hole.timing = HoleTiming::Deferred { roots: late };
         }
     }
 }
@@ -2267,12 +2757,14 @@ fn split_catalog_reference(raw: &str) -> (Option<String>, String) {
 /// ## Returns
 ///
 /// The group's position in the catalog's `groups:` list — which is what anchors
-/// its authored-order pointer — and the group itself.
-fn select_catalog_group(
-    root: &Map<String, Value>,
+/// its authored-order pointer — and the group itself, borrowed from `root`,
+/// which is `document`'s root object.
+fn select_catalog_group<'a>(
+    document: &ReferencedDocument,
+    root: &'a Map<String, Value>,
     name: &str,
     path: &Path,
-) -> Result<(usize, Map<String, Value>), CompositionError> {
+) -> Result<(usize, &'a Map<String, Value>), CompositionError> {
     expect_kind(root, "group-catalog", path)?;
 
     let groups = match root.get("groups") {
@@ -2289,30 +2781,31 @@ fn select_catalog_group(
         }
     };
 
-    let available: Vec<String> = groups
-        .iter()
-        .filter_map(|g| g.get("name").and_then(Value::as_str))
-        .map(str::to_string)
-        .collect();
-
-    let matches: Vec<(usize, &Value)> = groups
-        .iter()
-        .enumerate()
-        .filter(|(_, g)| g.get("name").and_then(Value::as_str) == Some(name))
-        .collect();
+    let index = document.catalog_index.get_or_init(|| {
+        let mut index: HashMap<String, Vec<usize>> = HashMap::new();
+        for (position, group) in groups.iter().enumerate() {
+            if let Some(name) = group.get("name").and_then(Value::as_str) {
+                index.entry(name.to_string()).or_default().push(position);
+            }
+        }
+        index
+    });
 
     let lookup_failure = |problem: &str| CompositionError::SequenceGroupCatalogLookup {
         name: name.to_string(),
         path: path.to_path_buf(),
         problem: problem.to_string(),
-        available: available.clone(),
+        available: groups
+            .iter()
+            .filter_map(|g| g.get("name").and_then(Value::as_str))
+            .map(str::to_string)
+            .collect(),
     };
 
-    match matches.as_slice() {
-        [(index, only)] => only
+    match index.get(name).map(Vec::as_slice).unwrap_or_default() {
+        [only] => groups[*only]
             .as_object()
-            .cloned()
-            .map(|group| (*index, group))
+            .map(|group| (*only, group))
             .ok_or_else(|| lookup_failure("is not an object")),
         [] => Err(lookup_failure("is not defined")),
         _ => Err(lookup_failure("is defined more than once")),
@@ -2398,14 +2891,13 @@ fn expect_kind(
     }
 }
 
-fn expect_object(
-    document: &Value,
+fn expect_object<'a>(
+    document: &'a Value,
     context: &str,
     path: &Path,
-) -> Result<Map<String, Value>, CompositionError> {
+) -> Result<&'a Map<String, Value>, CompositionError> {
     document
         .as_object()
-        .cloned()
         .ok_or_else(|| CompositionError::SequenceReferenceInvalid {
             context: context.to_string(),
             path: path.to_path_buf(),
@@ -2465,3 +2957,7 @@ mod tests;
 
 #[cfg(test)]
 pub(crate) mod runtime_fixture;
+
+#[cfg(test)]
+#[path = "tests/scaling.rs"]
+mod scaling_tests;

@@ -144,6 +144,8 @@ This results in a document which:
 - These stages, the operations within these stages, along with concerns like ordering, concurrency and more are covered in detail in the [Darkmatter Composition Pipeline](../docs/darkmatter-compose-pipeline.md) document.
 - Shell expansion details are split across [body shell expansion](../docs/inline/shell-expansion.md) and [frontmatter shell expansion](../docs/inline/fm-shell-expansion.md).
 
+> **Not to be confused with lifecycle events.** The stages above are how one composition works. *Lifecycle events* (`initialize`, `composed`, `failed`, `cancelled`, `finalize`) are frontmatter action stacks that a host such as `md compose` runs before and after a composition; the library parses them but runs nothing unless a host drives a run through `darkmatter::lifecycle`. See [Lifecycle Events](../docs/topics/lifecycle/index.md).
+
 
 ### Rendering Details
 
@@ -330,6 +332,7 @@ The following crates play an important role in Darkmatter providing it's current
 | Module | Description |
 |--------|-------------|
 | `markdown` | Core `Markdown` type with frontmatter, rendering, and manipulation |
+| `lifecycle` | Lifecycle-event grammar, event registry, and run engine for hosts (see [Lifecycle Events](../docs/topics/lifecycle/index.md)) |
 | `diff` | Visual diff utilities for strings and files |
 | `mermaid` | Mermaid diagram theming (terminal rendering via biscuit-visualized's `MermaidDiagram`) |
 | `render` | Hyperlink rendering utilities (OSC 8 terminal hyperlinks) |

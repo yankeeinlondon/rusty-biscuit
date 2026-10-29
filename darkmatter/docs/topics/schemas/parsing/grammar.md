@@ -155,7 +155,10 @@ side. It runs over body interpolations and over Expression-typed frontmatter
 values alike. The walk is the library's `expression::static_variable_reads`,
 the static twin of the runtime classifier, so the editor suppresses exactly what
 compose suppresses — a fallback primary, a ternary condition and the branches it
-guards, and a direct absence-predicate argument. The one difference is
+guards, and a direct argument to a parameter that declares `| null`, unless
+the call is itself another call's argument (`is_null(x)`, `trim(x)`, but not
+`is_empty(trim(x))`; see
+[interpolation](../../../inline/interpolation.md)). The one difference is
 reachability: compose warns only for the branch it evaluates, while the editor
 checks both. A document without frontmatter is exempt, because its names may
 come from `--set` values the editor cannot see.

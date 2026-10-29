@@ -28,8 +28,8 @@
 //! and the in-memory lint results only.
 
 use super::{
-    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema,
-    SuggestionCandidate, SuggestionLintProblem, TypeExpr, lint_suggestions,
+    Constraint, DefKey, Definition, DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
+    SimplifiedSchema, SuggestionCandidate, SuggestionLintProblem, TypeExpr, lint_suggestions,
 };
 
 /// One lint-valid suggestion candidate available for value completion.
@@ -263,7 +263,12 @@ fn descend<'a>(root: &'a SchemaShape, ancestors: &[&str]) -> Option<&'a SchemaSh
 fn inline_object_shape(def: &PropertyDef) -> Option<&SchemaShape> {
     atoms_of(def).iter().find_map(|atom| match &atom.ty {
         TypeExpr::InlineObject(inner) => Some(inner),
-        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => None,
+        TypeExpr::Primitive(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Union(_)
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => None,
     })
 }
 
@@ -328,6 +333,241 @@ fn push_alternatives<'a>(
             }
         }
         None => out.push(Alternative { atom, arm, is_array }),
+    }
+}
+
+/// Where the body of a [`TypeExpr::Ref`] is looked up.
+///
+/// Reference-aware queries ask for one definition at a time, only when the
+/// position they are answering is a reference, so an implementation sees
+/// exactly the definitions a query needed. [`DefinitionTable`] and
+/// [`EffectiveSchema`](crate::markdown::schemas::EffectiveSchema) implement it;
+/// a caller may wrap either to observe or restrict lookups.
+pub trait DefinitionLookup {
+    /// The definition `key` names; `None` when it is not in scope, which a
+    /// query treats as offering nothing, never as an unconstrained value.
+    fn lookup_definition(&self, key: &DefKey) -> Option<&Definition>;
+}
+
+impl DefinitionLookup for DefinitionTable {
+    fn lookup_definition(&self, key: &DefKey) -> Option<&Definition> {
+        self.get(key)
+    }
+}
+
+/// [`flattened_alternatives`] with each reference replaced by the leaf
+/// alternatives of its definition's body, looked up in `definitions`.
+///
+/// Only references at the top of `def` resolve: a reference used directly, as
+/// a union arm, or as the element of `def`'s array, followed through alias and
+/// union bodies. A reference nested inside an inline object's properties is
+/// left for a later query that descends into that property, so the result is
+/// one level of the recursive type and never its closure.
+///
+/// A body alternative keeps the body's [`Alternative::arm`]. A reference that
+/// stays in the result is one the query could not open: its definition is
+/// missing, it closes an alias loop, or it is an array element whose body is
+/// itself an array (`list[]` of `list: item[]`), which has no leaf alternative
+/// at the element site. Such a reference offers nothing.
+pub fn resolved_alternatives<'a, L>(def: &'a PropertyDef, definitions: &'a L) -> Vec<Alternative<'a>>
+where
+    L: DefinitionLookup + ?Sized,
+{
+    resolve_with_bodies(def, definitions).0
+}
+
+/// [`resolved_alternatives`] together with every definition body it opened,
+/// in first-opened order. A body is the scope its own `suggest(...)`
+/// candidates are linted in.
+pub(crate) fn resolve_with_bodies<'a, L>(
+    def: &'a PropertyDef,
+    definitions: &'a L,
+) -> (Vec<Alternative<'a>>, Vec<&'a PropertyDef>)
+where
+    L: DefinitionLookup + ?Sized,
+{
+    let mut resolver = Resolver {
+        definitions,
+        open: Vec::new(),
+        bodies: Vec::new(),
+    };
+    let mut out = Vec::new();
+    resolver.push_def(def, false, &mut out);
+    (out, resolver.bodies)
+}
+
+struct Resolver<'a, L: ?Sized> {
+    definitions: &'a L,
+    /// The references being opened on the current alias chain.
+    open: Vec<&'a DefKey>,
+    bodies: Vec<&'a PropertyDef>,
+}
+
+impl<'a, L: DefinitionLookup + ?Sized> Resolver<'a, L> {
+    fn push_def(&mut self, def: &'a PropertyDef, outer_array: bool, out: &mut Vec<Alternative<'a>>) {
+        match def {
+            PropertyDef::Single(atom) => self.push_atom(atom, None, outer_array, out),
+            PropertyDef::Union(atoms) => {
+                for (index, atom) in atoms.iter().enumerate() {
+                    self.push_atom(atom, Some(index), outer_array, out);
+                }
+            }
+        }
+    }
+
+    fn push_atom(
+        &mut self,
+        atom: &'a PropertyAtom,
+        arm: Option<usize>,
+        outer_array: bool,
+        out: &mut Vec<Alternative<'a>>,
+    ) {
+        let is_array = outer_array || atom.is_array;
+        let key = match &atom.ty {
+            TypeExpr::Union(arms) => {
+                for (index, inner) in arms.iter().enumerate() {
+                    self.push_atom(inner, Some(index), is_array, out);
+                }
+                return;
+            }
+            TypeExpr::Ref(key) => key,
+            _ => {
+                out.push(Alternative { atom, arm, is_array });
+                return;
+            }
+        };
+        // Resolution rejects an alias cycle; an adversarial lookup must still
+        // not loop.
+        let definition = match self.definitions.lookup_definition(key) {
+            Some(definition) if !self.open.contains(&key) => definition,
+            _ => {
+                out.push(Alternative { atom, arm, is_array });
+                return;
+            }
+        };
+        if !self.bodies.iter().any(|body| std::ptr::eq(*body, &definition.body)) {
+            self.bodies.push(&definition.body);
+        }
+        self.open.push(key);
+        let mut body = Vec::new();
+        self.push_def(&definition.body, false, &mut body);
+        self.open.pop();
+        let mut kept_reference = false;
+        for alternative in body {
+            if is_array && alternative.is_array {
+                if !kept_reference {
+                    out.push(Alternative { atom, arm, is_array });
+                    kept_reference = true;
+                }
+                continue;
+            }
+            out.push(Alternative {
+                is_array: is_array || alternative.is_array,
+                ..alternative
+            });
+        }
+    }
+}
+
+/// Lint-valid candidates of each suggest-bearing alternative of `def` and of
+/// each definition body in `bodies` (as [`resolve_with_bodies`] returns them),
+/// each judged against the definition that stores it.
+pub(crate) fn suggestions_by_resolved_alternative<'a>(
+    leaf: &str,
+    def: &'a PropertyDef,
+    bodies: &[&'a PropertyDef],
+) -> Vec<(Alternative<'a>, Vec<SuggestionItem>)> {
+    std::iter::once(def)
+        .chain(bodies.iter().copied())
+        .flat_map(|source| suggestions_by_alternative(leaf, source))
+        .collect()
+}
+
+/// Every definition `atom` reaches through `definitions`, transitively, as a
+/// table a lowering of `atom` can resolve its references in. `None` when a
+/// reached reference has no definition.
+///
+/// This is the whole closure, as validating a value needs; completion's path
+/// descent never calls it.
+pub(crate) fn reachable_definitions<L>(atom: &PropertyAtom, definitions: &L) -> Option<DefinitionTable>
+where
+    L: DefinitionLookup + ?Sized,
+{
+    let mut pending: Vec<DefKey> = Vec::new();
+    collect_atom_refs(atom, &mut pending);
+    let mut table = DefinitionTable::default();
+    while let Some(key) = pending.pop() {
+        if table.get(&key).is_some() {
+            continue;
+        }
+        let definition = definitions.lookup_definition(&key)?;
+        table.insert(key, definition.body.clone(), definition.origin.clone());
+        collect_def_refs(&definition.body, &mut pending);
+    }
+    Some(table)
+}
+
+/// A content fingerprint of `atom` and of every definition it reaches through
+/// `definitions`, taken in the order [`reachable_definitions`] collects them,
+/// which is also the order a lowering allocates their `$defs` keys in. Equal
+/// fingerprints therefore lower to the same schema. `None` when a reached
+/// reference has no definition, exactly when [`reachable_definitions`] is.
+///
+/// The derived `Debug` text of each value is streamed into the hasher, never
+/// built, so fingerprinting a large recursive alternative allocates only its
+/// reference keys. The hash is stable within one process only.
+pub(crate) fn reachable_fingerprint<L>(atom: &PropertyAtom, definitions: &L) -> Option<u64>
+where
+    L: DefinitionLookup + ?Sized,
+{
+    use std::fmt::Write as _;
+    use std::hash::Hasher as _;
+
+    let mut hasher = biscuit_hash::XxHasher::new();
+    write!(hasher, "{atom:?}").ok()?;
+    let mut pending: Vec<DefKey> = Vec::new();
+    collect_atom_refs(atom, &mut pending);
+    let mut seen = std::collections::HashSet::new();
+    while let Some(key) = pending.pop() {
+        if seen.contains(&key) {
+            continue;
+        }
+        let definition = definitions.lookup_definition(&key)?;
+        write!(hasher, "\u{0}{key:?}\u{0}{:?}\u{0}{:?}", definition.body, definition.origin).ok()?;
+        collect_def_refs(&definition.body, &mut pending);
+        seen.insert(key);
+    }
+    Some(hasher.finish())
+}
+
+pub(super) fn collect_def_refs(def: &PropertyDef, out: &mut Vec<DefKey>) {
+    match def {
+        PropertyDef::Single(atom) => collect_atom_refs(atom, out),
+        PropertyDef::Union(atoms) => atoms.iter().for_each(|atom| collect_atom_refs(atom, out)),
+    }
+}
+
+fn collect_atom_refs(atom: &PropertyAtom, out: &mut Vec<DefKey>) {
+    match &atom.ty {
+        TypeExpr::Ref(key) => out.push(key.clone()),
+        TypeExpr::InlineObject(shape) => {
+            for def in shape.properties.values() {
+                collect_def_refs(def, out);
+            }
+            for pattern in &shape.pattern_keys {
+                collect_def_refs(&pattern.def, out);
+            }
+        }
+        TypeExpr::Union(arms) => arms.iter().for_each(|arm| collect_atom_refs(arm, out)),
+        TypeExpr::Tuple(tuple) => {
+            for element in &tuple.elements {
+                collect_def_refs(&element.def, out);
+            }
+            if let Some(spread) = &tuple.spread {
+                collect_atom_refs(spread, out);
+            }
+        }
+        TypeExpr::Primitive(_) | TypeExpr::Imported { .. } | TypeExpr::Function(_) => {}
     }
 }
 
@@ -769,5 +1009,52 @@ mod tests {
         assert_eq!(bare, explicit);
         let labels: Vec<&str> = bare.items.iter().map(|item| item.label.as_str()).collect();
         assert_eq!(labels, ["a", "2"]);
+    }
+
+    fn reference(name: &str, is_array: bool) -> PropertyAtom {
+        PropertyAtom {
+            ty: TypeExpr::Ref(DefKey::new(super::super::DefNamespace::InlineRoot, name)),
+            is_array,
+            ..PropertyAtom::bare(super::super::SimplifiedType::String)
+        }
+    }
+
+    fn table(entries: &[(&str, PropertyAtom)]) -> DefinitionTable {
+        let mut table = DefinitionTable::default();
+        for (name, body) in entries {
+            let origin = super::super::SchemaReferenceSite {
+                source: super::super::SchemaSourceId::InlineDocument,
+                path: super::super::SchemaSourcePath::root().property(*name),
+            };
+            let key = DefKey::new(super::super::DefNamespace::InlineRoot, *name);
+            table.insert(key, PropertyDef::Single(body.clone()), origin);
+        }
+        table
+    }
+
+    /// Resolution rejects alias loops, but a lookup that holds one must end
+    /// with the reference unopened rather than recursing forever.
+    #[test]
+    fn resolved_alternatives_stops_at_an_alias_loop() {
+        let definitions = table(&[("a", reference("b", false)), ("b", reference("a", false))]);
+        let use_site = PropertyDef::Single(reference("a", false));
+        let alternatives = resolved_alternatives(&use_site, &definitions);
+        assert_eq!(alternatives.len(), 1);
+        assert!(matches!(&alternatives[0].atom.ty, TypeExpr::Ref(key) if key.name == "a"));
+    }
+
+    /// An element of `list[]` where `list` is itself an array has no leaf
+    /// alternative at the element site, so the reference stays unopened.
+    #[test]
+    fn resolved_alternatives_keeps_an_array_of_an_array_definition_unopened() {
+        let object = PropertyAtom::bare_inline_object(SchemaShape::default());
+        let definitions = table(&[("list", PropertyAtom { is_array: true, ..object })]);
+        let as_value = PropertyDef::Single(reference("list", false));
+        let value = resolved_alternatives(&as_value, &definitions);
+        assert!(value.len() == 1 && value[0].is_array && matches!(value[0].atom.ty, TypeExpr::InlineObject(_)));
+
+        let as_items = PropertyDef::Single(reference("list", true));
+        let items = resolved_alternatives(&as_items, &definitions);
+        assert!(items.len() == 1 && items[0].is_array && matches!(items[0].atom.ty, TypeExpr::Ref(_)));
     }
 }

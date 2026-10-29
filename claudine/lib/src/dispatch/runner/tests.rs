@@ -606,7 +606,7 @@ async fn when_ctx_fields_do_not_require_precomputed_event_metadata() {
         args: None,
         timeout_ms: Some(50),
         mapper: None,
-        when: Some("ctx.today != ''".to_string()),
+        when: Some("!is_empty(ctx.today)".to_string()),
     }];
 
     let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
@@ -614,7 +614,7 @@ async fn when_ctx_fields_do_not_require_precomputed_event_metadata() {
 
     let response = result
         .expect("ctx.* condition should evaluate without erroring the runner")
-        .expect("ctx.today != '' should be truthy and let the call fire");
+        .expect("!is_empty(ctx.today) should be truthy and let the call fire");
     assert_eq!(response.decision, Some(HookDecision::Deny));
 }
 
@@ -629,13 +629,13 @@ async fn when_ctx_today_resolves() {
         args: None,
         timeout_ms: Some(50),
         mapper: None,
-        when: Some("ctx.today != ''".to_string()),
+        when: Some("!is_empty(ctx.today)".to_string()),
     }];
 
     let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap()
-    .expect("ctx.today != '' should be truthy and let the call fire");
+    .expect("!is_empty(ctx.today) should be truthy and let the call fire");
 
     assert_eq!(result.decision, Some(HookDecision::Deny));
 }
@@ -836,13 +836,13 @@ async fn when_ctx_year_resolves() {
         args: None,
         timeout_ms: Some(50),
         mapper: None,
-        when: Some("ctx.year != ''".to_string()),
+        when: Some("ctx.year != null".to_string()),
     }];
 
     let result = execute_actions(&actions, None, &make_meta_for_when_tests(), DispatchConfig::Canonical(&config), crate::test_support::process_snapshot(), &messaging, true, None)
     .await
     .unwrap()
-    .expect("ctx.year != '' should be truthy and let the call fire");
+    .expect("ctx.year != null should be truthy and let the call fire");
 
     assert_eq!(result.decision, Some(HookDecision::Deny));
 }

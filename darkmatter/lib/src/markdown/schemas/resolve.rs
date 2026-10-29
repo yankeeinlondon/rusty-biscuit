@@ -27,9 +27,13 @@
 //! differs: an embedded document's imports resolve lexically against the
 //! embedded table by repository-relative virtual path, never against the disk,
 //! the network, or the request's context, and record no dependency edges.
+//!
+//! A reference in the reserved form `Name@darkmatter:<stem>` names a type of
+//! the shipped partial `darkmatter/schemas/partials/<stem>.yaml` from any
+//! schema, on disk or embedded, and resolves only against the shipped table.
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
     fs,
     path::{Component, Path, PathBuf},
     sync::Arc,
@@ -45,9 +49,10 @@ use super::{
     embedded::{self, EmbeddedDocument}, SchemaOrigin, SchemaOriginKind, SchemaShape, SimplifiedSchema,
     errors::SchemaError,
     simplified::{
-        AlphanumericOptions, SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaDeclaration,
-        SchemaReferenceSite, SchemaSourceId, SchemaSourceMap, SchemaSourcePath, SchemaUnionRejection,
-        parse_standalone_schema_document, parse_yaml_schema, to_json_schema,
+        AlphanumericOptions, DefKey, DefNamespace, DefinitionTable, SchemaConstraintConflictKind,
+        SchemaConstraintOrigin, SchemaConstraintParticipant, SchemaDeclaration, SchemaReferenceSite, SchemaSourceId, SchemaSourceMap,
+        SchemaSourcePath, SchemaUnionRejection, parse_standalone_schema_document, parse_yaml_schema,
+        to_json_schema, to_json_schema_with_definitions,
         types::{
             Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SimplifiedType,
             TypeExpr,
@@ -63,6 +68,11 @@ use super::{
 #[derive(Debug, Clone)]
 pub struct ResolvedSchema {
     pub simplified: Option<SimplifiedSchema>,
+    /// The stored named types `simplified` reaches through
+    /// [`TypeExpr::Ref`] (cyclic ones, and acyclic structured ones referenced
+    /// from two or more sites), lowered once under `json_schema`'s root
+    /// `$defs`. Empty when nothing recurses or is shared.
+    pub definitions: Arc<DefinitionTable>,
     pub json_schema: Value,
     /// Where the schema came from — an inline `$schema` mapping/sequence
     /// (`Document`) or a referenced schema file (`ReferencedFile`, carrying
@@ -170,6 +180,46 @@ pub fn resolve_yaml_schema_with_roots(
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<ResolvedSchema, SchemaError> {
+    resolve_yaml_schema_owned_by(value, InlineOwner::Document, base_dir, schema_roots, request_context)
+}
+
+/// Who authored an inline `$schema` mapping, which decides the
+/// [`DefNamespace`] its named types (and its root-union arms' named types)
+/// are stored under.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum InlineOwner<'a> {
+    /// The document being prepared.
+    Document,
+    /// The schema-trigger file at this path.
+    Trigger(&'a Path),
+}
+
+impl InlineOwner<'_> {
+    fn root(self) -> DefNamespace {
+        match self {
+            Self::Document => DefNamespace::InlineRoot,
+            Self::Trigger(path) => DefNamespace::TriggerPayload(canonical_path(path)),
+        }
+    }
+
+    fn union_arm(self, index: usize) -> DefNamespace {
+        match self {
+            Self::Document => DefNamespace::RootUnionArm(index),
+            Self::Trigger(path) => DefNamespace::TriggerPayloadUnionArm(canonical_path(path), index),
+        }
+    }
+}
+
+/// [`resolve_yaml_schema_with_roots`] for an inline value authored by
+/// `owner`. A string reference resolves exactly as it does for a document;
+/// only the namespaces of inline named types differ.
+pub(crate) fn resolve_yaml_schema_owned_by(
+    value: &YamlValue,
+    owner: InlineOwner<'_>,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<ResolvedSchema, SchemaError> {
     let mut stack = ReferenceStack::default();
     match value {
         YamlValue::String(reference) => {
@@ -181,47 +231,15 @@ pub fn resolve_yaml_schema_with_roots(
                 &mut stack,
             )
         }
-        YamlValue::Mapping(_) => {
-            let schema = parse_yaml_schema(value)?;
-            // Inline the definitions of any `Name@file` named-type imports
-            // (Feature B) before conversion — `to_json_schema` rejects a
-            // surviving import. This is the top-level document, so `@this`
-            // resolves against the inline root (`NamespaceKey::Root`).
-            let mut searched = BTreeSet::new();
-            let (schema, imports) = expand_document_imports(
-                schema,
-                base_dir,
-                NamespaceKey::Root,
-                &SchemaSourcePath::root(),
-                schema_roots,
-                request_context,
-                &mut searched,
-            )?;
-            let mut json = to_json_schema(&schema)?;
-            // Inline `$schema` mappings have no on-disk path, so `this` example
-            // references have no target here (the acceptance driver references
-            // examples from a schema *file*, resolved in `parse_yaml_referenced_file`).
-            let examples = resolve_document_examples(
-                &mut json,
-                base_dir,
-                None,
-                schema_roots,
-                request_context,
-                &mut searched,
-            )?;
-            Ok(ResolvedSchema {
-                simplified: Some(schema),
-                json_schema: json,
-                origin: SchemaOrigin::document(),
-                imports,
-                examples,
-                referenced_files: Vec::new(),
-                searched: searched.into_iter().collect(),
-                advisories: Vec::new(),
-            })
-        }
+        YamlValue::Mapping(_) => resolve_inline_mapping(
+            value,
+            owner,
+            base_dir,
+            schema_roots,
+            request_context,
+        ),
         YamlValue::Sequence(items) => {
-            resolve_root_union(items, base_dir, schema_roots, request_context, &mut stack)
+            resolve_root_union(items, owner, base_dir, schema_roots, request_context, &mut stack)
         }
         other => Err(SchemaError::FrontmatterShape {
             message: format!(
@@ -232,12 +250,78 @@ pub fn resolve_yaml_schema_with_roots(
     }
 }
 
+/// Resolves one global catalog declaration, `value` (a single-entry
+/// mapping), from schema files in `base_dir`. Its stored definitions, cyclic
+/// and shared, are returned with it, as for any inline `$schema` mapping.
+pub(crate) fn resolve_catalog_declaration(
+    value: &YamlValue,
+    base_dir: &Path,
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<ResolvedSchema, SchemaError> {
+    resolve_inline_mapping(value, InlineOwner::Document, base_dir, &[], request_context)
+}
+
+/// Resolves the inline `$schema` mapping `value` authored by `owner`.
+fn resolve_inline_mapping(
+    value: &YamlValue,
+    owner: InlineOwner<'_>,
+    base_dir: &Path,
+    schema_roots: &[PathBuf],
+    request_context: &biscuit_file::FileResolutionContext,
+) -> Result<ResolvedSchema, SchemaError> {
+    let schema = parse_yaml_schema(value)?;
+    // Inline the definitions of any `Name@file` named-type imports
+    // (Feature B) before conversion — `to_json_schema` rejects a
+    // surviving import. `@this` resolves against this mapping, whose
+    // namespace is its owner's.
+    let mut searched = BTreeSet::new();
+    let mut definitions = DefinitionTable::default();
+    let source = NamespaceSource::Files {
+        schema_roots: schema_roots.to_vec(),
+        context: Box::new(request_context.clone()),
+    };
+    let (schema, imports) = expand_imports(
+        schema,
+        base_dir,
+        owner.root(),
+        &SchemaSourcePath::root(),
+        source,
+        Sharing::Automatic,
+        &mut searched,
+        &mut definitions,
+    )?;
+    let mut json = to_json_schema_with_definitions(&schema, &definitions)?;
+    // Inline `$schema` mappings have no on-disk path, so `this` example
+    // references have no target here (the acceptance driver references
+    // examples from a schema *file*, resolved in `parse_yaml_referenced_file`).
+    let examples = resolve_document_examples(
+        &mut json,
+        base_dir,
+        None,
+        schema_roots,
+        request_context,
+        &mut searched,
+    )?;
+    Ok(ResolvedSchema {
+        simplified: Some(schema),
+        definitions: Arc::new(definitions),
+        json_schema: json,
+        origin: SchemaOrigin::document(),
+        imports,
+        examples,
+        referenced_files: Vec::new(),
+        searched: searched.into_iter().collect(),
+        advisories: Vec::new(),
+    })
+}
+
 /// The canonical path of the file an explicit named-type reference
 /// (`Name@reference`) selects, from a schema authored in `base_dir`.
 ///
 /// This is the resolver's own target selection, exposed so an editor can find
 /// the file that defines a referenced type without a second lookup rule.
-/// `this` names no file and returns `None`.
+/// `this` and a reserved `darkmatter:<stem>` reference (a shipped partial)
+/// name no file and return `None`.
 ///
 /// ## Errors
 ///
@@ -251,11 +335,24 @@ pub fn named_type_reference_path(
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Option<PathBuf>, SchemaError> {
-    if reference.trim() == "this" {
+    if reference.trim() == "this" || embedded::reserved_stem(reference).is_some() {
         return Ok(None);
     }
     named_type_file_path(reference, base_dir, schema_roots, request_context, &mut BTreeSet::new())
         .map(|path| Some(canonical_path(&path)))
+}
+
+/// A schema whose named-type references were expanded, with what expansion
+/// read and the stored definitions its [`TypeExpr::Ref`]s point into.
+#[derive(Debug, Clone)]
+pub struct NamedTypeExpansion {
+    /// The expanded schema.
+    pub schema: SimplifiedSchema,
+    /// The files the references imported, sorted.
+    pub imports: Vec<PathBuf>,
+    /// The stored definitions the schema reaches; empty when nothing recurses
+    /// or is shared.
+    pub definitions: Arc<DefinitionTable>,
 }
 
 /// Expands the named-type references in `schema`, as resolving it would, and
@@ -273,29 +370,39 @@ pub fn named_type_reference_path(
 /// ## Errors
 ///
 /// [`SchemaError::UnknownNamedType`], [`SchemaError::ConstraintConflict`],
-/// [`SchemaError::UnionReference`], [`SchemaError::ImportCycle`], and any
-/// error reading or resolving an imported file.
+/// [`SchemaError::UnionReference`], [`SchemaError::NonDescendingCycle`],
+/// [`SchemaError::ImportCycle`], and any error reading or resolving an
+/// imported file.
 pub fn expand_named_types(
     schema: &SimplifiedSchema,
     base_dir: &Path,
     defining_file: Option<&Path>,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
-) -> Result<(SimplifiedSchema, Vec<PathBuf>), SchemaError> {
-    let key = || match defining_file {
-        Some(path) => NamespaceKey::File(canonical_path(path)),
-        None => NamespaceKey::Root,
-    };
+) -> Result<NamedTypeExpansion, SchemaError> {
+    let mut definitions = DefinitionTable::default();
     match schema {
-        SimplifiedSchema::Single(_) => expand_document_imports(
-            schema.clone(),
-            base_dir,
-            key(),
-            &SchemaSourcePath::root(),
-            schema_roots,
-            request_context,
-            &mut BTreeSet::new(),
-        ),
+        SimplifiedSchema::Single(_) => {
+            let key = match defining_file {
+                Some(path) => DefNamespace::File(canonical_path(path)),
+                None => DefNamespace::InlineRoot,
+            };
+            let (schema, imports) = expand_document_imports(
+                schema.clone(),
+                base_dir,
+                key,
+                &SchemaSourcePath::root(),
+                schema_roots,
+                request_context,
+                &mut BTreeSet::new(),
+                &mut definitions,
+            )?;
+            Ok(NamedTypeExpansion {
+                schema,
+                imports,
+                definitions: Arc::new(definitions),
+            })
+        }
         SimplifiedSchema::Union(arms) => {
             let mut imports = BTreeSet::new();
             let mut expanded = Vec::with_capacity(arms.len());
@@ -304,14 +411,19 @@ pub fn expand_named_types(
                     expanded.push(arm.clone());
                     continue;
                 };
+                let key = match defining_file {
+                    Some(path) => DefNamespace::FileRootUnionArm(canonical_path(path), index),
+                    None => DefNamespace::RootUnionArm(index),
+                };
                 let (schema, found) = expand_document_imports(
                     SimplifiedSchema::Single(shape.clone()),
                     base_dir,
-                    key(),
+                    key,
                     &SchemaSourcePath::root().union_arm(index),
                     schema_roots,
                     request_context,
                     &mut BTreeSet::new(),
+                    &mut definitions,
                 )?;
                 imports.extend(found);
                 let SimplifiedSchema::Single(shape) = schema else {
@@ -319,13 +431,18 @@ pub fn expand_named_types(
                 };
                 expanded.push(SchemaArm::Inline(shape));
             }
-            Ok((SimplifiedSchema::Union(expanded), imports.into_iter().collect()))
+            Ok(NamedTypeExpansion {
+                schema: SimplifiedSchema::Union(expanded),
+                imports: imports.into_iter().collect(),
+                definitions: Arc::new(definitions),
+            })
         }
     }
 }
 
 fn resolve_root_union(
     items: &[YamlValue],
+    owner: InlineOwner<'_>,
     base_dir: &Path,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
@@ -343,6 +460,12 @@ fn resolve_root_union(
     let mut referenced_files: BTreeSet<PathBuf> = BTreeSet::new();
     let mut searched: BTreeSet<PathBuf> = BTreeSet::new();
     let mut advisories: BTreeSet<SchemaAdvisory> = BTreeSet::new();
+    // One table for every inline arm: each arm is its own namespace, and
+    // their definitions are emitted once at the union root.
+    let mut definitions = DefinitionTable::default();
+    let mut root_defs = Map::new();
+    // Arms whose definitions join the root after every typed key is known.
+    let mut deferred_arms: Vec<usize> = Vec::new();
     for (index, item) in items.iter().enumerate() {
         match item {
             YamlValue::Mapping(_) => {
@@ -352,14 +475,15 @@ fn resolve_root_union(
                     expand_document_imports(
                         arm_schema,
                         base_dir,
-                        NamespaceKey::Root,
+                        owner.union_arm(index),
                         &SchemaSourcePath::root().union_arm(index),
                         schema_roots,
                         request_context,
                         &mut searched,
+                        &mut definitions,
                     )?;
                 imports.extend(arm_imports);
-                let mut arm_json = to_json_schema(&arm_schema)?;
+                let mut arm_json = to_json_schema_with_definitions(&arm_schema, &definitions)?;
                 examples.extend(resolve_document_examples(
                     &mut arm_json,
                     base_dir,
@@ -368,8 +492,14 @@ fn resolve_root_union(
                     request_context,
                     &mut searched,
                 )?);
+                hoist_definitions(&mut arm_json, &mut root_defs);
                 if let SimplifiedSchema::Single(shape) = &arm_schema {
-                    super::simplified::convert::attach_root_union_match(&mut arm_json, shape);
+                    super::simplified::convert::attach_root_union_match(
+                        &mut arm_json,
+                        shape,
+                        &definitions,
+                        &mut root_defs,
+                    )?;
                 }
                 if let SimplifiedSchema::Single(shape) = &arm_schema
                     && let Some(arms) = all_simplified_arms.as_mut()
@@ -397,8 +527,23 @@ fn resolve_root_union(
                 // it in the simplified projection only when it is a single
                 // shape (root unions of unions are not modelled in v1).
                 let mut arm_json = resolved.json_schema;
+                if join_file_arm_definitions(
+                    &resolved.definitions,
+                    matches!(resolved.simplified, Some(SimplifiedSchema::Single(_))),
+                    &mut arm_json,
+                    reference,
+                    &mut definitions,
+                    &mut root_defs,
+                )? {
+                    deferred_arms.push(any_of.len());
+                }
                 if let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified {
-                    super::simplified::convert::attach_root_union_match(&mut arm_json, shape);
+                    super::simplified::convert::attach_root_union_match(
+                        &mut arm_json,
+                        shape,
+                        &definitions,
+                        &mut root_defs,
+                    )?;
                 }
                 match (&resolved.simplified, all_simplified_arms.as_mut()) {
                     (Some(SimplifiedSchema::Single(shape)), Some(arms)) => {
@@ -420,15 +565,22 @@ fn resolve_root_union(
             }
         }
     }
+    for index in deferred_arms {
+        super::scope::fold_definitions(&mut root_defs, &mut any_of[index]);
+    }
     let mut root = Map::new();
     root.insert(
         "$schema".into(),
         Value::String(super::simplified::DRAFT_2020_12.into()),
     );
     root.insert("anyOf".into(), Value::Array(any_of));
+    if !root_defs.is_empty() {
+        root.insert("$defs".into(), Value::Object(root_defs));
+    }
 
     Ok(ResolvedSchema {
         simplified: all_simplified_arms.map(SimplifiedSchema::Union),
+        definitions: Arc::new(definitions),
         json_schema: Value::Object(root),
         origin: SchemaOrigin::document(),
         imports: imports.into_iter().collect(),
@@ -437,6 +589,68 @@ fn resolve_root_union(
         searched: searched.into_iter().collect(),
         advisories: advisories.into_iter().collect(),
     })
+}
+
+/// Moves an inline root-union arm's lowered `$defs` to the union root, where
+/// its `#/$defs/…` references resolve once the arm is nested under `anyOf`.
+/// Every inline arm of one union lowers against one table, so a key already
+/// present names the same definition.
+fn hoist_definitions(arm_json: &mut Value, root_defs: &mut Map<String, Value>) {
+    let Some(Value::Object(defs)) = arm_json.as_object_mut().and_then(|arm| arm.remove("$defs")) else {
+        return;
+    };
+    for (key, body) in defs {
+        root_defs.entry(key).or_insert(body);
+    }
+}
+
+/// Joins the definitions of a root-union arm that names a schema file to
+/// the union root, where its `#/$defs/…` references resolve once the arm is
+/// nested under `anyOf`. The file was resolved on its own, so its keys were
+/// allocated in a separate table.
+///
+/// A SimplifiedSchema single-shape arm (`typed`) folds its table into the
+/// union's `definitions`, which re-keys only definitions the union does not
+/// already hold, and its JSON references are renamed to match: the union's
+/// table stays the one its arms lower against. Any other arm (raw JSON
+/// Schema, or a file that is itself a root union) has no projection in that
+/// table; it returns `true`, and its `$defs` join the root by
+/// [`super::scope::fold_definitions`] after every arm is known.
+///
+/// ## Errors
+///
+/// [`SchemaError::UnresolvedReference`] or
+/// [`SchemaError::UnsupportedMergeReference`] when a reference in the arm
+/// would bind to a different target under the union root.
+fn join_file_arm_definitions(
+    arm_definitions: &DefinitionTable,
+    typed: bool,
+    arm_json: &mut Value,
+    reference: &str,
+    definitions: &mut DefinitionTable,
+    root_defs: &mut Map<String, Value>,
+) -> Result<bool, SchemaError> {
+    super::scope::check_joined_references(arm_json, &format!("the root-union arm `{}`", reference.trim()))?;
+    if arm_json.get("$defs").is_none() {
+        return Ok(false);
+    }
+    if !typed {
+        return Ok(true);
+    }
+    let renamed = definitions.absorb(arm_definitions);
+    let Some(Value::Object(defs)) = arm_json.as_object_mut().and_then(|arm| arm.remove("$defs")) else {
+        unreachable!("a lowered schema's `$defs` is an object");
+    };
+    if !renamed.is_empty() {
+        super::scope::rename_references(arm_json, &renamed);
+    }
+    for (key, mut body) in defs {
+        if !renamed.is_empty() {
+            super::scope::rename_references(&mut body, &renamed);
+        }
+        root_defs.entry(renamed.get(&key).cloned().unwrap_or(key)).or_insert(body);
+    }
+    Ok(false)
 }
 
 // ── Bare-name schema-root resolution (Phase 3) ──────────────────────────────
@@ -487,7 +701,7 @@ fn try_bare_name_in_roots(
     let explicit = FileReference::new(&format!("./{}", file_ref.raw())).map_err(unresolved)?;
     for root in schema_roots {
         let detailed = explicit.resolve_detailed(&request_context.for_trusted_external_cwd(root));
-        searched.extend(detailed.probed_paths());
+        observed::probed(searched, detailed.probed_paths());
         if let Some(path) = detailed.into_convenience().map_err(unresolved)? {
             return Ok(Some(path));
         }
@@ -674,6 +888,7 @@ fn load_guarded_in_context(
         SchemaError::Grammar { .. }
         | SchemaError::Convert { .. }
         | SchemaError::UnknownNamedType { .. }
+        | SchemaError::NonDescendingCycle { .. }
         | SchemaError::ConstraintConflict { .. }
         | SchemaError::UnionReference { .. }
         | SchemaError::Aggregate { .. } => SchemaError::ReferencedSchema {
@@ -686,6 +901,74 @@ fn load_guarded_in_context(
     loaded
 }
 
+/// An out-of-band record of what schema resolution observed, kept even when
+/// the resolution fails.
+///
+/// A successful [`ResolvedSchema`] carries its `referenced_files` and
+/// `searched` locations, but an error carries neither. Trigger discovery
+/// needs them for a failed payload too, so a repair, or the creation of a
+/// missing file, refreshes the skipped trigger. Probes and reads are recorded
+/// into every collection running on the calling thread; with none running,
+/// nothing is recorded.
+pub(crate) mod observed {
+    use std::cell::RefCell;
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
+
+    thread_local! {
+        static FRAMES: RefCell<Vec<Observed>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// What one [`collect`] call observed.
+    #[derive(Debug, Default)]
+    pub(crate) struct Observed {
+        /// Files read successfully, normalized like `referenced_files`.
+        pub(crate) read: BTreeSet<PathBuf>,
+        /// Every location probed, present or absent.
+        pub(crate) searched: BTreeSet<PathBuf>,
+    }
+
+    /// Runs `resolve`, returning its result with everything it observed.
+    pub(crate) fn collect<T>(resolve: impl FnOnce() -> T) -> (T, Observed) {
+        struct Pop;
+        impl Drop for Pop {
+            fn drop(&mut self) {
+                FRAMES.with_borrow_mut(Vec::pop);
+            }
+        }
+        FRAMES.with_borrow_mut(|frames| frames.push(Observed::default()));
+        let pop = Pop;
+        let result = resolve();
+        let observed = FRAMES.with_borrow_mut(|frames| frames.last_mut().map(std::mem::take)).unwrap_or_default();
+        drop(pop);
+        (result, observed)
+    }
+
+    /// Adds `probed` to `searched`, and records it.
+    pub(super) fn probed(searched: &mut BTreeSet<PathBuf>, probed: impl Iterator<Item = PathBuf>) {
+        let probed: Vec<PathBuf> = probed.collect();
+        FRAMES.with_borrow_mut(|frames| {
+            for frame in frames.iter_mut() {
+                frame.searched.extend(probed.iter().cloned());
+            }
+        });
+        searched.extend(probed);
+    }
+
+    /// Records a file read successfully.
+    pub(super) fn read(path: &Path) {
+        FRAMES.with_borrow_mut(|frames| {
+            if frames.is_empty() {
+                return;
+            }
+            let normalized = super::canonical_path(path);
+            for frame in frames.iter_mut() {
+                frame.read.insert(normalized.clone());
+            }
+        });
+    }
+}
+
 /// Resolves `file_ref` from `base_dir`, adding every location it probed to
 /// `searched`. This and [`try_bare_name_in_roots`] are the only places schema
 /// resolution probes a file reference, so `searched` sees every candidate.
@@ -696,7 +979,7 @@ fn resolve_file_reference_in_context(
     searched: &mut BTreeSet<PathBuf>,
 ) -> Result<Option<PathBuf>, biscuit_file::FileReferenceError> {
     let detailed = file_ref.resolve_detailed(&request_context.for_cwd(base_dir));
-    searched.extend(detailed.probed_paths());
+    observed::probed(searched, detailed.probed_paths());
     detailed.into_convenience()
 }
 
@@ -710,6 +993,7 @@ fn load_schema_from_path_in_context(
         path: path.to_path_buf(),
         source,
     })?;
+    observed::read(path);
     let extension = path
         .extension()
         .and_then(|ext| ext.to_str())
@@ -728,8 +1012,9 @@ fn parse_yaml_referenced_file(
     request_context: &biscuit_file::FileResolutionContext,
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
-    let text = std::str::from_utf8(bytes).map_err(|_| SchemaError::AmbiguousReferenced {
+    let text = std::str::from_utf8(bytes).map_err(|error| SchemaError::SchemaDocument {
         path: path.to_path_buf(),
+        message: format!("not UTF-8 text: {error}"),
     })?;
     if let Some(document) = parse_standalone_schema_document(text, path)? {
         return match document.declaration {
@@ -750,10 +1035,19 @@ fn parse_yaml_referenced_file(
     }
 
     // Treat the file's contents as a raw JSON Schema serialized in YAML.
-    let yaml: YamlValue =
-        serde_yaml_ng::from_str(text).map_err(|_| SchemaError::AmbiguousReferenced {
+    // A duplicate key, trailing content, or a second document is a located
+    // syntax error in the file, not an unrecognizable schema.
+    let yaml: YamlValue = crate::markdown::numeric::load_admitted_yaml(text).map_err(|error| {
+        let message = if crate::markdown::numeric::is_yaml_admission_error(&error) {
+            error.to_string()
+        } else {
+            format!("not valid YAML: {error}")
+        };
+        SchemaError::SchemaDocument {
             path: path.to_path_buf(),
-        })?;
+            message,
+        }
+    })?;
     let advisories = missing_simplified_envelope_advisory(&yaml, path)
         .into_iter()
         .collect();
@@ -768,6 +1062,7 @@ fn parse_yaml_referenced_file(
     }
     Ok(ResolvedSchema {
         simplified: None,
+        definitions: Arc::default(),
         json_schema: json,
         origin: SchemaOrigin::document(),
         imports: Vec::new(),
@@ -880,10 +1175,11 @@ fn resolve_standalone_schema(
     stack: &mut ReferenceStack,
 ) -> Result<ResolvedSchema, SchemaError> {
     let file_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let key = NamespaceKey::File(canonical_path(path));
+    let key = DefNamespace::File(canonical_path(path));
     match schema {
         SimplifiedSchema::Single(_) => {
             let mut searched = BTreeSet::new();
+            let mut definitions = DefinitionTable::default();
             let (schema, imports) = expand_document_imports(
                 schema,
                 file_dir,
@@ -892,8 +1188,9 @@ fn resolve_standalone_schema(
                 schema_roots,
                 request_context,
                 &mut searched,
+                &mut definitions,
             )?;
-            let mut json_schema = to_json_schema(&schema)?;
+            let mut json_schema = to_json_schema_with_definitions(&schema, &definitions)?;
             let examples = resolve_document_examples(
                 &mut json_schema,
                 file_dir,
@@ -904,6 +1201,7 @@ fn resolve_standalone_schema(
             )?;
             Ok(ResolvedSchema {
                 simplified: Some(schema),
+                definitions: Arc::new(definitions),
                 json_schema,
                 origin: SchemaOrigin::document(),
                 imports,
@@ -940,6 +1238,7 @@ fn resolve_standalone_schema(
 /// virtual path inside the repository root, a whole-file reference or
 /// root-union document, or an `example(...)` constraint (which would name a
 /// file on disk).
+#[cfg(test)]
 pub(crate) fn prepare_embedded_schema(
     path: &str,
     documents: &[EmbeddedDocument<'_>],
@@ -975,7 +1274,7 @@ pub(crate) fn prepare_embedded_schema_in(
             return Err(unsupported("an embedded schema cannot be a whole-file reference"));
         }
     };
-    lower_embedded_schema(schema, path, documents, bundle)
+    lower_embedded_schema(schema, path, documents, bundle, Sharing::Automatic)
 }
 
 /// Prepares an inline `$schema` mapping authored in the embedded document
@@ -999,7 +1298,26 @@ pub(crate) fn prepare_embedded_inline_schema(
             message: "an embedded inline schema cannot be a root union".into(),
         });
     }
-    lower_embedded_schema(schema, importer, documents, bundle)
+    lower_embedded_schema(schema, importer, documents, bundle, Sharing::Automatic)
+}
+
+/// [`prepare_embedded_inline_schema`] for one global catalog declaration,
+/// expanded with `sharing`: [`Sharing::Automatic`] for the catalog itself,
+/// [`Sharing::Off`] for a definition-free projection of it.
+pub(crate) fn prepare_embedded_catalog_declaration(
+    value: &YamlValue,
+    importer: &str,
+    documents: &[EmbeddedDocument<'_>],
+    sharing: Sharing,
+) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
+    let schema = parse_yaml_schema(value)?;
+    if matches!(schema, SimplifiedSchema::Union(_)) {
+        return Err(SchemaError::SchemaDocument {
+            path: PathBuf::from(importer),
+            message: "an embedded inline schema cannot be a root union".into(),
+        });
+    }
+    lower_embedded_schema(schema, importer, documents, "", sharing)
 }
 
 /// Expands a single-object embedded schema authored at `path` and lowers it,
@@ -1009,17 +1327,21 @@ fn lower_embedded_schema(
     path: &str,
     documents: &[EmbeddedDocument<'_>],
     bundle: &str,
+    sharing: Sharing,
 ) -> Result<(ResolvedSchema, Vec<PathBuf>), SchemaError> {
+    let mut definitions = DefinitionTable::default();
     let (schema, mut reads) = expand_imports(
         schema,
         Path::new(""),
-        NamespaceKey::Embedded(path.to_string()),
+        DefNamespace::Embedded(path.to_string()),
         &SchemaSourcePath::root(),
         NamespaceSource::Embedded { documents, bundle },
+        sharing,
         // Embedded imports resolve lexically in the table and probe no disk.
         &mut BTreeSet::new(),
+        &mut definitions,
     )?;
-    let json_schema = to_json_schema(&schema)?;
+    let json_schema = to_json_schema_with_definitions(&schema, &definitions)?;
     if contains_example_annotation(&json_schema) {
         return Err(SchemaError::SchemaDocument {
             path: PathBuf::from(path),
@@ -1029,6 +1351,7 @@ fn lower_embedded_schema(
     reads.push(PathBuf::from(path));
     let resolved = ResolvedSchema {
         simplified: Some(schema),
+        definitions: Arc::new(definitions),
         json_schema,
         origin: SchemaOrigin::document(),
         imports: Vec::new(),
@@ -1067,6 +1390,10 @@ fn resolve_standalone_root_union(
     let mut referenced_files = BTreeSet::new();
     let mut searched = BTreeSet::new();
     let mut advisories = BTreeSet::new();
+    let mut definitions = DefinitionTable::default();
+    let mut root_defs = Map::new();
+    // Arms whose definitions join the root after every typed key is known.
+    let mut deferred_arms: Vec<usize> = Vec::new();
 
     for (index, arm) in arms.into_iter().enumerate() {
         match arm {
@@ -1075,17 +1402,19 @@ fn resolve_standalone_root_union(
                 let (schema, arm_imports) = expand_document_imports(
                     schema,
                     base_dir,
-                    NamespaceKey::File(canonical_path(path)),
+                    DefNamespace::FileRootUnionArm(canonical_path(path), index),
                     &SchemaSourcePath::root().union_arm(index),
                     schema_roots,
                     request_context,
                     &mut searched,
+                    &mut definitions,
                 )?;
                 imports.extend(arm_imports);
                 let SimplifiedSchema::Single(shape) = schema else {
                     unreachable!("single root-union arm remains single")
                 };
-                let mut arm_json = to_json_schema(&SimplifiedSchema::Single(shape.clone()))?;
+                let mut arm_json =
+                    to_json_schema_with_definitions(&SimplifiedSchema::Single(shape.clone()), &definitions)?;
                 examples.extend(resolve_document_examples(
                     &mut arm_json,
                     base_dir,
@@ -1094,7 +1423,13 @@ fn resolve_standalone_root_union(
                     request_context,
                     &mut searched,
                 )?);
-                super::simplified::convert::attach_root_union_match(&mut arm_json, &shape);
+                hoist_definitions(&mut arm_json, &mut root_defs);
+                super::simplified::convert::attach_root_union_match(
+                    &mut arm_json,
+                    &shape,
+                    &definitions,
+                    &mut root_defs,
+                )?;
                 simplified_arms.push(SchemaArm::Inline(shape));
                 any_of.push(strip_schema_uri(arm_json));
             }
@@ -1112,8 +1447,23 @@ fn resolve_standalone_root_union(
                 searched.extend(resolved.searched.iter().cloned());
                 advisories.extend(resolved.advisories.iter().cloned());
                 let mut arm_json = resolved.json_schema;
+                if join_file_arm_definitions(
+                    &resolved.definitions,
+                    matches!(resolved.simplified, Some(SimplifiedSchema::Single(_))),
+                    &mut arm_json,
+                    &reference,
+                    &mut definitions,
+                    &mut root_defs,
+                )? {
+                    deferred_arms.push(any_of.len());
+                }
                 if let Some(SimplifiedSchema::Single(shape)) = resolved.simplified {
-                    super::simplified::convert::attach_root_union_match(&mut arm_json, &shape);
+                    super::simplified::convert::attach_root_union_match(
+                        &mut arm_json,
+                        &shape,
+                        &definitions,
+                        &mut root_defs,
+                    )?;
                     simplified_arms.push(SchemaArm::Inline(shape));
                 } else {
                     all_simplified = false;
@@ -1123,14 +1473,21 @@ fn resolve_standalone_root_union(
         }
     }
 
+    for index in deferred_arms {
+        super::scope::fold_definitions(&mut root_defs, &mut any_of[index]);
+    }
     let mut root = Map::new();
     root.insert(
         "$schema".into(),
         Value::String(super::simplified::DRAFT_2020_12.into()),
     );
     root.insert("anyOf".into(), Value::Array(any_of));
+    if !root_defs.is_empty() {
+        root.insert("$defs".into(), Value::Object(root_defs));
+    }
     Ok(ResolvedSchema {
         simplified: all_simplified.then_some(SimplifiedSchema::Union(simplified_arms)),
+        definitions: Arc::new(definitions),
         json_schema: Value::Object(root),
         origin: SchemaOrigin::document(),
         imports: imports.into_iter().collect(),
@@ -1141,11 +1498,27 @@ fn resolve_standalone_root_union(
     })
 }
 
+/// ## Errors
+///
+/// [`SchemaError::SchemaDocument`], naming the line and column, when the
+/// bytes are not one strict JSON value: invalid syntax, trailing content, a
+/// duplicate key, a number too large for `f64` (`1e400`), or a number whose
+/// written value cannot be admitted (an inexact whole number or an
+/// underflow, which also names its JSON Pointer).
+/// [`SchemaError::AmbiguousReferenced`] when the value is not an object.
 fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, SchemaError> {
-    let value: Value =
-        serde_json::from_slice(bytes).map_err(|_| SchemaError::AmbiguousReferenced {
-            path: path.to_path_buf(),
-        })?;
+    let document_error = |message: String| SchemaError::SchemaDocument {
+        path: path.to_path_buf(),
+        message,
+    };
+    let text = std::str::from_utf8(bytes).map_err(|error| document_error(format!("not UTF-8 text: {error}")))?;
+    if let Some(message) =
+        crate::markdown::coercion::content_error(crate::markdown::coercion::ContentFormat::Json, text)
+    {
+        return Err(document_error(message));
+    }
+    let value: Value = serde_json::from_str(text).map_err(|error| document_error(format!("invalid JSON: {error}")))?;
+    crate::markdown::numeric::admit_json_text_numbers(text).map_err(|error| document_error(error.to_string()))?;
     if !value.is_object() {
         return Err(SchemaError::AmbiguousReferenced {
             path: path.to_path_buf(),
@@ -1153,6 +1526,7 @@ fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, Sc
     }
     Ok(ResolvedSchema {
         simplified: None,
+        definitions: Arc::default(),
         json_schema: value,
         origin: SchemaOrigin::document(),
         imports: Vec::new(),
@@ -1173,54 +1547,31 @@ fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, Sc
 // reference, including `required` and `generated`. Postfix composes outward:
 // `Name[]@file` becomes an array of the inlined type, and
 // `Name(constraints)@file` merges the use-site constraints into the inherited
-// ones (`apply_import_postfix`). Expansion is eager, bounded, and
-// cycle-checked (named types form a DAG in v1); `to_json_schema` still rejects
-// any import that survives.
+// ones (`apply_import_postfix`). Members of a descending cycle, and acyclic
+// structured definitions referenced from two or more authored sites, become
+// references to definitions stored once; every other definition expands
+// inline, as does any use of a shared one whose postfix a reference cannot
+// represent. `to_json_schema` rejects any unresolved import that survives.
 //
-// Each namespace's unexpanded table is parsed once per expansion and shared
-// through an `Arc`: the cache, every later import of that file, and every
-// `@this` hold the same immutable allocation. Only the selected definition is
-// cloned, so each use site expands and modifies its own copy. The sharing
-// ends with `expand_document_imports`; nothing persists across calls.
+// Each namespace's unexpanded table is shared through an `Arc`: the engine
+// cache, every later import of that file, and every `@this` hold the same
+// immutable allocation. Use-site modifiers apply to independent definition
+// copies. Engine caches end with the expansion; each file's latest parsed
+// revision and the shipped tables can outlive it in the process memos below.
 
 /// Hard cap on named-type import expansion depth. Mirrors the inline-object
 /// depth cap so import chains cannot bypass the recursion guard indefinitely.
 const MAX_IMPORT_DEPTH: usize = 32;
 
-/// Cycle-detection identity for a named-type namespace. The inline document
-/// root has no path, so it uses a dedicated sentinel; a file namespace is
-/// keyed by the canonicalized path of the file it was loaded from, and an
-/// embedded one by its virtual path, which never equals a host path.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum NamespaceKey {
-    /// The inline document `$schema` (or a root-union arm) — the top-level
-    /// schema being resolved, which has no on-disk path of its own.
-    Root,
-    /// A named-type file, keyed by its canonicalized path.
-    File(PathBuf),
-    /// An embedded schema document, keyed by its virtual path. Its imports
-    /// resolve only against the embedded table.
-    Embedded(String),
-}
-
-impl NamespaceKey {
-    /// The public identity of the source this namespace was authored in.
-    fn source_id(&self) -> SchemaSourceId {
-        match self {
-            Self::Root => SchemaSourceId::InlineDocument,
-            Self::File(path) => SchemaSourceId::File(path.clone()),
-            Self::Embedded(path) => SchemaSourceId::Embedded(path.clone()),
-        }
-    }
-}
-
 /// A named-type namespace: the top-level mapping entries (`$schema:`, or
 /// `types:` under `kind: schema`) a file (or the inline document) exposes for
 /// `Name@…` imports, plus the context needed to resolve relative imports and
 /// `@this` inside it.
+#[derive(Clone)]
 struct Namespace {
-    /// Cycle-detection identity for this namespace.
-    key: NamespaceKey,
+    /// The identity of this namespace's table: definitions and cycle
+    /// detection key on it.
+    key: DefNamespace,
     /// Directory that relative imports authored inside this namespace resolve
     /// against (mirrors `$schema` file-ref resolution).
     base_dir: PathBuf,
@@ -1232,9 +1583,13 @@ struct Namespace {
 /// Drives eager, bounded, cycle-checked expansion of `Name@file` imports over
 /// a parsed [`SimplifiedSchema`].
 struct ImportEngine<'a> {
-    /// Stack of `(namespace, type-name)` frames currently being expanded, used
-    /// to detect direct and transitive cycles.
-    stack: Vec<(NamespaceKey, String)>,
+    /// The acyclic definitions currently being expanded at a use, used to
+    /// bound the depth of an import chain. A cyclic definition is never a
+    /// frame: its uses are references and its body is expanded on its own.
+    /// A shared definition's body is expanded at its first use, under that
+    /// use's frames, exactly as an inlined one is, so storing it never
+    /// shortens a chain.
+    stack: Vec<DefKey>,
     /// Resolved import file paths, deduplicated — the dependency edges a warm
     /// cache / DMLS index consumes to invalidate on imported-file change.
     dependencies: BTreeSet<PathBuf>,
@@ -1247,8 +1602,47 @@ struct ImportEngine<'a> {
     source: NamespaceSource<'a>,
     /// Parsed named-type namespaces keyed by canonical file path.
     namespace_cache: HashMap<PathBuf, CachedNamespace>,
+    /// The file each `(reference, base_dir)` selected, so a site repeating a
+    /// reference replays its probes into `searched` without resolving it
+    /// again. Only successful selections are kept, and the roots and context
+    /// they depend on are fixed for the engine's lifetime.
+    selected_files: HashMap<(String, PathBuf), SelectedFile>,
     /// Parsed embedded namespaces keyed by virtual path.
     embedded_cache: HashMap<String, Arc<IndexMap<String, PropertyDef>>>,
+    /// Parsed shipped partials keyed by virtual path, apart from
+    /// `embedded_cache`: a host table may register its own document under a
+    /// shipped path.
+    shipped_cache: HashMap<String, Arc<IndexMap<String, PropertyDef>>>,
+    /// Each named type expanded so far, by `(namespace, name)`, before any
+    /// use-site postfix. A definition's expansion depends only on its own
+    /// namespace, so a type inlined at many sites (the baseline's lifecycle
+    /// stacks) is expanded once. Only successful expansions are kept; a cycle
+    /// through a type is found at its first expansion.
+    expanded_cache: HashMap<DefKey, ExpandedDef>,
+    /// The definitions that take part in a reference cycle, found before
+    /// expansion starts. Empty for a schema that does not recurse.
+    cyclic: HashSet<DefKey>,
+    /// The acyclic definitions selected for storage (see `graph`). Kept apart
+    /// from `cyclic`: selection never changes cycle admission.
+    shared: HashSet<DefKey>,
+    /// What each stored definition contributes to a use site. `None` during
+    /// the first of the two passes a schema with stored definitions takes.
+    summaries: Option<HashMap<DefKey, recursive::UseSummary>>,
+    /// Each stored definition reached in this pass, in first-reached order,
+    /// with its namespace and, once expanded, its body.
+    reached: IndexMap<DefKey, recursive::ReachedDefinition>,
+    /// Reached cyclic definitions whose bodies are not expanded yet.
+    pending: VecDeque<DefKey>,
+    /// Expansions of definitions whose top-level alias chain is inlined
+    /// through to its end, for a use a reference to a shared target cannot
+    /// represent (see `recursive`).
+    forced_cache: HashMap<DefKey, ExpandedDef>,
+    /// Set just before expanding an atom that is a union alternative, and
+    /// taken by that atom's expansion.
+    arm_use: bool,
+    /// Set just before expanding a definition's top-level atom that must not
+    /// become a reference to a shared definition; taken by that expansion.
+    force_inline: bool,
 }
 
 /// Where an expansion reads the namespaces its imports name. This is all that
@@ -1262,7 +1656,7 @@ enum NamespaceSource<'a> {
         context: Box<biscuit_file::FileResolutionContext>,
     },
     /// The embedded table, by virtual path. Nothing is read from the disk or
-    /// the network, and every namespace is [`NamespaceKey::Embedded`]. A
+    /// the network, and every namespace is [`DefNamespace::Embedded`]. A
     /// non-empty `bundle` confines every import to `{bundle}/`.
     Embedded {
         documents: &'a [EmbeddedDocument<'a>],
@@ -1270,9 +1664,52 @@ enum NamespaceSource<'a> {
     },
 }
 
+impl<'a> ImportEngine<'a> {
+    fn new(source: NamespaceSource<'a>) -> Self {
+        Self {
+            stack: Vec::new(),
+            dependencies: BTreeSet::new(),
+            searched: BTreeSet::new(),
+            source,
+            namespace_cache: HashMap::new(),
+            selected_files: HashMap::new(),
+            embedded_cache: HashMap::new(),
+            shipped_cache: HashMap::new(),
+            expanded_cache: HashMap::new(),
+            cyclic: HashSet::new(),
+            shared: HashSet::new(),
+            summaries: None,
+            reached: IndexMap::new(),
+            pending: VecDeque::new(),
+            forced_cache: HashMap::new(),
+            arm_use: false,
+            force_inline: false,
+        }
+    }
+}
+
+/// The schema file one import reference selected.
+struct SelectedFile {
+    path: PathBuf,
+    canonical: PathBuf,
+    /// The locations the selection probed.
+    probed: Vec<PathBuf>,
+}
+
 struct CachedNamespace {
     base_dir: PathBuf,
     named_types: Arc<IndexMap<String, PropertyDef>>,
+}
+
+/// Where a named-type reference is used.
+#[derive(Clone, Copy)]
+struct Use {
+    /// The reference is an alternative of a union, which flattens a union
+    /// target into its own alternatives.
+    as_arm: bool,
+    /// The reference is the top level of a definition whose use must inline
+    /// any shared definition it aliases.
+    force_inline: bool,
 }
 
 /// One named-type reference as authored: the type, the namespace it names,
@@ -1292,6 +1729,7 @@ struct NamedReference {
 /// use-site merge needs to report where contradictory values were declared.
 /// A union carries none: a postfix over a union keeps the arms verbatim, and
 /// an arm default it lifts takes its arm's position in the definition.
+#[derive(Clone)]
 enum ExpandedDef {
     Single(Box<PropertyAtom>, AtomProvenance),
     Union(Vec<PropertyAtom>),
@@ -1454,30 +1892,63 @@ fn pattern_key_source_name(key: &PatternKey) -> String {
 /// every location probed for an import target or a rehomed example to
 /// `searched`. Schemas with no imports are returned untouched
 /// (byte-equivalent to legacy output).
+///
+/// The stored definitions the schema reaches (cyclic and shared) are added to
+/// `definitions`, which allocates their `$defs` keys; a root union passes one table to
+/// every inline arm so their keys never collide.
+#[allow(clippy::too_many_arguments)]
 fn expand_document_imports(
     schema: SimplifiedSchema,
     base_dir: &Path,
-    key: NamespaceKey,
+    key: DefNamespace,
     root: &SchemaSourcePath,
     schema_roots: &[PathBuf],
     request_context: &biscuit_file::FileResolutionContext,
     searched: &mut BTreeSet<PathBuf>,
+    definitions: &mut DefinitionTable,
 ) -> Result<(SimplifiedSchema, Vec<PathBuf>), SchemaError> {
     let source = NamespaceSource::Files {
         schema_roots: schema_roots.to_vec(),
         context: Box::new(request_context.clone()),
     };
-    expand_imports(schema, base_dir, key, root, source, searched)
+    expand_imports(schema, base_dir, key, root, source, Sharing::Automatic, searched, definitions)
+}
+
+/// Whether an expansion stores repeated acyclic structured definitions once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Sharing {
+    /// Store each definition discovery selects (see `graph`). Every
+    /// resolution, global catalog declarations included, expands this way.
+    Automatic,
+    /// Store only cyclic definitions and inline every other use. Only the
+    /// definition-free projection of the built-in baseline
+    /// ([`super::darkmatter_base_schema`]) expands this way: that public
+    /// convenience form carries no definition table, and the inline form an
+    /// acyclic use takes is the resolver's to decide, so the projection is
+    /// resolved rather than rebuilt from the shared form.
+    Off,
 }
 
 /// [`expand_document_imports`] over an explicit namespace source.
+///
+/// The named-type graph is discovered first. Without a cycle or a definition
+/// selected for sharing, expansion inlines every reference exactly as it
+/// always has. Otherwise every use of a cyclic definition, and every use of a
+/// shared one a reference can represent, becomes a [`TypeExpr::Ref`] and
+/// expansion runs twice: the first pass learns what each stored definition
+/// contributes to a use site (its markers and outer shape, see
+/// `recursive::UseSummary`), and the second builds every use site from that
+/// summary with full provenance, inlining the uses it cannot represent.
+#[allow(clippy::too_many_arguments)]
 fn expand_imports(
     schema: SimplifiedSchema,
     base_dir: &Path,
-    key: NamespaceKey,
+    key: DefNamespace,
     root: &SchemaSourcePath,
     source: NamespaceSource<'_>,
+    sharing: Sharing,
     searched: &mut BTreeSet<PathBuf>,
+    definitions: &mut DefinitionTable,
 ) -> Result<(SimplifiedSchema, Vec<PathBuf>), SchemaError> {
     if !schema_has_imports(&schema) {
         return Ok((schema, Vec::new()));
@@ -1493,15 +1964,24 @@ fn expand_imports(
         base_dir: base_dir.to_path_buf(),
         named_types,
     };
-    let mut engine = ImportEngine {
-        stack: Vec::new(),
-        dependencies: BTreeSet::new(),
-        searched: BTreeSet::new(),
-        source,
-        namespace_cache: HashMap::new(),
-        embedded_cache: HashMap::new(),
+    let mut engine = ImportEngine::new(source);
+    let discovery = engine.discover(&schema, &current, root)?;
+    engine.cyclic = discovery.cyclic;
+    if sharing == Sharing::Automatic {
+        engine.shared = discovery.shared;
+    }
+    let expanded = if engine.cyclic.is_empty() && engine.shared.is_empty() {
+        engine.expand_schema(schema, &current, root)?
+    } else {
+        engine.expand_schema(schema.clone(), &current, root)?;
+        engine.expand_reached_definitions()?;
+        let summaries = engine.summarize()?;
+        engine.begin_final_pass(summaries);
+        let expanded = engine.expand_schema(schema, &current, root)?;
+        engine.expand_reached_definitions()?;
+        engine.publish_definitions(&expanded, definitions);
+        expanded
     };
-    let expanded = engine.expand_schema(schema, &current, root)?;
     searched.extend(engine.searched);
     Ok((expanded, engine.dependencies.into_iter().collect()))
 }
@@ -1599,6 +2079,7 @@ impl ImportEngine<'_> {
         let mut out = Vec::with_capacity(arms.len());
         let mut markers = Vec::new();
         for (index, atom) in arms.into_iter().enumerate() {
+            self.arm_use = true;
             match self.expand_atom(atom, current, &path.union_arm(index))? {
                 ExpandedDef::Single(atom, provenance) => match *atom {
                     PropertyAtom {
@@ -1658,9 +2139,14 @@ impl ImportEngine<'_> {
             array_constraints,
             description,
         } = atom;
+        let as_arm = std::mem::take(&mut self.arm_use);
+        let force_inline = std::mem::take(&mut self.force_inline);
         let mut hoisted = Vec::new();
         let ty = match ty {
             TypeExpr::Imported { name, reference } => {
+                // A list of a shared definition keeps the reference on its
+                // items whatever the postfix, so forcing stops at `[]`.
+                let force_inline = force_inline && !is_array;
                 return self.expand_import(
                     NamedReference {
                         name,
@@ -1672,6 +2158,7 @@ impl ImportEngine<'_> {
                     },
                     current,
                     path,
+                    Use { as_arm, force_inline },
                 );
             }
             TypeExpr::Primitive(p) => TypeExpr::Primitive(p),
@@ -1683,6 +2170,11 @@ impl ImportEngine<'_> {
                 hoisted = flat.markers;
                 TypeExpr::Union(flat.arms)
             }
+            TypeExpr::Tuple(tuple) => TypeExpr::Tuple(tuple.try_map_defs(|index, def| {
+                self.expand_property_def(def, current, &path.union_arm(index))
+            })?),
+            TypeExpr::Function(function) => TypeExpr::Function(function),
+            TypeExpr::Ref(key) => TypeExpr::Ref(key),
         };
         let mut atom = PropertyAtom {
             ty,
@@ -1717,6 +2209,7 @@ impl ImportEngine<'_> {
         reference: NamedReference,
         current: &Namespace,
         path: &SchemaSourcePath,
+        context: Use,
     ) -> Result<ExpandedDef, SchemaError> {
         if self.stack.len() >= MAX_IMPORT_DEPTH {
             return Err(SchemaError::ImportCycle {
@@ -1733,7 +2226,7 @@ impl ImportEngine<'_> {
             source: current.key.source_id(),
             path: path.clone(),
         };
-        let Some(def) = target.named_types.get(&reference.name).cloned() else {
+        let Some(def) = target.named_types.get(&reference.name) else {
             // A missing named type is a resolution error, not a grammar error:
             // the reference parsed fine, its namespace simply does not define it.
             return Err(SchemaError::UnknownNamedType {
@@ -1743,33 +2236,92 @@ impl ImportEngine<'_> {
             });
         };
 
-        let frame = (target.key.clone(), reference.name.clone());
-        if self.stack.contains(&frame) {
+        let frame = DefKey::new(target.key.clone(), reference.name.clone());
+        let definition_path = SchemaSourcePath::root().property(reference.name.as_str());
+        let definition = SchemaReferenceSite {
+            source: target.key.source_id(),
+            path: definition_path.clone(),
+        };
+        if self.cyclic.contains(&frame) {
+            self.reach(&frame, &target);
+            return self.recursive_use(frame, reference, &site, &definition);
+        }
+        let mut base = self.inline_base(&frame, def, &target, &definition_path, &reference.name, context.force_inline)?;
+        if !context.force_inline && self.shared.contains(&frame) && self.can_reference(&frame, &base, &reference, context.as_arm) {
+            self.reach_shared(&frame, &target, &base);
+            return self.recursive_use(frame, reference, &site, &definition);
+        }
+        if !context.force_inline && !self.alias_use_keeps_reference(&base, &reference, context.as_arm) {
+            base = self.inline_base(&frame, def, &target, &definition_path, &reference.name, true)?;
+        }
+        self.apply_postfix(base, reference, &site, &definition)
+    }
+
+    /// The expansion of `def`, the definition `frame`, before any use-site
+    /// postfix, from the cache when an earlier use expanded it. With
+    /// `force_inline`, a top-level alias chain into shared definitions is
+    /// inlined through to its end rather than ending in a reference.
+    fn inline_base(
+        &mut self,
+        frame: &DefKey,
+        def: &PropertyDef,
+        target: &Namespace,
+        definition_path: &SchemaSourcePath,
+        name: &str,
+        force_inline: bool,
+    ) -> Result<ExpandedDef, SchemaError> {
+        if let Some(expanded) = self.expanded_cache.get(frame)
+            && !(force_inline && self.shared_alias_target(expanded).is_some())
+        {
+            return Ok(expanded.clone());
+        }
+        if force_inline && let Some(expanded) = self.forced_cache.get(frame) {
+            return Ok(expanded.clone());
+        }
+        // Admission rejected every cycle that does not pass through a
+        // cyclic definition, so this guards an invariant.
+        if self.stack.contains(frame) {
             return Err(SchemaError::ImportCycle {
-                chain: self.describe_cycle(&reference.name),
+                chain: self.describe_cycle(name),
             });
         }
-        self.stack.push(frame);
-        let definition_path = SchemaSourcePath::root().property(reference.name.as_str());
-        let base = match def {
-            PropertyDef::Single(atom) => self.expand_atom(atom, &target, &definition_path)?,
-            PropertyDef::Union(arms) => {
-                self.expand_union_arms(arms, &target, &definition_path)?.into_expanded()
+        self.stack.push(frame.clone());
+        // Cloned only here: a cached expansion never reads the body.
+        let base = match def.clone() {
+            PropertyDef::Single(atom) => {
+                self.force_inline = force_inline;
+                self.expand_atom(atom, target, definition_path)?
             }
+            PropertyDef::Union(arms) => self.expand_union_arms(arms, target, definition_path)?.into_expanded(),
         };
         self.stack.pop();
 
-        let base = match &target.key {
-            NamespaceKey::File(file) => self.rehome_examples(base, file)?,
+        let base = self.rehome_definition_examples(base, &target.key)?;
+        let cache = if force_inline { &mut self.forced_cache } else { &mut self.expanded_cache };
+        cache.insert(frame.clone(), base.clone());
+        Ok(base)
+    }
+
+    /// Pins the examples of a definition expanded from a schema file (see
+    /// [`Self::rehome_examples`]); other namespaces have none to pin.
+    fn rehome_definition_examples(
+        &mut self,
+        base: ExpandedDef,
+        namespace: &DefNamespace,
+    ) -> Result<ExpandedDef, SchemaError> {
+        match namespace {
+            DefNamespace::File(file) | DefNamespace::FileRootUnionArm(file, _) => {
+                self.rehome_examples(base, &file.clone())
+            }
             // An embedded definition's examples are rejected once the
             // embedded schema is lowered (`prepare_embedded_schema`).
-            NamespaceKey::Root | NamespaceKey::Embedded(_) => base,
-        };
-        let definition = SchemaReferenceSite {
-            source: target.key.source_id(),
-            path: definition_path,
-        };
-        apply_import_postfix(base, reference, &site, &definition)
+            DefNamespace::InlineRoot
+            | DefNamespace::RootUnionArm(_)
+            | DefNamespace::TriggerPayload(_)
+            | DefNamespace::TriggerPayloadUnionArm(..)
+            | DefNamespace::Embedded(_)
+            | DefNamespace::Shipped(_) => Ok(base),
+        }
     }
 
     /// Pins the `example(...)` references of a definition inlined from
@@ -1806,10 +2358,13 @@ impl ImportEngine<'_> {
     }
 
     /// Resolves the namespace named on the right of `@`. `this` targets the
-    /// current namespace; any other value is a `biscuit-file` reference resolved
-    /// relative to `current.base_dir` (mirroring `$schema` file-ref resolution).
-    /// Bare-name references (no path component) resolve against the schema-root
-    /// context nearest-first when roots are configured (Phase 3).
+    /// current namespace, and `darkmatter:<stem>` a shipped partial
+    /// ([`embedded::SHIPPED_NAMESPACE`]); a reference written inside a shipped
+    /// partial resolves lexically among the shipped documents. Any other value
+    /// is a `biscuit-file` reference resolved relative to `current.base_dir`
+    /// (mirroring `$schema` file-ref resolution). Bare-name references (no
+    /// path component) resolve against the schema-root context nearest-first
+    /// when roots are configured (Phase 3).
     fn resolve_namespace(
         &mut self,
         reference: &str,
@@ -1823,38 +2378,68 @@ impl ImportEngine<'_> {
                 named_types: Arc::clone(&current.named_types),
             });
         }
-        let path = match &self.source {
+        if let Some(stem) = embedded::reserved_stem(trimmed) {
+            let document = embedded::shipped_partial(stem).ok_or_else(|| SchemaError::NoMatch {
+                reference: trimmed.to_string(),
+                bare_name: false,
+            })?;
+            return self.shipped_namespace(document.path);
+        }
+        if let DefNamespace::Shipped(importer) = &current.key {
+            let target = embedded::resolve_path(importer, reference).map_err(|reason| SchemaError::SchemaDocument {
+                path: PathBuf::from(importer),
+                message: format!("embedded import `{trimmed}`: {reason}"),
+            })?;
+            let document = embedded::find(embedded::SHIPPED, &target).ok_or_else(|| SchemaError::SchemaDocument {
+                path: PathBuf::from(importer),
+                message: format!("embedded import `{trimmed}`: `{target}` is not a shipped schema document"),
+            })?;
+            return self.shipped_namespace(document.path);
+        }
+        let (path, canonical) = match &self.source {
             NamespaceSource::Files { schema_roots, context } => {
-                named_type_file_path(
-                    reference,
-                    &current.base_dir,
-                    schema_roots,
-                    context,
-                    &mut self.searched,
-                )?
+                let site = (reference.to_string(), current.base_dir.clone());
+                if let Some(selected) = self.selected_files.get(&site) {
+                    self.searched.extend(selected.probed.iter().cloned());
+                    (selected.path.clone(), selected.canonical.clone())
+                } else {
+                    let mut probed = BTreeSet::new();
+                    let selected = named_type_file_path(reference, &current.base_dir, schema_roots, context, &mut probed);
+                    self.searched.extend(probed.iter().cloned());
+                    let path = selected?;
+                    let canonical = canonical_path(&path);
+                    self.selected_files.insert(
+                        site,
+                        SelectedFile {
+                            path: path.clone(),
+                            canonical: canonical.clone(),
+                            probed: probed.into_iter().collect(),
+                        },
+                    );
+                    (path, canonical)
+                }
             }
             NamespaceSource::Embedded { documents, bundle } => {
                 let (documents, bundle) = (*documents, *bundle);
-                let NamespaceKey::Embedded(importer) = &current.key else {
+                let DefNamespace::Embedded(importer) = &current.key else {
                     unreachable!("an embedded expansion holds only embedded namespaces")
                 };
                 return self.resolve_embedded_namespace(documents, bundle, importer, reference);
             }
         };
 
-        let canonical = canonical_path(&path);
         self.dependencies.insert(canonical.clone());
         // Reuse an already-loaded namespace for this file: multiple import sites
         // targeting the same file (`A@types.yaml`, `B@types.yaml`, …) otherwise
         // re-read and re-parse it once each.
         if let Some(cached) = self.namespace_cache.get(&canonical) {
             return Ok(Namespace {
-                key: NamespaceKey::File(canonical),
+                key: DefNamespace::File(canonical),
                 base_dir: cached.base_dir.clone(),
                 named_types: Arc::clone(&cached.named_types),
             });
         }
-        let named_types = Arc::new(load_named_types(&path)?);
+        let named_types = load_named_types(&path)?;
         let base_dir = path
             .parent()
             .map(Path::to_path_buf)
@@ -1867,7 +2452,7 @@ impl ImportEngine<'_> {
             },
         );
         Ok(Namespace {
-            key: NamespaceKey::File(canonical),
+            key: DefNamespace::File(canonical),
             base_dir,
             named_types,
         })
@@ -1908,7 +2493,30 @@ impl ImportEngine<'_> {
             }
         };
         Ok(Namespace {
-            key: NamespaceKey::Embedded(target),
+            key: DefNamespace::Embedded(target),
+            base_dir: PathBuf::new(),
+            named_types,
+        })
+    }
+
+    /// The shipped partial registered at `path` as a namespace. An embedded
+    /// expansion records it in its read set; a disk expansion records no
+    /// dependency edge, since a shipped document is an immutable build input
+    /// and names no host file.
+    fn shipped_namespace(&mut self, path: &str) -> Result<Namespace, SchemaError> {
+        if matches!(self.source, NamespaceSource::Embedded { .. }) {
+            self.dependencies.insert(PathBuf::from(path));
+        }
+        let named_types = match self.shipped_cache.get(path) {
+            Some(cached) => Arc::clone(cached),
+            None => {
+                let named_types = shipped_named_types(path)?;
+                self.shipped_cache.insert(path.to_string(), Arc::clone(&named_types));
+                named_types
+            }
+        };
+        Ok(Namespace {
+            key: DefNamespace::Shipped(path.to_string()),
             base_dir: PathBuf::new(),
             named_types,
         })
@@ -1917,10 +2525,40 @@ impl ImportEngine<'_> {
     /// Renders the current expansion stack as a `a -> b -> a` chain for the
     /// cycle-error message.
     fn describe_cycle(&self, repeat: &str) -> String {
-        let mut parts: Vec<&str> = self.stack.iter().map(|(_, n)| n.as_str()).collect();
+        let mut parts: Vec<&str> = self.stack.iter().map(|frame| frame.name.as_str()).collect();
         parts.push(repeat);
         parts.join(" -> ")
     }
+}
+
+/// The parsed named types of each shipped partial, shared by every
+/// expansion in the process: a shipped document is compiled in, so its parse
+/// never changes. Failures are not kept.
+static SHIPPED_NAMED_TYPES: std::sync::LazyLock<std::sync::Mutex<HashMap<&'static str, Arc<NamedTypes>>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// A schema document's top-level named types, unexpanded.
+type NamedTypes = IndexMap<String, PropertyDef>;
+
+/// Empties the process-wide named-type parse memos (see
+/// [`crate::markdown::schemas::reset_process_caches_for_bench`]).
+pub(crate) fn reset_process_caches() {
+    SHIPPED_NAMED_TYPES.lock().expect("shipped partial memo poisoned").clear();
+    FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").clear();
+}
+
+/// The named types of the shipped partial registered at `path`.
+fn shipped_named_types(path: &str) -> Result<Arc<NamedTypes>, SchemaError> {
+    let document = embedded::find(embedded::SHIPPED, path).expect("the caller found the shipped document");
+    if let Some(cached) = SHIPPED_NAMED_TYPES.lock().expect("shipped partial memo poisoned").get(document.path) {
+        return Ok(Arc::clone(cached));
+    }
+    let named_types = Arc::new(named_types_from_text(document.text, Path::new(document.path))?);
+    SHIPPED_NAMED_TYPES
+        .lock()
+        .expect("shipped partial memo poisoned")
+        .insert(document.path, Arc::clone(&named_types));
+    Ok(named_types)
 }
 
 /// The file an explicit named-type reference (`Name@reference`) selects,
@@ -2078,28 +2716,64 @@ fn canonical_path(path: &Path) -> PathBuf {
 /// SimplifiedSchema mapping (raw JSON Schema or a root union) —
 /// imports are only defined among a file's named types, so a raw JSON Schema
 /// has none to offer.
-fn load_named_types(path: &Path) -> Result<IndexMap<String, PropertyDef>, SchemaError> {
+fn load_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
+    let loaded = read_named_types(path);
+    if loaded.is_err() {
+        // The path's latest revision failed: drop its entry so the memo only
+        // ever holds a table the file parsed to when last read.
+        FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").remove(path);
+    }
+    loaded
+}
+
+/// Reads and hashes `path`, reusing its memo entry when the hash matches and
+/// otherwise parsing and replacing the entry.
+fn read_named_types(path: &Path) -> Result<Arc<NamedTypes>, SchemaError> {
     let bytes = fs::read(path).map_err(|source| SchemaError::Io {
         path: path.to_path_buf(),
         source,
     })?;
+    observed::read(path);
     let text = std::str::from_utf8(&bytes).map_err(|_| SchemaError::AmbiguousReferenced {
         path: path.to_path_buf(),
     })?;
-    named_types_from_text(text, path)
+    let hash = biscuit_hash::xx_hash_bytes(&bytes);
+    if let Some(entry) = FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").get(path)
+        && entry.hash == hash
+    {
+        return Ok(Arc::clone(&entry.table));
+    }
+    crate::note_work!(NamedTypeTableParse);
+    let table = Arc::new(named_types_from_text(text, path)?);
+    FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").insert(
+        path.to_path_buf(),
+        FileTable {
+            hash,
+            table: Arc::clone(&table),
+        },
+    );
+    Ok(table)
+}
+
+/// The latest successfully parsed revision of each schema file an import
+/// read, keyed by the path it was read from, so every payload and document
+/// importing an unchanged file parses it once. The file is still read and
+/// hashed on every use: an edit replaces the entry, and a failed read or
+/// parse removes it and is never served from here. Entries are never evicted,
+/// so memory grows with the distinct paths a process imports; a request
+/// holding a superseded table keeps it alive through its own `Arc`.
+static FILE_NAMED_TYPES: std::sync::LazyLock<std::sync::Mutex<HashMap<PathBuf, FileTable>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// One path's latest successful parse and the hash of the bytes it parsed.
+struct FileTable {
+    hash: u64,
+    table: Arc<NamedTypes>,
 }
 
 /// The named types a schema document's text declares; `path` identifies the
 /// document in errors.
 fn named_types_from_text(text: &str, path: &Path) -> Result<IndexMap<String, PropertyDef>, SchemaError> {
-    // The classifier declines unparseable YAML; an import target must be
-    // a schema, so name the syntax error instead of "ambiguous".
-    if let Err(error) = serde_yaml_ng::from_str::<YamlValue>(text) {
-        return Err(SchemaError::SchemaDocument {
-            path: path.to_path_buf(),
-            message: format!("not valid YAML: {error}"),
-        });
-    }
     let Some(document) = parse_standalone_schema_document(text, path)? else {
         return Err(SchemaError::AmbiguousReferenced {
             path: path.to_path_buf(),
@@ -2135,9 +2809,13 @@ impl MergeSite<'_> {
     fn conflict(
         &self,
         kind: SchemaConstraintConflictKind,
-        mut constraints: Vec<SchemaConstraintOrigin>,
+        constraints: Vec<Tagged>,
     ) -> SchemaError {
-        locate_origin_spans(&mut constraints);
+        let mut constraints = constraints
+            .into_iter()
+            .map(|(constraint, origin)| SchemaConstraintParticipant { origin, constraint })
+            .collect::<Vec<_>>();
+        locate_origin_spans(constraints.iter_mut().map(|participant| &mut participant.origin));
         SchemaError::ConstraintConflict {
             name: self.name.to_string(),
             kind,
@@ -2151,9 +2829,9 @@ impl MergeSite<'_> {
 /// re-projecting that file. Runs only on the error path. A file that can no
 /// longer be read or projected leaves its spans `None`; the error being built
 /// still names the file, path, and keyword.
-fn locate_origin_spans(origins: &mut [SchemaConstraintOrigin]) {
+fn locate_origin_spans<'a>(origins: impl Iterator<Item = &'a mut SchemaConstraintOrigin>) {
     let mut documents: HashMap<PathBuf, Option<(String, SchemaSourceMap)>> = HashMap::new();
-    for origin in origins.iter_mut() {
+    for origin in origins {
         let SchemaSourceId::File(path) = &origin.source else {
             continue;
         };
@@ -2711,7 +3389,7 @@ fn bound_count(n: f64, keyword: &str, property: &str) -> Result<usize, SchemaErr
 }
 
 fn is_key_bound(constraint: &Constraint) -> bool {
-    matches!(constraint, Constraint::MinKeys(_) | Constraint::MaxKeys(_))
+    matches!(constraint, Constraint::MinKeys(_) | Constraint::MaxKeys(_) | Constraint::UncountedKeys(_))
 }
 
 /// The kind a bound limits; bounds merge only within one kind.
@@ -2806,6 +3484,8 @@ fn check_use_site_options(
         .map(|(_, origin)| origin)
         .next()
         .expect("caller passes at least one option list");
+    let canonical_set =
+        |set: AlphanumericOptions| Constraint::Options(set.canonical().options().collect());
     let base_origin = base
         .constraints
         .iter()
@@ -2821,7 +3501,10 @@ fn check_use_site_options(
             occurrence: 0,
             span: None,
         });
-    Err(merge_site.conflict(SchemaConstraintConflictKind::Options, vec![base_origin, use_origin]))
+    Err(merge_site.conflict(
+        SchemaConstraintConflictKind::Options,
+        vec![(canonical_set(target), base_origin), (canonical_set(written), use_origin)],
+    ))
 }
 
 /// Merges `inherited` and then `use_site` constraints of one level (value or
@@ -2858,11 +3541,17 @@ fn merge_constraints(
                     .iter_mut()
                     .find(|(c, ..)| matches!(c, Constraint::Scheme(_)))
                 {
+                    // The inherited participant is the effective list before
+                    // this intersection, not the empty list it narrows to.
+                    let effective = existing.clone();
                     existing.retain(|scheme| schemes.contains(scheme));
                     if existing.is_empty() {
                         return Err(merge_site.conflict(
                             SchemaConstraintConflictKind::Scheme,
-                            vec![existing_origin.clone(), origin],
+                            vec![
+                                (Constraint::Scheme(effective), existing_origin.clone()),
+                                (constraint, origin),
+                            ],
                         ));
                     }
                     continue;
@@ -2878,7 +3567,10 @@ fn merge_constraints(
                     }
                     return Err(merge_site.conflict(
                         SchemaConstraintConflictKind::Default,
-                        vec![existing_origin.clone(), origin],
+                        vec![
+                            (Constraint::Default(existing.clone()), existing_origin.clone()),
+                            (constraint, origin),
+                        ],
                     ));
                 }
             }
@@ -2898,17 +3590,20 @@ fn merge_constraints(
             merged.iter().find_map(|(constraint, origin, sequence)| {
                 Bound::of(constraint)
                     .filter(|bound| bound.kind == kind && bound.lower == lower)
-                    .map(|bound| (bound.value, origin, *sequence))
+                    .map(|bound| (bound.value, constraint, origin, *sequence))
             })
         };
         if let (Some(lower), Some(upper)) = (find(true), find(false))
             && lower.0 > upper.0
         {
             let mut ordered = [lower, upper];
-            ordered.sort_by_key(|(_, _, sequence)| *sequence);
+            ordered.sort_by_key(|(.., sequence)| *sequence);
             return Err(merge_site.conflict(
                 SchemaConstraintConflictKind::Bounds,
-                ordered.iter().map(|(_, origin, _)| (*origin).clone()).collect(),
+                ordered
+                    .iter()
+                    .map(|(_, constraint, origin, _)| ((*constraint).clone(), (*origin).clone()))
+                    .collect(),
             ));
         }
     }
@@ -2931,12 +3626,15 @@ fn reconcile_property_defaults(
         _ => None,
     });
     if let Some((item_default, item_origin)) = item_default {
-        if let Some((_, container_origin)) = array.iter().find(|(constraint, _)| {
+        if let Some(container) = array.iter().find(|(constraint, _)| {
             matches!(constraint, Constraint::Default(default) if !defaults_equal(default, item_default))
         }) {
             return Err(merge_site.conflict(
                 SchemaConstraintConflictKind::Default,
-                vec![item_origin.clone(), container_origin.clone()],
+                vec![
+                    (Constraint::Default(item_default.clone()), item_origin.clone()),
+                    container.clone(),
+                ],
             ));
         }
         array.retain(|(constraint, _)| !matches!(constraint, Constraint::Default(_)));
@@ -2944,31 +3642,12 @@ fn reconcile_property_defaults(
     Ok((value, array))
 }
 
-/// Whether two defaults lower to the same JSON value. Integral floats equal
-/// integers (`3.0` is `3`); a string never equals a number. Mirrors the
-/// converter's `normalize_json_number` so a merge accepts exactly the
-/// defaults that lower identically.
+/// Whether two defaults lower to the same JSON value. Sharing the converter's
+/// normalization keeps integer boundaries and nested values identical.
 fn defaults_equal(left: &Value, right: &Value) -> bool {
-    normalized_default(left) == normalized_default(right)
-}
+    use super::simplified::convert::normalize_json_number;
 
-fn normalized_default(value: &Value) -> Value {
-    match value {
-        Value::Number(n) if n.is_i64() || n.is_u64() => value.clone(),
-        Value::Number(n) => n
-            .as_f64()
-            .filter(|f| {
-                f.is_finite() && f.fract() == 0.0 && (i64::MIN as f64..=i64::MAX as f64).contains(f)
-            })
-            .map_or_else(|| value.clone(), |f| Value::from(f as i64)),
-        Value::Array(items) => Value::Array(items.iter().map(normalized_default).collect()),
-        Value::Object(map) => Value::Object(
-            map.iter()
-                .map(|(key, item)| (key.clone(), normalized_default(item)))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
+    normalize_json_number(left.clone()) == normalize_json_number(right.clone())
 }
 
 // ── Import-tree traversal helpers (fast-path detection) ─────────────────────
@@ -3000,7 +3679,8 @@ fn atom_has_imports(atom: &PropertyAtom) -> bool {
         TypeExpr::Imported { .. } => true,
         TypeExpr::InlineObject(shape) => shape_has_imports(shape),
         TypeExpr::Union(arms) => arms.iter().any(atom_has_imports),
-        TypeExpr::Primitive(_) => false,
+        TypeExpr::Tuple(tuple) => tuple.any_atom(atom_has_imports),
+        TypeExpr::Primitive(_) | TypeExpr::Function(_) | TypeExpr::Ref(_) => false,
     }
 }
 
@@ -3031,8 +3711,12 @@ fn resolve_document_examples(
 ) -> Result<Vec<PathBuf>, SchemaError> {
     let mut deps: BTreeSet<PathBuf> = BTreeSet::new();
     let mut reads: HashMap<PathBuf, Vec<u8>> = HashMap::new();
+    // A target is compiled alone, so it takes the root's definitions (read
+    // before any annotation inside them is resolved in place).
+    let definitions = json.get("$defs").cloned();
     resolve_examples_in_json(
         json,
+        definitions.as_ref(),
         base_dir,
         this_file,
         schema_roots,
@@ -3047,6 +3731,7 @@ fn resolve_document_examples(
 #[allow(clippy::too_many_arguments)]
 fn resolve_examples_in_json(
     value: &mut Value,
+    definitions: Option<&Value>,
     base_dir: &Path,
     this_file: Option<&Path>,
     schema_roots: &[PathBuf],
@@ -3068,6 +3753,9 @@ fn resolve_examples_in_json(
                 // match. Cloned before the annotation is overwritten below.
                 let mut target = map.clone();
                 target.remove("x-darkmatter-example");
+                if let Some(definitions) = definitions {
+                    target.insert("$defs".into(), definitions.clone());
+                }
                 let target = Value::Object(target);
                 let mut resolved = Vec::with_capacity(items.len());
                 for item in items {
@@ -3095,6 +3783,7 @@ fn resolve_examples_in_json(
                 }
                 resolve_examples_in_json(
                     child,
+                    definitions,
                     base_dir,
                     this_file,
                     schema_roots,
@@ -3109,6 +3798,7 @@ fn resolve_examples_in_json(
             for item in items.iter_mut() {
                 resolve_examples_in_json(
                     item,
+                    definitions,
                     base_dir,
                     this_file,
                     schema_roots,
@@ -3211,6 +3901,7 @@ fn resolve_one_example(
     let path =
         resolve_example_path(reference, base_dir, this_file, schema_roots, request_context, searched)?;
     let canonical = canonical_path(&path);
+    observed::read(&canonical);
     // Reuse the bytes when another `example(...)` site already read this file
     // during the same resolution run.
     let bytes = match reads.get(&canonical) {
@@ -3245,14 +3936,100 @@ fn resolve_one_example(
 ///   baseline's `required` array (since the document's own `required` may
 ///   restate them).
 /// - Properties present only in one side are preserved verbatim.
+/// - The baseline's root `$defs` move to the document's root, where its
+///   `#/$defs/…` references resolve once its properties are copied in (into
+///   every arm of a root union). Only the definitions a copied property
+///   reaches move; those reached only from properties the document declares
+///   are dropped. The document's keys and references never change; a
+///   baseline key that collides with a different document body is re-keyed
+///   (`item-2`) along with the baseline's references to it.
 ///
 /// ## Errors
 ///
 /// Returns [`SchemaError::Baseline`] when the baseline is not a simple
 /// object schema (rooted at `"type": "object"` with only `properties` /
-/// `required`).
+/// `required` / `$defs`), [`SchemaError::UnresolvedReference`] or
+/// [`SchemaError::UnsupportedMergeReference`] when its references would not
+/// keep their meaning under the document's root, and
+/// [`SchemaError::UnsupportedMergeReference`] when its definitions would move
+/// into a root-union arm that declares its own `$id`.
 pub fn merge_baseline(baseline: &Value, document: Value) -> Result<Value, SchemaError> {
     validate_baseline_schema(baseline)?;
+    let mut document = document;
+    let baseline = move_baseline_definitions(baseline, &mut document)?;
+    merge_layer(&baseline, document)
+}
+
+/// The baseline with the root `$defs` its copied properties reach moved into
+/// `document`'s root and its references renamed to match; borrowed unchanged
+/// when it has none.
+fn move_baseline_definitions<'b>(
+    baseline: &'b Value,
+    document: &mut Value,
+) -> Result<std::borrow::Cow<'b, Value>, SchemaError> {
+    if baseline.get("$defs").is_none() {
+        return Ok(std::borrow::Cow::Borrowed(baseline));
+    }
+    let Some(document_obj) = document.as_object_mut() else {
+        // `merge_layer` reports the non-object document.
+        return Ok(std::borrow::Cow::Borrowed(baseline));
+    };
+    // `#/$defs` inside an arm with its own `$id` resolves in that arm, not in
+    // the root the definitions move to.
+    if let Some(arms) = document_obj.get("anyOf").and_then(Value::as_array)
+        && let Some(index) = arms.iter().position(|arm| arm.get("$id").is_some())
+    {
+        return Err(SchemaError::UnsupportedMergeReference {
+            schema: "the baseline".into(),
+            location: format!("/anyOf/{index}"),
+            reason: "the document arm's `$id` would change the scope the baseline's definitions resolve in"
+                .into(),
+        });
+    }
+    // Only the properties some document arm leaves undeclared are copied in.
+    let arms: Vec<&Map<String, Value>> = match document_obj.get("anyOf").and_then(Value::as_array) {
+        Some(arms) => arms.iter().filter_map(Value::as_object).collect(),
+        None => vec![&*document_obj],
+    };
+    let copied: BTreeSet<String> = baseline
+        .get("properties")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(Map::keys)
+        .filter(|name| {
+            arms.iter().any(|arm| {
+                !arm.get("properties").and_then(Value::as_object).is_some_and(|properties| properties.contains_key(*name))
+            })
+        })
+        .cloned()
+        .collect();
+    let mut baseline = baseline.clone();
+    super::scope::retain_reached_definitions(&mut baseline, |name| copied.contains(name));
+    if baseline.get("$defs").and_then(Value::as_object).is_some_and(Map::is_empty) {
+        baseline.as_object_mut().expect("validated baseline must be an object").remove("$defs");
+        return Ok(std::borrow::Cow::Owned(baseline));
+    }
+    let mut document_defs = match document_obj.remove("$defs") {
+        Some(Value::Object(defs)) => defs,
+        Some(other) => {
+            document_obj.insert("$defs".into(), other);
+            return Err(SchemaError::Baseline {
+                message: "the document's root `$defs` is not an object, so the baseline's definitions \
+                          cannot join it"
+                    .into(),
+                source: None,
+            });
+        }
+        None => Map::new(),
+    };
+    super::scope::fold_definitions(&mut document_defs, &mut baseline);
+    document_obj.insert("$defs".into(), Value::Object(document_defs));
+    Ok(std::borrow::Cow::Owned(baseline))
+}
+
+/// The property-keyed merge of an already admitted `baseline` (no root
+/// `$defs` of its own) into `document`, arm by arm for a root union.
+pub(super) fn merge_layer(baseline: &Value, document: Value) -> Result<Value, SchemaError> {
     let baseline_obj = baseline
         .as_object()
         .expect("validated baseline must be an object");
@@ -3261,7 +4038,7 @@ pub fn merge_baseline(baseline: &Value, document: Value) -> Result<Value, Schema
     if let Some(arms) = document.get("anyOf").and_then(Value::as_array) {
         let mut new_arms = Vec::with_capacity(arms.len());
         for arm in arms {
-            new_arms.push(merge_baseline(baseline, arm.clone())?);
+            new_arms.push(merge_layer(baseline, arm.clone())?);
         }
         let mut merged = document.as_object().cloned().unwrap_or_else(Map::new);
         merged.insert("anyOf".into(), Value::Array(new_arms));
@@ -3355,23 +4132,45 @@ pub fn merge_baseline(baseline: &Value, document: Value) -> Result<Value, Schema
 }
 
 pub(super) fn validate_baseline_schema(baseline: &Value) -> Result<(), SchemaError> {
-    let baseline_obj = baseline.as_object().ok_or_else(|| SchemaError::Baseline {
-        message: "baseline must be an object schema".into(),
-        source: None,
-    })?;
-    validate_simple_object_schema(baseline_obj)
+    validate_simple_object_schema(baseline, "the baseline")
 }
 
 /// Validates that a JSON Schema is a simple object schema: rooted at
 /// `"type": "object"` with only `properties` / `required` (plus the cosmetic
-/// `$schema` / `additionalProperties: true` / `description` / `title`).
+/// `$schema` / `additionalProperties: true` / `description` / `title`, and a
+/// root `$defs` table its properties refer to).
 ///
 /// This is the merge-compatibility contract: both caller baselines and trigger
 /// payloads must satisfy it so the property-keyed merge has a sound "later
-/// wins" meaning.
-pub(crate) fn validate_simple_object_schema(
-    schema: &Map<String, Value>,
-) -> Result<(), SchemaError> {
+/// wins" meaning. `label` names the schema in errors.
+///
+/// A root `$defs` moves to the root the schema merges under, so a schema that
+/// carries one must be a valid Draft 2020-12 schema and its references must
+/// stay in its own table ([`super::scope::check_joined_references`]). Every
+/// schema's `#/$defs/…` references must resolve in its own table; the other
+/// reference forms of a schema without `$defs` are not inspected, as before.
+pub(crate) fn validate_simple_object_schema(schema: &Value, label: &str) -> Result<(), SchemaError> {
+    let object = schema.as_object().ok_or_else(|| SchemaError::Baseline {
+        message: format!("{label} must be an object schema"),
+        source: None,
+    })?;
+    validate_simple_object_root(object)?;
+    if object.contains_key("$defs")
+        && let Err(error) = jsonschema::draft202012::meta::validate(schema)
+    {
+        return Err(SchemaError::Baseline {
+            message: format!(
+                "{label} declares `$defs` but is not a valid Draft 2020-12 schema at `{}`: {error}",
+                error.instance_path()
+            ),
+            source: None,
+        });
+    }
+    super::scope::check_joined_references(schema, label)
+}
+
+/// The root-key half of [`validate_simple_object_schema`].
+pub(super) fn validate_simple_object_root(schema: &Map<String, Value>) -> Result<(), SchemaError> {
     // `additionalProperties: true` is permitted (SimplifiedSchema-generated
     // baselines emit it); `false` and schema-shaped values are not.
     const ALLOWED_KEYS: &[&str] = &[
@@ -3382,6 +4181,7 @@ pub(crate) fn validate_simple_object_schema(
         "additionalProperties",
         "description",
         "title",
+        "$defs",
     ];
 
     if let Some(ty) = schema.get("type") {
@@ -4121,10 +4921,13 @@ mod schema_plus_phase1 {
             "$schema:\n  type: type@./a.yaml\n",
         );
         let err = resolve_file(dir.path(), "a.yaml").expect_err("import cycle must error");
-        assert!(
-            matches!(err, SchemaError::ImportCycle { .. }),
-            "an import cycle must be a structural recursion error, not a grammar error: {err:?}"
-        );
+        // An alias cycle never descends into a child value, so it is the
+        // typed cycle error rather than a grammar error.
+        let SchemaError::NonDescendingCycle { cycles } = &err else {
+            panic!("an alias cycle must be a NonDescendingCycle: {err:?}");
+        };
+        assert_eq!(cycles.len(), 1, "{err:?}");
+        assert_eq!(cycles[0].len(), 2, "both references form the cycle: {err:?}");
     }
 
     #[test]
@@ -5224,22 +6027,15 @@ mod shared_type_tables {
     }
 
     fn engine(dir: &Path) -> ImportEngine<'static> {
-        ImportEngine {
-            stack: Vec::new(),
-            dependencies: BTreeSet::new(),
-            searched: BTreeSet::new(),
-            source: NamespaceSource::Files {
-                schema_roots: Vec::new(),
-                context: Box::new(FileResolutionContext::new(dir)),
-            },
-            namespace_cache: HashMap::new(),
-            embedded_cache: HashMap::new(),
-        }
+        ImportEngine::new(NamespaceSource::Files {
+            schema_roots: Vec::new(),
+            context: Box::new(FileResolutionContext::new(dir)),
+        })
     }
 
     fn root_namespace(dir: &Path, named_types: IndexMap<String, PropertyDef>) -> Namespace {
         Namespace {
-            key: NamespaceKey::Root,
+            key: DefNamespace::InlineRoot,
             base_dir: dir.to_path_buf(),
             named_types: Arc::new(named_types),
         }
@@ -5263,7 +6059,7 @@ mod shared_type_tables {
 
             let first = engine.resolve_namespace("./types.yaml", &root).unwrap();
             let canonical = canonical_path(&types);
-            assert_eq!(first.key, NamespaceKey::File(canonical.clone()));
+            assert_eq!(first.key, DefNamespace::File(canonical.clone()));
             let cached = &engine.namespace_cache[&canonical];
             assert!(
                 Arc::ptr_eq(&first.named_types, &cached.named_types),
@@ -5272,8 +6068,12 @@ mod shared_type_tables {
 
             // Two later imports, selecting distinct names and spelling the
             // reference differently, reach the same canonical cache entry.
+            engine.dependencies.clear();
             let for_a = engine.resolve_namespace("./types.yaml", &root).unwrap();
+            assert!(engine.dependencies.contains(&canonical), "a cache hit records its dependency");
+            engine.dependencies.clear();
             let for_b = engine.resolve_namespace("types.yaml", &root).unwrap();
+            assert!(engine.dependencies.contains(&canonical), "an alternate spelling records its dependency");
             assert!(for_a.named_types.contains_key("A"), "tagged={tagged}");
             assert!(for_b.named_types.contains_key("B"), "tagged={tagged}");
             for later in [&for_a, &for_b] {
@@ -5308,7 +6108,7 @@ mod shared_type_tables {
 
         for _ in 0..2 {
             let this = engine.resolve_namespace("this", &root).unwrap();
-            assert_eq!(this.key, NamespaceKey::Root);
+            assert_eq!(this.key, DefNamespace::InlineRoot);
             assert!(
                 Arc::ptr_eq(&this.named_types, &root.named_types),
                 "`@this` must share the root's table"
@@ -5329,7 +6129,7 @@ mod shared_type_tables {
 
             for _ in 0..2 {
                 let this = engine.resolve_namespace("this", &file).unwrap();
-                assert_eq!(this.key, NamespaceKey::File(canonical_path(&types)));
+                assert_eq!(this.key, DefNamespace::File(canonical_path(&types)));
                 assert!(
                     Arc::ptr_eq(&this.named_types, &file.named_types),
                     "tagged={tagged}: `@this` in a file must share that file's table"
@@ -5340,6 +6140,23 @@ mod shared_type_tables {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_whole_file_reference_cannot_supply_a_cached_named_namespace() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("types.yaml"), "$schema: ./actual.yaml\n").unwrap();
+        std::fs::write(dir.path().join("actual.yaml"), "$schema:\n  name: string\n").unwrap();
+        let mut engine = engine(dir.path());
+        let root = root_namespace(dir.path(), IndexMap::new());
+
+        let error = engine.resolve_namespace("./types.yaml", &root).err().expect("a reference is no namespace");
+        let SchemaError::SchemaDocument { path, message } = error else {
+            panic!("expected a schema-document error, got {error:?}");
+        };
+        assert_eq!(path, dir.path().join("types.yaml"));
+        assert_eq!(message, "whole-file reference schema documents cannot supply named imports");
+        assert!(engine.namespace_cache.is_empty(), "a rejected namespace must not enter the cache");
     }
 
     // ── Use-site independence ────────────────────────────────────────────
@@ -5395,6 +6212,38 @@ mod shared_type_tables {
     }
 
     #[test]
+    fn array_modifiers_do_not_change_another_use_of_the_shared_type() {
+        for tagged in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            write_types(dir.path(), tagged, "  name: 'string(required)'\n");
+            for reference in ["./types.yaml", "this"] {
+                let resolved = resolve_root(
+                    dir.path(),
+                    &format!(
+                        "name: 'string(required)'\n\
+                         many: 'name[](min(2))@{reference} -> names'\n\
+                         one: name@{reference}\n"
+                    ),
+                );
+                let properties = &resolved.json_schema["properties"];
+                assert_eq!(
+                    properties["many"],
+                    json!({
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 2,
+                        "description": "names",
+                    }),
+                    "tagged={tagged}, reference={reference}: array modifiers stay at their use site"
+                );
+                assert_eq!(properties["one"], json!({"type": "string"}));
+                assert_eq!(properties["name"], json!({"type": "string"}));
+                assert_eq!(resolved.json_schema["required"], json!(["name", "many", "one"]));
+            }
+        }
+    }
+
+    #[test]
     fn this_inside_imported_file_selects_that_files_type() {
         for tagged in [false, true] {
             let dir = tempfile::tempdir().unwrap();
@@ -5444,7 +6293,7 @@ mod shared_type_tables {
         )
         .unwrap();
 
-        let (expanded, imports) =
+        let NamedTypeExpansion { schema: expanded, imports, .. } =
             expand_named_types(&buffer, dir.path(), Some(&schema_file), &[], &context).unwrap();
         let SimplifiedSchema::Single(shape) = expanded else { panic!("single schema") };
         assert!(shape.properties["title"].is_required(), "`base` came from the buffer");
@@ -5486,4 +6335,237 @@ mod shared_type_tables {
 }
 
 #[cfg(test)]
+mod reserved_namespace {
+    //! `Name@darkmatter:<stem>` names a type of a shipped partial whoever
+    //! writes it: a disk schema, a Darkmatter embedded document, or a host
+    //! bundle document. References inside the partial resolve among the
+    //! shipped documents, also during a disk expansion.
+
+    use super::*;
+
+    fn yaml(input: &str) -> YamlValue {
+        serde_yaml_ng::from_str(input).expect("yaml parse")
+    }
+
+    /// The property names of the object `json` lowers to, or of its
+    /// non-null `anyOf` arm.
+    fn keys(json: &Value) -> BTreeSet<String> {
+        let object = json["anyOf"]
+            .as_array()
+            .and_then(|arms| arms.iter().find(|arm| arm["type"] == "object"))
+            .unwrap_or(json);
+        object["properties"].as_object().expect("an object").keys().cloned().collect()
+    }
+
+    #[test]
+    fn a_disk_schema_reaches_a_shipped_partial_and_records_no_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = FileResolutionContext::new(dir.path());
+        let resolved = resolve_yaml_schema(&yaml("talk: communicate@darkmatter:lifecycle\n"), dir.path(), &context)
+            .expect("the reserved reference resolves");
+        assert!(keys(&resolved.json_schema["properties"]["talk"]).contains("say"));
+        assert!(resolved.referenced_files.is_empty(), "{:?}", resolved.referenced_files);
+        assert!(resolved.imports.is_empty(), "a shipped partial is no file dependency: {:?}", resolved.imports);
+    }
+
+    #[test]
+    fn a_disk_library_file_reaches_a_shipped_partial_from_any_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("a/b");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("types.yaml"), "kind: schema\ntypes:\n  tally: count@darkmatter:lifecycle\n").unwrap();
+        let context = FileResolutionContext::new(dir.path());
+        let resolved = resolve_yaml_schema(&yaml("n: tally@./a/b/types.yaml\n"), dir.path(), &context)
+            .expect("the library's reserved reference resolves");
+        let arms = resolved.json_schema["properties"]["n"]["anyOf"].as_array().expect("count is a union");
+        assert!(arms.iter().any(|arm| arm["type"] == "integer"), "{arms:?}");
+        assert!(arms.iter().any(|arm| arm["pattern"].is_string()), "count's `interpolation` arm resolved locally");
+        assert_eq!(resolved.imports, vec![canonical_path(&nested.join("types.yaml"))]);
+    }
+
+    #[test]
+    fn relative_references_inside_a_reached_partial_stay_in_the_shipped_table() {
+        // md-lifecycle.yaml names its verbs `info-short@./lifecycle.yaml`;
+        // the importer's folder holds a decoy that must not be read.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("lifecycle.yaml"), "kind: schema\ntypes:\n  info-short: number\n").unwrap();
+        let context = FileResolutionContext::new(dir.path());
+        let resolved =
+            resolve_yaml_schema(&yaml("talk: md-communicate@darkmatter:md-lifecycle\n"), dir.path(), &context)
+                .expect("the partial's own imports resolve");
+        let talk = &resolved.json_schema["properties"]["talk"];
+        let object = talk["anyOf"].as_array().and_then(|arms| arms.iter().find(|arm| arm["type"] == "object")).unwrap_or(talk);
+        let info = object["properties"]["info"].to_string();
+        assert!(info.contains("\"string\"") && !info.contains("\"number\""), "{info}");
+        assert!(resolved.imports.is_empty(), "{:?}", resolved.imports);
+    }
+
+    #[test]
+    fn a_darkmatter_embedded_document_reaches_a_shipped_partial() {
+        let (resolved, reads) = prepare_embedded_inline_schema(
+            &yaml("talk: communicate@darkmatter:lifecycle\n"),
+            embedded::SHIPPED[0].path,
+            embedded::SHIPPED,
+            "",
+        )
+        .expect("resolves in the shipped table");
+        assert!(keys(&resolved.json_schema["properties"]["talk"]).contains("info"));
+        assert!(reads.contains(&PathBuf::from("darkmatter/schemas/partials/lifecycle.yaml")), "{reads:?}");
+    }
+
+    #[test]
+    fn a_host_bundle_document_reaches_a_shipped_partial_outside_its_bundle() {
+        let documents = [EmbeddedDocument {
+            path: "host/actions.yaml",
+            text: "kind: schema\ntypes:\n  talk: communicate@darkmatter:lifecycle\n",
+        }];
+        let (resolved, _) = prepare_embedded_inline_schema(
+            &yaml("talk: talk@./actions.yaml\n"),
+            "host/trigger.yaml",
+            &documents,
+            "host",
+        )
+        .expect("the bundle's reserved reference resolves");
+        assert!(keys(&resolved.json_schema["properties"]["talk"]).contains("say"));
+        // A plain relative climb out of the bundle is still refused.
+        let escape = prepare_embedded_inline_schema(
+            &yaml("talk: communicate@../darkmatter/schemas/partials/lifecycle.yaml\n"),
+            "host/trigger.yaml",
+            &documents,
+            "host",
+        );
+        assert!(escape.is_err(), "{escape:?}");
+    }
+
+    #[test]
+    fn an_unknown_stem_is_an_error_naming_the_reference() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = FileResolutionContext::new(dir.path());
+        for reference in ["darkmatter:bogus", "darkmatter:", "darkmatter:../fm", "darkmatter:fm.yaml"] {
+            let error = resolve_yaml_schema(&yaml(&format!("x: \"t@{reference}\"\n")), dir.path(), &context)
+                .expect_err("an unknown stem fails");
+            let SchemaError::NoMatch { reference: named, .. } = &error else {
+                panic!("`{reference}`: {error:?}")
+            };
+            assert_eq!(named, reference);
+            assert!(error.to_string().contains(reference), "{error}");
+        }
+        let embedded = prepare_embedded_inline_schema(&yaml("x: t@darkmatter:bogus\n"), "host/a.yaml", &[], "host");
+        assert!(matches!(embedded, Err(SchemaError::NoMatch { .. })), "{embedded:?}");
+        let missing_type = resolve_yaml_schema(&yaml("x: nope@darkmatter:lifecycle\n"), dir.path(), &context);
+        assert!(
+            matches!(&missing_type, Err(SchemaError::UnknownNamedType { name, .. }) if name == "nope"),
+            "{missing_type:?}"
+        );
+    }
+
+    #[test]
+    fn a_reserved_reference_names_no_host_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = FileResolutionContext::new(dir.path());
+        assert_eq!(named_type_reference_path("darkmatter:lifecycle", dir.path(), &[], &context).unwrap(), None);
+        assert_eq!(named_type_reference_path(" darkmatter:bogus ", dir.path(), &[], &context).unwrap(), None);
+    }
+}
+
+#[cfg(test)]
 mod searched_tests;
+
+mod graph;
+mod recursive;
+
+#[cfg(test)]
+mod embedded_recursion {
+    //! Recursive named types inside embedded documents resolve against the
+    //! embedded table alone, with no filesystem read.
+
+    use super::*;
+
+    const ITEM: &str = "kind: schema\ntypes:\n  item: \"{ children: item[] }\"\n";
+    const PAIR: &str = "kind: schema\ntypes:\n  a: \"{ b: b@./pair.yaml }\"\n  b: \"{ a: a[]@./pair.yaml }\"\n";
+
+    #[test]
+    fn self_and_mutual_recursion_resolve_from_embedded_documents() {
+        let documents = [
+            EmbeddedDocument { path: "bundle/item.yaml", text: ITEM },
+            EmbeddedDocument { path: "bundle/pair.yaml", text: PAIR },
+            EmbeddedDocument {
+                path: "bundle/root.yaml",
+                text: "kind: schema\ntypes:\n  tree: item@./item.yaml\n  pair: a@./pair.yaml\n",
+            },
+        ];
+        let (resolved, reads) = prepare_embedded_schema_in("bundle/root.yaml", &documents, "bundle")
+            .expect("embedded recursion resolves");
+        assert!(resolved.imports.is_empty(), "embedded documents record no file edge");
+        assert_eq!(reads.len(), 3, "{reads:?}");
+        let namespaces: Vec<&DefNamespace> = resolved.definitions.iter().map(|(key, _)| &key.namespace).collect();
+        assert_eq!(
+            namespaces,
+            [
+                &DefNamespace::Embedded("bundle/item.yaml".into()),
+                &DefNamespace::Embedded("bundle/pair.yaml".into()),
+                &DefNamespace::Embedded("bundle/pair.yaml".into()),
+            ]
+        );
+        let defs = resolved.json_schema["$defs"].as_object().expect("$defs");
+        assert_eq!(defs.keys().collect::<Vec<_>>(), ["item", "a", "b"]);
+        assert_eq!(resolved.json_schema["properties"]["tree"]["anyOf"][1], serde_json::json!({"$ref": "#/$defs/item"}));
+    }
+}
+#[cfg(test)]
+mod named_type_file_memo {
+    use super::*;
+
+    fn memo_holds(path: &Path) -> bool {
+        FILE_NAMED_TYPES.lock().expect("named-type file memo poisoned").contains_key(path)
+    }
+
+    fn named_type(table: &NamedTypes) -> SimplifiedType {
+        match &table["name"] {
+            PropertyDef::Single(atom) => match &atom.ty {
+                TypeExpr::Primitive(primitive) => *primitive,
+                other => panic!("expected a primitive, got {other:?}"),
+            },
+            other => panic!("expected a single definition, got {other:?}"),
+        }
+    }
+
+    /// A table a request already holds survives the edit that replaces its
+    /// memo entry; an unchanged reread shares the latest table.
+    #[test]
+    fn a_held_table_keeps_its_revision_after_the_entry_is_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("types.yaml");
+        std::fs::write(&path, "kind: schema\ntypes:\n  name: string\n").unwrap();
+        let held = load_named_types(&path).unwrap();
+
+        std::fs::write(&path, "kind: schema\ntypes:\n  name: number\n").unwrap();
+        let latest = load_named_types(&path).unwrap();
+
+        assert_eq!(named_type(&held), SimplifiedType::String);
+        assert_eq!(named_type(&latest), SimplifiedType::Number);
+        assert!(Arc::ptr_eq(&latest, &load_named_types(&path).unwrap()));
+        assert!(!Arc::ptr_eq(&held, &latest));
+    }
+
+    /// A failed read or parse drops the path's entry, so nothing can serve
+    /// the earlier revision.
+    #[test]
+    fn a_failed_read_or_parse_drops_the_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("types.yaml");
+        std::fs::write(&path, "kind: schema\ntypes:\n  name: string\n").unwrap();
+        load_named_types(&path).unwrap();
+        assert!(memo_holds(&path));
+
+        std::fs::write(&path, "kind: schema\ntypes: [\n").unwrap();
+        assert!(matches!(load_named_types(&path), Err(SchemaError::SchemaDocument { .. })));
+        assert!(!memo_holds(&path));
+
+        std::fs::write(&path, "kind: schema\ntypes:\n  name: string\n").unwrap();
+        load_named_types(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert!(matches!(load_named_types(&path), Err(SchemaError::Io { .. })));
+        assert!(!memo_holds(&path));
+    }
+}

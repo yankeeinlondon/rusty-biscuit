@@ -30,6 +30,7 @@ pub mod semantic_legend;
 pub mod source_map;
 pub mod wiki;
 pub mod work_counters;
+pub mod validation_timing;
 pub mod workspace;
 
 pub use bench::{BenchReport, bench_index};

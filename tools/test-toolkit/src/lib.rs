@@ -65,6 +65,7 @@
 //! reached from a declared `[[test]]` root. Each such package calls it from a
 //! test inside its own Level 1 binary.
 
+pub mod alloc_count;
 pub mod archive_guard;
 pub mod argv_recorder;
 pub mod backend;

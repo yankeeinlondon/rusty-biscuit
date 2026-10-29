@@ -1,0 +1,40 @@
+# scenario: proxy-hop-limit
+# doc: proxy-hop-limit.md
+# given: invoked as `claudine compose --claude proxy-hop-limit.md` from the directory holding the fixture documents
+# given: the test writes proxy-hop-limit.hop-01.md through proxy-hop-limit.hop-16.md from proxy-hop-limit.hop.md; the entry and every hop proxy to the next from start, before any provider launch
+# given: the chain counts the origin document, so 15 hand-offs are adopted and the 16th (hop-15 to hop-16, an existing file) is refused with LifecycleProxyCycle (limit 16)
+# given: the refusal before launch ends the run with no catch event and no finalize
+# given: the provider never launches
+event initialize
+event start
+event hop-01:initialize
+event hop-01:start
+event hop-02:initialize
+event hop-02:start
+event hop-03:initialize
+event hop-03:start
+event hop-04:initialize
+event hop-04:start
+event hop-05:initialize
+event hop-05:start
+event hop-06:initialize
+event hop-06:start
+event hop-07:initialize
+event hop-07:start
+event hop-08:initialize
+event hop-08:start
+event hop-09:initialize
+event hop-09:start
+event hop-10:initialize
+event hop-10:start
+event hop-11:initialize
+event hop-11:start
+event hop-12:initialize
+event hop-12:start
+event hop-13:initialize
+event hop-13:start
+event hop-14:initialize
+event hop-14:start
+event hop-15:initialize
+event hop-15:start
+exit 1

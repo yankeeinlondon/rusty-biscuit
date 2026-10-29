@@ -26,7 +26,7 @@ use super::source::{
     ExpressionContext, SchemaSourcePath, SchemaSourcePathSegment, quoted_flow_scalar_end,
     scan_expression, split_flow_entries,
 };
-use super::yaml_scalar::decode_partial_scalar_at;
+use super::yaml_scalar::{DecodedScalar, decode_partial_scalar_at};
 
 /// The structural role a cursor occupies inside a partially authored value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,6 +152,41 @@ pub fn locate_schema_declaration_cursor(
     locate_in(&value_source[..relative], value_offset, SchemaSourcePath::root(), true)
 }
 
+/// Locates the authoring state of `cursor` inside a plain scalar already
+/// decoded from `source`, as [`locate_type_definition_cursor`] does for raw
+/// value text.
+///
+/// `scalar` is the result of
+/// [`decode_plain_scalar_node`](super::decode_plain_scalar_node) on `source`,
+/// so a value that continues onto later lines is read as YAML folds it and any
+/// anchor or tag before it stays outside every reported range. Use it when the
+/// value cannot be read from a parsed document, such as a definition still
+/// being typed.
+///
+/// ## Returns
+///
+/// `None` when `cursor` is before the scalar or not on a character boundary,
+/// when it is past the scalar's last authored byte with anything other than
+/// spaces or tabs between them on that line, and in the cases
+/// [`locate_type_definition_cursor`] lists.
+pub fn locate_type_definition_cursor_in_scalar(
+    source: &str,
+    scalar: &DecodedScalar,
+    cursor: usize,
+) -> Option<SchemaCursor> {
+    scan_decoded(&scalar.prefix_at(source, cursor)?, 0, SchemaSourcePath::root())
+}
+
+/// [`locate_schema_declaration_cursor`] for a plain scalar already decoded
+/// from `source`; see [`locate_type_definition_cursor_in_scalar`].
+pub fn locate_schema_declaration_cursor_in_scalar(
+    source: &str,
+    scalar: &DecodedScalar,
+    cursor: usize,
+) -> Option<SchemaCursor> {
+    whole_decoded(&scalar.prefix_at(source, cursor)?, 0, SchemaSourcePath::root())
+}
+
 /// Walks the YAML shape layer (a flow sequence is a union) and then reads the
 /// enclosing scalar, either as a type expression or as a whole declaration arm.
 fn locate_in(
@@ -186,6 +221,10 @@ fn locate_in(
 /// Reads a declaration arm as one opaque authored token.
 fn whole_arm(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<SchemaCursor> {
     let (scalar, _) = decode_partial_scalar_at(prefix, 0);
+    whole_decoded(&scalar, offset, path)
+}
+
+fn whole_decoded(scalar: &DecodedScalar, offset: usize, path: SchemaSourcePath) -> Option<SchemaCursor> {
     let decoded = scalar.decoded();
     let span = scalar.project(0..decoded.len())?;
     Some(SchemaCursor {
@@ -299,6 +338,11 @@ enum Frame {
 /// keeps the import-reference role while it is still inside a reference.
 fn scan_scalar(prefix: &str, offset: usize, path: SchemaSourcePath) -> Option<SchemaCursor> {
     let (scalar, _) = decode_partial_scalar_at(prefix, 0);
+    scan_decoded(&scalar, offset, path)
+}
+
+/// [`scan_scalar`] over text already decoded up to the cursor.
+fn scan_decoded(scalar: &DecodedScalar, offset: usize, path: SchemaSourcePath) -> Option<SchemaCursor> {
     let src = scalar.decoded().to_string();
     let bytes = src.as_bytes();
     let mut lex = Lexer::new(&src);
@@ -907,6 +951,73 @@ mod tests {
             assert!(super::super::grammar::parse_type_expr("p", value).is_err(), "{value:?}");
             assert!(locate_type_definition_cursor(value, 0, value.len()).is_some(), "{value:?}");
         }
+    }
+
+    fn decoded_plain(source: &str, holder: &str, parent_indent: usize) -> DecodedScalar {
+        let start = source.find(holder).expect("holder") + holder.len();
+        super::super::decode_plain_scalar_node(source, start, parent_indent)
+            .expect("plain scalar")
+            .0
+    }
+
+    #[test]
+    fn a_decoded_continuation_reads_the_cursor_without_its_anchor_or_tag() {
+        for (source, holder) in [
+            ("t: &e string(min(1);\n  ma\n", "t: "),
+            ("t: !!str string(min(1);\n  ma\n", "t: "),
+            ("t: &e !!str string(min(1);\r\n\r\n  ma\r\n", "t: "),
+        ] {
+            let scalar = decoded_plain(source, holder, 0);
+            let cursor = source.find("ma").unwrap() + 2;
+            let state = locate_type_definition_cursor_in_scalar(source, &scalar, cursor)
+                .expect("cursor state");
+            assert_eq!(state.token, "ma", "{source:?}");
+            assert_eq!(state.token_span, cursor - 2..cursor, "{source:?}");
+            assert!(
+                matches!(
+                    &state.role,
+                    SchemaCursorRole::Constraint { subject: Some(subject), leading_group: None, .. }
+                        if subject == "string"
+                ),
+                "{source:?}: {:?}",
+                state.role
+            );
+            // The same token read from raw text that starts after the anchor.
+            let raw = locate_type_definition_cursor(source, 0, cursor);
+            assert_eq!(raw.map(|raw| raw.token), Some("ma".to_string()));
+        }
+    }
+
+    #[test]
+    fn a_decoded_scalar_accepts_only_cursors_it_authored_or_trailing_blanks() {
+        let source = "t: &e string(min(1);\n  max(2); \nnext: x\n";
+        let scalar = decoded_plain(source, "t: ", 0);
+        let end = source.find("max(2);").unwrap() + "max(2);".len();
+        // At the final byte, and after trailing blanks: a fresh position.
+        let state = locate_type_definition_cursor_in_scalar(source, &scalar, end).unwrap();
+        assert_eq!((state.token.as_str(), state.token_span), ("", end..end));
+        let state = locate_type_definition_cursor_in_scalar(source, &scalar, end + 1).unwrap();
+        assert_eq!(state.token_span, end + 1..end + 1);
+        // Before the scalar (inside the anchor), and on the next line.
+        let anchor = source.find("&e").unwrap() + 1;
+        assert!(locate_type_definition_cursor_in_scalar(source, &scalar, anchor).is_none());
+        let sibling = source.find("next").unwrap() + 2;
+        assert!(locate_type_definition_cursor_in_scalar(source, &scalar, sibling).is_none());
+        // A comment after the scalar is not part of it.
+        let source = "t: string(min(1);\n  max(2) # note\n";
+        let scalar = decoded_plain(source, "t: ", 0);
+        let inside = source.find("note").unwrap();
+        assert!(locate_type_definition_cursor_in_scalar(source, &scalar, inside).is_none());
+    }
+
+    #[test]
+    fn a_decoded_declaration_arm_is_one_token_without_its_anchor() {
+        let source = "- &a ./types\n  .yaml\n";
+        let scalar = decoded_plain(source, "- ", 0);
+        let cursor = source.len() - 1;
+        let state = locate_schema_declaration_cursor_in_scalar(source, &scalar, cursor).unwrap();
+        assert_eq!(state.token, "./types .yaml");
+        assert_eq!(state.token_span, source.find("./").unwrap()..cursor);
     }
 
     #[test]

@@ -1,14 +1,14 @@
-//! Content-triggered schema layering — foundational trigger-schema core.
+//! Content-triggered schema layering — foundational schema-trigger core.
 //!
-//! A trigger schema is a standalone YAML file claiming the
-//! `kind: trigger-schema` envelope. Triggers live in the five
+//! A schema trigger is a standalone YAML file claiming the
+//! `kind: schema-trigger` envelope. Triggers live in the five
 //! [schema roots](super::roots), activate by matching a document's parsed
 //! frontmatter + path, and layer a payload schema between the caller
 //! baseline and the document `$schema`.
 //!
 //! ## Phase scope
 //!
-//! - **Phase 1** — the match grammar ([`grammar`]), the trigger-schema
+//! - **Phase 1** — the match grammar ([`grammar`]), the schema-trigger
 //!   envelope parser ([`envelope`]), the vacuous-trigger lint ([`lint`]), and
 //!   the matcher ([`matcher`]). No I/O beyond judging one known path.
 //! - **Phase 2** — trigger discovery in the schema roots and the
@@ -25,6 +25,7 @@
 pub mod assemble;
 pub mod discovery;
 pub mod envelope;
+pub mod finding;
 pub mod grammar;
 pub mod lint;
 pub mod matcher;
@@ -32,7 +33,7 @@ pub mod matcher;
 mod payload_memo_tests;
 
 pub use assemble::{
-    PayloadMemoCounts, PayloadMemoTally, TriggerArmTrace, TriggerEvaluation, TriggerTrace, TriggerTraceEntry, evaluate_registry,
+    PayloadMemoCounts, PayloadMemoTally, TriggerConditionTrace, TriggerEvaluation, TriggerTrace, TriggerTraceEntry, evaluate_registry,
     matched_triggers, trace_registry,
 };
 pub use crate::markdown::schemas::embedded::EmbeddedSchemaBundle;
@@ -40,9 +41,10 @@ pub use discovery::{
     LoadedTrigger, SchemaRootSource, ShadowedFile, TriggerRegistry, TriggerSource,
     enumerate_root_files, scan, scan_with_embedded, scan_with_source,
 };
+pub use finding::InvalidTriggerFinding;
 pub use envelope::{TriggerEnvelope, parse_trigger_envelope, parse_trigger_envelope_from_str};
 pub use grammar::{
-    COMBINATOR_KEYS, PATH_KEY, MatchArms, MatchExpr, PathGlobs, is_match_safe_constraint,
-    parse_match_arms,
+    COMBINATOR_KEYS, PATH_KEY, MatchConditions, MatchExpr, PathGlobs, is_match_safe_constraint,
+    parse_match_conditions,
 };
 pub use matcher::{PathSubject, first_defeat, matches};

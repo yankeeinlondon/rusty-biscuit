@@ -76,9 +76,9 @@ test *args="":
     if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
         # Darkmatter's CI L1 contract retains the explicitly marked slow tests
         # and keeps per-package invocations for distinct JUnit reports.
-        BISCUIT_L1_INCLUDE_SLOW=1 just _test_all "{{ LIBRARY }} --features effects-instrumentation; {{ CLI }} --features test-fixtures; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
+        BISCUIT_L1_INCLUDE_SLOW=1 just _test_all "{{ LIBRARY }} --features effects-instrumentation,work-counters; {{ CLI }} --features test-fixtures; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
     else
-        just _test_local_all "{{ LIBRARY }} --features effects-instrumentation; {{ CLI }} --features test-fixtures; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
+        just _test_local_all "{{ LIBRARY }} --features effects-instrumentation,work-counters; {{ CLI }} --features test-fixtures; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
     fi
     if (( exit_code == 130 )); then
         exit 130
@@ -448,7 +448,7 @@ bench *args="":
     @echo -e "Running Criterion benches for {{ BOLD }}{{ LIB_NAME }}{{ RESET }}"
     @cargo bench -p {{ LIBRARY }} --benches -- {{ args }}
 
-# run only the schema validation benches (1000-doc corpus, warm + cold cache)
+# run only the schema validation benches (1000-doc corpus; frozen Claudine bundle cold + warm; frozen recursive/unrolled resolve)
 bench-schema *args="":
     @cargo bench -p {{ LIBRARY }} --bench schema_validation -- {{ args }}
 
@@ -524,6 +524,15 @@ regen-expr-doc:
     @cargo run -p darkmatter --example expression_doc_generator -- --write
     @echo
     @echo -e "{{ BOLD }}{{ GREEN }}Function table regenerated{{ RESET }} in docs/topics/darkmatter-expressions.md"
+
+# Regenerate the generated lifecycle verb types in schemas/partials/lifecycle.yaml
+regen-lifecycle-schema:
+    @echo
+    @echo -e "Regenerating the {{ BOLD }}generated lifecycle verb types{{ RESET }}"
+    @echo
+    @cargo run -p darkmatter --example lifecycle_schema_generator -- --write
+    @echo
+    @echo -e "{{ BOLD }}{{ GREEN }}Lifecycle verb types regenerated{{ RESET }} in schemas/partials/lifecycle.yaml"
 
 readme:
     _readme_files darkmatter

@@ -231,12 +231,6 @@ fn compose_in_tmux(
             .map(|frame| frame.plain)
             .unwrap_or_default();
         if ready(&pane) {
-            // One redraw, so the last line the run wrote is in the frame.
-            std::thread::sleep(Duration::from_millis(200));
-            pane = harness
-                .capture()
-                .map(|frame| frame.plain)
-                .unwrap_or_default();
             break;
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -413,8 +407,16 @@ fn level2_ac28_lazy_roots_refresh_between_lifecycle_events() {
 /// `success` therefore means the lazy root resolved.
 #[test]
 fn level2_ac28_shipped_prompt_that_references_a_lazy_root_composes() {
-    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    assert_planning_prompt_lazy_root(true);
+}
 
+#[test]
+fn level2_ac28_shipped_prompt_rejects_an_unknown_lazy_root() {
+    assert_planning_prompt_lazy_root(false);
+}
+
+fn assert_planning_prompt_lazy_root(known_root: bool) {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let shipped = fs::read_to_string(frozen_prompts_dir().join("plan.md"))
         .expect("the shipped planning prompt must be readable");
     assert!(
@@ -426,38 +428,40 @@ fn level2_ac28_shipped_prompt_that_references_a_lazy_root_composes() {
     let fixture = stage();
     fs::create_dir_all(fixture.repo.join("features/f1")).unwrap();
     fs::write(fixture.repo.join("features/f1/spec.md"), "# fixture spec\n").unwrap();
-    // What `plan.md` transcludes must sit beside both documents composed below.
+    // The control document needs the same transclusion targets as the original.
     stage_frozen_prompts(&fixture.repo, &["plan.md"]);
-    let real = "plan.md".to_string();
-    let control = write_document(
-        &fixture,
-        "plan-control.md",
-        &shipped.replace("current.time", "current.not_a_context_key"),
-    );
+    let document = if known_root {
+        "plan.md".to_string()
+    } else {
+        write_document(
+            &fixture,
+            "plan-control.md",
+            &shipped.replace("current.time", "current.not_a_context_key"),
+        )
+    };
     let setters = "spec=features/f1/spec.md plan=features/f1/plan.md";
     let settled = |pane: &str| {
         pane.contains("has been created") || pane.contains("lifecycle evaluation error")
     };
 
-    let pane = compose_in_tmux(&fixture, &fixture.repo, &real, setters, settled);
-    assert!(
-        pane.contains("has been created"),
-        "the shipped planning prompt must compose through its `current.time` \
-         handlers and reach `success`; pane:\n{pane}"
-    );
+    let pane = compose_in_tmux(&fixture, &fixture.repo, &document, setters, settled);
+    if known_root {
+        assert!(
+            pane.contains("has been created"),
+            "the shipped planning prompt must compose through its `current.time` \
+             handlers and reach `success`; pane:\n{pane}"
+        );
+    } else {
+        assert!(
+            pane.contains("lifecycle evaluation error"),
+            "an unresolvable lazy root in the same shipped prompt must halt the run; pane:\n{pane}"
+        );
+    }
     assert!(
         !fixture.spool.exists(),
         "composing a shipped prompt must publish no audio; the private spool at \
          {} was created",
         fixture.spool.display()
-    );
-
-    let control_pane = compose_in_tmux(&fixture, &fixture.repo, &control, setters, settled);
-    assert!(
-        control_pane.contains("lifecycle evaluation error"),
-        "the control proves the assertion above distinguishes: an unresolvable \
-         lazy root in the same shipped prompt must halt the run; \
-         pane:\n{control_pane}"
     );
 }
 

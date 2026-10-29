@@ -1,9 +1,14 @@
 //! Parsed reads of the retired sequence globals, with presence-based escape
 //! for ordinary document properties (including an authored or supplied null).
+//!
+//! The reads are Darkmatter's ([`static_access_reads`]); this module only
+//! matches their roots against [`RETIRED_SEQUENCE_NAMES`].
 
 use std::path::Path;
 
-use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder, parse, parse_condition};
+use darkmatter::markdown::compose::expression::{
+    Expr, ExpressionFinder, parse, parse_condition, static_access_reads,
+};
 use serde_json::Value;
 
 use super::{AuthoredDocument, super::LifecycleConfig};
@@ -20,43 +25,35 @@ pub const RETIRED_SEQUENCE_NAMES: &[(&str, &str)] = &[
     ("is_last", "seq.is_last"),
 ];
 
+/// Which [`RETIRED_SEQUENCE_NAMES`] `values` declares, one bit per name in
+/// that order: the only part of a `supplied` overlay the retired-read checks
+/// read, so a check that passed under one set passes under it again.
+pub fn retired_names_present(values: &serde_json::Map<String, Value>) -> u16 {
+    RETIRED_SEQUENCE_NAMES.iter().enumerate()
+        .filter(|(_, (name, _))| values.contains_key(*name))
+        .fold(0, |present, (bit, _)| present | (1 << bit))
+}
+
+/// The first retired sequence read of `expr` whose root `declared` does not
+/// claim, as `(removed, replacement)`, in source order.
+///
+/// `removed` is the read's static path
+/// ([`static_path`](darkmatter::markdown::compose::expression::StaticAccessRead::static_path)):
+/// a string key extends it like a member, which matters for
+/// `state['sequence_id']`, where the member changes the replacement; a
+/// numeric or computed index ends it.
 fn read(expr: &Expr, declared: &impl Fn(&str) -> bool) -> Option<(String, String)> {
-    let path = |path: &str| {
-        let (root, suffix) = path.split_once('.').unwrap_or((path, ""));
+    static_access_reads(expr).iter().find_map(|access| {
+        let path = access.static_path();
+        let (root, suffix) = path.split_once('.').unwrap_or((&path, ""));
         if declared(root) { return None; }
         let (_, replacement) = RETIRED_SEQUENCE_NAMES.iter().find(|(old, _)| *old == root)?;
         let replacement = if root == "state" && suffix == "sequence_id" {
             "seq.run_id".to_string()
         } else if suffix.is_empty() { replacement.to_string() }
         else { format!("{replacement}.{suffix}") };
-        Some((path.to_string(), replacement))
-    };
-    // Static selectors matter for `state['sequence_id']`, where the member
-    // changes the replacement; unrelated selectors retain normal semantics.
-    fn static_path(expr: &Expr) -> Option<String> {
-        match expr {
-            Expr::Variable(path) => Some(path.clone()),
-            Expr::Paren(inner) => static_path(inner),
-            Expr::MemberAccess { base, name } => Some(format!("{}.{name}", static_path(base)?)),
-            Expr::Index { base, index } => match index.as_ref() {
-                Expr::StringLiteral(key) => Some(format!("{}.{key}", static_path(base)?)),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-    if let Some(found) = static_path(expr).and_then(|p| path(&p)) { return Some(found); }
-    match expr {
-        Expr::Variable(_) | Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => None,
-        Expr::Index { base, index } => read(base, declared).or_else(|| read(index, declared)),
-        Expr::MemberAccess { base, .. } | Expr::Paren(base) | Expr::UnaryNot(base) | Expr::UnaryMinus(base) => read(base, declared),
-        Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. }
-        | Expr::Fallback { primary: left, fallback: right } => read(left, declared).or_else(|| read(right, declared)),
-        Expr::Ternary { condition, then_branch, else_branch } => read(condition, declared)
-            .or_else(|| read(then_branch, declared)).or_else(|| read(else_branch, declared)),
-        Expr::FunctionCall { args, .. } | Expr::ArrayLiteral(args) => args.iter().find_map(|arg| read(arg, declared)),
-        Expr::ObjectLiteral(entries) => entries.iter().find_map(|(_, arg)| read(arg, declared)),
-    }
+        Some((path.clone(), replacement))
+    })
 }
 
 fn reject(source: &Path, path: String, found: Option<(String, String)>) -> Result<(), CompositionError> {
@@ -65,6 +62,39 @@ fn reject(source: &Path, path: String, found: Option<(String, String)>) -> Resul
             source_path: source.to_path_buf(), path, removed,
             replacement: format!("use `{replacement}`"),
         });
+    }
+    Ok(())
+}
+
+/// Reject retired roots in `lifecycle`'s events alone: the part of
+/// [`reject_removed_sequence_reads`] that reads `frontmatter` only for which
+/// names it declares, so a caller that has already checked the document's
+/// frontmatter does not scan it again.
+///
+/// # Errors
+/// Returns `RemovedGrammar` with the authored surface and replacement.
+pub fn reject_removed_lifecycle_reads(
+    source: &Path,
+    frontmatter: &Value,
+    supplied: Option<&Value>,
+    lifecycle: &LifecycleConfig,
+) -> Result<(), CompositionError> {
+    let declared = |key: &str| frontmatter.get(key).is_some()
+        || supplied.is_some_and(|values| values.get(key).is_some());
+    let text_read = |text: &str| ExpressionFinder::find_all_plain(text).iter()
+        .find_map(|span| parse(span.expression.trim()).ok().and_then(|expr| read(&expr, &declared)));
+    for signal in super::super::LifecycleSignal::ALL {
+        let mut found = None;
+        darkmatter::lifecycle::walk_stack(lifecycle.stack(signal), &mut |path, surface| {
+            if found.is_none() {
+                let retired = match surface.expr {
+                    Expr::StringLiteral(text) if !surface.predicate => text_read(text),
+                    expr => read(expr, &declared),
+                };
+                found = retired.map(|retired| (path.to_string(), retired));
+            }
+        });
+        if let Some((path, found)) = found { reject(source, path, Some(found))?; }
     }
     Ok(())
 }
@@ -109,19 +139,7 @@ pub fn reject_removed_sequence_reads(
         }
     }
     if let Some(lifecycle) = lifecycle {
-        for signal in super::super::LifecycleSignal::ALL {
-            let mut found = None;
-            super::super::validate::walk_stack(lifecycle.stack(signal), &mut |path, surface| {
-                if found.is_none() {
-                    let retired = match surface.expr {
-                        Expr::StringLiteral(text) if !surface.predicate => text_read(text),
-                        expr => read(expr, &declared),
-                    };
-                    found = retired.map(|retired| (path.to_string(), retired));
-                }
-            });
-            if let Some((path, found)) = found { reject(source, path, Some(found))?; }
-        }
+        reject_removed_lifecycle_reads(source, document.frontmatter, supplied, lifecycle)?;
     }
     if document.body.contains("::") {
         let context = biscuit_terminal::errors::SourceContext::new(

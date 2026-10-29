@@ -553,6 +553,33 @@ async fn internal_query_keys_are_rejected_at_the_authored_boundary() {
     );
 }
 
+/// Criterion 23: text `"3"` and the number `3` both select the count
+/// overload with 3, so they share one memo slot and one request; `"0"` and
+/// `"2.5"` bind neither overload and fail before any provider request.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial_test::serial(provider_transport)]
+async fn list_counts_bind_before_any_provider_request() {
+    let fixture = Fixture::start().await;
+    fixture
+        .mount_json(PR_LIST_PATH, json!((1..=5).map(|number| pr_body(number, "Listed")).collect::<Vec<_>>()))
+        .await;
+
+    for expression in ["pr_list(\"0\")", "pr_list(\"2.5\")", "cicd_list(\"0\")"] {
+        let message = error_text(fixture.compose(&frontmatter_document(expression)));
+        assert!(message.contains("no signature accepts these arguments"), "{expression}: {message}");
+        assert!(message.contains("(query: object)"), "{expression}: {message}");
+        assert!(message.contains("(count: number("), "{expression}: {message}");
+    }
+    assert_eq!(fixture.request_count().await, 0, "a count that did not bind reached the provider");
+
+    let composed = fixture
+        .compose("A: {{ pr_list(\"3\") }}\n\nB: {{ pr_list(3) }}\n")
+        .expect("compose succeeds");
+    // Three of the five listed per call, so each call carried the count 3.
+    assert_eq!(composed.content().matches("Listed").count(), 6, "{}", composed.content());
+    assert_eq!(fixture.request_count().await, 1, "\"3\" and 3 must be one normalized call");
+}
+
 /// `stage` on a flavor with no stage data (the loopback remote resolves as
 /// Gitea) is the spec's explicit unsupported-filter error, never an empty
 /// result — and the refusal lands before any provider request.

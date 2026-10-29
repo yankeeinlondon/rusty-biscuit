@@ -402,3 +402,24 @@ fn stop_is_valid_in_every_event() {
         );
     }
 }
+
+#[test]
+fn darkmatter_spellings_of_renamed_events_fail_naming_claudines_spelling() {
+    for (authored, replacement) in [("composed", "start"), ("failed", "blocked")] {
+        let frontmatter = serde_json::json!({ authored: [{ "info": "hi" }] });
+        let error = parse_lifecycle_config(&frontmatter, Path::new("review.md")).unwrap_err();
+        let CompositionError::LifecycleRenamedEvent { authored: found, replacement: named, .. } = &error else {
+            panic!("expected LifecycleRenamedEvent, got {error:?}");
+        };
+        assert_eq!((found.as_str(), named.as_str()), (authored, replacement));
+        assert!(error.to_string().contains(&format!("write `{replacement}:`")), "{error}");
+    }
+}
+
+#[test]
+fn claudines_own_spelling_of_a_renamed_event_parses() {
+    let frontmatter = serde_json::json!({ "start": [{ "info": "hi" }], "blocked": [{ "warn": "no" }] });
+    let config = parse_lifecycle_config(&frontmatter, Path::new("review.md")).unwrap();
+    assert_eq!(communications(&config, LifecycleSignal::Start), [("info", "hi".to_string())]);
+    assert_eq!(communications(&config, LifecycleSignal::Blocked), [("warn", "no".to_string())]);
+}

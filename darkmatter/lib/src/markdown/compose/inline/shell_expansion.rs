@@ -7,6 +7,7 @@ use super::super::perf;
 use super::super::body_origin::{BodyProvenance, EditOrigin, apply_replacements_with_edits};
 use super::super::context::effective_state::ResolvingLookup;
 use super::super::expression::ExpressionFinder;
+use super::super::page_blocks::BodyGuards;
 use super::super::schema_validation::PreparedSchemas;
 use super::super::shell_expansion::site::{SiteFrame, SiteScope, TemplateSite, authored_context, prepare_site};
 use super::super::shell_expansion::template::LookupEvaluator;
@@ -23,7 +24,8 @@ use tracing::debug;
 ///
 /// A directive whose authored text holds a placeholder is also read as a
 /// template: its authored command is recovered through `body.authored`, typed
-/// against the document's schema, and its holes are read from `state`. It
+/// against the document's schema narrowed by the authored `::block when=`
+/// guards around it, and its holes are read from `state`. It
 /// runs in template mode when that is what authorizes it (see
 /// [`prepare_site`]), including when the value interpolated into its current
 /// text holds quotes or operators, so the text no longer parses as a command.
@@ -54,22 +56,32 @@ pub(crate) fn run_stage(
         return Ok(());
     }
 
-    // The authored command of each line that holds a placeholder.
-    let authored: Vec<Option<(String, usize)>> = lines
+    // The authored command of each line that holds a placeholder, with its
+    // authored byte offset.
+    let authored: Vec<Option<(String, usize, usize)>> = lines
         .iter()
         .map(|line| {
             let authored = body.authored.as_ref()?;
             let range = authored.project(markdown.content(), &line.keyword)?;
             let (command, file_line) = parser::authored_directive_at(authored.text(), range.start, line_offset)?;
-            (!ExpressionFinder::scan_plain(&command).expressions.is_empty()).then_some((command, file_line))
+            (!ExpressionFinder::scan_plain(&command).expressions.is_empty()).then_some((command, file_line, range.start))
         })
         .collect();
+    // The page-block stage already removed every false block, so a site's
+    // enclosing `::block when=` guards held; they are read from the authored
+    // body, as discovery read them.
+    let body_guards = body
+        .authored
+        .as_ref()
+        .filter(|_| authored.iter().any(Option::is_some))
+        .map(|authored| BodyGuards::scan_body(authored.text(), line_offset))
+        .unwrap_or_default();
     let lookup = ResolvingLookup::new(state, options.expression_resolution_context(&runtime.remote_fetch));
     let evaluator = LookupEvaluator::new(&lookup);
     let scope = authored
         .iter()
         .any(Option::is_some)
-        .then(|| SiteScope::new(options, schemas.effective_for(markdown).and_then(|effective| effective.simplified)));
+        .then(|| SiteScope::new(options, schemas.effective_for(markdown)));
     let authored_ctx = authored_context(markdown, body.authored.as_ref().map(|authored| authored.text()));
 
     // Every directive is read before any runs, so one that cannot run fails
@@ -84,7 +96,7 @@ pub(crate) fn run_stage(
     )> = Vec::with_capacity(lines.len());
     for (line, authored) in lines.into_iter().zip(authored) {
         let site = match (authored, &scope) {
-            (Some((command, file_line)), Some(scope)) => {
+            (Some((command, file_line, authored_offset)), Some(scope)) => {
                 let frame = match &line.parsed {
                     Ok(directive) => Some(SiteFrame::of(directive)),
                     Err(_) => parser::authored_directive_options(&command, file_line, &authored_ctx)?.map(|options| {
@@ -105,6 +117,7 @@ pub(crate) fn run_stage(
                         authored_ctx.clone(),
                         &evaluator,
                         frame,
+                        &body_guards.enclosing(authored_offset),
                     )?,
                     None => None,
                 }
@@ -151,6 +164,8 @@ pub(crate) fn run_stage(
         replacements.push((span, output));
         report.warnings.extend(execution.warnings);
         report.shell_expansions_applied += 1;
+        // A blocking warning this command reported stops the next one.
+        super::super::pipeline::stop_if_blocked(report, options, None)?;
     }
 
     let before = markdown.content().to_string();

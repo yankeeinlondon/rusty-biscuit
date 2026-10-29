@@ -25,27 +25,68 @@
 //!
 //! Absent, unknown, duplicate, ambiguous, or conflicting discriminants all
 //! yield `None`.
+//!
+//! An arm, a discriminant property, or its nullable wrapper may be a local
+//! `$ref` (a stored named type, recursive or shared, lowers to
+//! `#/$defs/<key>` at each use).
+//! [`select_literal_discriminant_arm_in`] follows those references against the
+//! schema's root, reading the discriminants of every hop, since each hop's
+//! properties constrain the value; [`select_literal_discriminant_arm`] has no
+//! root, so a reference arm declares nothing there.
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 use serde_json::Value;
 
+use super::SchemaError;
+use super::scope::SchemaScope;
+
 /// Selects the single union arm whose shared literal discriminant(s) match
 /// `instance`, or `None` when no unambiguous narrowing applies.
 ///
 /// `arms` is the raw `anyOf` array (the optional-nullable `{"type":"null"}`
 /// sentinel, if present, is ignored — it declares no properties). The returned
-/// index is into that same `arms` slice.
+/// index is into that same `arms` slice. A `$ref` arm is not followed; see
+/// [`select_literal_discriminant_arm_in`].
 pub fn select_literal_discriminant_arm(arms: &[Value], instance: &Value) -> Option<usize> {
-    let obj = instance.as_object()?;
-
-    // Each arm's literal-const discriminant properties (by original index).
-    let arm_consts: Vec<(usize, BTreeMap<String, &Value>)> = arms
+    let arm_consts = arms
         .iter()
         .enumerate()
-        .filter_map(|(idx, arm)| literal_const_props(arm).map(|consts| (idx, consts)))
+        .filter_map(|(idx, arm)| {
+            literal_const_props(arm, None).ok().flatten().map(|consts| (idx, consts))
+        })
         .collect();
+    select_by_consts(arm_consts, instance)
+}
+
+/// Like [`select_literal_discriminant_arm`], following local references in
+/// `arms` against `scope`'s root.
+///
+/// An arm or discriminant property whose reference names nothing abandons
+/// narrowing (`None`) rather than counting as an arm without discriminants:
+/// the missing body might declare the same literal, so skipping it could
+/// select an arm a complete schema would call ambiguous. `None` keeps the
+/// caller's ordinary union behavior, which never depends on a selection.
+pub(crate) fn select_literal_discriminant_arm_in<'a>(
+    arms: &'a [Value],
+    instance: &Value,
+    scope: &SchemaScope<'a>,
+) -> Option<usize> {
+    let mut arm_consts = Vec::new();
+    for (idx, arm) in arms.iter().enumerate() {
+        if let Some(consts) = literal_const_props(arm, Some(scope)).ok()? {
+            arm_consts.push((idx, consts));
+        }
+    }
+    select_by_consts(arm_consts, instance)
+}
+
+fn select_by_consts(
+    arm_consts: Vec<(usize, BTreeMap<String, &Value>)>,
+    instance: &Value,
+) -> Option<usize> {
+    let obj = instance.as_object()?;
 
     // A discriminant key is one that appears as a literal const in >= 2 arms.
     let mut key_arm_count: HashMap<&str, usize> = HashMap::new();
@@ -98,34 +139,62 @@ pub fn select_literal_discriminant_arm(arms: &[Value], instance: &Value) -> Opti
     selected
 }
 
-/// The literal-const discriminant properties of one arm, or `None` when the arm
-/// is not an inline object with at least one `{"const": …}` property.
+/// `schema` and, with a scope, the target of each local reference it reaches.
+fn hops<'a>(schema: &'a Value, scope: Option<&SchemaScope<'a>>) -> Result<Vec<&'a Value>, SchemaError> {
+    match scope {
+        Some(scope) => scope.chain(schema, ""),
+        None => Ok(vec![schema]),
+    }
+}
+
+/// The literal-const discriminant properties of one arm, or `Ok(None)` when no
+/// hop of the arm is an object with a `{"const": …}` property.
 ///
 /// A property wrapped in the optional-nullable `{"anyOf":[{"type":"null"},
 /// {"const": …}]}` form (an un-`required` inline-object literal) is looked
-/// through so its const still counts as a discriminant.
-fn literal_const_props(arm: &Value) -> Option<BTreeMap<String, &Value>> {
-    let props = arm.get("properties")?.as_object()?;
+/// through so its const still counts as a discriminant. When two hops declare
+/// the same key, the first (the use site) is kept.
+fn literal_const_props<'a>(
+    arm: &'a Value,
+    scope: Option<&SchemaScope<'a>>,
+) -> Result<Option<BTreeMap<String, &'a Value>>, SchemaError> {
     let mut consts = BTreeMap::new();
-    for (key, prop) in props {
-        if let Some(const_value) = const_of(prop) {
-            consts.insert(key.clone(), const_value);
+    for hop in hops(arm, scope)? {
+        let Some(props) = hop.get("properties").and_then(Value::as_object) else {
+            continue;
+        };
+        for (key, prop) in props {
+            if let Some(const_value) = const_of(prop, scope)? {
+                consts.entry(key.clone()).or_insert(const_value);
+            }
         }
     }
-    (!consts.is_empty()).then_some(consts)
+    Ok((!consts.is_empty()).then_some(consts))
 }
 
 /// The `const` value of a property schema, looking through the two-arm
-/// optional-nullable wrapper (`{"anyOf":[{"type":"null"}, {"const": …}]}`).
-fn const_of(prop: &Value) -> Option<&Value> {
-    if let Some(constant) = prop.get("const") {
-        return Some(constant);
+/// optional-nullable wrapper (`{"anyOf":[{"type":"null"}, {"const": …}]}`)
+/// and, with a scope, through references at either level.
+fn const_of<'a>(
+    prop: &'a Value,
+    scope: Option<&SchemaScope<'a>>,
+) -> Result<Option<&'a Value>, SchemaError> {
+    for hop in hops(prop, scope)? {
+        if let Some(constant) = hop.get("const") {
+            return Ok(Some(constant));
+        }
+        let Some(arms) = hop.get("anyOf").and_then(Value::as_array) else {
+            continue;
+        };
+        if arms.len() == 2 && arms[0].get("type").and_then(Value::as_str) == Some("null") {
+            for inner in hops(&arms[1], scope)? {
+                if let Some(constant) = inner.get("const") {
+                    return Ok(Some(constant));
+                }
+            }
+        }
     }
-    let arms = prop.get("anyOf").and_then(Value::as_array)?;
-    if arms.len() == 2 && arms[0].get("type").and_then(Value::as_str) == Some("null") {
-        return arms[1].get("const");
-    }
-    None
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -394,5 +463,75 @@ mod tests {
             select_literal_discriminant_arm(arms, &json!("created")),
             None
         );
+    }
+
+    /// A recursive `node` union whose `branch` arm is a reference and whose
+    /// `leaf` arm is a reference with a sibling, as lowering emits them.
+    fn reference_arm_root() -> Value {
+        json!({
+            "properties": { "root": { "$ref": "#/$defs/node" } },
+            "$defs": {
+                "node": { "anyOf": [
+                    { "$ref": "#/$defs/branch" },
+                    { "$ref": "#/$defs/leaf", "description": "a leaf" }
+                ] },
+                "branch": {
+                    "type": "object",
+                    "properties": {
+                        "kind": { "const": "branch" },
+                        "children": { "type": "array", "items": { "$ref": "#/$defs/node" } }
+                    }
+                },
+                "leaf": {
+                    "type": "object",
+                    "properties": {
+                        "kind": { "anyOf": [ { "type": "null" }, { "$ref": "#/$defs/leaf-tag" } ] },
+                        "value": { "type": "string" }
+                    }
+                },
+                "leaf-tag": { "const": "leaf" }
+            }
+        })
+    }
+
+    #[test]
+    fn scoped_selection_reads_discriminants_through_references() {
+        let root = reference_arm_root();
+        let scope = SchemaScope::new(&root);
+        let arms = root["$defs"]["node"]["anyOf"].as_array().unwrap();
+        assert_eq!(
+            select_literal_discriminant_arm_in(arms, &json!({ "kind": "branch" }), &scope),
+            Some(0)
+        );
+        assert_eq!(
+            select_literal_discriminant_arm_in(arms, &json!({ "kind": "leaf" }), &scope),
+            Some(1)
+        );
+        assert_eq!(select_literal_discriminant_arm_in(arms, &json!({ "kind": "twig" }), &scope), None);
+    }
+
+    #[test]
+    fn unscoped_selection_does_not_follow_references() {
+        let root = reference_arm_root();
+        let arms = root["$defs"]["node"]["anyOf"].as_array().unwrap();
+        assert_eq!(select_literal_discriminant_arm(arms, &json!({ "kind": "branch" })), None);
+    }
+
+    #[test]
+    fn a_missing_reference_target_abandons_narrowing() {
+        // Without the broken arm, `kind: a` would select arm 1; the missing
+        // body might declare `a` as well, so nothing is selected.
+        let root = json!({
+            "$defs": {
+                "union": { "anyOf": [
+                    { "$ref": "#/$defs/missing" },
+                    { "properties": { "kind": { "const": "a" } } },
+                    { "properties": { "kind": { "const": "b" } } }
+                ] }
+            }
+        });
+        let scope = SchemaScope::new(&root);
+        let arms = root["$defs"]["union"]["anyOf"].as_array().unwrap();
+        assert_eq!(select_literal_discriminant_arm_in(arms, &json!({ "kind": "a" }), &scope), None);
     }
 }

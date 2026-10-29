@@ -1,16 +1,18 @@
 //! Ordered nested containers keep their output accumulator lexical while
 //! retaining invocation mutations and the outer invocation identity.
 
+use crate::composition::LifecycleErrorInfoExt;
 use std::sync::Arc;
 
-use darkmatter::markdown::compose::EffectiveStateBuilder;
+use darkmatter::markdown::compose::{EffectiveStateBuilder, SharedFrontmatter};
 use serde_json::{Map, Value};
 
 use super::{PrimaryOutcome, TaskDiagnostic, TaskExecution, TaskStage, TaskStatus};
 use crate::composition::error::CompositionError;
-use crate::composition::lifecycle::{LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
+use crate::composition::lifecycle::{LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext, LifecycleSignal};
 use crate::composition::lifecycle::bindings::SequenceBinding;
 use crate::composition::lifecycle::executor::StackExecutionContext;
+use crate::composition::lifecycle::policy::{RefusalRoute, SubjectKind};
 use crate::composition::lifecycle::runtime::{ContainerEventDecision, ContainerRunner, LifecycleTransitionAbort};
 use crate::composition::looping::{ContainerPassEnd, LoopFrame, LoopResultKind, PassCheckpoint, finish_container_pass};
 use crate::composition::runtime_state::RuntimeState;
@@ -21,23 +23,26 @@ impl TaskExecution<'_> {
         if self.interrupted() { return PrimaryOutcome::interrupted(String::new()); }
         let owned_runtime = Arc::new(RuntimeState::new());
         let runtime = self.runtime.unwrap_or(&owned_runtime);
-        let outer = runtime.snapshot();
-        let run_id = self.sequence_binding().get("run_id").and_then(Value::as_str)
+        // The enclosing scope moves out and back; its outputs are never copied.
+        let (outer_seq, outer_outputs) = runtime.replace_sequence_scope(None, Vec::new());
+        // The position `sequence_binding` reads: the runtime's, else the overlay's.
+        let run_id = outer_seq.as_ref().or_else(|| self.overlay.and_then(|overlay| overlay.get("seq")))
+            .and_then(|seq| seq.get("run_id")).and_then(Value::as_str)
             .unwrap_or(&sequence.plan.sequence_id).to_string();
-        runtime.replace_sequence_scope(Some(SequenceBinding::container(&run_id, Vec::new()).to_value()), Vec::new());
+        runtime.set_sequence_binding(SequenceBinding::container(&run_id, Vec::new()).to_value());
         let runtime_context = LifecycleRuntimeContext {
             settings: self.stack.settings, messaging: self.stack.messaging, term: self.stack.term,
             source_path: &sequence.origin_path, repo_root: self.stack.repo_root,
             launch_area: self.stack.ctx_base_dir, context: self.stack.prepared_context,
         };
         let guard = LifecycleRunGuard::new(&sequence.lifecycle, &runtime_context, self.stack.emitter);
-        let mut runner = ContainerRunner::new(guard);
+        let mut runner = ContainerRunner::new(guard).with_subject(SubjectKind::Sequence);
         let state = self.sequence_frontmatter(sequence).unwrap_or_else(|| self.stack.frontmatter.clone());
         let result = match self.open_loop(sequence.loop_config.as_ref(), LoopResultKind::Sequence, &state, runtime) {
             Ok(mut frame) => self.run_sequence_attempts(sequence, runtime, &run_id, &mut runner, frame.as_mut()),
             Err(error) => PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
         };
-        runtime.replace_sequence_scope(outer.seq, outer.outputs);
+        runtime.replace_sequence_scope(outer_seq, outer_outputs);
         result
     }
 
@@ -55,7 +60,7 @@ impl TaskExecution<'_> {
         let mut prepared = None;
         // A referenced document's events share their own live state, as a
         // directly run document's events do, rather than the caller's.
-        let own_live = sequence.frontmatter.is_some().then(|| std::sync::Mutex::new(Map::new()));
+        let own_live = sequence.frontmatter.is_some().then(|| std::sync::Mutex::new(SharedFrontmatter::default()));
         let live_frontmatter = own_live.as_ref().or(self.stack.live_frontmatter);
         loop {
             // The `loop` values this container's events and children read:
@@ -73,10 +78,10 @@ impl TaskExecution<'_> {
             if signal == LifecycleSignal::Start {
                 let context = self.stack.prepared_context.cloned().unwrap_or_else(|| self.state.context().clone());
                 let mut supplied = match self.user_setters { Some(Value::Object(setters)) => setters.clone(), _ => Map::new() };
-                supplied.extend(runtime.snapshot().mutations);
+                supplied.extend(runtime.mutations());
                 match crate::composition::sequence::preflight::prepare_nested_sequence(
                     self.task, sequence, self.state, supplied, context, self.stack.file_resolution_context,
-                    self.stack.group.is_some(),
+                    self.stack.group.is_some(), self.graph.nested_sources(),
                 ).and_then(|(fresh, graph)| {
                     self.verify_nested_graph(&graph)?;
                     Ok(fresh)
@@ -101,15 +106,16 @@ impl TaskExecution<'_> {
                 signal = LifecycleSignal::Cancelled;
             }
             let sequence = prepared.as_ref().unwrap_or(sequence);
-            let seq = SequenceBinding::container(run_id, runtime.snapshot().outputs).to_value();
+            let (mutations, outputs) = runtime.mutations_and_outputs();
+            let seq = SequenceBinding::container(run_id, outputs).to_value();
             let base = self.sequence_frontmatter(sequence);
             let mut event_frontmatter = base.clone().unwrap_or_else(|| self.stack.frontmatter.clone());
-            event_frontmatter.extend(runtime.snapshot().mutations);
+            event_frontmatter.extend(mutations.clone());
             if let Some(live) = &own_live {
-                live.lock().expect("sequence live frontmatter poisoned").extend(event_frontmatter.clone());
+                layer_onto(&mut live.lock().expect("sequence live frontmatter poisoned"), &event_frontmatter);
             }
             if let Some(live) = self.stack.live_frontmatter {
-                live.lock().expect("sequence live frontmatter poisoned").extend(runtime.snapshot().mutations);
+                live.lock().expect("sequence live frontmatter poisoned").extend(mutations);
             }
             let disabled = crate::composition::lifecycle::executor::DisabledShellRunner;
             let stack = StackExecutionContext {
@@ -118,6 +124,9 @@ impl TaskExecution<'_> {
                 live_frontmatter, source_path: &sequence.origin_path, err: error.as_ref(), loop_values,
                 ..self.stack.with_signal(signal)
             };
+            if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start) {
+                self.prewarm_container(runner.guard_mut().config(), &event_frontmatter);
+            }
             let event = if self.prompt.is_dry_run() {
                 let outcome = Default::default();
                 let decision = runner.record_outcome(signal, &outcome);
@@ -147,11 +156,12 @@ impl TaskExecution<'_> {
                             break;
                         }
                         let overlay = crate::composition::sequence::build_step_overlay(&plan, index);
-                        let seq = SequenceBinding::step(&overlay, runtime.snapshot().outputs).to_value();
+                        let (mutations, outputs) = runtime.mutations_and_outputs();
+                        let seq = SequenceBinding::step(&overlay, outputs).to_value();
                         runtime.set_sequence_binding(seq.clone());
-                        let mut data = base.clone().map_or_else(|| self.state.data().clone(), |base| base.into_iter().collect());
-                        data.extend(runtime.snapshot().mutations);
-                        let state = match EffectiveStateBuilder::new().with_frontmatter(data)
+                        let mut data = base.clone().unwrap_or_else(|| self.state.data().clone());
+                        data.extend(mutations);
+                        let state = match EffectiveStateBuilder::new().with_shared_frontmatter(data)
                             .with_context(self.state.context().clone()).with_allow_ctx_override(true).build()
                         {
                             Ok(state) => state,
@@ -184,10 +194,9 @@ impl TaskExecution<'_> {
                             }
                         };
                         let run = self.prompt.open_member_run(task);
-                        let frontmatter = state.data().iter().map(|(key,value)| (key.clone(), value.clone())).collect();
                         let child_stack = StackExecutionContext {
                             seq: Some(&seq), runtime_state: Some(runtime.as_ref()),
-                            frontmatter: &frontmatter, live_frontmatter, source_path: &task.origin_path, loop_values,
+                            frontmatter: state.data(), live_frontmatter, source_path: &task.origin_path, loop_values,
                             prepared_context: run.as_ref().map(|opened| &opened.context).or(self.stack.prepared_context),
                             ..self.stack.with_signal(LifecycleSignal::Start)
                         };
@@ -253,8 +262,7 @@ impl TaskExecution<'_> {
                         // The pass's own slice of the cumulative outputs is its
                         // result: its terminal event, `finalize`, and gate read it.
                         if let Some(frame) = frame.as_deref_mut() {
-                            let outputs = runtime.snapshot().outputs;
-                            let pass = outputs[checkpoint.outputs().min(outputs.len())..].to_vec();
+                            let pass = runtime.outputs_from(checkpoint.outputs());
                             frame.record_pass(Value::Array(pass), i32::from(error.is_some()));
                         }
                         let breaking = loop_values.filter(|ambient| ambient.breaks.is_pending());
@@ -293,8 +301,9 @@ impl TaskExecution<'_> {
                     {
                         let ambient = frame.ambient();
                         let mut gate_frontmatter = base.clone().unwrap_or_else(|| self.stack.frontmatter.clone());
-                        gate_frontmatter.extend(runtime.snapshot().mutations);
-                        let gate_seq = SequenceBinding::container(run_id, runtime.snapshot().outputs).to_value();
+                        let (mutations, outputs) = runtime.mutations_and_outputs();
+                        gate_frontmatter.extend(mutations);
+                        let gate_seq = SequenceBinding::container(run_id, outputs).to_value();
                         let gate = StackExecutionContext {
                             seq: Some(&gate_seq), runtime_state: Some(runtime.as_ref()), frontmatter: &gate_frontmatter,
                             live_frontmatter, source_path: &sequence.origin_path, err: None, loop_values: Some(&ambient),
@@ -340,7 +349,7 @@ impl TaskExecution<'_> {
                 }
                 ContainerEventDecision::Retry { delay, overlay } => {
                     if !delay.is_zero() { std::thread::sleep(delay); }
-                    let state = base.clone().unwrap_or_else(|| self.state.data().iter().map(|(key,value)| (key.clone(),value.clone())).collect());
+                    let state = base.clone().unwrap_or_else(|| self.state.data().clone());
                     // A looping container replaces only the failed attempt
                     // of this pass: its outputs and runtime writes return to
                     // the pass's entry. Without a loop the attempt's results
@@ -361,18 +370,17 @@ impl TaskExecution<'_> {
                     }
                     error = None; secondary_errors.clear(); signal = LifecycleSignal::Start;
                 }
-                ContainerEventDecision::Abort(LifecycleTransitionAbort::ResumeWithoutSession) => {
-                    let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary,
-                        &CompositionError::LifecycleResumeWithoutSession { source_path: sequence.origin_path.clone() });
-                    error = Some(diagnostic.info);
-                    runner.set_error(error.as_ref().unwrap().clone());
-                    signal = if signal == LifecycleSignal::Failure { LifecycleSignal::Finalize } else { LifecycleSignal::Failure };
-                }
-                ContainerEventDecision::SetupRecoveryUnsupported { event, action } => {
-                    let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary,
-                        &CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
-                            source_path: sequence.origin_path.clone(), event: event.property_name().into(), action: action.into(),
-                        });
+                // A `defer` is not reported as a refusal here: it falls to the
+                // unsupported-recovery arm below.
+                decision @ (ContainerEventDecision::Abort(LifecycleTransitionAbort::ResumeWithoutSession)
+                | ContainerEventDecision::SetupRecoveryUnsupported { .. }) => {
+                    let (Some(refusal), Some(RefusalRoute::FailureThenFinalize)) = (decision.refusal(), runner.refusal_route(&decision)) else {
+                        unreachable!("a nested sequence fails a refused recovery through its catch events: {decision:?}");
+                    };
+                    let Some(failure) = CompositionError::from_lifecycle_refusal(&refusal, &sequence.origin_path) else {
+                        unreachable!("a resume without a session and a setup recovery map to errors");
+                    };
+                    let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary, &failure);
                     error = Some(diagnostic.info);
                     runner.set_error(error.as_ref().unwrap().clone());
                     signal = if signal == LifecycleSignal::Failure { LifecycleSignal::Finalize } else { LifecycleSignal::Failure };
@@ -399,18 +407,20 @@ impl TaskExecution<'_> {
     /// children: its authored properties under the invocation setters.
     /// Runtime mutations are layered above it at each read. `None` for an
     /// inline list or a step selection, which read the enclosing state.
-    fn sequence_frontmatter(&self, sequence: &PreflightSequence) -> Option<Map<String, Value>> {
+    ///
+    /// The view is decoded once per call and shared by every event and child
+    /// that reads it, so a child never copies the document's own steps.
+    fn sequence_frontmatter(&self, sequence: &PreflightSequence) -> Option<SharedFrontmatter> {
         let mut base: Map<String, Value> = sequence.frontmatter.as_ref()?.iter()
             .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value))).collect();
         if let Some(Value::Object(setters)) = self.user_setters {
             base.extend(setters.clone());
         }
-        Some(base)
+        Some(base.into())
     }
 
     pub(super) fn verify_nested_graph(&self, fresh: &crate::composition::sequence::preflight::PreflightGraph) -> Result<(), CompositionError> {
-        let unapproved = fresh.shell_commands.iter().find(|command| !self.graph.shell_commands.iter()
-            .any(|approved| approved.command == command.command));
+        let unapproved = fresh.shell_commands.iter().find(|command| !self.graph.contains_shell_command(&command.command));
         if let Some(command) = unapproved {
             return Err(CompositionError::SequenceShellResolution {
                 command: command.command.clone(), task: self.label(),
@@ -418,7 +428,7 @@ impl TaskExecution<'_> {
             });
         }
         for candidate in &fresh.template_candidates {
-            if !self.graph.template_candidates.iter().any(|approved| approved.authored() == candidate.authored())
+            if self.graph.candidates_authored(candidate.authored()).next().is_none()
                 || self.graph.shell_authorization().is_some_and(|(approved, _)| !candidate.authorized_by(&approved)) {
                 return Err(CompositionError::SequenceShellResolution {
                     command: candidate.authored().unwrap_or("").into(), task: self.label(),
@@ -453,12 +463,11 @@ impl TaskExecution<'_> {
             let owned_runtime = Arc::new(RuntimeState::new());
             let runtime = self.runtime.unwrap_or(&owned_runtime);
             let _chain = runtime.enter_container_proxy(source, &path, target)?;
-            if let Some(runtime) = self.runtime {
-                let prior = self.state.data().iter().map(|(key,value)| (key.clone(),value.clone())).collect();
-                if let Err(error) = runtime.set_batch(self.stack.effect_engine, &overlay, &prior) {
-                    return Ok(PrimaryOutcome::failed(TaskDiagnostic { stage: TaskStage::Primary,
-                        info: crate::composition::lifecycle::context::LifecycleErrorInfo::from_error_or_action("proxy", &error) }));
-                }
+            if let Some(runtime) = self.runtime
+                && let Err(error) = runtime.set_batch(self.stack.effect_engine, &overlay, self.state.data())
+            {
+                return Ok(PrimaryOutcome::failed(TaskDiagnostic { stage: TaskStage::Primary,
+                    info: crate::composition::lifecycle::context::LifecycleErrorInfo::from_error_or_action("proxy", &error) }));
             }
             if let Some(sequence) = approved_sequence(&self.graph.steps, &path) {
                 let mut task = self.task.clone();
@@ -496,4 +505,22 @@ fn approved_sequence<'a>(steps: &'a [crate::composition::sequence::preflight::Pr
         }
     }
     steps.iter().filter_map(|step| step.task.as_ref()).find_map(|task| find(task,path))
+}
+
+/// Write every entry of `values` into `live`, as [`Extend`] would, copying
+/// only the entries whose value `live` does not already hold.
+///
+/// A referenced document's own live cell receives its whole event state at
+/// each event; the first write shares that state's base, and a later one
+/// writes only what changed, so no event deep-copies the document.
+fn layer_onto(live: &mut SharedFrontmatter, values: &SharedFrontmatter) {
+    if live.is_empty() {
+        *live = values.clone();
+        return;
+    }
+    for (key, value) in values.iter() {
+        if live.get(key).is_none_or(|current| !std::ptr::eq(current, value) && current != value) {
+            live.insert(key.clone(), value.clone());
+        }
+    }
 }
