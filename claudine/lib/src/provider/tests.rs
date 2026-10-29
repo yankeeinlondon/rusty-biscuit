@@ -235,20 +235,18 @@ fn serialized_field_list_matches_catalog() {
         "overlay_capabilities",
         "cli_switches",
     ];
-    // The gen-side twin pins order against the mapping registry; this test
-    // checks membership regardless of serde_json's feature configuration.
-    let mut expected: Vec<&str> = SERIALIZED_PROVIDER_INFO_FIELDS.to_vec();
-    expected.sort_unstable();
+    // `serde_json/preserve_order` keeps struct field order, so the list is
+    // compared in declaration order, as the gen-side twin does.
+    let expected: Vec<&str> = SERIALIZED_PROVIDER_INFO_FIELDS.to_vec();
     for provider in PROVIDERS_DISPLAY_ORDER {
         let info = provider_info(provider);
         let json = serde_json::to_value(info).expect("provider_info serializes");
-        let mut keys: Vec<&str> = json
+        let keys: Vec<&str> = json
             .as_object()
             .expect("ProviderInfo serializes as an object")
             .keys()
             .map(String::as_str)
             .collect();
-        keys.sort_unstable();
         assert_eq!(
             keys, expected,
             "{provider:?}: serialized field list drifted — update the checked-in list \

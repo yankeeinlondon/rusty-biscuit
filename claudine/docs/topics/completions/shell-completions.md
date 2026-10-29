@@ -1,3 +1,6 @@
+---
+kind: canonical-documentation
+---
 # Shell Completions
 
 Claudine ships dynamic shell completions for `bash`, `zsh`, and `fish`.
@@ -425,7 +428,7 @@ Filenames and directories that begin with an underscore (`_completed/`,
 cover them.
 
 **Why.** The `_` prefix is the repo convention for archived/in-progress
-artefacts (see `features/_completed/`); listing them in completion
+artifacts; listing them in completion
 would cause the user to open stale documents more often than fresh
 ones.
 
@@ -675,7 +678,7 @@ claudine compose @plan.md cover=<TAB>          # schema: file(match('*.png'))
 # launched from packages/web, schema: file(match(^**/*spec*.md))
 claudine compose @plan.md spec=<TAB>
 → spec='fixes/login/spec.md'                 # under the launch directory
-→ spec='&fixes/2026-09-29-ts-review/spec.md' # the repository root's, two levels up
+→ spec='&fixes/logout/spec.md'              # the repository root's, two levels up
 ```
 
 ### Root-level unions

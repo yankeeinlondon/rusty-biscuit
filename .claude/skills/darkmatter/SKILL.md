@@ -48,12 +48,13 @@ definitions away from their references or replace them with placeholders.
 | Remote reads and the transport cache | [remote-cache.md](remote-cache.md) |
 | `md` file arguments and CLI conventions | [cli.md](cli.md) |
 | Expression grammar, inserted text, warnings | [expressions.md](expressions.md) |
+| Lifecycle grammar, executor, run accounting, request/reply `Run` | [lifecycle.md](lifecycle.md) |
 | Test fixtures, source guards, parity matrix | [testing.md](testing.md) |
 | Public modules and extracted library surfaces | [library-surfaces.md](library-surfaces.md) |
 | DMLS architecture, protocol behavior, and rollout history | [dmls.md](dmls.md) |
 | Render tree, style lowering, disclosure blocks, code blocks | [rendering.md](rendering.md) |
 | Terminal rendering options | [terminal.md](terminal.md) |
-| Frontmatter model, literal tokens, in-place leaf edits | [frontmatter.md](frontmatter.md) |
+| Frontmatter model, shared views, literal tokens, in-place leaf edits | [frontmatter.md](frontmatter.md) |
 | Error/status block conventions | [errors.md](errors.md) |
 | `md clean`/DMLS formatting rules and frontmatter repair | [cleanup.md](cleanup.md) |
 | Document comparison | [comparison.md](comparison.md) |
@@ -77,7 +78,9 @@ against a context derived from that one. User-facing docs:
 `topics/file-referencing.md` (forms and tree rule), and
 `errors/file-reference-failures.md` (the `failure:` row).
 
-The root compose pipeline is ordered: frontmatter interpolation pass 1;
+The root compose pipeline is ordered: the passive call check (a proven-bad
+call in any branch rejects the document before anything runs); frontmatter
+interpolation pass 1;
 schema validation and coercion; frontmatter shell expansion; frontmatter
 interpolation pass 2; literal replacement; conditional page blocks; body
 interpolation; shell directives and blocks; link resolution; concurrent
@@ -126,6 +129,10 @@ Important contracts:
   `const`; quoted and native YAML forms are observably different.
 - `expression`, `yaml`, and `json` are passive content formats. They parse or
   coerce but never execute.
+- One coercion engine (`markdown::coercion`) converts frontmatter and binds
+  function arguments; numbers enter only through `markdown::numeric` as exact
+  `f64`s. See [schema.md](schema.md#conversion-engine) and
+  [expressions.md](expressions.md).
 - `type-definition` and `schema` meta-types delegate to the same passive
   parsers used by authoring and DMLS.
 - Trigger matching is schema-based and passive. A schema-trigger document is a
@@ -140,18 +147,21 @@ Important contracts:
   `EDITOR_SCHEMA` types `content_policy`) and is the default for compose,
   `md schema validate`, and DMLS; see [schema.md](schema.md#runtime-baseline).
 
-Read [schema.md](schema.md) for imports, unions, pattern dictionaries,
-suggestions, triggers, and DMLS schema behavior.
+Read [schema.md](schema.md) for imports, recursive named types (`$defs`,
+`TypeExpr::Ref`), unions, pattern dictionaries, suggestions, triggers, and
+DMLS schema behavior.
 
-The authored global catalog `darkmatter/schemas/darkmatter.yaml` is not the
-embedded document baseline; see [schema.md](schema.md#authored-global-catalog).
+The global catalog `darkmatter/schemas/darkmatter.yaml` declares every
+global's shape; the built-in baseline is its resolved `fm`. A catalog is
+registered explicitly, never applied as a document schema; see
+[schema.md](schema.md#authored-global-catalog).
 
 ## Remote and cache safety
 
 HTTP(S) composition covers `::file`, `::code`, and read-side expression
 arguments where a remote runtime is present; rendered links are never fetched,
 and frontmatter interpolation and `$()` fail loudly on a URL. Reads are
-deny-all until `--allow-host`; only transport artifacts (raw HTTP bodies) may
+deny-all until `--allow host=HOST`; only transport artifacts (raw HTTP bodies) may
 persist under a cache root; `Cache-Control` outranks every freshness flag;
 host policy is checked before the cache is read. Read
 [remote-cache.md](remote-cache.md) before changing any of this.
@@ -176,6 +186,66 @@ themes, disclosure blocks, browser safety, or the render-tree fold.
 The binary is `md`: `compose`, `clean`, `read`, `toc`, `delta`, `schema
 validate|detect|about|triggers`, `hash`, `frontmatter get|set|rm`,
 `code-block`, `graph`, and reference commands.
+
+Checks are relaxed or tightened only through three verbs: `--allow <id|all>`
+(a recovery, or `host=HOST`), `--deny <id|all>` (make diagnostics blocking),
+and `--disable <id>` (stop a feature; no `all`). `cli/src/args/policy.rs` is
+the one registry of identifiers, commands, and help; on `md compose`,
+`--deny` lowers to the library's `compose::policy::BlockingPolicy`. The legacy per-flag spellings are
+usage errors (`main.rs::REMOVED_FLAGS`); see `docs/cli/policy.md`. The
+pipeline's call precheck consults the policy per document, before its
+expressions run (`MarkdownError::BlockedDiagnostics`; a child's is fatal,
+never a tolerated transclusion failure); the pre-flight walk's warnings
+(a skipped child's invalid trigger) are judged before any command is
+approved: by `compose_preflight_approvals*` (`pipeline::stop_if_warnings_blocked`,
+before policy files or the handler) and by `validate_pre_approved` before
+membership, at the root and `as_markdown` gates; a runtime warning is checked by
+`pipeline::stop_if_blocked` before each body stage, after transclusion
+`when=` preparation, between `::shell` commands, and before frontmatter
+shell expansion, and within a stage before each further expression
+(`pipeline::blocking_guard` through the rewriters' `BeforeEval`, for body
+and frontmatter interpolation and directive targets) or condition
+(`pipeline::ReportWatch`, for `::block` and `when=`), judging only what is
+new since the last check (undeclared reads only once state and schema are
+final, through `unknown_identifiers::pending_warnings`; never in discovery
+passes); a nested `as_markdown` child's stop is restored on the caller
+(`NestedComposeSlot::take_blocked`), even when `||` absorbed the call;
+the last stages' warnings are checked by the CLI before writing. A new coded warning adds its
+code to `COMPOSE_DIAGNOSTIC_CODES`; a new recovery adds a registry entry
+naming the codes it governs.
+
+`md compose --output report-json` (compose only; `ComposeOutputFormat`)
+prints one `{outcome, diagnostics, document}` object for every parsed
+invocation. The CLI only collects (`commands/compose/report.rs::ReportSink`,
+`ReportedExit` for the exit status); every code and record comes from
+`compose::report_diagnostics` (`warning_diagnostic`, `error_diagnostics`,
+`lifecycle_failure_diagnostics`), and a CLI-worded shell failure keeps its
+typed diagnostics through `ClassifiedFailure`. `Markdown::compose_with_warnings`
+returns a failure with the warnings reported before it (`PipelineRuntime`'s
+failed-document stash); a failed pre-flight walk leaves its failed document's
+warnings for `ComposeOptions::take_preflight_failure_warnings` (with the
+triggers of the siblings walked before it, each trigger once), as does any
+policy error `compose_preflight_approvals*` raises after a successful walk;
+a successful one returns them in `ComposePreflightApprovals::warnings`; the
+in-pipeline pre-approval gate (`validate_pre_approved`) adds its walk's
+triggers to the composition report; and a
+lifecycle call rejection carries its earlier warnings (`earlier_warnings`);
+a failing document keeps the triggers its `as_markdown` children and gate
+found (`NestedCompose::finish` → `PipelineRuntime::record_failed_triggers`).
+`md compose`'s reference check is passive: its graph preparation runs no
+`::shell` (`prepare_content` never re-enables an operation the request
+disabled). Skipped-trigger
+warnings found by a pass that runs ahead of the delivering report (reference
+validation via `ReferenceValidationReport::trigger_warnings`, which prepares
+each transcluded child in its own context; the lifecycle call check via
+`effective_schema_for`; the lifecycle bootstrap; the `--shell` walk via
+`ComposePreflightReport::warnings`; the shell-approval walk via
+`ComposePreflightApprovals::warnings`) are held in
+`compose.rs::PendingTriggerWarnings`: merged once into the first report or
+failure, or delivered by any exit that never composes.
+The call precheck orders findings by authored position and keeps the prefix
+before a rejection. Never print to stdout on a report-mode path; see
+`docs/cli/report-json.md`.
 
 Every source-file argument opens through `cli/src/io::open_argument`:
 `FileReference` grammar first, resolved in the launch context, with the

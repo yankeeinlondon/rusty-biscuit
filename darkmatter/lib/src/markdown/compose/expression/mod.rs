@@ -67,38 +67,67 @@
 pub(crate) mod absence;
 pub mod ast;
 pub mod binding;
+pub mod call_binding;
+pub mod call_check;
 pub mod catalog;
 pub mod ctx;
+mod deferred;
+pub mod diagnostics;
+pub(crate) mod equality;
 pub(crate) mod fm_namespace;
 pub mod error;
 pub mod file_suggestions;
 pub mod functions;
+pub mod host;
 pub mod lexer;
 pub mod lint;
 pub(crate) mod path_projection;
 pub mod parser;
 pub mod prepared;
 pub mod resolve_ctx;
+pub mod scope;
 pub mod semantics;
 
-pub use absence::{StaticVariableRead, static_variable_reads};
+pub use absence::{AccessStep, StaticAccessRead, StaticVariableRead, branch_scope, static_access_reads, static_variable_reads};
 pub use ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
 pub use binding::{
     Availability, BindingError, BindingView, BindingViewBuilder, EvaluationSession,
     GlobalDeclaration, HostGlobals, LazyProvider, ResolvedBinding, RootClass, RuntimeBinding, ScopeId,
     UnavailabilityReason, UnavailableBinding, is_reserved_namespace,
 };
-pub use catalog::{
-    expression_function_descriptors, generate_expression_function_table, reserved_root_descriptors,
-    DataType, ExpressionFunctionDescriptor, ParamRefinement, ParamType, ReservedRootDescriptor,
-    ReturnType, ReturnValueType, RootEvaluation, RootMembers,
+pub use call_binding::{
+    BoundArgs, BoundCall, CallBindingError, CallErrorKind, CompiledSignature, EvaluationMode, FunctionRegistration,
+    LazyCall, RegistrationError,
 };
+pub use call_check::{
+    ALWAYS_FALSE_CALL_CODE, AlwaysFalseFinding, ArgumentCategory, ArgumentCheck, ArgumentType, CallCheck, CallFinding,
+    CallProblem, PreparedCallCheck, check_call,
+    check_call_with_definitions, check_expression_calls, check_prepared_calls, classify_argument,
+    classify_argument_with_definitions, expression_type,
+};
+pub use catalog::{
+    CatalogCategory, ExpressionFunctionDescriptor, FunctionCatalog, FunctionExample, FunctionParameterDescriptor,
+    ReservedRootDescriptor, RootEvaluation, RootMembers, expression_function_catalog, expression_function_descriptors,
+    function_descriptors, generate_expression_function_table, reserved_root_descriptors,
+};
+#[cfg(any(test, feature = "effects-instrumentation"))]
+pub use functions::test_hooks as function_test_hooks;
 pub use ctx::CtxLookup;
+pub use diagnostics::{
+    Diagnostic, DiagnosticSource, ExpressionDiagnostic, INCOMPATIBLE_CALL_CODE, Severity, UNCERTAIN_CALL_CODE,
+    call_severity, expression_call_diagnostics, one_based_position,
+};
+pub use host::{
+    FactsArtifact, HostCatalogError, HostFunctionCatalog, HostFunctionError, HostFunctionScope, HostFunctions,
+    HostFunctionsBuilder, HostHandler, INCOMPLETE_ANALYSIS_CODE, IncompleteHostCall, incomplete_host_calls,
+    install_host_functions,
+};
+pub use deferred::{defer_templates, is_deferred_template, is_deferred_value, is_malformed_template};
 pub use fm_namespace::{
     FRONTMATTER_ROOT, FmPath, fm_namespace_path, resolve_fm_namespace_in_object,
 };
 pub use error::{
-    ArityBound, CallerFileDiagnosticProvenance, ExpressionError, FileRefFailure,
+    CallerFileDiagnosticProvenance, ExpressionError, FileRefFailure,
     FileReferenceDiagnostic, ProviderFailureKind,
 };
 pub use file_suggestions::{collect_sibling_candidates, suggest_sibling_files};
@@ -106,6 +135,10 @@ pub(crate) use path_projection::{
     make_portable_relative_in_context,
 };
 pub use resolve_ctx::ResolutionContext;
+pub use scope::{
+    BindingId, DeclaredType, DeclaredTypes, GuardOrigin, Member, Polarity, PresenceEvidence, RawDeclarations,
+    ScopedType, Shape, Subject, TypeScope, WriteSet,
+};
 pub use lint::{ExpressionLint, ExpressionLintKind, is_whole_value_span, lint_expression, lint_spanned};
 pub use lexer::{
     ComparisonOp, ExpressionFinder, ExpressionLocation, ExpressionScanResult, InterpolationLiteral,
@@ -122,25 +155,51 @@ pub use prepared::{
 use absence::{AbsenceScope, MissingRootObserver};
 use serde_json::Value;
 
-use crate::catalog::{describe, describe_for_error, suggest, Described};
+use crate::markdown::numeric::{self, NumberTextError, NumericAdmissionError};
 
-/// Converts a value to a number for arithmetic operations.
-///
-/// Accepts numbers and parseable strings; rejects booleans, null, arrays,
-/// and objects.
-fn to_number_arithmetic(value: &Value) -> Option<f64> {
-    match value {
-        Value::Number(n) => n.as_f64(),
-        Value::String(s) => s.parse::<f64>().ok(),
-        _ => None,
+use crate::catalog::{describe_for_error, suggest};
+
+/// A value read as an arithmetic operand.
+enum ArithmeticOperand {
+    Number(f64),
+    /// Not a number and not numeric text: booleans, null, arrays, objects,
+    /// and text such as `"pear"`.
+    NotNumeric,
+    /// A number, or numeric text, that admission rejects
+    /// (`"9007199254740993"`).
+    Inadmissible(NumericAdmissionError),
+}
+
+/// Reads a value as an arithmetic operand. Text converts through the one
+/// canonical numeric-text parser, and a stored number is admitted again
+/// because a value supplied from outside the loaders (`--set`) may be an
+/// exact integer no `f64` holds.
+fn arithmetic_operand(value: &Value) -> ArithmeticOperand {
+    let admitted = match value {
+        Value::Number(number) => numeric::admit_json_number(number).map_err(NumberTextError::Admission),
+        Value::String(text) => numeric::admit_number_text(text),
+        _ => Err(NumberTextError::NotANumber),
+    };
+    match admitted {
+        Ok(number) => ArithmeticOperand::Number(number),
+        Err(NumberTextError::NotANumber) => ArithmeticOperand::NotNumeric,
+        Err(NumberTextError::Admission(reason)) => ArithmeticOperand::Inadmissible(reason),
     }
 }
 
 /// Converts an expression value into a number for arithmetic operations,
-/// returning an error message tagged with the originating operator when the
-/// value cannot be represented as a number.
+/// returning an error tagged with the originating operator when the value is
+/// not a number, or carrying the admission reason when it is a number that
+/// cannot be represented.
 fn require_number(value: &Value, op_label: &'static str) -> Result<f64, ExpressionError> {
-    to_number_arithmetic(value).ok_or(ExpressionError::Arithmetic { op: op_label })
+    match arithmetic_operand(value) {
+        ArithmeticOperand::Number(number) => Ok(number),
+        ArithmeticOperand::NotNumeric => Err(ExpressionError::Arithmetic { op: op_label }),
+        ArithmeticOperand::Inadmissible(reason) => Err(ExpressionError::Other {
+            function: op_label.to_string(),
+            message: format!("The number {} {reason}", scalar_string(value)),
+        }),
+    }
 }
 
 /// Converts a value to a number for array indexing.
@@ -154,16 +213,20 @@ fn to_number_index(value: &Value) -> Option<f64> {
     }
 }
 
+/// The value a numeric literal evaluates to. The guard analysis models
+/// literal operands with this, so it must stay the evaluator's only literal
+/// conversion: the lexer already admitted the literal, and it is stored by
+/// [`numeric::json_number`] (a whole value as an integer, never narrowed).
+fn number_literal(n: f64) -> Option<Value> {
+    numeric::json_number(n).map(Value::Number)
+}
+
+/// Stores a computed number; a non-finite result (overflow, `0 / 0`) is an
+/// error, never infinity or a saturated value.
 fn json_number(value: f64) -> Result<Value, String> {
-    if !value.is_finite() {
-        return Err(format!("Arithmetic produced a non-finite number: {value}"));
-    }
-    if value.fract() == 0.0 && value.abs() < (i64::MAX as f64) {
-        return Ok(Value::Number(serde_json::Number::from(value as i64)));
-    }
-    serde_json::Number::from_f64(value)
+    numeric::json_number(value)
         .map(Value::Number)
-        .ok_or_else(|| format!("Unable to represent number: {value}"))
+        .ok_or_else(|| format!("Arithmetic result is not finite: {value}"))
 }
 
 /// Trait for types that can resolve expression variable lookups.
@@ -328,7 +391,7 @@ pub(crate) fn default_format(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
         Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
+        Value::Number(n) => format_json_number(n),
         Value::Bool(b) => b.to_string(),
         other => other.to_string(),
     }
@@ -366,14 +429,16 @@ pub fn is_truthy(value: &Value) -> bool {
 /// Converts a JSON value to a number.
 ///
 /// - `Number` -> `Some(n)`
-/// - `String` -> `Some(n)` if parseable as f64
+/// - `String` -> `Some(n)` when the canonical numeric-text parser
+///   ([`numeric::admit_number_text`]) admits it; `None` for other text,
+///   including `"inf"`, `"NaN"`, and inexact text such as `"9007199254740993"`
 /// - `Bool` -> `Some(1.0)` for true, `Some(0.0)` for false
 /// - `Null` -> `None`
 /// - `Array` | `Object` -> `None`
 pub fn to_number(value: &Value) -> Option<f64> {
     match value {
         Value::Number(n) => n.as_f64(),
-        Value::String(s) => s.parse::<f64>().ok(),
+        Value::String(s) => numeric::admit_number_text(s).ok(),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Null => None,
         Value::Array(_) | Value::Object(_) => None,
@@ -389,23 +454,27 @@ pub fn to_number_coerce(value: &Value) -> f64 {
 ///
 /// - `Null` -> empty string
 /// - `Bool` -> `"true"` or `"false"`
-/// - `Number` -> string representation
+/// - `Number` -> [`numeric::format_number`] (`4.0` is `"4"`); an integer
+///   stored exactly keeps all its digits
 /// - `String` -> the string itself
 /// - `Array` | `Object` -> JSON string representation
 pub fn scalar_string(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
         Value::Bool(b) => b.to_string(),
-        Value::Number(n) => {
-            if let Some(f) = n.as_f64()
-                && f.fract() == 0.0
-            {
-                return format!("{}", f as i64);
-            }
-            n.to_string()
-        }
+        Value::Number(n) => format_json_number(n),
         Value::String(s) => s.clone(),
         Value::Array(_) | Value::Object(_) => value.to_string(),
+    }
+}
+
+/// The text form of a stored number: [`numeric::format_number`] for float
+/// storage (`4.0` is `"4"`, `1e20` has no exponent), and every digit of an
+/// integer stored exactly.
+pub(crate) fn format_json_number(number: &serde_json::Number) -> String {
+    match number.as_f64() {
+        Some(value) if number.is_f64() => numeric::format_number(value),
+        _ => number.to_string(),
     }
 }
 
@@ -506,16 +575,8 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
             Ok(binding.into_value().unwrap_or(Value::Null))
         }
         Expr::StringLiteral(s) => Ok(Value::String(s.clone())),
-        Expr::NumberLiteral(n) => {
-            let num = if n.fract() == 0.0 {
-                serde_json::Number::from(*n as i64)
-            } else {
-                serde_json::Number::from_f64(*n).ok_or_else(|| {
-                    ExpressionError::Parse(format!("Invalid numeric literal: {n}"))
-                })?
-            };
-            Ok(Value::Number(num))
-        }
+        Expr::NumberLiteral(n) => number_literal(*n)
+            .ok_or_else(|| ExpressionError::Parse(format!("Invalid numeric literal: {n}"))),
         Expr::BoolLiteral(b) => Ok(Value::Bool(*b)),
         Expr::ArrayLiteral(items) => items
             .iter()
@@ -558,44 +619,46 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
             let base = evaluate_expr(base, lookup, scope, observer)?;
             Ok(evaluate_member(&base, name))
         }
-        Expr::Fallback { primary, fallback } => {
-            let primary = evaluate_expr(primary, lookup, scope.absence_check(), observer)?;
+        Expr::Fallback { primary: primary_expr, fallback } => {
+            let primary = evaluate_expr(primary_expr, lookup, scope.absence_check(), observer)?;
             if is_truthy(&primary) {
                 Ok(primary)
+            } else if O::OBSERVES {
+                // Keeps `scope`'s handling: in a chain `a || b || "d"` that is
+                // itself a primary, `b` is handled too. The fallback is read
+                // only when the primary failed, so it gets the false side.
+                let facts = scope.facts().assume(primary_expr, scope::Polarity::False);
+                evaluate_expr(fallback, lookup, scope.with_facts(&facts), observer)
             } else {
-                // Keeps `scope`: in a chain `a || b || "d"` that is itself a
-                // primary, `b` is handled too.
                 evaluate_expr(fallback, lookup, scope, observer)
             }
         }
         Expr::Ternary {
-            condition,
+            condition: condition_expr,
             then_branch,
             else_branch,
         } => {
-            let guard = scope.condition_guard(condition);
-            let branch_scope = scope.branch(guard.as_ref());
-            let condition = evaluate_expr(condition, lookup, scope.absence_check(), observer)?;
-            if is_truthy(&condition) {
-                evaluate_expr(then_branch, lookup, branch_scope, observer)
+            let condition = evaluate_expr(condition_expr, lookup, scope.absence_check(), observer)?;
+            let (branch, polarity) = if is_truthy(&condition) {
+                (then_branch, scope::Polarity::True)
             } else {
-                evaluate_expr(else_branch, lookup, branch_scope, observer)
+                (else_branch, scope::Polarity::False)
+            };
+            if O::OBSERVES {
+                // The chosen branch reads under its own side's facts only.
+                let facts = scope.facts().assume(condition_expr, polarity);
+                evaluate_expr(branch, lookup, scope.with_facts(&facts), observer)
+            } else {
+                evaluate_expr(branch, lookup, scope, observer)
             }
         }
         Expr::Comparison { left, op, right } => {
             let left = evaluate_expr(left, lookup, operand, observer)?;
             let right = evaluate_expr(right, lookup, operand, observer)?;
 
-            // Null-safe comparisons: when both sides are Null (undefined),
-            // equality and inequality both return false. Comparing two
-            // unknown values yields no meaningful result.
-            let both_null = left.is_null() && right.is_null();
-
             let outcome = match op {
-                ComparisonOp::Equal => !both_null && scalar_string(&left) == scalar_string(&right),
-                ComparisonOp::NotEqual => {
-                    !both_null && scalar_string(&left) != scalar_string(&right)
-                }
+                ComparisonOp::Equal => equality::values_equal(&left, &right),
+                ComparisonOp::NotEqual => !equality::values_equal(&left, &right),
                 ComparisonOp::GreaterThan => to_number_coerce(&left) > to_number_coerce(&right),
                 ComparisonOp::GreaterThanOrEqual => {
                     to_number_coerce(&left) >= to_number_coerce(&right)
@@ -614,13 +677,15 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
 }
 
 fn evaluate_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value, ExpressionError> {
+    // Numeric text that admission rejects still counts as numeric here, so
+    // `"9007199254740993" + 1` reports the reason instead of concatenating.
     let mixed_number_and_numeric_string = op == BinaryOp::Add
         && matches!(
             (left, right),
             (Value::Number(_), Value::String(_)) | (Value::String(_), Value::Number(_))
         )
-        && to_number_arithmetic(left).is_some()
-        && to_number_arithmetic(right).is_some();
+        && !matches!(arithmetic_operand(left), ArithmeticOperand::NotNumeric)
+        && !matches!(arithmetic_operand(right), ArithmeticOperand::NotNumeric);
     if op == BinaryOp::Add
         && (left.is_string() || right.is_string())
         && !mixed_number_and_numeric_string
@@ -676,20 +741,9 @@ fn evaluate_index(base: &Value, index: &Value) -> Value {
     match base {
         Value::Null => Value::Null,
         Value::Array(items) => {
-            let Some(n) = to_number_index(index) else {
-                return Value::Null;
-            };
-            if n.fract() != 0.0 {
-                return Value::Null;
-            }
-            let len = items.len() as i64;
-            let idx = n as i64;
-            let resolved = if idx < 0 { len + idx } else { idx };
-            if resolved < 0 || resolved >= len {
-                Value::Null
-            } else {
-                items[resolved as usize].clone()
-            }
+            to_number_index(index)
+                .and_then(|n| resolve_array_index(items.len(), n))
+                .map_or(Value::Null, |resolved| items[resolved].clone())
         }
         Value::Object(map) => match index {
             Value::String(s) => map.get(s).cloned().unwrap_or(Value::Null),
@@ -723,21 +777,6 @@ fn evaluate_member(base: &Value, name: &str) -> Value {
 /// never resolve and would otherwise leak its literal `{{ … }}` text downstream.
 pub(crate) const UNKNOWN_FUNCTION_PREFIX: &str = "Unknown function:";
 
-/// Whether an evaluator error message is an arity (wrong-argument-count) error.
-///
-/// Arity errors read "… requires N argument(s)" / "… requires 1 or 2 arguments"
-/// / "… requires at least 1 argument". Type errors also contain "requires …
-/// argument" but name the rejected domain ("numeric"/"string"/"array"), so
-/// those are excluded.
-fn is_arity_error(message: &str) -> bool {
-    let m = message.to_lowercase();
-    m.contains("requires")
-        && m.contains("argument")
-        && !m.contains("numeric")
-        && !m.contains("string argument")
-        && !m.contains("array argument")
-}
-
 /// Returns a plain-text error for an unrecognized function name, with a fuzzy
 /// did-you-mean suggestion when one exists.
 pub(crate) fn unknown_function_error(name: &str) -> ExpressionError {
@@ -755,33 +794,6 @@ pub(crate) fn unknown_function_error(name: &str) -> ExpressionError {
     }
 }
 
-/// Appends the matched function descriptor's signature, description, and example
-/// to an arity error message.
-fn enrich_arity_error(name: &str, message: &str) -> String {
-    let signature = expression_function_descriptors()
-        .iter()
-        .find(|d| d.key().starts_with(&format!("{name}(")) || d.key() == name)
-        .map(|d| d.key());
-    match signature {
-        Some(sig) if let Some(descriptor) = describe(expression_function_descriptors(), sig) => {
-            format!("{message}\n\nExpected:\n  {}", describe_for_error(descriptor))
-        }
-        _ => message.to_string(),
-    }
-}
-
-fn classify_function_error(function: &str, message: String) -> ExpressionError {
-    let message = if is_arity_error(&message) {
-        enrich_arity_error(function, &message)
-    } else {
-        message
-    };
-    ExpressionError::Other {
-        function: function.to_string(),
-        message,
-    }
-}
-
 fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
     name: &str,
     args: &[Expr],
@@ -789,111 +801,101 @@ fn evaluate_function<L: EvaluationLookup, O: MissingRootObserver>(
     scope: AbsenceScope<'_>,
     observer: &mut O,
 ) -> Result<Value, ExpressionError> {
-    let argument = scope.call_argument(name);
+    // Only an observer reads absence handling, so a plain evaluation skips
+    // the registration lookup per argument.
+    let argument = |index: usize| {
+        if O::OBSERVES { scope.call_argument(name, index, args.len()) } else { scope.operand() }
+    };
     let name = name.to_ascii_lowercase();
-    match name.as_str() {
-        // `and`/`or` short-circuit, so they must evaluate their arguments
-        // lazily and stay here rather than in the eagerly-evaluated registries.
-        "and" => {
-            match functions::lazy_arity_eligibility("and", args.len()) {
-                Some(functions::LazyArityEligibility::Eligible) => {}
-                Some(functions::LazyArityEligibility::Ineligible(message)) => {
-                    return Err(classify_function_error("and", message));
-                }
-                None => return Err(unknown_function_error("and")),
-            }
-            for arg in args {
-                let value = evaluate_expr(arg, lookup, argument, observer)?;
-                if !is_truthy(&value) {
-                    return Ok(Value::Bool(false));
-                }
-            }
-            Ok(Value::Bool(true))
-        }
-        "or" => {
-            match functions::lazy_arity_eligibility("or", args.len()) {
-                Some(functions::LazyArityEligibility::Eligible) => {}
-                Some(functions::LazyArityEligibility::Ineligible(message)) => {
-                    return Err(classify_function_error("or", message));
-                }
-                None => return Err(unknown_function_error("or")),
-            }
-            for arg in args {
-                let value = evaluate_expr(arg, lookup, argument, observer)?;
-                if is_truthy(&value) {
-                    return Ok(Value::Bool(true));
-                }
-            }
-            Ok(Value::Bool(false))
-        }
-        // Every other function evaluates its arguments eagerly and resolves
-        // through the authoritative dispatch tables in `functions`.
-        other => {
-            let mut caller_occurrence = None;
-            let evaluated: Vec<Value> = if functions::is_fs_function(other) {
-                let mut values = Vec::with_capacity(args.len());
-                for (index, arg) in args.iter().enumerate() {
-                    if index == 0 {
-                        let (value, occurrence) = evaluate_caller_file_argument(arg, lookup, argument, observer)?;
-                        values.push(value);
-                        caller_occurrence = occurrence;
-                    } else {
-                        values.push(evaluate_expr(arg, lookup, argument, observer)?);
-                    }
-                }
-                values
+    if let Some((registration, short_circuit)) = functions::lazy_function(&name) {
+        return evaluate_lazy_function(registration, short_circuit, args, lookup, argument, observer);
+    }
+    let mut caller_occurrence = None;
+    let evaluated: Vec<Value> = if functions::is_context_function(&name) {
+        let mut values = Vec::with_capacity(args.len());
+        for (index, arg) in args.iter().enumerate() {
+            let argument = argument(index);
+            if index == 0 {
+                let (value, occurrence) = evaluate_caller_file_argument(arg, lookup, argument, observer)?;
+                values.push(value);
+                caller_occurrence = occurrence;
             } else {
-                args.iter()
-                    .map(|arg| evaluate_expr(arg, lookup, argument, observer))
-                    .collect::<Result<_, _>>()?
-            };
-            // Prefer the borrowed context (Finding 12) so a read-side function
-            // dispatched here does not deep-clone the lookup's context; only
-            // fall back to the owned clone for lookups that expose only the
-            // owned accessor.
-            let mut ctx = lookup
-                .resolution_context_ref()
-                .map(std::borrow::Cow::Borrowed)
-                .or_else(|| lookup.resolution_context().map(std::borrow::Cow::Owned));
-            if let Some(context) = ctx.as_ref()
-                && let Some(occurrence) = caller_occurrence
-                && let Some(provenance) = context.caller_file_provenance.get(&occurrence).cloned()
-            {
-                let mut selected = context.as_ref().clone();
-                selected.active_caller_file_provenance = Some(provenance);
-                ctx = Some(std::borrow::Cow::Owned(selected));
+                values.push(evaluate_expr(arg, lookup, argument, observer)?);
             }
-            if let Some(ctx) = ctx
-                && let Some(result) = functions::dispatch_fs(other, &evaluated, &ctx)
-            {
-                return result.map_err(|error| match error {
-                    ExpressionError::Other { function, message } if is_arity_error(&message) => {
-                        ExpressionError::Other {
-                            function,
-                            message: enrich_arity_error(other, &message),
-                        }
-                    }
-                    other => other,
-                });
-            }
-            if let Some(result) = functions::dispatch(other, &evaluated) {
-                return result.map_err(|message| classify_function_error(other, message));
-            }
-            // A known filesystem function reaches here only because the lookup
-            // returned no resolution context — an opt-out or test lookup, not a
-            // real document surface (all of which now supply one). Keep it
-            // recoverable so it doesn't read as an unknown symbol.
-            if functions::is_fs_function(other) {
-                return Err(ExpressionError::Other {
-                    function: other.to_string(),
-                    message: format!(
-                        "Filesystem function '{name}' requires a document resolution context, which is unavailable here"
-                    ),
-                });
-            }
-            Err(unknown_function_error(other))
+        }
+        values
+    } else {
+        args.iter()
+            .enumerate()
+            .map(|(index, arg)| evaluate_expr(arg, lookup, argument(index), observer))
+            .collect::<Result<_, _>>()?
+    };
+    // Prefer the borrowed context (Finding 12) so a read-side function
+    // dispatched here does not deep-clone the lookup's context.
+    let owned_ctx = owned_call_context(lookup, caller_occurrence);
+    let ctx = owned_ctx.as_deref().or_else(|| lookup.resolution_context_ref());
+    match functions::call_function(&name, &evaluated, ctx) {
+        Some(result) => result,
+        None => Err(unknown_function_error(&name)),
+    }
+}
+
+/// The context a call needs owned: the lookup's own clone when it exposes no
+/// borrowed context, or one selecting the caller file `caller_occurrence`
+/// names. `None` means the borrowed context serves the call as it is.
+///
+/// Out of line and boxed: a context held by value in
+/// [`evaluate_function`] would sit in a frame that recurs once per nested
+/// composition.
+#[inline(never)]
+fn owned_call_context<L: EvaluationLookup>(
+    lookup: &L,
+    caller_occurrence: Option<String>,
+) -> Option<Box<ResolutionContext>> {
+    let borrowed = lookup.resolution_context_ref();
+    let owned = if borrowed.is_none() { lookup.resolution_context().map(Box::new) } else { None };
+    let context = borrowed.or(owned.as_deref())?;
+    if let Some(occurrence) = caller_occurrence
+        && let Some(provenance) = context.caller_file_provenance.get(&occurrence).cloned()
+    {
+        let mut selected = Box::new(context.clone());
+        selected.active_caller_file_provenance = Some(provenance);
+        return Some(selected);
+    }
+    owned
+}
+
+/// Evaluates a lazy function's operands one at a time, binding each as it is
+/// evaluated; an operand after the short-circuit is never evaluated or bound.
+fn evaluate_lazy_function<'a, L: EvaluationLookup, O: MissingRootObserver>(
+    registration: &call_binding::FunctionRegistration,
+    short_circuit: functions::ShortCircuit,
+    args: &[Expr],
+    lookup: &L,
+    argument: impl Fn(usize) -> AbsenceScope<'a>,
+    observer: &mut O,
+) -> Result<Value, ExpressionError> {
+    let call_error = |error| ExpressionError::Call(Box::new(error));
+    registration.check_arity(args.len()).map_err(call_error)?;
+    let mut call = registration.lazy_call().expect("a lazy registration starts a lazy call");
+    let (stop_on_truthy, polarity) = match short_circuit {
+        functions::ShortCircuit::OnFalsy => (false, scope::Polarity::True),
+        functions::ShortCircuit::OnTruthy => (true, scope::Polarity::False),
+    };
+    // Each operand reads under the facts the earlier operands established.
+    let mut facts = argument(0).facts();
+    for (index, arg) in args.iter().enumerate() {
+        let value = evaluate_expr(arg, lookup, argument(index).with_facts(&facts), observer)?;
+        let bound = call.bind_next(value).map_err(call_error)?;
+        if is_truthy(bound) == stop_on_truthy {
+            return Ok(Value::Bool(stop_on_truthy));
+        }
+        if O::OBSERVES {
+            facts = facts.assume(arg, polarity);
         }
     }
+    call.finish().map_err(call_error)?;
+    Ok(Value::Bool(!stop_on_truthy))
 }
 
 fn evaluate_caller_file_argument<L: EvaluationLookup, O: MissingRootObserver>(
@@ -926,14 +928,19 @@ fn selected_array_index(base: &Value, index: &Value) -> Option<usize> {
     let Value::Array(items) = base else {
         return None;
     };
-    let index = to_number_index(index)?;
+    resolve_array_index(items.len(), to_number_index(index)?)
+}
+
+/// The position an index selects in a list of `len` items, counting a
+/// negative index from the end; `None` for a non-whole or out-of-range index.
+/// Computed in `f64` so a huge index is out of range rather than saturated.
+fn resolve_array_index(len: usize, index: f64) -> Option<usize> {
     if index.fract() != 0.0 {
         return None;
     }
-    let len = items.len() as i64;
-    let index = index as i64;
-    let resolved = if index < 0 { len + index } else { index };
-    (resolved >= 0 && resolved < len).then_some(resolved as usize)
+    let len = len as f64;
+    let resolved = if index < 0.0 { len + index } else { index };
+    (resolved >= 0.0 && resolved < len).then_some(resolved as usize)
 }
 
 fn caller_file_occurrence(expr: &Expr) -> Option<String> {
@@ -1025,21 +1032,17 @@ mod tests {
             );
         }
 
+        /// Arity is the binder's: a typed call error naming every candidate
+        /// signature, never a handler's text.
         #[test]
-        fn arity_error_includes_signature_and_example() {
+        fn arity_error_is_typed_and_names_the_signatures() {
             let err = evaluate(&parse("length()").unwrap(), &lookup(json!({}))).unwrap_err();
-            assert!(
-                err.contains("requires 1 argument"),
-                "error should preserve arity message: {err}"
-            );
-            assert!(
-                err.contains("length("),
-                "error should include function signature: {err}"
-            );
-            assert!(
-                err.contains("example:"),
-                "error should include an example: {err}"
-            );
+            let ExpressionError::Call(call) = &err else {
+                panic!("an arity error is a call error: {err:?}");
+            };
+            assert_eq!(call.kind(), call_binding::CallErrorKind::Arity);
+            assert!(err.contains("no signature takes 0 arguments"), "{err}");
+            assert!(err.contains("length("), "error should include function signature: {err}");
         }
     }
 
@@ -1153,13 +1156,13 @@ mod tests {
             };
             assert_eq!(evaluate(&expr, &state).unwrap(), json!(true));
 
-            // Null-safe equality: null == null is false
+            // Two missing values are both null, and null equals null
             let expr = Expr::Comparison {
                 left: Box::new(Expr::Variable("missing_a".to_string())),
                 op: ComparisonOp::Equal,
                 right: Box::new(Expr::Variable("missing_b".to_string())),
             };
-            assert_eq!(evaluate(&expr, &state).unwrap(), json!(false));
+            assert_eq!(evaluate(&expr, &state).unwrap(), json!(true));
         }
 
         #[test]

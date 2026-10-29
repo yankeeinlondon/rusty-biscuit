@@ -79,6 +79,12 @@ pub struct ReferenceValidationReport {
     pub issues: Vec<ReferenceIssue>,
     /// Non-blocking warnings.
     pub warnings: Vec<String>,
+    /// The schema triggers the validated documents' preparation skipped as
+    /// invalid (`dm.schema.invalid_trigger`), once per trigger, in discovery
+    /// order. Each transcluded child prepares in its own context, so a
+    /// trigger only a child's schema roots hold is here too. Not serialized:
+    /// a host delivers them as compose warnings.
+    pub trigger_warnings: Vec<crate::markdown::compose::ComposeWarning>,
 }
 
 impl Serialize for ReferenceValidationReport {
@@ -426,6 +432,7 @@ fn validate_graph_contents(
 
     let mut report = ReferenceValidationReport {
         references_scanned: ref_set.len(),
+        trigger_warnings: graph.trigger_warnings().to_vec(),
         ..Default::default()
     };
 
@@ -1422,6 +1429,7 @@ mod tests {
             references_valid: 0,
             issues: vec![issue],
             warnings: Vec::new(),
+            trigger_warnings: Vec::new(),
         };
 
         let value = serde_json::to_value(&report).unwrap();
@@ -1466,6 +1474,7 @@ mod tests {
             references_valid: 0,
             issues: vec![issue],
             warnings: Vec::new(),
+            trigger_warnings: Vec::new(),
         };
 
         use biscuit_terminal::components::renderable::TerminalRenderable as _;
@@ -1484,6 +1493,7 @@ mod tests {
             references_valid: 1,
             issues: Vec::new(),
             warnings: Vec::new(),
+            trigger_warnings: Vec::new(),
         };
 
         use biscuit_terminal::components::renderable::TerminalRenderable as _;

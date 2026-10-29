@@ -21,6 +21,41 @@ pub enum OutputFormat {
     Json,
 }
 
+/// Output format for `md compose`: the document formats of
+/// [`OutputFormat`], plus the composition report.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum ComposeOutputFormat {
+    /// Auto: Markdown text (compose never renders to the terminal).
+    Auto,
+    /// Markdown text output.
+    #[value(alias = "text")]
+    Markdown,
+    /// Markdown output with disclosure blocks as HTML details/summary elements.
+    MarkdownPlus,
+    /// HTML output.
+    #[value(alias = "browser")]
+    Html,
+    /// AST JSON output.
+    #[value(alias = "ast")]
+    Json,
+    /// One JSON object: the outcome, every diagnostic, and the Markdown
+    /// document (`null` on failure).
+    ReportJson,
+}
+
+impl ComposeOutputFormat {
+    /// The document format this selects; the report carries Markdown.
+    pub fn document_format(self) -> OutputFormat {
+        match self {
+            Self::Auto => OutputFormat::Auto,
+            Self::Markdown | Self::ReportJson => OutputFormat::Markdown,
+            Self::MarkdownPlus => OutputFormat::MarkdownPlus,
+            Self::Html => OutputFormat::Html,
+            Self::Json => OutputFormat::Json,
+        }
+    }
+}
+
 /// A named opt-in accepted by `md --feature` (the repository's `--feature`
 /// convention: repeatable, comma-separated, case-insensitive).
 ///

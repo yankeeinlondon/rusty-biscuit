@@ -1,0 +1,307 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "seq": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "description": "An authored step field, read as `seq.<field>`."
+          },
+          "properties": {
+            "name": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "The current step's name; null in a sequence's own events."
+            },
+            "id": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "The step's unique id: its dasherized name, suffixed -2, -3, … on repeats."
+            },
+            "index": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 1,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "The step's one-based position."
+            },
+            "count": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "The number of steps in the sequence."
+            },
+            "is_first": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "description": "Whether this is the first step."
+            },
+            "is_last": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "description": "Whether this is the last step."
+            },
+            "previous": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object"
+                }
+              ],
+              "description": "The previous step's row, or null at the start."
+            },
+            "next": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object"
+                }
+              ],
+              "description": "The next step's row, or null at the end."
+            },
+            "run_id": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "description": "One token per invocation, shared by every nested sequence."
+            },
+            "outputs": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "items": {}
+                }
+              ],
+              "description": "One result per executed child, in order."
+            }
+          }
+        }
+      ]
+    },
+    "loop": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 1,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "The one-based iteration."
+            },
+            "is_first": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "description": "Whether this is the first iteration."
+            },
+            "is_last": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "description": "Whether this is the final pass the cap permits."
+            },
+            "last_output": {
+              "description": "The previous pass's result: text for a document, a list for a sequence, a dictionary for a group."
+            },
+            "last_exit_code": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "The previous iteration's exit code."
+            }
+          }
+        }
+      ]
+    },
+    "group": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "description": "An authored group variable, read as `group.<variable>`."
+          },
+          "properties": {
+            "legs": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ],
+                        "description": "The leg's name."
+                      },
+                      "outcome": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "enum": [
+                              "succeeded",
+                              "failed",
+                              "cancelled",
+                              "skipped"
+                            ]
+                          }
+                        ],
+                        "description": "How the leg settled."
+                      },
+                      "output": {
+                        "description": "The leg's result, including partial output on failure; null when never admitted."
+                      },
+                      "err": {
+                        "description": "The leg's structured error or cancellation cause; null for success or skip."
+                      }
+                    }
+                  },
+                  "properties": {}
+                }
+              ]
+            },
+            "succeeded": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ],
+              "description": "The names of the legs that succeeded, in declaration order."
+            },
+            "failed": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ],
+              "description": "The names of the legs that failed, in declaration order."
+            },
+            "cancelled": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ],
+              "description": "The names of the legs that were cancelled, in declaration order."
+            }
+          }
+        }
+      ]
+    }
+  }
+}

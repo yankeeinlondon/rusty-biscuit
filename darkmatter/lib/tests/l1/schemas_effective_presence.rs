@@ -9,7 +9,7 @@ use std::path::Path;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
-use darkmatter::markdown::schemas::triggers::{PathSubject, matches, parse_trigger_envelope_from_str};
+use darkmatter::markdown::schemas::triggers::{PathSubject, parse_trigger_envelope_from_str};
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, SchemaPhase};
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -134,22 +134,20 @@ fn raw_json_schema_keeps_authored_required_for_nullable_properties() {
 fn trigger_conditions_use_the_same_presence() {
     let arms = |condition: &str| {
         parse_trigger_envelope_from_str(&format!(
-            "kind: trigger-schema\nmatch:\n  - all:\n      - kind: 'literal(t; required)'\n      - p: {condition}\n"
+            "kind: schema-trigger\nmatch:\n  - all:\n      - kind: 'literal(t; required)'\n      - p: {condition}\n"
         ))
         .unwrap_or_else(|error| panic!("{condition}: {error}"))
         .expect("trigger envelope")
-        .match_arms
+        .conditions
     };
-    let selects = |condition: &str, frontmatter: Value| {
-        arms(condition).0.iter().any(|arm| matches(arm, &frontmatter, &PathSubject::detached()))
-    };
+    let selects = |condition: &str, frontmatter: Value| arms(condition).matches(&frontmatter, &PathSubject::detached());
 
     for condition in ["'unknown(required)'", "'null(required)'"] {
         assert!(selects(condition, json!({ "kind": "t" })), "{condition}: omitted");
         assert!(selects(condition, json!({ "kind": "t", "p": null })), "{condition}: null");
         // Alone, the condition is a guard, so the arm would be vacuous.
         let vacuous = parse_trigger_envelope_from_str(&format!(
-            "kind: trigger-schema\nmatch:\n  - p: {condition}\n"
+            "kind: schema-trigger\nmatch:\n  - p: {condition}\n"
         ));
         assert!(vacuous.is_err(), "{condition} alone is vacuous");
     }
@@ -163,7 +161,7 @@ fn trigger_conditions_use_the_same_presence() {
     }
     assert!(!selects(list, json!({ "kind": "t" })), "absent");
     assert!(
-        parse_trigger_envelope_from_str(&format!("kind: trigger-schema\nmatch:\n  - p: {list}\n")).is_ok(),
+        parse_trigger_envelope_from_str(&format!("kind: schema-trigger\nmatch:\n  - p: {list}\n")).is_ok(),
         "a required list is a gate"
     );
 }

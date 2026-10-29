@@ -16,7 +16,7 @@
 //! ## Scope
 //!
 //! The CLI's own short-circuit — the early return that keeps the
-//! trigger-schema git-root walk off the no-frontmatter path — is proven at
+//! schema-trigger git-root walk off the no-frontmatter path — is proven at
 //! Level 1 in `darkmatter/cli/tests/l1/clean_schema.rs`, which points
 //! `--baseline-schema` at a missing file and shows the command still
 //! succeeds. That is a stronger proof than a counter (the walk cannot have
@@ -106,8 +106,8 @@ fn empty_frontmatter_produces_no_findings() {
 }
 
 /// With the baseline disabled and triggers off there is no schema at all, so
-/// the tier is fully inert — the configuration `--no-baseline-schema
-/// --no-trigger-schemas` selects.
+/// the tier is fully inert — the configuration `--disable baseline-schema
+/// --disable schema-triggers` selects.
 #[test]
 #[serial]
 fn schema_free_configuration_resolves_no_effective_schema() {

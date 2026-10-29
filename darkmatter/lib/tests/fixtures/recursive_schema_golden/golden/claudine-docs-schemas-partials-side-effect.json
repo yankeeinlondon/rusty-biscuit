@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "side_effect": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "set": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object"
+                }
+              ],
+              "description": "Sets a top-level key in the `fm` namespace; no external mutation"
+            },
+            "set_frontmatter": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "file": {
+                      "type": "string",
+                      "format": "darkmatter-file-reference"
+                    },
+                    "prop": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "object"
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "file",
+                    "prop"
+                  ]
+                }
+              ]
+            },
+            "merge_frontmatter": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "file": {
+                      "type": "string",
+                      "format": "darkmatter-file-reference"
+                    },
+                    "obj": {
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "file",
+                    "obj"
+                  ]
+                }
+              ]
+            },
+            "delete_frontmatter": {},
+            "increment_frontmatter": {},
+            "decrement_frontmatter": {},
+            "append_frontmatter": {},
+            "prepend_frontmatter": {},
+            "ensure_file": {},
+            "ensure_dir": {},
+            "append_line": {},
+            "append_jsonl": {},
+            "http_post": {}
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,4 @@
+kind: schema
+types:
+  word: string(pattern(^[a-z]+$))
+  middle_choice: [word, number]

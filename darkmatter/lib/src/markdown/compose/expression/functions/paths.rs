@@ -1,28 +1,33 @@
-use super::{EvaluationMode, FunctionBinding, FunctionHandler};
+use super::FunctionBinding;
+use crate::markdown::compose::expression::call_binding::FactKind::TrueImplies;
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding { canonical: "absolute", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::absolute_fn)) },
-    FunctionBinding { canonical: "relative", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::relative_fn)) },
-    FunctionBinding { canonical: "file_exists", aliases: &["fileexists"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::file_exists_fn)) },
-    FunctionBinding { canonical: "find_files", aliases: &["findfiles"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::find_files_fn)) },
-    FunctionBinding { canonical: "has_command", aliases: &["hascommand"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::has_command_fn)) },
+    FunctionBinding::context("absolute", &[], super::absolute_fn),
+    FunctionBinding::context("relative", &[], super::relative_fn),
+    // The handler returns false for `null`, every non-text value, and
+    // malformed reference text, which it never looks up.
+    FunctionBinding::context("file_exists", &["fileexists"], super::file_exists_fn)
+        .narrowing("value", TrueImplies, Some("string"))
+        .false_for_malformed_reference("value"),
+    FunctionBinding::context("find_files", &["findfiles"], super::find_files_fn),
+    FunctionBinding::context("has_command", &["hascommand"], super::has_command_fn),
     // `has_binary` is a second documented name for the same probe (R16), not an
     // alias: both names must appear in the descriptor catalog.
-    FunctionBinding { canonical: "has_binary", aliases: &["hasbinary"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::has_command_fn)) },
-    FunctionBinding { canonical: "is_indexed_file", aliases: &["isindexedfile"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::is_indexed_file_fn)) },
-    FunctionBinding { canonical: "file_index", aliases: &["fileindex"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::file_index_fn)) },
-    FunctionBinding { canonical: "increment_file_index", aliases: &["incrementfileindex"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::increment_file_index_fn)) },
-    FunctionBinding { canonical: "decrement_file_index", aliases: &["decrementfileindex"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::decrement_file_index_fn)) },
-    FunctionBinding { canonical: "find_first_index", aliases: &["findfirstindex"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::find_first_index_fn)) },
-    FunctionBinding { canonical: "find_last_index", aliases: &["findlastindex"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::find_last_index_fn)) },
-    FunctionBinding { canonical: "basename", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::basename_fn)) },
-    FunctionBinding { canonical: "basename_without_index", aliases: &["basenamewithoutindex"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::basename_without_index_fn)) },
-    FunctionBinding { canonical: "dirname", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::dirname_fn)) },
-    FunctionBinding { canonical: "ext", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::ext_fn)) },
-    FunctionBinding { canonical: "parent_dir", aliases: &["parentdir"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::parent_dir_fn)) },
-    FunctionBinding { canonical: "file_trailing", aliases: &["filetrailing"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::file_trailing_fn)) },
-    FunctionBinding { canonical: "dir_leading", aliases: &["dirleading"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::dir_leading_fn)) },
-    FunctionBinding { canonical: "join", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::join_fn)) },
-    FunctionBinding { canonical: "link", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::link_fn)) },
-    FunctionBinding { canonical: "code_link", aliases: &["codelink"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(super::code_link_fn)) },
+    FunctionBinding::context("has_binary", &["hasbinary"], super::has_command_fn),
+    FunctionBinding::context("is_indexed_file", &["isindexedfile"], super::is_indexed_file_fn),
+    FunctionBinding::context("file_index", &["fileindex"], super::file_index_fn),
+    FunctionBinding::context("increment_file_index", &["incrementfileindex"], super::increment_file_index_fn),
+    FunctionBinding::context("decrement_file_index", &["decrementfileindex"], super::decrement_file_index_fn),
+    FunctionBinding::context("find_first_index", &["findfirstindex"], super::find_first_index_fn),
+    FunctionBinding::context("find_last_index", &["findlastindex"], super::find_last_index_fn),
+    FunctionBinding::context("basename", &[], super::basename_fn),
+    FunctionBinding::context("basename_without_index", &["basenamewithoutindex"], super::basename_without_index_fn),
+    FunctionBinding::context("dirname", &[], super::dirname_fn),
+    FunctionBinding::context("ext", &[], super::ext_fn),
+    FunctionBinding::context("parent_dir", &["parentdir"], super::parent_dir_fn),
+    FunctionBinding::context("file_trailing", &["filetrailing"], super::file_trailing_fn),
+    FunctionBinding::context("dir_leading", &["dirleading"], super::dir_leading_fn),
+    FunctionBinding::context("join", &[], super::join_fn),
+    FunctionBinding::context("link", &[], super::link_fn),
+    FunctionBinding::context("code_link", &["codelink"], super::code_link_fn),
 ];

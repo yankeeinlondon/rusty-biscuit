@@ -1,0 +1,37 @@
+# Claudine's host catalog: the shapes of the globals Claudine supplies to
+# lifecycle and sequence expressions, beside Darkmatter's. Registered with
+# Claudine's event registry and embedded in the `claudine` binary; it is never
+# a document schema or a trigger. Which events may read each global is
+# Claudine's binding catalog, not this file.
+kind: schema
+description: the shapes of Claudine's host globals
+$schema:
+    seq:
+        name: "string -> The current step's name; null in a sequence's own events."
+        id: "string -> The step's unique id: its dasherized name, suffixed -2, -3, … on repeats."
+        index: "number(integer; min(1)) -> The step's one-based position."
+        count: "number(integer; min(0)) -> The number of steps in the sequence."
+        is_first: "boolean -> Whether this is the first step."
+        is_last: "boolean -> Whether this is the last step."
+        previous: "object -> The previous step's row, or null at the start."
+        next: "object -> The next step's row, or null at the end."
+        run_id: "string -> One token per invocation, shared by every nested sequence."
+        outputs: "unknown[] -> One result per executed child, in order."
+        "<string>": "unknown -> An authored step field, read as `seq.<field>`."
+    loop:
+        count: "number(integer; min(1)) -> The one-based iteration."
+        is_first: "boolean -> Whether this is the first iteration."
+        is_last: "boolean -> Whether this is the final pass the cap permits."
+        last_output: "unknown -> The previous pass's result: text for a document, a list for a sequence, a dictionary for a group."
+        last_exit_code: "number(integer) -> The previous iteration's exit code."
+    group:
+        legs:
+            "<string>":
+                name: "string -> The leg's name."
+                outcome: "enum(succeeded, failed, cancelled, skipped) -> How the leg settled."
+                output: "unknown -> The leg's result, including partial output on failure; null when never admitted."
+                err: "unknown -> The leg's structured error or cancellation cause; null for success or skip."
+        succeeded: "string[] -> The names of the legs that succeeded, in declaration order."
+        failed: "string[] -> The names of the legs that failed, in declaration order."
+        cancelled: "string[] -> The names of the legs that were cancelled, in declaration order."
+        "<string>": "unknown -> An authored group variable, read as `group.<variable>`."

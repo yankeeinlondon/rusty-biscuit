@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "AGENT": {
+      "type": "string",
+      "description": "The agent the Claudine is using",
+      "x-darkmatter-generated": true
+    },
+    "MODEL": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "The model being used by the agent that Claudine wrapping",
+      "x-darkmatter-generated": true
+    },
+    "YOLO": {
+      "type": [
+        "boolean",
+        "string"
+      ],
+      "format": "darkmatter-boolish",
+      "description": "Whether Claudine has been asked to run in YOLO mode or not",
+      "x-darkmatter-generated": true
+    },
+    "PID": {
+      "type": [
+        "number",
+        "string"
+      ],
+      "format": "darkmatter-numberlike",
+      "description": "The PID id for the Claudine process",
+      "x-darkmatter-generated": true
+    },
+    "PROMPT": {
+      "type": "string",
+      "description": "The prompt string (fully composed) that was used",
+      "x-darkmatter-generated": true
+    },
+    "PROMPT_FILE": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "const": ""
+        },
+        {
+          "type": "string",
+          "format": "darkmatter-file-reference"
+        }
+      ],
+      "description": "The prompt file that was _composed_ to generate the prompt",
+      "x-darkmatter-generated": true
+    },
+    "PANE": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "a unique ID for the PANE in your terminal app this session was executed from",
+      "x-darkmatter-generated": true
+    }
+  }
+}

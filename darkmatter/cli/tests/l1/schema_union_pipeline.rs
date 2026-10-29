@@ -335,18 +335,20 @@ fn compose_coerces_an_unambiguous_union_item_and_keeps_ambiguous_items() {
 }
 
 #[test]
-fn compose_coerces_items_of_a_postfixed_nested_union_like_its_direct_control() {
+fn compose_converts_items_of_a_postfixed_nested_union_like_its_direct_control() {
     let _ = include_str!("../../../lib/tests/union_fixtures/mod.rs");
     let process = CliProcessFixture::new();
     let root = process.cwd();
+    // `toggle` is `boolish | number`: `"TRUE"` matches `boolish` exactly and
+    // is kept as written, `"7"` is no boolean word and converts to `7`.
     let document = "---\n$schema:\n  direct: \"direct[]@./types.yaml\"\n  nested: \"nested[]@./types.yaml\"\n\
-                    direct: [\"TRUE\"]\nnested: [\"TRUE\"]\n---\nBody\n";
+                    direct: [\"TRUE\", \"7\"]\nnested: [\"TRUE\", \"7\"]\n---\nBody\n";
     write_files(root, &[(NESTED_UNION_FILE, NESTED_UNION_TYPES), ("doc.md", document)]);
 
     let (stdout, frontmatter) = compose(&process, &root.join("doc.md"));
 
-    assert_eq!(frontmatter["direct"], json!([true]), "{stdout}");
-    assert_eq!(frontmatter["nested"], json!([true]), "{stdout}");
+    assert_eq!(frontmatter["direct"], json!(["TRUE", 7]), "{stdout}");
+    assert_eq!(frontmatter["nested"], json!(["TRUE", 7]), "{stdout}");
 }
 
 #[test]

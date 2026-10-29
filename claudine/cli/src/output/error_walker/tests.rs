@@ -1,3 +1,5 @@
+use claudine::diagnostics::DiagnosticSnapshotExt;
+use claudine::composition::LifecycleErrorInfoExt;
 use super::*;
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 use color_eyre::eyre::eyre;
@@ -22,6 +24,7 @@ fn walks_past_wrapper_error_to_typed_inner() {
         whitelist_path: Box::new(PathBuf::from("/tmp/wl")),
         blacklist_path: Box::new(PathBuf::from("/tmp/bl")),
         origin: ShellCommandOrigin::Body { line: 7 },
+        suggested_rules: Box::default(),
     };
     let md: MarkdownError = shell.into();
     let cli_err = claudine::error::ClaudineError::SystemPromptComposition(md);

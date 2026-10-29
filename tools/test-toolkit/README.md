@@ -4,7 +4,7 @@ Shared test lifecycle helpers for the Rusty Biscuit workspace.
 
 ## What it provides
 
-This crate solves six common pain points when writing tests in a Rust workspace:
+This crate solves seven common pain points when writing tests in a Rust workspace:
 
 1. **Tracing output in tests** — `trace_phase!` macro and `init_test_tracing()` to emit structured spans around setup/body/teardown phases.
 2. **Safe environment variable mutation** — `EnvGuard` RAII guard that restores env vars after test completion, even when tests panic.
@@ -12,6 +12,7 @@ This crate solves six common pain points when writing tests in a Rust workspace:
 4. **Nextest integration** — Works out of the box with the workspace `.config/nextest.toml` for slow-test detection and JUnit reporting.
 5. **Tests that never compile** — `test_layout`, the layout gate for a package that declares its test binaries explicitly (`autotests = false`).
 6. **Proving the arguments a program received** — `argv_recorder`, the body of a native executable that records its argument vector. A consuming package declares one thin `[[bin]]` whose `main` returns `test_toolkit::argv_recorder::main()`; its tests copy that binary onto the child's `PATH`, point `ARGV_RECORDER_FILE` at a file, and read every run back with `read_argv_records`. Optional `ARGV_RECORDER_STDOUT` and `ARGV_RECORDER_STDERR` values emit stream probes after a successful record, so redirection tests can use the same native executable on every OS.
+7. **Counting allocations** — `alloc_count`, a global allocator that counts allocations, bytes, and peak live bytes, for benches that make allocation claims.
 
 ## Usage
 
@@ -263,6 +264,31 @@ fn every_test_source_is_compiled_by_a_declared_target() {
 
 Also assert that `files` holds a few known paths, so a scan that read nothing
 cannot pass. `darkmatter/lib/tests/l1/test_layout.rs` is the reference use.
+
+### `alloc_count` — allocation counts for benches
+
+`CountingAllocator` wraps the system allocator and keeps process-wide totals,
+so work done on other threads is counted. Only a final binary can declare a
+global allocator, so a bench target that measures allocations declares it
+itself; a library never does:
+
+```rust
+#[global_allocator]
+static ALLOCATOR: test_toolkit::alloc_count::CountingAllocator =
+    test_toolkit::alloc_count::CountingAllocator;
+
+test_toolkit::alloc_count::reset_peak();
+let before = test_toolkit::alloc_count::snapshot();
+run_scenario();
+let used = test_toolkit::alloc_count::snapshot().since(before);
+println!("{} allocations, {} bytes, peak {} bytes", used.allocations, used.bytes_allocated, used.peak_live_bytes);
+```
+
+Keep allocation measurement in its own bench target: counting adds atomic
+operations to every allocation, so Criterion timings run under the system
+allocator. To prove that code does a fixed amount of work, use a package's
+`work-counters` feature in an L1 test instead; allocation totals vary with the
+toolchain and are not stable enough to assert exactly.
 
 ### `leak-sweep` binary — post-run orphan detector
 

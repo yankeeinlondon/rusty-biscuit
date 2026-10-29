@@ -44,12 +44,17 @@ Two traps keep that order intact:
   (and `IndexMap::remove`) is a *swap* remove: the last key jumps into the
   removed key's slot. Any removal from frontmatter or effective state uses
   `shift_remove`.
-- **Never round-trip through `HashMap`.** `EffectiveState::data()`,
-  `EffectiveStateBuilder::with_frontmatter`, `EffectiveState::new`, and the
-  frontmatter shell APIs (`ResolvedShellValue::resolve`,
-  `execute_resolved_shell_values`, `execute_shell_values_with`) all take or
-  return `serde_json::Map`. A `HashMap` is fine only for key lookup that never
-  reaches output (`presentation_values`, caches, memo tables).
+- **Never round-trip through `HashMap`.** `EffectiveStateBuilder::with_frontmatter`
+  and `EffectiveState::new` take a `serde_json::Map`; `EffectiveState::data()`
+  and the frontmatter shell APIs use the ordered `SharedFrontmatter` view (see
+  "Shared Frontmatter Views" below). A `HashMap` is fine only for key lookup
+  that never reaches output (`presentation_values`, caches, memo tables).
+
+Numbers are admitted at load: the YAML loader reads every number through
+`markdown::numeric` (`numeric::load_admitted_yaml`), so an inexact whole
+number, an underflow, a non-finite `.inf`/`.nan`, or an integer beyond `u64`
+is a located load error whatever the property's type, and no fallback
+strategy can hide it.
 
 ## Merge Strategies
 
@@ -92,6 +97,38 @@ receiving document as `base` and picks the value-winning side with
 reorders the result). This applies to external state (document first),
 transclusion inheritance (child first, parent keys appended), and `set`
 overrides (child first).
+
+## Shared Frontmatter Views
+
+`SharedFrontmatter` (`compose::context::shared_frontmatter`, re-exported from
+`markdown::compose`) is the document state evaluation reads and lifecycle
+events write: an `Arc`-shared base map under an owned overlay of written and
+removed top-level keys. `clone()` shares the base, so views derived from one
+seed never observe each other's writes and a small write never copies a large
+inline definition (a `sequence:` list). An explicit `null` is a present value;
+`get_mut` copies only the one value it mutates; `to_map`/`to_hash_map`
+deep-copy and belong only at a boundary that needs an owned document.
+
+- `EffectiveState::data()` returns the view. `EffectiveStateBuilder::with_shared_frontmatter`
+  keeps the base uncopied when there is no (or an empty) external state; only
+  `ctx` and the view's writes are owned. With external state the merge
+  materializes, exactly as `with_frontmatter` does.
+- The lifecycle executor's base state (`StackInputs::frontmatter`,
+  `MdStackContext::frontmatter`, Claudine's `StackExecutionContext::frontmatter`)
+  is a `&SharedFrontmatter`, and its live cell (`…::live_frontmatter`) a
+  `Mutex<SharedFrontmatter>`; each event's `working` state and each
+  expression's state share their base, so no event or guard copies the
+  document. `owned()` iterates the values a view owns, which is what a clone
+  copies (Claudine's work counters read it).
+- A host-run whole-value `$( … )` reads a view in place: the state of
+  `ResolvedShellValue::resolve`, `execute_resolved_shell_values`, and
+  `execute_shell_values_with` is `impl Into<SharedFrontmatter>`, and the
+  frontmatter seed state those use holds the view, so a ternary's branches and
+  condition never copy the base. The lifecycle adapter
+  (`execute_set_shell_values`) counts what its clone copies as the
+  `ShellValueStateNodes` work counter.
+- Iteration order: base keys in base order (a written value in its place),
+  then new keys in first-write order.
 
 ## Typed Extraction
 
@@ -335,7 +372,7 @@ The supported surface includes:
 - `style.hr.*` as the canonical horizontal-rule namespace
 - hyperlink style plus local hyperlink/image style overrides
 
-`KnownButInactive` should be empty for valid v1 schema keys. `--strict-style`
+`KnownButInactive` should be empty for valid v1 schema keys. `--deny style`
 promotes unknown and deprecated keys to errors, while valid unsupported
 combinations fail through documented `StyleApplyError` variants.
 

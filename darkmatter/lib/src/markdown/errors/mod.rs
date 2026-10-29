@@ -336,6 +336,7 @@ mod tests {
             whitelist_path: Box::new("/tmp/wl".into()),
             blacklist_path: Box::new("/tmp/bl".into()),
             origin: ShellCommandOrigin::Body { line: 3 },
+            suggested_rules: Box::default(),
         };
         let out = render(&err);
         assert!(out.contains("approval required"));

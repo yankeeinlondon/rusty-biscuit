@@ -50,7 +50,7 @@ impl Repo {
     fn with_release_trigger(&self) -> &Self {
         self.write(
             "schemas/thing.trigger.yaml",
-            "kind: trigger-schema\nmatch:\n  kind: enum(thing; required)\n$schema: thing.yaml\n",
+            "kind: schema-trigger\nmatch:\n  kind: enum(thing; required)\n$schema: thing.yaml\n",
         );
         self.write("schemas/thing.yaml", RELEASE_IS_STRING);
         self
@@ -111,10 +111,10 @@ fn test_baseline_schema_flag_drives_schema_proven_quoting() {
     );
 }
 
-/// The default baseline is on, and `--no-baseline-schema` turns it off. The
+/// The default baseline is on, and `--disable baseline-schema` turns it off. The
 /// probe is a Darkmatter-owned key (`ctx`), which only the baseline declares.
 #[test]
-fn test_default_baseline_is_active_and_no_baseline_schema_disables_it() {
+fn test_default_baseline_is_active_and_disable_baseline_schema_turns_it_off() {
     let fixture = CliProcessFixture::named(
         "clean-schema-test-default-baseline-is-active-and-no-baseline-schema-disables-it",
     );
@@ -135,19 +135,19 @@ fn test_default_baseline_is_active_and_no_baseline_schema_disables_it() {
         .command()
         .arg("clean")
         .arg(&doc)
-        .arg("--no-baseline-schema")
+        .args(["--disable", "baseline-schema"])
         .assert()
         .success();
     let disabled_stderr = String::from_utf8(disabled.get_output().stderr.clone()).unwrap();
     assert!(
         !disabled_stderr.contains("schema.key-correction"),
-        "--no-baseline-schema must remove the baseline layer, got:\n{disabled_stderr}"
+        "--disable baseline-schema must remove the baseline layer, got:\n{disabled_stderr}"
     );
 }
 
-/// `--no-baseline-schema` also removes a baseline's quoting proof.
+/// `--disable baseline-schema` also removes a baseline's quoting proof.
 #[test]
-fn test_no_baseline_schema_suppresses_quoting() {
+fn test_disable_baseline_schema_suppresses_quoting() {
     let fixture =
         CliProcessFixture::named("clean-schema-test-no-baseline-schema-suppresses-quoting");
     let repo = Repo::new(&fixture);
@@ -162,7 +162,7 @@ fn test_no_baseline_schema_suppresses_quoting() {
     assert!(!release_quoted(&clean(
         &fixture,
         &doc,
-        &["--no-baseline-schema"]
+        &["--disable", "baseline-schema"]
     )));
 }
 
@@ -177,7 +177,7 @@ fn test_baseline_schema_flags_conflict() {
             "doc.md",
             "--baseline-schema",
             "s.yaml",
-            "--no-baseline-schema",
+            "--disable", "baseline-schema",
         ])
         .assert()
         .failure()
@@ -285,7 +285,7 @@ fn test_schema_flag_replaces_document_schema_layer() {
 #[test]
 fn test_matching_trigger_schema_drives_quoting() {
     let fixture =
-        CliProcessFixture::named("clean-schema-test-matching-trigger-schema-drives-quoting");
+        CliProcessFixture::named("clean-schema-test-matching-schema-trigger-drives-quoting");
     let repo = Repo::new(&fixture);
     repo.with_release_trigger();
     let doc = repo.write(
@@ -299,7 +299,7 @@ fn test_matching_trigger_schema_drives_quoting() {
 /// A trigger whose arm does not match contributes nothing.
 #[test]
 fn test_nonmatching_trigger_schema_is_inert() {
-    let fixture = CliProcessFixture::named("clean-schema-test-nonmatching-trigger-schema-is-inert");
+    let fixture = CliProcessFixture::named("clean-schema-test-nonmatching-schema-trigger-is-inert");
     let repo = Repo::new(&fixture);
     repo.with_release_trigger();
     let doc = repo.write(
@@ -310,11 +310,11 @@ fn test_nonmatching_trigger_schema_is_inert() {
     assert!(!release_quoted(&clean(&fixture, &doc, &[])));
 }
 
-/// `--no-trigger-schemas` disables discovery even when an arm would match.
+/// `--disable schema-triggers` disables discovery even when an arm would match.
 #[test]
-fn test_no_trigger_schemas_disables_discovery() {
+fn test_disable_schema_triggers_disables_discovery() {
     let fixture =
-        CliProcessFixture::named("clean-schema-test-no-trigger-schemas-disables-discovery");
+        CliProcessFixture::named("clean-schema-test-no-schema-triggers-disables-discovery");
     let repo = Repo::new(&fixture);
     repo.with_release_trigger();
     let doc = repo.write(
@@ -326,7 +326,7 @@ fn test_no_trigger_schemas_disables_discovery() {
     assert!(!release_quoted(&clean(
         &fixture,
         &doc,
-        &["--no-trigger-schemas"]
+        &["--disable", "schema-triggers"]
     )));
 }
 
@@ -421,7 +421,7 @@ fn test_save_shorthand_uses_default_schema_state_and_repairs() {
 ///
 /// The with-frontmatter case is the positive control: it proves the probe is
 /// live. The absent- and empty-frontmatter cases then succeed only because the
-/// bypass fired before any schema resolution — including the trigger-schema
+/// bypass fired before any schema resolution — including the schema-trigger
 /// ancestor walk — was attempted.
 #[test]
 fn test_absent_and_empty_frontmatter_perform_no_schema_work() {

@@ -43,6 +43,15 @@ related:
     - 2026-10-27-darkmatter-lifecycle-ownership
 implemented: true
 implemented_by: "codex/gpt-6.1-sol"
+canonical_docs:
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/state-management/context-variables.md
+    - claudine/docs/topics/pre-flight-checks.md
+    - claudine/docs/topics/signal-handling.md
+    - messenger/docs/user-guide.md
 ---
 
 # Sequence containers

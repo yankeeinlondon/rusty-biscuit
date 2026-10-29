@@ -5261,100 +5261,47 @@ fn level2_shipped_implement_plan_supplied_commit_message_runs_exact_commit_branc
     );
 }
 
-/// **The shipped motivating route** (`spec.md:1057-1060,1068-1072`): routing
-/// `prompts/implement.md` to `prompts/_implement/implement-plan.md` must execute
-/// every phase exactly as invoking `implement-plan.md` directly does.
-///
-/// This is the shipped-artifact counterpart to
-/// [`level2_lifecycle_initialize_proxy_to_looping_target_matches_direct_run`].
-/// That row owns a synthetic fixture and proves the loop coordinator honors an
-/// `initialize` hand-off in general; it cannot notice the shipped router's
-/// `when:` conditions being rewritten, the `$schema` gaining a required
-/// parameter, or `loop.until` changing shape. This row can, because it runs the
-/// real router and a mechanically-synced copy of the real target.
-///
-/// The phase sequence is read out of the *rendered body* the fake provider
-/// receives, so the assertion is over what the agent would actually have been
-/// asked to do on each iteration — not over a marker the test injected.
+/// Both the direct target and the shipped router must deliver this same
+/// complete phase trace. Separate tests let Nextest schedule the two real
+/// terminal runs independently without dropping the equivalence check.
+#[cfg(feature = "prompt-tests")]
+fn assert_shipped_implement_route(entry: &str) {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    const TOTAL_PHASES: usize = 3;
+    let staged = stage_shipped_implement_route(entry, TOTAL_PHASES);
+    let pane = run_until_settled_with_params(
+        &staged,
+        "--goose",
+        "spec=feature/spec.md plan=feature/plan.md",
+        TOTAL_PHASES * 2,
+        &[],
+    );
+    let lines = event_lines(&staged);
+    let phases: Vec<_> = lines.iter().filter(|line| line.starts_with("phase:")).collect();
+    assert_eq!(
+        phases,
+        ["phase:1-of-3", "phase:2-of-3", "phase:3-of-3"],
+        "{entry} must deliver the complete ordered phase trace; got {lines:?}; pane:\n{pane}"
+    );
+    assert_eq!(
+        lines.iter().filter(|line| line.as_str() == "provider-ran").count(),
+        TOTAL_PHASES,
+        "{entry} must launch exactly once per phase; got {lines:?}; pane:\n{pane}"
+    );
+}
+
+#[test]
+#[serial(level2_lifecycle_control)]
+#[cfg(feature = "prompt-tests")]
+fn level2_lifecycle_shipped_implement_direct_runs_every_phase() {
+    assert_shipped_implement_route("_implement/implement-plan.md");
+}
+
 #[test]
 #[serial(level2_lifecycle_control)]
 #[cfg(feature = "prompt-tests")]
 fn level2_lifecycle_shipped_implement_route_matches_direct_run() {
-    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
-
-    const TOTAL_PHASES: usize = 3;
-    // Each provider invocation records `provider-ran` + `phase:N-of-3`.
-    const EXPECTED_MARKERS: usize = TOTAL_PHASES * 2;
-
-    // `spec=` is what the router branches on; `plan=` is what
-    // `implement-plan.md` declares `required` in its `$schema`. Both runs get
-    // the identical pair, so the hand-off is the only difference between them.
-    //
-    // The paths are workspace-relative — the shape a user actually types, and
-    // the shape the document's `'@{{area}}/{{plan}}'` body reference is written
-    // for. The runner `cd`s into the workspace before invoking claudine.
-    const PARAMS: &str = "spec=feature/spec.md plan=feature/plan.md";
-
-    // Direct: `implement-plan.md` IS the invoked document.
-    let direct = stage_shipped_implement_route("_implement/implement-plan.md", TOTAL_PHASES);
-    let direct_pane = run_until_settled_with_params(
-        &direct,
-        "--goose",
-        PARAMS,
-        EXPECTED_MARKERS,
-        &[],
-    );
-    let direct_lines = event_lines(&direct);
-
-    // Routed: the shipped router is invoked and proxies to the same target.
-    let routed = stage_shipped_implement_route("implement.md", TOTAL_PHASES);
-    let routed_pane = run_until_settled_with_params(
-        &routed,
-        "--goose",
-        PARAMS,
-        EXPECTED_MARKERS,
-        &[],
-    );
-    let routed_lines = event_lines(&routed);
-
-    let phases = |lines: &[String]| -> Vec<String> {
-        lines
-            .iter()
-            .filter(|l| l.starts_with("phase:"))
-            .cloned()
-            .collect()
-    };
-    let count = |lines: &[String], needle: &str| lines.iter().filter(|l| *l == needle).count();
-
-    // Assert the direct run first: it is the contract the routed run must match,
-    // so a broken fixture is not misread as a routing regression.
-    assert_eq!(
-        phases(&direct_lines),
-        vec!["phase:1-of-3", "phase:2-of-3", "phase:3-of-3"],
-        "fixture check: invoked directly, the shipped implement-plan document \
-         resolves `total_phases` from the plan and runs every phase in order; \
-         got {direct_lines:?}; pane:\n{direct_pane}"
-    );
-
-    assert_eq!(
-        phases(&routed_lines),
-        phases(&direct_lines),
-        "the shipped route must execute the same phases in the same order as a \
-         direct invocation; routed {routed_lines:?}; direct {direct_lines:?}; \
-         pane:\n{routed_pane}"
-    );
-    assert_eq!(
-        count(&routed_lines, "provider-ran"),
-        count(&direct_lines, "provider-ran"),
-        "the shipped router must not change how many provider attempts the plan \
-         document makes; routed {routed_lines:?}; direct {direct_lines:?}; \
-         pane:\n{routed_pane}"
-    );
-    assert_eq!(
-        count(&routed_lines, "provider-ran"),
-        TOTAL_PHASES,
-        "every phase of the plan must run; got {routed_lines:?}; pane:\n{routed_pane}"
-    );
+    assert_shipped_implement_route("implement.md");
 }
 
 // ── Phase 7: staged bootstrap, narrow safety gate, stabilized reread ────────

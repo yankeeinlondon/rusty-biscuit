@@ -18,7 +18,13 @@
 //! | `dm.expression.malformed`, document-body span | `WARNING` | A body `{{ … }}` is only inferred to be an expression. |
 //! | `dm.expression.undeclared_property` | `WARNING` | Advisory: the property is valid and `null` unless supplied at runtime. |
 //! | `dm.expression.unknown_function` | `ERROR` | The function catalog is closed, so compose fails on the call. |
+//! | `dm.expression.unavailable_global` | `ERROR` | The event's view declares the global unavailable, so the read fails when the stack runs. |
 //! | `dm.expression.nested_span_in_literal` | `ERROR` | Its surfaces never re-interpolate the literal. |
+//! | `dm.expression.incompatible_call` | `ERROR` | Argument category 5 (or a wrong argument count or ambiguous overload): composition rejects the document. |
+//! | `dm.expression.uncertain_call` | `WARNING` | Argument category 3; with `expressions.strict`, also 2 (may be `null`) and 4 (type unknown). |
+//! | `dm.expression.always_false_call` | `WARNING` | An authored literal argument is not a well-formed file reference (`file_exists("https://")`), so the call is always `false`; composition reports the same warning. |
+//! | `dm.expression.incomplete_analysis` | `WARNING` | The host function's facts artifact is missing, stale, or invalid, so nothing is known about the call; it may still be right. |
+//! | `dm.lifecycle.incomplete_analysis` | `WARNING` | No host catalog's lifecycle artifact could be used (missing, stale, or invalid), so lifecycle stacks are analyzed as the `md` host's, which may not be the document's host. |
 //!
 //! Design: `claudine/fixes/2026-09-13-better-static-analysis/spec.md` (D7).
 
@@ -86,29 +92,36 @@ pub mod code {
     // `darkmatter.schema`) ──
 
     /// The frontmatter YAML could not be parsed.
-    pub const FM_YAML_PARSE: &str = "dm.frontmatter.yaml_parse";
+    pub const FM_YAML_PARSE: &str = darkmatter::markdown::compose::report_diagnostics::FRONTMATTER_PARSE_CODE;
     /// The `$schema` value is not a valid schema shape.
     pub const SCHEMA_INVALID_SHAPE: &str = "dm.schema.invalid_schema_shape";
     /// A semantic `type-definition` value does not parse as one property definition.
     pub const SCHEMA_INVALID_TYPE_DEFINITION: &str = "dm.schema.invalid_type_definition";
     /// The schema could not be resolved, merged, or compiled.
-    pub const SCHEMA_PREPARE: &str = "dm.schema.prepare";
+    pub const SCHEMA_PREPARE: &str = darkmatter::markdown::schemas::SCHEMA_PREPARE_CODE;
     /// A value did not match its declared type.
-    pub const SCHEMA_TYPE_MISMATCH: &str = "dm.schema.type_mismatch";
+    pub const SCHEMA_TYPE_MISMATCH: &str = darkmatter::markdown::schemas::SCHEMA_TYPE_MISMATCH_CODE;
     /// A non-type constraint (range, length, pattern, enum, …) failed.
-    pub const SCHEMA_CONSTRAINT: &str = "dm.schema.constraint";
+    pub const SCHEMA_CONSTRAINT: &str = darkmatter::markdown::schemas::SCHEMA_CONSTRAINT_CODE;
     /// A required key is absent.
-    pub const SCHEMA_MISSING_REQUIRED: &str = "dm.schema.missing_required";
+    pub const SCHEMA_MISSING_REQUIRED: &str = darkmatter::markdown::schemas::SCHEMA_MISSING_REQUIRED_CODE;
     /// A key the schema does not declare is present (strict mode).
-    pub const SCHEMA_UNKNOWN_KEY: &str = "dm.schema.unknown_key";
+    pub const SCHEMA_UNKNOWN_KEY: &str = darkmatter::markdown::schemas::SCHEMA_UNKNOWN_KEY_CODE;
     /// A deprecated key is present.
     pub const SCHEMA_DEPRECATED_KEY: &str = "dm.schema.deprecated_key";
     /// A `file(...)`-typed value failed to parse, resolve, or match a file.
-    pub const SCHEMA_INVALID_FILE_REFERENCE: &str = "dm.schema.invalid_file_reference";
+    pub const SCHEMA_INVALID_FILE_REFERENCE: &str = darkmatter::markdown::schemas::SCHEMA_INVALID_FILE_REFERENCE_CODE;
     /// A `suggest(...)` candidate is invalid metadata: it fails its target
     /// schema's type, range, integer, length, not-empty, or pattern constraint,
     /// or uses invalid decimal syntax or an unsupported lossless representation.
     pub const SCHEMA_INVALID_SUGGESTION: &str = "dm.schema.invalid_suggestion";
+    /// A host global catalog in the document's schema roots failed to load,
+    /// so the globals it declares are not known to this document's analysis.
+    pub const SCHEMA_HOST_CATALOG: &str = "dm.schema.host_catalog";
+    /// No host catalog in the document's schema roots has a usable lifecycle
+    /// artifact, so its lifecycle stacks are analyzed under the `md` host.
+    /// Reported once per catalog, at the top of the document.
+    pub const LIFECYCLE_INCOMPLETE_ANALYSIS: &str = "dm.lifecycle.incomplete_analysis";
     /// A recognized standalone SimplifiedSchema envelope is malformed (missing
     /// or non-mapping `types`, unsupported tagged-envelope keys, or an invalid
     /// payload).
@@ -144,10 +157,31 @@ pub mod code {
     /// frontmatter key, schema property, reserved namespace, or function.
     pub const EXPRESSION_UNDECLARED_PROPERTY: &str = "dm.expression.undeclared_property";
     /// A call to a function outside Darkmatter's closed function catalog.
-    pub const EXPRESSION_UNKNOWN_FUNCTION: &str = "dm.expression.unknown_function";
+    pub const EXPRESSION_UNKNOWN_FUNCTION: &str = darkmatter::markdown::compose::report_diagnostics::UNKNOWN_FUNCTION_CODE;
+    /// A read, inside a lifecycle stack, of a global the event's binding view
+    /// declares unavailable (`err` outside an error event).
+    pub const EXPRESSION_UNAVAILABLE_GLOBAL: &str = "dm.expression.unavailable_global";
     /// A `{{ … }}` span inside a quoted string literal on a single-pass
     /// lifecycle surface, where it is never interpolated.
     pub const EXPRESSION_NESTED_SPAN_IN_LITERAL: &str = "dm.expression.nested_span_in_literal";
+    /// A function call Darkmatter's design-time check proves wrong (argument
+    /// category 5, a wrong argument count, or an ambiguous overload), so
+    /// composition rejects the document. Ranges the argument, or the whole
+    /// call for a call-level problem. The code is Darkmatter's.
+    pub const EXPRESSION_INCOMPATIBLE_CALL: &str = darkmatter::markdown::compose::expression::INCOMPATIBLE_CALL_CODE;
+    /// A call argument that might not bind: category 3, and with
+    /// `expressions.strict` also categories 2 and 4. The code is
+    /// Darkmatter's, which composition reports under too.
+    pub const EXPRESSION_UNCERTAIN_CALL: &str = darkmatter::markdown::compose::expression::UNCERTAIN_CALL_CODE;
+    /// A call that is always `false`: an authored literal argument is not a
+    /// well-formed file reference. The code is Darkmatter's, which
+    /// composition reports under too.
+    pub const EXPRESSION_ALWAYS_FALSE_CALL: &str = darkmatter::markdown::compose::expression::ALWAYS_FALSE_CALL_CODE;
+    /// A call to a host function whose facts artifact is missing, stale, or
+    /// invalid: no argument category or narrowing is known for it. The code
+    /// is Darkmatter's.
+    pub const EXPRESSION_INCOMPLETE_ANALYSIS: &str =
+        darkmatter::markdown::compose::expression::INCOMPLETE_ANALYSIS_CODE;
     /// A fenced-code info string whose language token no grammar recognizes.
     pub const FENCE_UNKNOWN_LANGUAGE: &str = "dm.fence.unknown_language";
     /// A `::shell` / `::shell-block` / `$()` command the shell policy disallows.

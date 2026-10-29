@@ -42,6 +42,8 @@ pub enum ShellToken {
 /// - Whitespace splitting
 /// - Single-quoted strings (literal, no escape sequences)
 /// - Double-quoted strings (backslash escaping for `\`, `"`, space)
+/// - A quoted empty word (`""` or `''`) is one empty word; unquoted
+///   whitespace never makes one
 /// - Backslash escaping outside quotes (for spaces, quotes, backslashes)
 /// - Chain operators: `&&`, `||`
 /// - Curated redirections: `> /dev/null`, `2> /dev/null`, `2>&1`, `>&2`
@@ -85,17 +87,19 @@ pub fn tokenize(input: &str, ctx: &SourceContext) -> Result<Vec<ShellToken>, She
 
     let mut tokens = Vec::new();
     let mut current = String::new();
+    // Whether the current word holds a quoted run: `""` and `''` are words
+    // even when empty, so an authored empty argument is never dropped.
+    let mut quoted = false;
     let mut chars = trimmed.chars().peekable();
 
     while let Some(ch) = chars.next() {
         match ch {
             ' ' | '\t' | '\n' | '\r' => {
-                if !current.is_empty() {
-                    flush_token(&mut tokens, &mut current)?;
-                }
+                flush_token(&mut tokens, &mut current, &mut quoted)?;
             }
 
             '\'' => {
+                quoted = true;
                 let mut found_close = false;
                 for ch in chars.by_ref() {
                     if ch == '\'' {
@@ -114,6 +118,7 @@ pub fn tokenize(input: &str, ctx: &SourceContext) -> Result<Vec<ShellToken>, She
             }
 
             '"' => {
+                quoted = true;
                 let mut found_close = false;
                 while let Some(ch) = chars.next() {
                     if ch == '\\' {
@@ -169,9 +174,7 @@ pub fn tokenize(input: &str, ctx: &SourceContext) -> Result<Vec<ShellToken>, She
             '&' => {
                 if chars.peek() == Some(&'&') {
                     chars.next();
-                    if !current.is_empty() {
-                        flush_token(&mut tokens, &mut current)?;
-                    }
+                    flush_token(&mut tokens, &mut current, &mut quoted)?;
                     tokens.push(ShellToken::And);
                 } else {
                     current.push(ch);
@@ -181,9 +184,7 @@ pub fn tokenize(input: &str, ctx: &SourceContext) -> Result<Vec<ShellToken>, She
             '|' => {
                 if chars.peek() == Some(&'|') {
                     chars.next();
-                    if !current.is_empty() {
-                        flush_token(&mut tokens, &mut current)?;
-                    }
+                    flush_token(&mut tokens, &mut current, &mut quoted)?;
                     tokens.push(ShellToken::Or);
                 } else {
                     return Err(ShellExpansionError::ParseDirective {
@@ -219,9 +220,7 @@ pub fn tokenize(input: &str, ctx: &SourceContext) -> Result<Vec<ShellToken>, She
                     });
                 }
 
-                if !current.is_empty() {
-                    flush_token(&mut tokens, &mut current)?;
-                }
+                flush_token(&mut tokens, &mut current, &mut quoted)?;
 
                 // Check for >&2 (stdout to stderr)
                 if chars.peek() == Some(&'&') {
@@ -272,7 +271,7 @@ pub fn tokenize(input: &str, ctx: &SourceContext) -> Result<Vec<ShellToken>, She
             _ => {
                 // Handle the digit '2' specially: if followed by '>' and current is empty,
                 // it's a fd prefix for stderr redirection
-                if ch == '2' && chars.peek() == Some(&'>') && current.is_empty() {
+                if ch == '2' && chars.peek() == Some(&'>') && current.is_empty() && !quoted {
                     chars.next(); // consume '>'
                     if chars.peek() == Some(&'&') {
                         chars.next(); // consume '&'
@@ -309,9 +308,7 @@ pub fn tokenize(input: &str, ctx: &SourceContext) -> Result<Vec<ShellToken>, She
     }
 
     // Push final token
-    if !current.is_empty() {
-        flush_token(&mut tokens, &mut current)?;
-    }
+    flush_token(&mut tokens, &mut current, &mut quoted)?;
 
     if tokens.is_empty() {
         return Err(ShellExpansionError::ParseDirective {
@@ -327,10 +324,11 @@ pub fn tokenize(input: &str, ctx: &SourceContext) -> Result<Vec<ShellToken>, She
 fn flush_token(
     tokens: &mut Vec<ShellToken>,
     current: &mut String,
+    quoted: &mut bool,
 ) -> Result<(), ShellExpansionError> {
-    if !current.is_empty() {
-        tokens.push(ShellToken::Word(current.clone()));
-        current.clear();
+    if !current.is_empty() || *quoted {
+        tokens.push(ShellToken::Word(std::mem::take(current)));
+        *quoted = false;
     }
     Ok(())
 }
@@ -592,6 +590,37 @@ mod tests {
     fn tokenize_mixed_quotes() {
         let tokens = tokenize(r#"echo 'single' "double" plain"#).unwrap();
         assert_eq!(words(&tokens), vec!["echo", "single", "double", "plain"]);
+    }
+
+    /// A quoted empty word is one empty argument, before an operator, a
+    /// redirection, and at the end; an unquoted gap is none, and `''2>` is the
+    /// word `2` before a stdout redirection, not a stderr redirection.
+    #[test]
+    fn tokenize_keeps_quoted_empty_words() {
+        let tokens = tokenize(r#"git commit -m "" ''"#).unwrap();
+        assert_eq!(words(&tokens), vec!["git", "commit", "-m", "", ""]);
+
+        let tokens = tokenize(r#"tool "" && tool '' > /dev/null"#).unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                ShellToken::Word("tool".into()),
+                ShellToken::Word(String::new()),
+                ShellToken::And,
+                ShellToken::Word("tool".into()),
+                ShellToken::Word(String::new()),
+                ShellToken::RedirectStdoutNull,
+            ]
+        );
+
+        let tokens = tokenize("tool   a  ").unwrap();
+        assert_eq!(words(&tokens), vec!["tool", "a"]);
+
+        let tokens = tokenize("tool ''2> /dev/null").unwrap();
+        assert_eq!(
+            tokens,
+            vec![ShellToken::Word("tool".into()), ShellToken::Word("2".into()), ShellToken::RedirectStdoutNull]
+        );
     }
 
     #[test]

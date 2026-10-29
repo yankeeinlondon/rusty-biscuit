@@ -283,7 +283,7 @@ fn extensions_triggers_and_document_schemas_replace_the_baseline_declaration() {
     std::fs::create_dir_all(root.join("schemas")).unwrap();
     std::fs::write(
         root.join("schemas/numbered.trigger.yaml"),
-        "kind: trigger-schema\nmatch:\n  numbered: string(required)\n$schema: numbered.yaml\n",
+        "kind: schema-trigger\nmatch:\n  numbered: string(required)\n$schema: numbered.yaml\n",
     )
     .unwrap();
     std::fs::write(root.join("schemas/numbered.yaml"), "$schema:\n  content_policy: number\n").unwrap();
@@ -400,7 +400,7 @@ fn embedded_baseline_documents_are_never_watched_dependencies() {
     assert!(
         dependencies.iter().all(|dependency| {
             !dependency.ends_with("content-policy/schemas/content-policy.yaml")
-                && !dependency.ends_with("darkmatter/docs/schemas/darkmatter.yaml")
+                && !dependency.to_string_lossy().contains("darkmatter/schemas/")
         }),
         "{dependencies:?}"
     );

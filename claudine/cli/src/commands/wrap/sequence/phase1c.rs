@@ -20,7 +20,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::sequence::build_step_overlay;
 use claudine::composition::{
-    self, CompositionError, LIFECYCLE_EVENT_KEYS, MissingProperty, PrepareOptions,
+    self, CompositionError, MissingProperty, PrepareOptions,
     PreparedComposition, ResolvedCompositionSource, SequenceMissingPropertiesStep, SequencePlan,
 };
 use claudine::harness::ShellApprovalOptions;
@@ -321,6 +321,9 @@ fn collect_sequence_missing_values(
                     ctx.effective_overrides.as_ref(),
                     launch_area,
                     file_resolution_context,
+                    // Display only: the step's own pre-validation already
+                    // recorded the triggers its discovery skipped.
+                    &composition::TriggerFindings::default(),
                 )
             {
                 let status = Status::from_prose(format!(

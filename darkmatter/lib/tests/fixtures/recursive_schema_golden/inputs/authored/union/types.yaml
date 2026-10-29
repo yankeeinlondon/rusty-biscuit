@@ -1,0 +1,10 @@
+kind: schema
+types:
+  toggle: [boolish, number]
+  direct: [toggle, object]
+  nested: [toggle(required), object]
+  tagged:
+    - "{kind: literal(a; required), a: string(required)}"
+    - "{kind: literal(b; required), b: string(required)}"
+  direct_tag: [tagged, number]
+  nested_tag: [tagged(required), number]

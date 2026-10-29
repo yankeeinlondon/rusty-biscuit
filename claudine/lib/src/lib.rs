@@ -39,5 +39,31 @@ pub mod signals;
 pub mod steering;
 pub mod stream;
 pub mod system_prompt;
+#[cfg(feature = "work-counters")]
+pub mod work_counters;
+
+/// Records units of [`Work`](crate::work_counters::Work): `note_work!(RuntimeSnapshot)` adds one,
+/// `note_work!(RuntimeSnapshot, n)` adds `n`. Expands to nothing without the
+/// `work-counters` feature, so `n` is not evaluated in production builds.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! note_work {
+    ($work:ident) => {
+        $crate::note_work!($work, 1)
+    };
+    ($work:ident, $count:expr) => {
+        #[cfg(feature = "work-counters")]
+        $crate::work_counters::add($crate::work_counters::Work::$work, ($count) as u64);
+    };
+}
+
 #[cfg(test)]
 pub(crate) mod test_support;
+
+// The spike's crate-private scenarios measure allocations; a unit-test binary
+// is a final binary, so it may declare the counting allocator.
+#[cfg(all(test, feature = "work-counters"))]
+#[global_allocator]
+static SPIKE_ALLOCATOR: test_toolkit::alloc_count::CountingAllocator = test_toolkit::alloc_count::CountingAllocator;
+#[cfg(all(test, feature = "work-counters"))]
+mod pipeline_spike;

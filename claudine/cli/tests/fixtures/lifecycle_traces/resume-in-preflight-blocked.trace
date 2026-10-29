@@ -1,0 +1,13 @@
+# scenario: resume-in-preflight-blocked
+# doc: resume-in-preflight-blocked.md
+# given: invoked as `claudine compose --claude resume-in-preflight-blocked.md` from the directory holding the fixture documents
+# given: the start shell is not approved (no --yolo, no whitelist, no terminal), so the shell audit denies it during preflight
+# given: blocked returns resume before any provider launched, so no session exists
+# given: finalize runs with the blocked error; afterwards the resume raises LifecycleResumeWithoutSession, which replaces the reported error
+# given: the provider never launches
+event initialize
+event blocked
+err composition.shell_approval
+event finalize
+err composition.shell_approval
+exit 1

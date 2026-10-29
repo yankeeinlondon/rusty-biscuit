@@ -4,6 +4,11 @@
 // `commands/compose/`, `commands/sequence.rs`).
 #![allow(clippy::result_large_err)]
 
+use claudine::composition::preflight::checks::{LIFECYCLE_SHELL_AUDIT, claudine_preflight, run_check};
+use darkmatter::lifecycle::preflight::CheckStage;
+use darkmatter::lifecycle::run::EntryReason;
+use claudine::composition::LifecycleRunGuardExt;
+use claudine::composition::LifecycleErrorInfoExt;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::lifecycle::LifecycleSignal;
 use claudine::composition::lifecycle_context::{LifecycleErrorInfo, LifecycleTiming};
@@ -32,8 +37,10 @@ use tracing::info_span;
 use super::{
     CachedHarnessLoopContext, HarnessPromptState, MaterializedHarnessPrompt, build_harness_launch,
     bootstrap_harness_prompt, execute_harness_attempt, harness_prompt_mode_label,
-    materialize_harness_prompt, preflight_harness_document, session_compat_key, HarnessPromptMode,
+    preflight_harness_document, session_compat_key, HarnessPromptMode,
 };
+#[cfg(test)]
+use super::materialize_harness_prompt;
 
 type HarnessLoopResult = (
     i32,
@@ -1145,12 +1152,14 @@ fn bootstrap_adopted_document_phase(
     // Stage 5 — the full audit. `set_config` re-points the guard at the
     // stabilized surface without resetting its emission ledger, so
     // `initialize` is not fired a second time.
-    if let Err(error) = claudine::composition::resolve_lifecycle_shell_approvals(
-        &stabilized_lifecycle,
-        &prompt.prompt_state.source_path,
-        &LifecycleSignal::ALL,
-        prompt.harness_context.shell_options(),
-    ) {
+    if let Err(error) = run_check(claudine_preflight(), LIFECYCLE_SHELL_AUDIT, CheckStage::InRun, EntryReason::Initial, || {
+        claudine::composition::resolve_lifecycle_shell_approvals(
+            &stabilized_lifecycle,
+            &prompt.prompt_state.source_path,
+            &LifecycleSignal::ALL,
+            prompt.harness_context.shell_options(),
+        )
+    }) {
         return Err(bootstrap_blocked(prompt, lifecycle, materialized, &error));
     }
     lifecycle.guard.set_config(stabilized_lifecycle);
@@ -1454,6 +1463,7 @@ fn empty_materialized_prompt(
         file_resolution_context,
         compose_context: None,
         document_epoch: None,
+        frontmatter_view: darkmatter::markdown::compose::SharedFrontmatter::default(),
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         lifecycle: None,
@@ -1497,7 +1507,14 @@ fn preflight_fresh_document_phase(
         if (!proxy_pending && !fresh_reentry) || has_seed {
             return Ok(());
         }
-        preflight_harness_document(prompt_state, harness_context.shell_options(), child_cwd)
+        let entry = match prompt_state.entry {
+            claudine::composition::DocumentEntryReason::Retry => EntryReason::Retry,
+            claudine::composition::DocumentEntryReason::Resume => EntryReason::Resume,
+            _ => EntryReason::Initial,
+        };
+        run_check(claudine_preflight(), LIFECYCLE_SHELL_AUDIT, CheckStage::InRun, entry, || {
+            preflight_harness_document(prompt_state, harness_context.shell_options(), child_cwd)
+        })
     });
     if let Err(error) = result {
         let err_info = LifecycleErrorInfo::from_error_or_action("shell_approval", error.as_ref());
@@ -1670,18 +1687,23 @@ fn materialize_attempt_prompt_phase(
     //
     // For an unchanged document this reproduces the identity the invocation
     // already installed, so the key compares equal and the resume proceeds.
+    let installed = prompt_state.input_layers.env_overrides.clone();
+    let select = |hints: &claudine::composition::EffectiveSelectionHints| {
+        target_launch::refreshed_identity_env(launch_intent, hints, cli_model, repo_root, &source_path, &installed)
+    };
     info_span!(
         "harness_materialize_prompt",
         attempt,
         source_path = %prompt_state.source_path.display(),
     )
     .in_scope(|| {
-        materialize_harness_prompt(
+        super::prompt::materialize_harness_prompt_selecting(
             prompt_state,
             repo_root,
             child_cwd,
             resume_followup.as_deref(),
             schema,
+            Some(&select),
         )
     })
     .and_then(|mut materialized| {
@@ -2375,7 +2397,7 @@ fn classify_attempt_phase(
                     .live_frontmatter
                     .lock()
                     .expect("live frontmatter mutex poisoned by a panicking lifecycle action")
-                    .clone(),
+                    .to_map(),
             );
             let completed = claudine::composition::complete_active_document(
                 claudine::composition::CompletionContext {

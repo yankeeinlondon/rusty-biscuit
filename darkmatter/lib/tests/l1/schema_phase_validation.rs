@@ -401,7 +401,7 @@ fn passive_trigger_schemas_reject_eager_on_every_shape_and_placement() {
         "file[](eager)",
     ] {
         let source = format!(
-            "kind: trigger-schema\nmatch:\n  candidate: '{definition}'\n$schema:\n  candidate: string\n",
+            "kind: schema-trigger\nmatch:\n  candidate: '{definition}'\n$schema:\n  candidate: string\n",
         );
         let error = parse_trigger_envelope_from_str(&source)
             .expect_err("trigger match eager must be rejected");

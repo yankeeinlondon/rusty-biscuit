@@ -44,7 +44,7 @@ impl TaskExecution<'_> {
             let snapshot = runtime.snapshot();
             data.extend(snapshot.mutations);
         }
-        let state = EffectiveStateBuilder::new().with_frontmatter(data)
+        let state = EffectiveStateBuilder::new().with_shared_frontmatter(data)
             .with_context(self.state.context().clone()).with_allow_ctx_override(true).build()
             .map_err(|error| CompositionError::SequenceShellResolution {
                 command: site.authored.clone(), task: self.label(), message: error.to_string(), source: Some(Box::new(MarkdownError::CtxMerge(error))),

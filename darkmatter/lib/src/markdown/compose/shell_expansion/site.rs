@@ -23,7 +23,7 @@
 
 use super::template::{
     self, ApprovalKey, CommandTemplate, HoleEvaluator, ModeRequirement, OfferedChoices, ShellCandidate,
-    TemplateShape,
+    SuggestedRules, TemplateShape,
 };
 use super::types::{
     CommandAction, ErrorHandling, PipelineAction, ShellApprovalDecision, ShellApprovalRequest, ShellCommandOrigin,
@@ -336,12 +336,22 @@ fn approve_template_only(
     policy_paths: &ShellPolicyPaths,
     runtime: &mut ShellExpansionRuntime,
 ) -> Result<PreparedShellDirective, ShellExpansionError> {
-    let approval_required = || ShellExpansionError::ApprovalRequired {
-        ctx: Box::new(site.ctx.clone()),
-        command: site.authored().to_string(),
-        whitelist_path: Box::new(policy_paths.whitelist.clone()),
-        blacklist_path: Box::new(policy_paths.blacklist.clone()),
-        origin: site.origin().clone(),
+    // No value is known as bytes, so the exact choice is never offered.
+    let offered = OfferedChoices {
+        exact: false,
+        shape: true,
+        prefix: true,
+    };
+    let approval_required = || {
+        let programs: Vec<String> = programs.iter().map(|program| (*program).to_string()).collect();
+        ShellExpansionError::ApprovalRequired {
+            ctx: Box::new(site.ctx.clone()),
+            command: site.authored().to_string(),
+            whitelist_path: Box::new(policy_paths.whitelist.clone()),
+            blacklist_path: Box::new(policy_paths.blacklist.clone()),
+            origin: site.origin().clone(),
+            suggested_rules: Box::new(SuggestedRules::new(offered, None, Some(shape), &programs)),
+        }
     };
     let Some(handler) = options.shell_approval_handler.as_ref() else {
         return Err(approval_required());
@@ -361,11 +371,6 @@ fn approve_template_only(
         .filter(|program| distinct.insert(**program))
         .map(|program| (*program).to_string())
         .collect();
-    let offered = OfferedChoices {
-        exact: false,
-        shape: true,
-        prefix: true,
-    };
     let request = ShellApprovalRequest {
         source: options.source.clone(),
         origin: site.origin().clone(),
@@ -424,10 +429,12 @@ fn approve_template_only(
 }
 
 /// What one document's shell stages need to build its command sites: the
-/// owner schema its placeholders are typed by and the roots its host
-/// declared.
+/// owner's effective schema its placeholders are typed by, and the roots its
+/// host declared.
 pub(crate) struct SiteScope<'a> {
-    schema: Option<crate::markdown::schemas::SimplifiedSchema>,
+    // Boxed: a scope lives in the frames of the pipeline's stage dispatch,
+    // which nested composition re-enters once per level.
+    schema: Option<Box<crate::markdown::schemas::EffectiveSchema>>,
     host_globals: Vec<String>,
     deferred: &'a template::DeferredShellRoots,
     source_file: std::path::PathBuf,
@@ -436,10 +443,10 @@ pub(crate) struct SiteScope<'a> {
 
 impl<'a> SiteScope<'a> {
     /// The scope of the document `options` compose, whose effective schema
-    /// projection is `schema`.
+    /// is `effective`.
     pub(crate) fn new(
         options: &'a crate::markdown::compose::ComposeRequest,
-        schema: Option<crate::markdown::schemas::SimplifiedSchema>,
+        effective: Option<crate::markdown::schemas::EffectiveSchema>,
     ) -> Self {
         use crate::markdown::compose::ComposeSource;
         let (source_file, owner) = match &options.source {
@@ -456,7 +463,7 @@ impl<'a> SiteScope<'a> {
             ComposeSource::Unknown => (std::path::PathBuf::from("<unknown>"), None),
         };
         Self {
-            schema,
+            schema: effective.map(Box::new),
             host_globals: options
                 .host_globals
                 .as_ref()
@@ -472,6 +479,10 @@ impl<'a> SiteScope<'a> {
     /// it has no placeholder or is not a valid template (it then runs only as
     /// resolved bytes).
     ///
+    /// `guards` are the body `::block` guards enclosing the site, outermost
+    /// first (none for a frontmatter value). They must be the guards
+    /// discovery typed the site under, so its shape matches its approval.
+    ///
     /// ## Errors
     ///
     /// [`ShellExpansionError::TemplateGrammar`] for a command that reads a
@@ -485,20 +496,29 @@ impl<'a> SiteScope<'a> {
         ctx: SourceContext,
         evaluator: &'e dyn HoleEvaluator,
         frame: SiteFrame,
+        guards: &[&crate::markdown::compose::page_blocks::BodyGuard],
     ) -> Result<Option<TemplateSite<'e>>, ShellExpansionError> {
         let derived = std::collections::HashSet::new();
         let scope = template::candidate::CandidateScope {
-            schema: self.schema.as_ref(),
-            host_globals: self.host_globals.clone(),
             deferred: self.deferred,
             derived: &derived,
             source_file: self.source_file.clone(),
             owner: self.owner.clone(),
             ctx: &ctx,
         };
+        let host_roots: Vec<&str> = self.host_globals.iter().map(String::as_str).collect();
+        let declared =
+            crate::markdown::compose::expression::DeclaredTypes::for_schema(self.schema.as_deref())
+                .with_host_globals(&host_roots);
+        // The site's types must be the ones discovery typed it with, so its
+        // shape matches what was approved.
+        let types = crate::markdown::compose::page_blocks::guards::within(
+            guards,
+            crate::markdown::compose::expression::TypeScope::unguarded(&declared),
+        );
         // Presence is checked when each hole is filled, so discovery's
         // approval-time evaluation is not repeated here.
-        let candidate = scope.build(authored, template, origin, &|_| None)?;
+        let candidate = scope.build(authored, template, origin, &types, &|_| None)?;
         Ok(TemplateSite::new(candidate, evaluator, ctx, frame))
     }
 }

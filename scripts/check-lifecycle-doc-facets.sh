@@ -39,9 +39,10 @@
 #   scripts/check-lifecycle-doc-facets.sh [file ...]
 #
 # Default targets are every public lifecycle/composition topic that mentions
-# lifecycle `err.*`: `lifecycle.md`, `composition.md`, and
-# `frontmatter-properties.md`. Explicit files may be supplied (e.g. when a new
-# lifecycle topic doc is added) to override the default set.
+# lifecycle `err.*`: Claudine's `lifecycle.md`, `composition.md`, and
+# `frontmatter-properties.md`, and Darkmatter's lifecycle topic pages.
+# Explicit files may be supplied (e.g. when a new lifecycle topic doc is
+# added) to override the default set.
 
 set -euo pipefail
 
@@ -60,6 +61,8 @@ if [[ $# -eq 0 ]]; then
         "${repo_root}/claudine/docs/topics/flow-control/lifecycle.md"
         "${repo_root}/claudine/docs/topics/composition.md"
         "${repo_root}/claudine/docs/topics/frontmatter-properties.md"
+        "${repo_root}/darkmatter/docs/topics/lifecycle/index.md"
+        "${repo_root}/darkmatter/docs/topics/lifecycle/error-handling.md"
     )
 else
     files=("$@")

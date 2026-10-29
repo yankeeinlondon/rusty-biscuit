@@ -1,3 +1,6 @@
+---
+kind: canonical-documentation
+---
 # Schema Validation
 
 Schema validation lets a Markdown document declare the **shape of its frontmatter** and have Darkmatter enforce it. You describe the expected properties once — using a friendly single-line grammar called **SimplifiedSchema** — and Darkmatter checks every document against it, reporting a styled error that names the offending property instead of letting a downstream tool fail cryptically.
@@ -185,24 +188,42 @@ Policy's editor schema, `content_policy`. It is compiled into the library, so
 an installed `md` or `dmls` uses it outside a checkout with no schema files on
 disk. `md compose`, `md schema validate`, and DMLS all apply it by default.
 
+For example, this document needs no `$schema` declaration:
+
+```yaml
+---
+content_policy:
+  - rule: ValidFor(3mo)
+    action: archive
+---
+```
+
+`md schema validate notes.md` accepts it and rejects `action: delete` at that
+field's location. This is a passive declaration check: it does not assess
+freshness, read a watched file, or change `last_updated`. Content Policy's
+[editor guide](../../../content-policy/docs/topics/policy-lifecycle.md#get-help-in-the-editor)
+explains the accepted forms and the additional rules its declaration parser
+enforces.
+
 `md schema validate` picks its baseline from the first rule that applies:
 
 | # | Input | Baseline | Example |
 |---|-------|----------|---------|
-| 1 | `--no-baseline-schema` | none | `md schema validate post.md --no-baseline-schema` |
+| 1 | `--disable baseline-schema` | none | `md schema validate post.md --disable baseline-schema` |
 | 2 | `--schema <path>` | that file, even when the opt-out variable is set | `md schema validate post.md --schema ./schemas/baseline.yaml` |
 | 3 | `DARKMATTER_NO_BASELINE_SCHEMA` is `1`, `true`, `TRUE`, `yes`, or `YES` | none; `BASELINE_SCHEMA` is ignored | `DARKMATTER_NO_BASELINE_SCHEMA=1 md schema validate post.md` |
 | 4 | `BASELINE_SCHEMA=<path>` | that file | `BASELINE_SCHEMA=./schemas/baseline.yaml md schema validate post.md` |
 | 5 | nothing | the built-in baseline | `md schema validate post.md` |
 
-`--no-baseline-schema` and `--schema` cannot be combined (a usage error, exit
+`--disable baseline-schema` and `--schema` cannot be combined (a usage error, exit
 `2`). A custom path resolves from the directory you ran the command in, and a
 custom baseline that cannot be loaded exits `2`; it never falls back. Opting
 out removes only the baseline: the document's own `$schema` and matching
-trigger schemas still apply, and `--no-trigger-schemas` controls triggers
+trigger schemas still apply, and `--disable schema-triggers` controls triggers
 separately. See
 [Selecting the Baseline](../topics/schemas/definition.md#selecting-the-baseline)
-for the precedence flowchart.
+for the precedence flowchart, and [Policy Flags](../cli/policy.md) for the
+`--disable` verb.
 
 Because the built-in baseline is the default, a document with no `$schema` is
 checked the same way by `md schema validate` and `md compose`:
@@ -210,11 +231,11 @@ checked the same way by `md schema validate` and `md compose`:
 ```bash
 printf -- '---\nlast_updated: not-a-date\n---\n' > post.md
 md schema validate post.md                       # exit 1: last_updated is a date
-md schema validate post.md --no-baseline-schema  # exit 0
+md schema validate post.md --disable baseline-schema  # exit 0
 ```
 
 `md compose` keeps its own flags: `--baseline-schema <path>` replaces the
-built-in baseline, and `--no-baseline-schema` or
+built-in baseline, and `--disable baseline-schema` or
 `DARKMATTER_NO_BASELINE_SCHEMA=1` removes it.
 
 A library caller starts with no baseline and attaches one explicitly, either a
@@ -230,7 +251,7 @@ Because a whole property is replaced when both sides declare it, replacing a bas
 ## CLI: `md schema validate`
 
 ```bash
-md schema validate <file>... [--schema <path> | --no-baseline-schema] [--no-trigger-schemas] [--format pretty|json] [--quiet]
+md schema validate <file>... [--schema <path> | --disable baseline-schema] [--disable schema-triggers] [--format pretty|json] [--quiet] [-vv]
 ```
 
 Pretty output (the default) renders one styled block per file:
@@ -261,6 +282,107 @@ for the full rules and fallbacks.
 
 A document with no `$schema` is validated against the baseline and reported as having a schema definition; in JSON output its `schema` field is still `null`, because the field names the document's own `$schema`. Only with the baseline turned off does such a document succeed vacuously (with a warning line in pretty mode).
 
+### Stage timings (`-vv`)
+
+To see where a slow validation spends its time, pass `-v` twice. After each
+document's normal output, `md` prints a stage breakdown to **stderr**; stdout
+(pretty or JSON) and the exit code are exactly what they are without it. A
+single `-v` changes nothing, and neither `--debug` nor `RUST_LOG` is needed.
+
+```console
+$ md schema validate docs/prompt.md -vv
+- ✔ the document docs/prompt.md has a schema definition and is valid.
+Validation timings for docs/prompt.md
+matched triggers: prompt.trigger.yaml
+compile cache: miss
+┌────────────┬───────────┐
+│ stage      │ time      │
+├────────────┼───────────┤
+│ discover   │ 2.13 ms   │
+│ match      │ 0.02 ms   │
+│ resolve    │ 17.14 ms  │
+│ compile    │ 84.65 ms  │
+│ validate   │ 0.07 ms   │
+│ unassigned │ 0.09 ms   │
+│ total      │ 104.09 ms │
+└────────────┴───────────┘
+```
+
+The stages never overlap; each one's time is work done in it and nowhere else:
+
+| Stage | Work it covers |
+|-------|----------------|
+| `discover` | Scanning the schema roots for trigger files and checking each trigger's envelope and `match:` definition. Zero when trigger discovery does not run (outside a repository, or with `--disable schema-triggers`). |
+| `match` | Judging each trigger's `match:` conditions against the document. |
+| `resolve` | Resolving `$schema` and trigger payloads, lowering SimplifiedSchema to JSON Schema, and merging the baseline, trigger, and document layers. |
+| `compile` | Building validators. A validator reused from the cache costs nothing here, so this time is taken out of the stage that asked for it. |
+| `validate` | Checking the frontmatter against the compiled schema, including the conversion of its values. |
+| `unassigned` | The rest of `total`: reading the frontmatter and other bookkeeping no stage claims. |
+
+`compile cache` says whether the validators were already built:
+
+| State | Meaning |
+|-------|---------|
+| `hit` | Validators were looked up and every one was cached. |
+| `miss` | At least one validator was built for this document. |
+| `not requested` | No validator was needed: the document has no schema at all, or validation stopped earlier. |
+
+When a document fails before validating, for example because its `$schema`
+does not resolve, the error is printed as usual and the breakdown that follows
+covers the work done before the failure. Documents that cannot be opened or
+parsed get no breakdown.
+
+The breakdown covers all of the document's schema work, not just the final
+check. With `key=value` assignments, `md` first resolves the schema to coerce
+the assigned values, then resolves it again after assigning them, because an
+assignment can change which triggers match. Both resolutions are counted, so a
+validator first built while preparing the assignments is still a `miss`:
+
+```console
+$ md schema validate --disable baseline-schema review_counter=2 doc.md -vv
+- ✔ the document doc.md has a schema definition and is valid.
+Validation timings for doc.md
+matched triggers: none
+compile cache: miss
+...
+```
+
+If that first resolution fails, its error is printed as usual and the breakdown
+covers the work done up to it.
+
+### Comparing cold and warm validation
+
+From `darkmatter/`, run the schema-only benchmark to investigate a change:
+
+```sh
+just bench-schema --save-baseline local-before
+# Make the change, then compare the same cases.
+just bench-schema --baseline local-before
+```
+
+The `schema_validation/claudine_cold` and `claudine_warm` groups each cover
+three cases: no matching trigger, document lifecycle events, and a sequence
+with a nested group. They use frozen schemas under
+`lib/benches/fixtures/claudine-schemas/`, rather than the live Claudine bundle,
+so changing the application does not quietly change the workload. The
+`resolve_frozen` cases compare recursive and depth-five unrolled lifecycle
+schemas, with resolution, file reads, and validator compilation measured
+separately. Existing corpus cases remain available in the same benchmark.
+
+A cold iteration clears the relevant process caches outside the measured
+work; constructing a fresh `DarkmatterSchemas` alone would still reuse those
+caches. A warm iteration reuses prior work. The benchmark checks that the two
+paths give the same verdict and that cold work builds validators where needed,
+while warm work reuses them. Ordinary filesystem caches may stay warm.
+
+Use the stage report above to explain a difference before treating it as an
+improvement. A structural validator may be shared between documents, but a
+schema that judges files or `match()` conditions must retain its document's
+resolution context, including below references. Editing dependencies or
+adding a nearer schema candidate must invalidate affected resolution. Reuse
+never transfers source locations from one document's diagnostics to another.
+Elapsed-time comparisons are development measurements, not test thresholds.
+
 ## CLI: `md schema detect`
 
 `detect` is a productivity aid for adopting schemas on an existing corpus — it infers a starting SimplifiedSchema from real documents.
@@ -278,11 +400,15 @@ Schema validation also runs as an **always-on stage inside the compose pipeline*
 ```
 Apply --set / --state overrides
   └─ Materialize schema-selected caller files (captured per-property origin)
-      └─ Frontmatter Interpolation ({{ var }})
-          └─ Schema Validation      ◄── here (bind + coerce + validate)
-              └─ Frontmatter Shell Expansion ($(cmd))
-                  └─ … rest of pipeline
+      └─ Call Check (declared types only; nothing evaluated)
+          └─ Frontmatter Interpolation ({{ var }})
+              └─ Schema Validation      ◄── here (bind + coerce + validate)
+                  └─ Frontmatter Shell Expansion ($(cmd))
+                      └─ … rest of pipeline
 ```
+
+The [call check](./call-check.md) rejects a document whose calls its declared
+types prove wrong before any of these stages computes a value.
 
 This placement is deliberate:
 
@@ -290,12 +416,20 @@ This placement is deliberate:
   caller-owned values selected as eager or non-recursive lazy files from each
   property's captured origin. It does not bind, coerce, validate, or normalize
   document-authored values. This gives frontmatter expressions one stable
-  semantic value from their first lookup.
+  semantic value from their first lookup. Selection reads through named and
+  recursive types the way validation does, so with
+  `node: "file(eager) | { children: node[] }"`, both `spec: node` and
+  `spec: node[]` select a caller's `--set spec=spec.md` (or `["spec.md"]`) as
+  an eager file and materialize the launch directory's `spec.md`, exactly as
+  `spec: file(eager)` would. A value that more than one alternative accepts
+  (`file(eager) | string`) is not selected and stays raw, and only a string
+  or a list of strings is a caller file: an object value such as
+  `{ children: [spec.md] }` is kept as supplied.
 - Full validation runs **after** `--set` / `--state` and interpolation, so a schema-required field can be satisfied by an override or a template. A document with `spec: ""` plus `--set spec=design.md` validates fine — validation sees the *effective* frontmatter.
 - It runs **before** shell expansion, preserving fail-fast: an invalid schema aborts the run before any side-effecting `$(...)` command executes.
 
 By default, `md compose` validates documents with no `$schema` against the
-Darkmatter base frontmatter schema. Use `--no-baseline-schema` or
+Darkmatter base frontmatter schema. Use `--disable baseline-schema` or
 `DARKMATTER_NO_BASELINE_SCHEMA=1` for raw compose behavior; with no document
 `$schema` and no baseline, the stage is a complete no-op. Use
 `--baseline-schema <path>` to replace the default baseline for that invocation.
@@ -318,7 +452,7 @@ root, while authored values and caller overrides remain unchanged. Explicit
 
 This binding behavior is deliberately narrow:
 
-- baseline and trigger-schema properties remain validation policy and do not
+- baseline and schema-trigger properties remain validation policy and do not
   create bindings;
 - raw JSON Schema, root-union declarations, nested properties, required
   properties, and properties with `default(...)` do not create bindings; and
@@ -346,15 +480,24 @@ A property whose value a later stage will compute has not been computed yet at v
 | `content_policy: ["$(echo X)", TimeSensitive]` — `$(...)` inside a list is never run | judged as written, so rejected |
 | `title: "see $(date)"` — `$(...)` after other text is never run | judged as written |
 
-Any schema problem that does not depend on a later stage still fails fast, before a command runs. The post-shell check defers nothing: no later stage resolves frontmatter, so a value that still holds `$(...)` or `{{ … }}` text there is judged as that text. When shell expansion is disabled, nothing can be deferred and those problems fail immediately.
+Deferral is decided per problem, at the problem's own path. A wholly later-resolved key — a whole-value command, or a value read from one — defers every problem beneath it. Otherwise a problem waits only when the value at its path (or, for a missing node, its nearest existing parent) still holds a `{{ … }}` template: rendering a template changes only its own value, so it can fix a problem there or on a parent that contains it, never one on a literal sibling. Two problems never wait: an unknown or missing key on a mapping (rendering changes values, not keys), and a problem beside a template the schema already accepted at a place marked `deferred` (that template's value was already allowed for, so what remains is a real mistake).
 
-The post-shell check applies whichever schemas are in effect — the document's `$schema`, the baseline, and any matched trigger schema. `--no-trigger-schemas` only removes trigger schemas from that set; it does not skip the check. Shell output is text, so with the built-in baseline:
+```yaml
+$schema:
+  cfg: "{ counts: number[] }"
+cfg:
+  counts: [three, "{{ x }}"]   # fails fast at /cfg/counts/0; /cfg/counts/1 waits
+```
+
+Any schema problem that does not depend on a later stage still fails fast, before a command runs. The post-shell check defers nothing except schema locations marked `deferred`: no later stage of compose resolves frontmatter, so a value that still holds `$(...)` or `{{ … }}` text there is judged as that text. The one exception is a `{{ … }}` template nested below a top-level key at a place the schema marks [`deferred`](../topics/schemas/definition.md#universal-constraints); its consumer renders it later (a lifecycle event, for example), so every validation pass accepts it without judging it, while its literal siblings are still checked. When shell expansion is disabled, nothing else can be deferred and those problems fail immediately.
+
+The post-shell check applies whichever schemas are in effect — the document's `$schema`, the baseline, and any matched trigger schema. `--disable schema-triggers` only removes trigger schemas from that set; it does not skip the check. Shell output is text, so with the built-in baseline:
 
 ```yaml
 content_policy: "$(cat policy.txt)"   # policy.txt holds ["Duration(3mo)"]
 ```
 
-fails `md compose` and `md compose --no-trigger-schemas` alike: the resolved value is a string, not a list. Only with no effective schema at all (`--no-baseline-schema` and no `$schema` or matching trigger) is the expanded value left unchecked.
+fails `md compose` and `md compose --disable schema-triggers` alike: the resolved value is a string, not a list. Only with no effective schema at all (`--disable baseline-schema` and no `$schema` or matching trigger) is the expanded value left unchecked.
 
 A library caller that validates the composed frontmatter itself can take this verdict over with `ComposeOptions::with_caller_owned_post_shell_verdict(true)` (Claudine does, so it can drop an optional value that shell output made invalid). Compose then still judges what that caller does not: values a result suffix (`::ok`, `::exit-code`, `::result`) typed, and, when trigger schemas are enabled, the full post-shell pass. A `{{ … }}` template that does not depend on a shell value has resolved by the time the first pass runs, so its value is checked like any authored value.
 
@@ -372,40 +515,41 @@ Each bullet carries the YAML `line:col` when available, and root-union failures 
 
 Strict JSON Schema rejects a string where a boolean is declared — but many value sources can only ever produce strings. Shell expansion always yields a string; a ternary like `"{{ spec ? true : false }}"` renders the literal into a **quoted** scalar, so the stored value is the string `"true"`, not a real boolean. Coercion fixes this class of mismatch.
 
-When a frontmatter value is *trivially* the wrong JSON type but **unambiguously** convertible to the declared type, Darkmatter coerces the stored value and accepts it. Coercion is **default-on** with no opt-out.
-
-| Declared type | Incoming value | Coerced to |
-|---------------|----------------|------------|
-| `boolean` / `boolish` | `true`/`false`/`True`/`False`/`TRUE`/`FALSE` (as a string) | real boolean |
-| `number` / `integer` / `numberlike` | numeric string (`"42"`, `"-13"`, `"3.14"`) | real number |
-| `string` (incl. `date`/`url`/`email`/`file`…) | a number or boolean scalar | its canonical string (`42` → `"42"`) |
-| `array` of `T` | an array | each element coerced by `T`'s rule |
-| `array` of a union `U` | an array | each element coerced on its own by the property-union rule: committed only when exactly one arm's coerced candidate validates |
-| `expression` / `shell` | a number or boolean scalar | its canonical string (`true` → `"true"`) |
-| `object`, `unknown`, `alphanumeric`, bare `enum`, `null` | — | untouched (`3` against `alphanumeric` is a type mismatch) |
+When a frontmatter value is not the declared type but converts to it without
+changing its meaning, Darkmatter converts the stored value and accepts it:
+`"yes"` against `boolean` becomes `true`, `"4"` against `number` becomes `4`,
+and `"pear"` against `number` is an error. Conversion is always on, and
+function arguments use the same engine. The rules (what converts, what never
+converts, unions, nested values, raw JSON Schema, and the changes from
+earlier releases) are described once, in
+[Type Coercion](../topics/schemas/definition.md#type-coercion).
 
 Two consequences matter:
 
-- **Coercion mutates the stored value, not just the validator.** A `has_spec` field holding the string `"false"` becomes a real `false`. This is correctness, not just ergonomics: condition evaluators (`::block when="!has_spec"`, init-stack `when:`) treat any non-empty string as truthy, so leaving `"false"` as a string is a latent logic bug that coercion eliminates.
-- **`boolish` and `numberlike` now normalize**, where previously they merely *accepted* the string form. After coercion their stored value is the canonical JSON type.
+- **Conversion changes the stored value, not just the verdict.** A `has_spec`
+  field holding the text `"false"` becomes a real `false`. Condition
+  evaluators (`::block when="!has_spec"`, init-stack `when:`) treat any
+  non-empty string as truthy, so leaving `"false"` as text would be a latent
+  logic bug.
+- **`numberlike` and `boolish` do not normalize.** They exist for values whose
+  written form matters, such as a ZIP code.
 
-### What is never coerced
+### Where conversion runs
 
-Anything ambiguous falls through to the existing strict error unchanged — coercion only ever *adds* acceptances for unambiguous cases, never masks a genuinely-wrong value:
+- **Library validation** converts a *working copy* of the instance, then
+  validates it. It reports validity after conversion but performs **no
+  document mutation**: `md schema validate` does not rewrite files.
+- **The compose stage** writes converted top-level properties back into the
+  frontmatter, so the real boolean, number, or text flows to every later
+  stage and into the composed output. Each top-level property is converted on
+  its own: one failing property does not stop its siblings. Values deferred
+  to the post-shell check are skipped here and converted there. Conversion is
+  idempotent.
 
-- `"yes"` / `"no"` / `"on"` / `"off"` → boolean (not in the boolish set)
-- `"1"` / `"0"` → boolean (equally valid as numbers)
-- any non-numeric string → number
-- arrays, objects, or `null` → a scalar type; a string → object, or vice versa
-
-Coercion also never *parses into* a constrained string type: a number landing in a `date` field becomes its string form and then fails the `date` format check normally — it can never produce a false accept.
-
-### Where coercion runs
-
-- **Library validation** coerces a *working copy* of the instance, then validates it. It reports post-coercion validity but performs **no document mutation** — `md schema validate` does not rewrite files.
-- **The compose stage** writes coerced top-level properties back into the frontmatter, so the real boolean/number/string flows to every later stage and into the composed output. Values deferred to the post-shell check are skipped here and coerced there. Coercion is idempotent, so re-validating an already-coerced value is a no-op.
-
-For root unions, Darkmatter coerces against each arm in order and commits the first arm that validates post-coercion.
+A union keeps a value one option already accepts; otherwise the one
+reachable option wins, a number beats a boolean, and JSON beats YAML. Any
+other tie is an error naming each reading, and option order never matters,
+including for root unions.
 
 ### Schema-selected `file` value materialization
 
@@ -494,13 +638,44 @@ it raw too rather than re-anchor it as though the document had authored it.
 Each simplified arm's declared glob is compiled into that arm as
 `x-darkmatter-match`, and an existing file outside it rules the arm out. An
 arm with several `match(...)` groups, as when a reused named type adds its
-own, keeps every group, and a file must satisfy each one:
+own, keeps every group, and a file must satisfy each one. The glob is
+enforced on a property whose type is `file` or `file[]` (directly or through
+a named type that is just that file) and on every file inside a recursive
+named type the arm uses, at every depth of the value. Any other file in the
+arm (a union alternative such as `file(match(…)) | number`, a file in an
+inline object, a dictionary value, a tuple slot, a list of a union) only
+suggests, as it does in a single schema:
 
 | Value | Result |
 |---|---|
 | `spec=fixes/x/spec.md` | the `feature` arm is ruled out; the `fix` arm applies |
 | `spec=features/x/spec.md` | the `fix` arm is ruled out; the `feature` arm applies |
 | `kind=fix spec=features/x/spec.md` | invalid: `` `…/features/x/spec.md` is outside this schema arm's `match(**/fixes/**/spec.md)` `` |
+
+A recursive type is not changed for its other uses: the arm compiles its own
+copy of each definition that reaches a glob (`$defs` key
+`<name>@match:<property>`), and the shared definition keeps the
+suggestion-only body a single schema or a merged trigger payload uses. A
+glob reached through a definition makes the schema depend on where the
+document lives, so its validator is never shared between documents in
+different folders.
+
+```yaml
+$schema:
+  - node: "file(match('./notes/*.md')) | { children: node[] }"
+    spec: node(required)
+  - spec: number
+```
+
+| Document | `spec` | Result |
+|---|---|---|
+| `a/doc.md` | `./notes/x.md` (exists) | valid |
+| `b/doc.md` | `../a/notes/x.md` (the same file) | invalid: outside `b/notes` |
+| `b/doc.md` | `{ children: [../a/notes/x.md] }` | invalid: the nested file is judged too |
+
+With `spec: "file(match('./notes/*.md')) | number"` in place of `node`, the
+same `b/doc.md` with `spec: ../a/notes/x.md` is valid: that glob only
+suggests.
 
 The same judgment runs wherever an arm is chosen: caller-file projection,
 coercion, and the final verdict. When every arm fails, an arm ruled out by its
@@ -547,7 +722,30 @@ if !report.valid {
 }
 ```
 
-`DarkmatterSchemas` also exposes `effective_for(&Markdown)` (resolve + merge into an `EffectiveSchema`) and `detect(&[&Markdown], DetectOptions)`. See [the topic reference](../topics/schemas/definition.md#library-api) for the full type surface.
+`DarkmatterSchemas` also exposes `effective_for(&Markdown)` (resolve + merge into an `EffectiveSchema`) and `detect(&[&Markdown], DetectOptions)`.
+
+`validate_timed(&Markdown)` returns the same result as `validate` together
+with a `ValidationTimings` (the stages above, `total()`, `unassigned()`,
+`compile_cache()`, and `matched_triggers()`), on failure too. Trigger
+discovery happens when the instance is built, so record it separately and fold
+it in:
+
+```rust
+use darkmatter::markdown::schemas::{ValidationStage, ValidationTimings};
+
+let (api, discovery) = ValidationTimings::record(|| api.with_trigger_discovery());
+let (report, mut timings) = api?.validate_timed(&markdown);
+timings.absorb(discovery);
+for (stage, elapsed) in timings.stages() {
+    eprintln!("{}: {elapsed:?}", stage.name());
+}
+```
+
+`ValidationTimings::record` times any span of work on the calling thread, and
+`ValidationStage::time` lets a host attribute its own work (such as checking
+whether a cached trigger registry is still fresh) to a stage. Timings carry
+durations, trigger file names, and the cache state, never document values or
+schema bodies. See [the topic reference](../topics/schemas/definition.md#library-api) for the full type surface.
 
 ## Limitations (v1)
 

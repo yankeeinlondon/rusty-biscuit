@@ -120,6 +120,7 @@
 //!
 //! [`SystemPromptArtifact`]: super::system_prompt::SystemPromptArtifact
 
+use claudine::diagnostics::DiagnosticSnapshotExt;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};

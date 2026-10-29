@@ -659,7 +659,7 @@ mod schema_validation_integration {
         std::fs::write(&spec, "# Specification\n").unwrap();
         std::fs::write(
             repo.path().join("schemas/stable.trigger.yaml"),
-            "kind: trigger-schema\nmatch:\n  gate: literal(stable; required)\n$schema: payload.yaml\n",
+            "kind: schema-trigger\nmatch:\n  gate: literal(stable; required)\n$schema: payload.yaml\n",
         )
         .unwrap();
         std::fs::write(
@@ -2285,7 +2285,7 @@ mod schema_validation_integration {
             std::fs::write(
                 repo.path().join("schemas/eager-file.yaml"),
                 format!(
-                    "kind: trigger-schema\nmatch:\n  gate: {match_type}\n$schema: payload.yaml\n"
+                    "kind: schema-trigger\nmatch:\n  gate: {match_type}\n$schema: payload.yaml\n"
                 ),
             )
             .unwrap();

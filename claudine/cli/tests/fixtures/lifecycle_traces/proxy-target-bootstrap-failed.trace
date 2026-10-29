@@ -1,0 +1,10 @@
+# scenario: proxy-target-bootstrap-failed
+# doc: proxy-target-bootstrap-failed.md
+# given: invoked as `claudine compose --claude proxy-target-bootstrap-failed.md` from the directory holding the fixture documents
+# given: every provider launch exits 0 with a result
+# given: source success proxies to a target whose initialize carries a shell, a parse error raised while bootstrapping the target
+event initialize
+event start
+work fresh 0
+event success
+exit 1

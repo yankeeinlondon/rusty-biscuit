@@ -47,6 +47,17 @@ where one gets through.
 
 ## Today's Behavior
 
+Refreshed against the implementation on 2026-10-21. The feature remains
+unimplemented; the library extraction described in the original design has
+already landed independently.
+
+The shared cleaner is `clean_document` in
+`darkmatter/lib/src/markdown/cleanup/document.rs`. Its raw-source frontmatter
+pass, `repair_frontmatter` in `cleanup/frontmatter.rs`, serves both `md clean`
+and DMLS formatting. It already returns diagnostics and accepted edits in
+original document coordinates and supports discarding candidate repairs when
+cleanup is declined. Composition reads do not call this repair pass.
+
 The `biscuit-file` YAML analyzer detects duplicate keys at every block nesting
 level and inside flow mappings, emitting `yaml.duplicate-key` with the
 `DeterministicFindNonDeterministicSolution` certainty and no repair. The
@@ -82,8 +93,10 @@ to build the document.
 6. **Every entry names its kind of lossy event in `id`**, a closed enum.
    Today it has one member, `duplicate-fm-key`; each future lossy repair adds
    its own member, so tools branch on `id` and never parse `message`.
-7. **`_warnings` is part of Darkmatter's base schema**, next to the existing
-   reserved `_cache` key, so schema validation and DMLS completion know it.
+7. **`_warnings` is part of Darkmatter's runtime baseline schema**, so
+   schema validation and DMLS completion know it. The runtime source is
+   `darkmatter/docs/schemas/darkmatter.yaml`; the authored catalog's `fm`
+   partial also declares the property alongside its reserved `_cache` key.
 
 ## The `_warnings` Property
 
@@ -96,7 +109,10 @@ Each entry is a mapping:
 | `message`  | string   | A plain-language account of what was wrong and what `md clean` did.     |
 | `data`     | any      | Optional. For a duplicate key whose values differ: every value, in source order. The first element is the one kept. |
 
-Base-schema entry, in `darkmatter/schemas/partials/doc.yaml`:
+Add this property under `$schema` in the embedded runtime baseline,
+`darkmatter/docs/schemas/darkmatter.yaml`, and under `types.fm` in the authored
+catalog partial, `darkmatter/schemas/partials/fm.yaml`. Updating the catalog
+alone does not update the runtime baseline:
 
 ```yaml
 _warnings: "{ id: enum(duplicate-fm-key; required); property: string(required); message: string(required); data: any }[] -> Reserved. Lossy repairs `md clean` performed on this frontmatter, replaced each time a run records one."
@@ -163,7 +179,7 @@ flowchart TD
   removed entries and the `_warnings` entry.
 - **Order with other repairs.** Duplicate removal runs first, because every
   parse-equivalence-gated repair is blocked until the block parses
-  (`darkmatter/cli/src/commands/clean/frontmatter_repair.rs` already rescans
+  (`darkmatter/lib/src/markdown/cleanup/frontmatter.rs` already rescans
   after a syntax pass restores parseability).
 - **Idempotence.** A second `md clean` run on the output changes nothing.
 
@@ -177,10 +193,14 @@ flowchart TD
   removed values); the auto-apply filter keyed on `is_auto_apply_eligible`
   is unchanged.
 - **Darkmatter** opts in. The `darkmatter` library owns the frontmatter
-  repair pipeline (moved from `darkmatter-cli`): it calls the lossy entry
-  point, builds the `_warnings` entries from its report, and splices them into
-  the block. `md clean` and the composition pipeline both call it (see
-  [Repair on Read](#repair-on-read)). The base schema gains `_warnings`.
+  repair pipeline, already shared by `md clean` and DMLS formatting. Extend
+  it with an explicit lossy-repair opt-in for `md clean`, and expose a
+  duplicate-only path for composition reads (see
+  [Repair on Read](#repair-on-read)). Both paths build the same `_warnings`
+  entries and preserve authored-coordinate diagnostics and edits. DMLS
+  formatting retains its current non-lossy behavior; sharing the module must
+  not opt it into duplicate removal. The runtime baseline and authored
+  catalog both gain `_warnings`.
 
 ## Acceptance
 
@@ -200,9 +220,13 @@ flowchart TD
   `analyze_yaml(...).apply()`; the existing `duplicate_keys.rs` tests still
   pass with only the "carries no repairs" assertion updated.
 - `md clean --json` reports each duplicate removal in `applied`.
-- `darkmatter/docs/cli/clean.md` and the base-schema docs describe the
-  repair and `_warnings`; the "duplicate keys are report-only" sentence is
-  corrected.
+- `darkmatter/docs/cli/clean.md` and
+  `darkmatter/docs/schemas/darkmatter-schema.md` describe the repair and
+  `_warnings`; the "duplicate keys are report-only" sentence is corrected
+  for `md clean` while neutral analyzer behavior remains documented.
+- DMLS formatting remains non-lossy. Declining cleanup or disabling
+  frontmatter cleanup discards duplicate removal and warning insertion along
+  with other candidate frontmatter edits.
 
 ## Repair on Read
 
@@ -212,19 +236,23 @@ Darkmatter's shared Markdown loader (`load_markdown` in
 `lib/src/markdown/compose/expression/functions/mod.rs`, also used by
 `markdown_title()` and its siblings). That loader calls
 `Markdown::try_from_content` and fails on the duplicate key. The repair code
-exists only in `darkmatter-cli`
-(`cli/src/commands/clean/frontmatter_repair.rs`).
+now lives in `lib/src/markdown/cleanup/frontmatter.rs`, but this loader does
+not call it. Darkmatter's frontmatter parser explicitly rejects duplicates,
+including through its indentation and expression fallbacks.
 
-Composition does run a clean step, but it does not reach this case: that step
-(`lib/src/markdown/cleanup/`) reformats the Markdown *body* of the composed
-output (lists, tables, emphasis, reflow). It never repairs frontmatter, and it
-never sees the files an expression such as `frontmatter(spec, ...)` reads.
+Composition's body cleanup does not reach this case: it reformats the
+Markdown body of the composed output (lists, tables, emphasis, reflow), not
+frontmatter in files an expression such as `frontmatter(spec, ...)` reads.
+The full shared `clean_document` operation also repairs frontmatter, but it
+is not a composition loader and must not be used wholesale for read repair.
 
 So the repair is done in Darkmatter's composition pipeline, at the point where
 it loads a document:
 
-- The frontmatter repair pipeline moves from `darkmatter-cli` into the
-  `darkmatter` library. `md clean` becomes a caller of it.
+- Reuse the existing library-owned frontmatter repair infrastructure; no
+  CLI-to-library move remains. Add a duplicate-only repair path that does not
+  run formatting or schema-proven repairs. Keep passive parsing, validation,
+  completion, hover, and DMLS formatting free of lossy repair and file writes.
 - The same applies to every document composition loads: files read by
   expressions through `load_markdown`, and files read by transclusion
   directives (`::file` and siblings), which today fail the same way on a

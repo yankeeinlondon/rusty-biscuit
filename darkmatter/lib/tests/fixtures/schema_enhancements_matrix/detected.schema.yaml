@@ -1,0 +1,37 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+additionalProperties: true
+properties:
+  active:
+    anyOf:
+    - type: 'null'
+    - type: boolean
+  count:
+    anyOf:
+    - type: 'null'
+    - type: integer
+  mixed:
+    anyOf:
+    - type: 'null'
+    - items: {}
+      type: array
+  rating:
+    anyOf:
+    - type: 'null'
+    - type: number
+  scores:
+    anyOf:
+    - type: 'null'
+    - items:
+        type: integer
+      type: array
+  tags:
+    anyOf:
+    - type: 'null'
+    - items:
+        type: string
+      type: array
+  title:
+    anyOf:
+    - type: 'null'
+    - type: string
+type: object

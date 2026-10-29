@@ -53,7 +53,7 @@ fn test_compose_remote_allowed_host_fetches_url() {
 
     fixture
         .command()
-        .args(["compose", "-", "--allow-host", "127.0.0.1"])
+        .args(["compose", "-", "--allow", "host=127.0.0.1"])
         .write_stdin(format!("# Local\n\n::file {url}\n"))
         .assert()
         .success()
@@ -101,7 +101,7 @@ fn test_compose_remote_expression_function_reads_url() {
 
     fixture
         .command()
-        .args(["compose", "-", "--allow-host", "127.0.0.1"])
+        .args(["compose", "-", "--allow", "host=127.0.0.1"])
         .write_stdin(format!("Title: {{{{ markdown_title(\"{url}\") }}}}\n"))
         .assert()
         .success()
@@ -152,7 +152,7 @@ fn test_compose_remote_prologue_allowed_host_fetches_url() {
 
     fixture
         .command()
-        .args(["compose", "-", "--allow-host", "127.0.0.1"])
+        .args(["compose", "-", "--allow", "host=127.0.0.1"])
         .write_stdin(format!("---\nprologue: {url}\n---\n# Local\n\nBody.\n"))
         .assert()
         .success()
@@ -210,7 +210,7 @@ fn test_compose_remote_refresh_revalidates_cached_url() {
 
     fixture
         .command()
-        .args(["compose", "-", "--allow-host", "127.0.0.1", "--cache-root"])
+        .args(["compose", "-", "--allow", "host=127.0.0.1", "--cache-root"])
         .arg(cache_dir.path())
         .write_stdin(input.clone())
         .assert()
@@ -219,7 +219,7 @@ fn test_compose_remote_refresh_revalidates_cached_url() {
 
     fixture
         .command()
-        .args(["compose", "-", "--allow-host", "127.0.0.1", "--cache-root"])
+        .args(["compose", "-", "--allow", "host=127.0.0.1", "--cache-root"])
         .arg(cache_dir.path())
         .args(["--remote-refresh"])
         .write_stdin(input)
@@ -253,7 +253,7 @@ fn test_compose_remote_fallback_serves_stale_cache_on_failure() {
 
     fixture
         .command()
-        .args(["compose", "-", "--allow-host", "127.0.0.1", "--cache-root"])
+        .args(["compose", "-", "--allow", "host=127.0.0.1", "--cache-root"])
         .arg(cache_dir.path())
         .write_stdin(input.clone())
         .assert()
@@ -262,7 +262,7 @@ fn test_compose_remote_fallback_serves_stale_cache_on_failure() {
 
     fixture
         .command()
-        .args(["compose", "-", "--allow-host", "127.0.0.1", "--cache-root"])
+        .args(["compose", "-", "--allow", "host=127.0.0.1", "--cache-root"])
         .arg(cache_dir.path())
         .args(["--remote-freshness", "fallback"])
         .write_stdin(input)
@@ -291,7 +291,7 @@ fn test_compose_remote_ttl_serves_cached_url_without_second_request() {
     for _ in 0..2 {
         fixture
             .command()
-            .args(["compose", "-", "--allow-host", "127.0.0.1", "--cache-root"])
+            .args(["compose", "-", "--allow", "host=127.0.0.1", "--cache-root"])
             .arg(cache_dir.path())
             .args(["--remote-ttl", "300"])
             .write_stdin(input.clone())
@@ -337,7 +337,7 @@ fn test_compose_remote_ttl_does_not_override_no_store_or_no_cache() {
         for expected in ["First remote body", "Second remote body"] {
             fixture
                 .command()
-                .args(["compose", "-", "--allow-host", "127.0.0.1", "--cache-root"])
+                .args(["compose", "-", "--allow", "host=127.0.0.1", "--cache-root"])
                 .arg(cache_dir.path())
                 .args(["--remote-ttl", "3600", "--remote-freshness", "optimistic"])
                 .write_stdin(input.clone())
@@ -390,7 +390,7 @@ fn test_compose_cache_manifest_never_persists_url_userinfo_or_query() {
     for _ in 0..2 {
         fixture
             .command()
-            .args(["compose", "-", "--allow-host", "127.0.0.1", "--cache-root"])
+            .args(["compose", "-", "--allow", "host=127.0.0.1", "--cache-root"])
             .arg(cache_dir.path())
             .write_stdin(input.clone())
             .assert()
@@ -444,7 +444,7 @@ fn test_compose_unusable_cache_root_warns_and_still_composes() {
 
     fixture
         .command()
-        .args(["compose", "-", "--allow-host", "127.0.0.1", "--cache-root"])
+        .args(["compose", "-", "--allow", "host=127.0.0.1", "--cache-root"])
         .arg(&cache_root)
         .write_stdin(format!("# Local\n\n::file {url}\n"))
         .assert()
@@ -488,7 +488,7 @@ fn test_compose_cache_root_never_replays_composed_local_output() {
             .env("AC36_PROBE", env_probe)
             .arg("compose")
             .arg(&root)
-            .args(["--allow-host", "127.0.0.1", "--remote-ttl", "300", "--cache-root"])
+            .args(["--allow", "host=127.0.0.1", "--remote-ttl", "300", "--cache-root"])
             .arg(cache_dir.path())
             .output()
             .expect("md compose runs");
@@ -536,7 +536,7 @@ fn test_compose_cache_root_never_replays_composed_local_output() {
 }
 
 /// Acceptance criterion 3 (R-Q1: keep) through the plain
-/// `md compose FILE --cache-root DIR --allow-host 127.0.0.1` invocation, with
+/// `md compose FILE --cache-root DIR --allow host=127.0.0.1` invocation, with
 /// no TTL or freshness override. A fresh remote body is reused from the
 /// transport cache while the local `::file` child, whose source and runtime
 /// value both change between runs, is recomposed. Only the raw remote bytes
@@ -575,7 +575,7 @@ fn test_compose_mixed_document_reuses_remote_bytes_and_recomposes_local_child() 
             .arg(&root)
             .arg("--cache-root")
             .arg(cache_dir.path())
-            .args(["--allow-host", "127.0.0.1"])
+            .args(["--allow", "host=127.0.0.1"])
             .output()
             .expect("md compose runs");
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -630,7 +630,7 @@ fn test_compose_mixed_document_reuses_remote_bytes_and_recomposes_local_child() 
 /// Acceptance criterion 5 through the normal `md compose` path: a denied host
 /// fails before the transport cache is read. A real allowed run seeds a fresh
 /// entry, and a second allowed run proves it is served without a request. The
-/// same URL composed without `--allow-host` then fails under every freshness
+/// same URL composed without `--allow host=HOST` then fails under every freshness
 /// mode, including `fallback` (which serves stale bytes after a failure) and a
 /// TTL override. The seeded body never appears, no request reaches the
 /// origin, and the seeded tree is left byte-identical.
@@ -658,7 +658,7 @@ fn test_compose_denied_host_never_reads_a_seeded_cache_entry() {
     for _ in 0..2 {
         fixture
             .command()
-            .args(["compose", "-", "--allow-host", "127.0.0.1", "--cache-root"])
+            .args(["compose", "-", "--allow", "host=127.0.0.1", "--cache-root"])
             .arg(cache_dir.path())
             .write_stdin(transclusion.clone())
             .assert()
@@ -781,7 +781,7 @@ fn test_compose_local_only_cache_root_is_never_created_or_modified() {
     fixture.write_file("cwd/main.rs", "fn main() {}\n");
     let flag_sets: [&[&str]; 2] = [
         &[],
-        &["--allow-host", "127.0.0.1", "--remote-ttl", "300", "--remote-freshness", "strict"],
+        &["--allow", "host=127.0.0.1", "--remote-ttl", "300", "--remote-freshness", "strict"],
     ];
     let compose = |cache_root: &Path, flags: &[&str]| {
         fixture

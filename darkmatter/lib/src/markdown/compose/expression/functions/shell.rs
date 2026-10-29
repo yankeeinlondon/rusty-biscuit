@@ -5,73 +5,54 @@
 
 use serde_json::Value;
 
-use super::{EvaluationMode, FunctionBinding, FunctionHandler, ResolutionContext};
+use super::{BoundCall, FunctionBinding, ResolutionContext, command_exists};
 use crate::markdown::compose::expression::ExpressionError;
 use crate::markdown::compose::shell_expansion::probe::ShellClasses;
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding {
-        canonical: "has_alias",
-        aliases: &[],
-        evaluation: EvaluationMode::Context,
-        handler: Some(FunctionHandler::Context(has_alias_fn)),
-    },
-    FunctionBinding {
-        canonical: "has_builtin_function",
-        aliases: &[],
-        evaluation: EvaluationMode::Context,
-        handler: Some(FunctionHandler::Context(has_builtin_function_fn)),
-    },
-    FunctionBinding {
-        canonical: "has_user_function",
-        aliases: &[],
-        evaluation: EvaluationMode::Context,
-        handler: Some(FunctionHandler::Context(has_user_function_fn)),
-    },
-    FunctionBinding {
-        canonical: "can_execute",
-        aliases: &[],
-        evaluation: EvaluationMode::Context,
-        handler: Some(FunctionHandler::Context(can_execute_fn)),
-    },
+    FunctionBinding::context("has_alias", &[], has_alias_fn),
+    FunctionBinding::context("has_builtin_function", &[], has_builtin_function_fn),
+    FunctionBinding::context("has_user_function", &[], has_user_function_fn),
+    FunctionBinding::context("can_execute", &[], can_execute_fn),
 ];
 
-/// Like `has_command`, a null, non-string, or empty name is simply not a
-/// command, so it reads as `false` without launching the shell.
-fn classify(args: &[Value], context: &ResolutionContext) -> ShellClasses {
-    match args.first() {
-        Some(Value::String(name)) => context.shell_probe.classify(name),
-        _ => ShellClasses::default(),
+/// Like `has_command`, a `null` or empty name is simply not a command, so it
+/// reads as `false` without launching the shell. A number or boolean arrives
+/// converted to text and is probed by that name.
+fn classify(call: &BoundCall<'_>, context: &ResolutionContext) -> ShellClasses {
+    match call.args().text(0) {
+        Some(name) => context.shell_probe.classify(name),
+        None => ShellClasses::default(),
     }
 }
 
-fn has_alias_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    Ok(Value::Bool(classify(args, context).alias))
+fn has_alias_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    Ok(Value::Bool(classify(call, context).alias))
 }
 
-fn has_builtin_function_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    Ok(Value::Bool(classify(args, context).builtin))
+fn has_builtin_function_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    Ok(Value::Bool(classify(call, context).builtin))
 }
 
-fn has_user_function_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    Ok(Value::Bool(classify(args, context).function))
+fn has_user_function_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    Ok(Value::Bool(classify(call, context).function))
 }
 
 /// `has_binary` first: a name found without the shell never launches a
 /// profile, and one launch answers the other three disjuncts together.
-fn can_execute_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    if super::has_command_fn(args, context)? == Value::Bool(true) {
+fn can_execute_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    if call.args().text(0).is_some_and(command_exists) {
         return Ok(Value::Bool(true));
     }
-    Ok(Value::Bool(classify(args, context).any()))
+    Ok(Value::Bool(classify(call, context).any()))
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
 
-    use super::super::dispatch_fs;
-    use crate::markdown::compose::expression::ResolutionContext;
+    use super::super::call_function;
+    use crate::markdown::compose::expression::{ExpressionError, ResolutionContext};
     use crate::markdown::compose::shell_expansion::probe::ShellProbe;
 
     fn context(probe: ShellProbe) -> ResolutionContext {
@@ -79,21 +60,25 @@ mod tests {
     }
 
     fn call(name: &str, argument: Value, context: &ResolutionContext) -> Value {
-        dispatch_fs(name, &[argument], context)
+        call_function(name, &[argument], Some(context))
             .expect("registered context function")
             .expect("shell probes never error")
     }
 
+    /// Ledger rows 99-102 (`name: string | null`): `null` and empty text are
+    /// `false` without a launch; a list is a type error raised at binding.
     #[test]
-    fn non_string_and_empty_names_are_false_without_a_launch() {
+    fn null_and_empty_names_are_false_without_a_launch() {
         let context = context(ShellProbe::from_environment(&std::collections::HashMap::from([(
             "SHELL".to_string(),
             "/bin/bash".to_string(),
         )])));
         for function in ["has_alias", "has_builtin_function", "has_user_function", "can_execute"] {
-            for argument in [Value::Null, json!(1), json!(["cd"]), json!("")] {
+            for argument in [Value::Null, json!("")] {
                 assert_eq!(call(function, argument.clone(), &context), json!(false), "{function}({argument})");
             }
+            let error = call_function(function, &[json!(["cd"])], Some(&context)).unwrap().unwrap_err();
+            assert!(matches!(error, ExpressionError::Call(_)), "{function}: {error:?}");
         }
         assert_eq!(context.shell_probe.launches(), 0);
     }
@@ -184,6 +169,17 @@ mod tests {
                 assert_eq!(call("has_builtin_function", json!("x"), &context), json!(builtin), "{kinds}");
                 assert_eq!(call("has_user_function", json!("x"), &context), json!(function), "{kinds}");
             }
+        }
+
+        /// Ledger rows 99-102: a boolean or number converts to its text and is
+        /// probed by that name rather than read as `false`.
+        #[test]
+        fn converted_names_launch_the_probe() {
+            let dir = tempfile::tempdir().unwrap();
+            let shell = stub_bash(dir.path());
+            let context = context(stub_probe(&shell, "alias"));
+            assert_eq!(call("has_alias", json!(true), &context), json!(true));
+            assert_eq!(context.shell_probe.launches(), 1);
         }
 
         #[test]

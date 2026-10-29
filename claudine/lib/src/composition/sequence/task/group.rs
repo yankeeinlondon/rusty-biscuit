@@ -1,11 +1,13 @@
 //! Concurrent group legs use isolated runtime branches and declaration-order
 //! admission and folding. A failed atomic group publishes no leg state or result.
 
+use crate::composition::lifecycle::cancellation::CancellationCauseExt;
+use crate::composition::LifecycleErrorInfoExt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use darkmatter::markdown::compose::{EffectiveState, EffectiveStateBuilder};
+use darkmatter::markdown::compose::{EffectiveState, EffectiveStateBuilder, SharedFrontmatter};
 use serde_json::{Map, Value};
 
 use super::super::super::error::CompositionError;
@@ -61,8 +63,9 @@ pub(super) struct ValidatedGroup {
 impl TaskExecution<'_> {
     pub(super) fn run_group_container(&self, group: &PreflightGroup) -> PrimaryOutcome {
         if self.interrupted() { return PrimaryOutcome::interrupted(String::new()); }
-        use crate::composition::lifecycle::{LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal};
+        use crate::composition::lifecycle::{LifecycleRunGuard, LifecycleRunGuardExt, LifecycleRuntimeContext, LifecycleSignal};
         use crate::composition::lifecycle::executor::DisabledShellRunner;
+        use crate::composition::lifecycle::policy::{RefusalRoute, SubjectKind};
         use crate::composition::lifecycle::runtime::{ContainerEventDecision as Decision, ContainerRunner};
 
         let before = self.runtime.map_or_else(RuntimeSnapshot::default, |runtime| runtime.snapshot());
@@ -77,7 +80,7 @@ impl TaskExecution<'_> {
             launch_area: self.stack.ctx_base_dir, context: self.stack.prepared_context,
         };
         let mut runner = ContainerRunner::new(LifecycleRunGuard::new(
-            &group.lifecycle, &context, self.stack.emitter));
+            &group.lifecycle, &context, self.stack.emitter)).with_subject(SubjectKind::Group);
         let mut frame = match self.open_loop(group.loop_config.as_deref(), LoopResultKind::Group, self.stack.frontmatter, &runtime) {
             Ok(frame) => frame,
             Err(error) => return PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
@@ -113,11 +116,12 @@ impl TaskExecution<'_> {
                 let preparation = execution.member_state().and_then(|state| {
                     let context = self.stack.prepared_context.cloned()
                         .unwrap_or_else(|| state.context().clone());
-                    let fresh = if self.graph.sources_unchanged() {
+                    let fresh = if self.graph.sources_unchanged(&group.sources) {
                         group.clone()
                     } else {
                         let (fresh, graph) = super::super::preflight::prepare_nested_group(
                             self.task, group, &state, context, self.stack.file_resolution_context,
+                            self.graph.nested_sources(),
                         )?;
                         self.verify_nested_graph(&graph)?;
                         fresh
@@ -154,6 +158,9 @@ impl TaskExecution<'_> {
             stack.group = Some(&group_value);
             stack.err = error.as_ref();
             if !shell_enabled { stack.shell_runner = &DisabledShellRunner; }
+            if matches!(signal, LifecycleSignal::Initialize | LifecycleSignal::Start) {
+                execution.prewarm_container(runner.guard_mut().config(), &live.lock().expect(SLOT_POISONED).clone());
+            }
             let event = if self.prompt.is_dry_run() {
                 let outcome = Default::default();
                 let decision = runner.record_outcome(signal, &outcome);
@@ -322,23 +329,20 @@ impl TaskExecution<'_> {
                     signal = LifecycleSignal::Start;
                 }
                 Decision::Skip => return PrimaryOutcome::succeeded(String::new()),
-                Decision::Abort(abort) => {
-                    let failure = match abort {
-                        crate::composition::lifecycle::runtime::LifecycleTransitionAbort::ResumeWithoutSession =>
-                            CompositionError::LifecycleResumeWithoutSession { source_path: group.origin_path.clone() },
-                        _ => CompositionError::LifecycleDeferNotImplemented { source_path: group.origin_path.clone() },
+                decision @ (Decision::Abort(_) | Decision::SetupRecoveryUnsupported { .. }) => {
+                    let (Some(refusal), Some(route)) = (decision.refusal(), runner.refusal_route(&decision)) else {
+                        unreachable!("a refusal decision carries its refusal: {decision:?}");
+                    };
+                    let Some(failure) = CompositionError::from_lifecycle_refusal(&refusal, &group.origin_path) else {
+                        unreachable!("a container refuses only a setup recovery, a resume, or a defer: {refusal:?}");
                     };
                     let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary, &failure);
                     runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
-                    result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Finalize;
-                }
-                Decision::SetupRecoveryUnsupported { event, action } => {
-                    let diagnostic = TaskDiagnostic::from_composition(TaskStage::Primary,
-                        &CompositionError::LifecycleSetupPhaseRecoveryUnsupported {
-                            source_path: group.origin_path.clone(), event: event.property_name().into(), action: action.into(),
-                        });
-                    runner.set_error(diagnostic.info.clone()); error = Some(diagnostic.info.clone());
-                    result = PrimaryOutcome::failed(diagnostic); signal = LifecycleSignal::Failure;
+                    result = PrimaryOutcome::failed(diagnostic);
+                    signal = match route {
+                        RefusalRoute::FailureThenFinalize => LifecycleSignal::Failure,
+                        RefusalRoute::FinalizeIfOwedReadingRefusal | RefusalRoute::FinalizeIfOwed => LifecycleSignal::Finalize,
+                    };
                 }
                 Decision::Proxy { target, overlay } => {
                     let result = execution.run_container_proxy(&target, overlay);
@@ -453,19 +457,26 @@ impl TaskExecution<'_> {
             .iter()
             .map(|_| Arc::new(RuntimeState::from_snapshot(base.clone())))
             .collect();
+        crate::note_work!(RuntimeStateBranch, group.tasks.len());
         let slots: Vec<Mutex<Option<MemberRun>>> =
             group.tasks.iter().map(|_| Mutex::new(None)).collect();
         // The live document cell is per-*attempt* and therefore shared by
         // construction; a member needs its own, seeded from the group-start
-        // view, for the same reason it needs its own runtime buffer. The copies
-        // are dropped with the group: a member's `set_frontmatter` already
+        // view, for the same reason it needs its own runtime buffer. Each cell
+        // shares that view's base and owns only its own writes, which are
+        // dropped with the group: a member's `set_frontmatter` already
         // reached disk, and the next *step* re-reads the file — a sibling never
         // does (spec → *Concurrency*).
-        let live_cells: Vec<Mutex<Map<String, Value>>> = scope_stack
+        let live_cells: Vec<Mutex<SharedFrontmatter>> = scope_stack
             .live_frontmatter_snapshot()
             .into_iter()
-            .flat_map(|seed| group.tasks.iter().map(move |_| Mutex::new(seed.clone())))
+            .flat_map(|seed| {
+                // A cell copies only the values the group-start view owns.
+                crate::note_work!(LiveFrontmatterCopy, group.tasks.len() as u64 * crate::work_counters::value_nodes(seed.owned()));
+                group.tasks.iter().map(move |_| Mutex::new(seed.clone()))
+            })
             .collect();
+        crate::note_work!(LiveFrontmatterView, live_cells.len());
 
         // Absent cap means "launch all"; declaration-order admission falls out of
         // a single shared cursor, so a freed slot always takes the next task.
@@ -505,8 +516,7 @@ impl TaskExecution<'_> {
         let cancellable: Vec<_> = group.tasks.iter().map(|task| match &task.action {
             super::super::preflight::PreflightAction::Sequence(sequence) => sequence.lifecycle.cancelled_declared,
             super::super::preflight::PreflightAction::Group(group) => group.lifecycle.cancelled_declared,
-            super::super::preflight::PreflightAction::Prompt { path, .. } => self.graph.prompt_documents.iter()
-                .find(|document| &document.path == path)
+            super::super::preflight::PreflightAction::Prompt { path, .. } => self.graph.prompt_document(path)
                 .is_some_and(|document| document.markdown.frontmatter().as_map().contains_key("cancelled")),
             _ => false,
         }).collect();
@@ -801,7 +811,7 @@ impl TaskExecution<'_> {
             }
         }
         EffectiveStateBuilder::new()
-            .with_frontmatter(data)
+            .with_shared_frontmatter(data)
             .with_context(self.state.context().clone())
             .with_allow_ctx_override(true)
             .build()

@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 const DOCUMENT: &str = "---\nprompt: hello\npolicy: ok\n\n---\n\n[broken](missing.md)\n";
 const DIRECT_DOCUMENT: &str = "---\nprompt: hello\npolicy: ok\n$schema: ./schemas/payload.yaml\n---\n\n[broken](missing.md)\n";
-const TRIGGER: &str = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: payload.yaml\n";
+const TRIGGER: &str = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: payload.yaml\n";
 const PAYLOAD: &str = "$schema:\n  policy: policy@../../shared.yaml\n  required_probe: string(required) -> Spike completion marker\n";
 
 fn uri(path: &Path) -> String {
@@ -107,18 +107,23 @@ fn spike_recovery_protocol_shared_import_failure_repair_and_directory_recreation
     std::fs::remove_file(&shared).unwrap();
     changed(&mut fixture, &[(&shared, 3)]);
     let failed = fixture.wait_for_diagnostics(&uri(&trigger));
-    assert!(failed.iter().any(|d| d["code"] == "dm.schema.prepare"), "{failed:?}");
+    assert!(
+        failed.iter().any(|d| d["code"] == "dm.schema.invalid_trigger" && d["severity"] == 2),
+        "the skipped trigger is warned about: {failed:?}"
+    );
+    assert!(!failed.iter().any(|d| d["code"] == "dm.schema.prepare"), "{failed:?}");
     for (index, uri) in uris[..2].iter().enumerate() {
         let diagnostics = fixture.wait_for_diagnostics(uri);
-        assert_eq!(has_required(&diagnostics), index == 0, "failure route {index}: {diagnostics:?}");
+        assert!(!has_required(&diagnostics), "failure route {index}: {diagnostics:?}");
         let codes = diagnostics.iter().filter_map(|d| d["code"].as_str().map(str::to_owned)).collect::<BTreeSet<_>>();
         assert!(independent_codes.is_subset(&codes), "independent checks must survive in affected documents");
-        // The trigger-only document keeps serving its last good payload, and
-        // its completion and hover agree with its diagnostics.
+        // No last-good payload is retained: the skipped trigger stops typing
+        // the trigger-only document, and completion and hover agree with its
+        // diagnostics.
         let items = completion(&mut fixture, uri);
-        assert_eq!(offers_probe(&items), index == 0, "failure route {index}");
+        assert!(!offers_probe(&items), "failure route {index}");
         assert!(items.iter().any(|item| item["label"] == "title"), "baseline assistance must remain available");
-        assert_eq!(hover(&mut fixture, uri).contains("SPIKE_OLD_TYPE"), index == 0, "failure route {index}");
+        assert!(!hover(&mut fixture, uri).contains("SPIKE_OLD_TYPE"), "failure route {index}");
     }
     let independent = fixture.wait_for_diagnostics(&uris[2]);
     let codes = independent.iter().filter_map(|d| d["code"].as_str().map(str::to_owned)).collect::<BTreeSet<_>>();

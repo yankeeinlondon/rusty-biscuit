@@ -5,6 +5,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::effects::EffectSafety;
 use darkmatter::markdown::compose::context::ContextValueType;
+use darkmatter::markdown::compose::expression::{ExpressionFunctionDescriptor, FunctionExample};
 use darkmatter::markdown::schemas::SimplifiedType;
 
 use crate::commands::context_render::inline_code_text;
@@ -88,7 +89,7 @@ pub(super) fn format_safety(safety: EffectSafety, term: &Terminal) -> String {
 }
 
 /// Renders a descriptor's optional example for table cells.
-pub(super) fn format_example(example: Option<&darkmatter::catalog::Example>, term: &Terminal) -> String {
+pub(super) fn format_example(example: Option<darkmatter::catalog::Example<'_>>, term: &Terminal) -> String {
     match example {
         Some(ex) => {
             let example = format!("{} → {}", ex.invocation, ex.result).replace('\t', r"\t");
@@ -98,13 +99,56 @@ pub(super) fn format_example(example: Option<&darkmatter::catalog::Example>, ter
     }
 }
 
+/// Renders every example of one function overload for the `Example` cell, one
+/// line each, in authored order: inline examples as `call ⇒ result` (a
+/// display-only one followed by its reason), then file-form examples as the
+/// file's invocation and its returns in JSON spelling, so a multi-line or
+/// tab-separated result stays on one visible line.
+pub(super) fn format_function_examples(
+    descriptor: &ExpressionFunctionDescriptor,
+    term: &Terminal,
+) -> String {
+    descriptor
+        .examples
+        .iter()
+        .map(|example| {
+            let line = match example {
+                FunctionExample::Call {
+                    call,
+                    result,
+                    display_only: None,
+                    ..
+                } => format!("{call} ⇒ {result}"),
+                FunctionExample::Call {
+                    call,
+                    result,
+                    display_only: Some(reason),
+                    ..
+                } => format!("{call} ⇒ {result} (display only: {reason})"),
+                FunctionExample::File {
+                    path,
+                    invocation,
+                    returns,
+                    ..
+                } => {
+                    let returns =
+                        serde_json::to_string(returns).expect("a string serializes to JSON");
+                    format!("{invocation} ⇒ {returns} (from {path})")
+                }
+            };
+            inline_code_text(&line.replace('\t', r"\t"), term)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Compact example formatter for side-effect capabilities.
 ///
 /// The signature is already shown in the `Capability` column, so the Example
 /// column only displays the result arrow and value, keeping the four-column
 /// report within the minimum supported terminal width.
 pub(super) fn format_effect_example(
-    example: Option<&darkmatter::catalog::Example>,
+    example: Option<darkmatter::catalog::Example<'_>>,
     term: &Terminal,
 ) -> String {
     match example {

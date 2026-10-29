@@ -1,5 +1,14 @@
 ---
 area: claudine
+canonical_docs:
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/flow-control/flow-control.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/schemas.md
+    - darkmatter/docs/topics/lifecycle/index.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/inline/interpolation.md
 status: finalized-spec
 created: 2026-09-21
 owner: Ken Snyder <ken@ken.net>

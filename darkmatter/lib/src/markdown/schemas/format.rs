@@ -61,6 +61,7 @@ use jsonschema::{Keyword, ValidationError, ValidationOptions, paths::Location};
 use serde_json::{Map, Value};
 use url::Url;
 
+use crate::markdown::coercion::{ContentFormat, content_error};
 use crate::markdown::compose::expression::resolve_ctx::resolve_document_file_ref;
 use crate::markdown::schemas::simplified::{
     parse_property_definition, parse_schema_declaration,
@@ -98,14 +99,33 @@ pub const DARKMATTER_TYPE_ANNOTATION: &str = "x-darkmatter-type";
 /// Keyword emitted for the `schema` semantic meta-type.
 pub const DARKMATTER_SCHEMA_KEYWORD: &str = "x-darkmatter-schema";
 
+/// Keyword emitted beside `"type": "integer"` for SimplifiedSchema
+/// `number(integer)`, whose whole numbers must also lie below 2^64 in
+/// magnitude; raw JSON Schema `integer` has no such ceiling.
+pub const DARKMATTER_INTEGER_KEYWORD: &str = "x-darkmatter-integer";
+
 /// Format name registered for the `yaml` content-format string type (Feature
-/// D). The value must parse as valid YAML; because JSON is a YAML subset a JSON
-/// string is accepted too.
+/// D). The value must parse as valid YAML with no duplicate key; because JSON
+/// is a YAML subset a JSON string is accepted too.
 pub const DARKMATTER_YAML_FORMAT: &str = "darkmatter-yaml";
 
 /// Format name registered for the `json` content-format string type (Feature
-/// D). The value must parse as strict JSON; YAML-only syntax is rejected.
+/// D). The value must parse as strict JSON: YAML-only syntax, a duplicate key,
+/// and a number outside `f64` (`1e400`) are rejected.
 pub const DARKMATTER_JSON_FORMAT: &str = "darkmatter-json";
+
+/// Format name registered for the `numberlike` type, compiled as
+/// `{"type": ["number", "string"], "format": "darkmatter-numberlike"}`. A
+/// string must be text the conversion core admits as a number (the canonical
+/// numeric-text parser, exactness check included); a regex cannot express that
+/// check. Validators that ignore unknown formats accept any string.
+pub const DARKMATTER_NUMBERLIKE_FORMAT: &str = "darkmatter-numberlike";
+
+/// Format name registered for the `boolish` type, compiled as
+/// `{"type": ["boolean", "string"], "format": "darkmatter-boolish"}`. A string
+/// must be a boolean word (`true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`, any
+/// letter case, surrounding whitespace ignored).
+pub const DARKMATTER_BOOLISH_FORMAT: &str = "darkmatter-boolish";
 
 /// Format name registered for the `expression` content-format string type
 /// (feature `2026-07-12-literal-expression`). The value must parse under the
@@ -249,15 +269,19 @@ pub(crate) fn register_darkmatter_formats_with(
         // ever sees a string, so a native (mapping/sequence/scalar) value is
         // serialized to its target-format string by the schema coercion pass
         // (`super::coerce`) before it reaches here.
+        // The conversion core's content check, so validation and conversion
+        // agree on every text (duplicate keys, `1e400`).
         .with_format(DARKMATTER_YAML_FORMAT, |value: &str| {
-            // `yaml` accepts any valid YAML; JSON is a YAML subset, so a JSON
-            // string parses too. biscuit-file's `Yaml` is the parsing seam.
-            biscuit_file::Yaml::from_str(value).is_ok()
+            content_error(ContentFormat::Yaml, value).is_none()
         })
         .with_format(DARKMATTER_JSON_FORMAT, |value: &str| {
-            // `json` is strict: only well-formed JSON parses, so YAML-only
-            // syntax (e.g. `title: Foo`) is rejected.
-            serde_json::from_str::<Value>(value).is_ok()
+            content_error(ContentFormat::Json, value).is_none()
+        })
+        .with_format(DARKMATTER_NUMBERLIKE_FORMAT, |value: &str| {
+            crate::markdown::numeric::admit_number_text(value).is_ok()
+        })
+        .with_format(DARKMATTER_BOOLISH_FORMAT, |value: &str| {
+            crate::markdown::numeric::parse_boolean_word(value).is_some()
         })
         // The `expression` content-format string type. Parse-only and
         // side-effect-free: `parse_condition` never evaluates functions, shell,
@@ -429,6 +453,45 @@ pub(crate) fn resolve_file_reference_in_context(
         });
     }
     Ok(path)
+}
+
+/// Factory for the `x-darkmatter-integer` keyword; its only legal value is
+/// `true`.
+pub fn integer_keyword_factory<'a>(
+    _parent: &'a Map<String, Value>,
+    schema: &'a Value,
+    _schema_path: Location,
+) -> Result<Box<dyn for<'i> Keyword<'i>>, ValidationError<'a>> {
+    if schema != &Value::Bool(true) {
+        return Err(ValidationError::schema("x-darkmatter-integer must be true"));
+    }
+    Ok(Box::new(DarkmatterIntegerKeyword))
+}
+
+struct DarkmatterIntegerKeyword;
+
+impl DarkmatterIntegerKeyword {
+    fn check(instance: &Value) -> bool {
+        instance
+            .as_f64()
+            .is_none_or(|number| number.abs() < 2f64.powi(64))
+    }
+}
+
+impl<'i> Keyword<'i> for DarkmatterIntegerKeyword {
+    fn validate(&self, instance: &'i Value) -> Result<(), ValidationError<'i>> {
+        if Self::check(instance) {
+            Ok(())
+        } else {
+            Err(ValidationError::custom(format!(
+                "{instance} is not a number(integer): its magnitude must be below 2^64"
+            )))
+        }
+    }
+
+    fn is_valid(&self, instance: &'i Value) -> bool {
+        Self::check(instance)
+    }
 }
 
 /// Factory for the `x-darkmatter-url-scheme` keyword.

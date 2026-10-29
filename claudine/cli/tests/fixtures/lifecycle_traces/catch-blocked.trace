@@ -1,0 +1,14 @@
+# scenario: catch-blocked
+# doc: catch-blocked.md
+# given: invoked as `claudine compose --claude catch-blocked.md` from the directory holding the fixture documents
+# given: the start shell is not approved (no --yolo, no whitelist, no terminal), so the shell audit denies it during preflight
+# given: the blocked guard raises an evaluation error (frontmatter() of a missing file)
+# given: the provider never launches
+event initialize
+event blocked
+err composition.shell_approval
+event failure
+err uncoded: invalid file path: nope-blocked.md
+event finalize
+err uncoded: invalid file path: nope-blocked.md
+exit 1

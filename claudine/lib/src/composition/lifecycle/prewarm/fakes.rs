@@ -98,9 +98,11 @@ impl FakePreparer {
             .expect("the fake owns the sender");
     }
 
-    /// Wait until at least `count` calls have run to the end. A call is made
-    /// before its future is polled, so [`Self::wait_for_calls`] does not
-    /// imply it completed.
+    /// Wait until at least `count` calls have run to the end.
+    ///
+    /// A call is made before its future is polled, so a test that drops the
+    /// worker after [`Self::wait_for_calls`] can cancel the last call before
+    /// it completes; wait here before asserting on [`Self::completed`].
     pub(crate) async fn wait_for_completed(&self, count: usize) {
         let mut receiver = self.state.completed_count.subscribe();
         receiver

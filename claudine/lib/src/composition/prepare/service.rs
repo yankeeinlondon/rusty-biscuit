@@ -16,9 +16,9 @@ mod tests;
 
 use super::bootstrap::BootstrapPreparation;
 use super::entry::DocumentEntryReason;
-use super::PrepareOptions;
+use super::{PrepareOptions, ResolvedIdentitySelector};
 use crate::composition::error::CompositionError;
-use crate::composition::schema::{prepare_direct_with_schema_and_prompt, prepare_inline_with_schema};
+use crate::composition::schema::prepare_inline_with_schema;
 use crate::composition::types::{CompositionMode, PreparedComposition, ResolvedCompositionSource};
 
 /// Where the delivered prompt text comes from.
@@ -101,6 +101,19 @@ pub struct DocumentPreparation<'a> {
 pub fn prepare_document(
     request: DocumentPreparation<'_>,
 ) -> Result<PreparedComposition, CompositionError> {
+    prepare_document_selecting(request, None)
+}
+
+/// Prepare through the same stage matrix while selecting the body environment
+/// after frontmatter evaluation, including on retry and resume fresh reads.
+///
+/// ## Errors
+///
+/// The preparation errors of [`prepare_document`] and the selector's failure.
+pub fn prepare_document_selecting(
+    request: DocumentPreparation<'_>,
+    select: Option<&ResolvedIdentitySelector<'_>>,
+) -> Result<PreparedComposition, CompositionError> {
     let DocumentPreparation {
         entry,
         mode,
@@ -116,18 +129,21 @@ pub fn prepare_document(
     // only one of the two would still fail the document before its `initialize`.
     let mut prepared = match (schema, mode) {
         (SchemaStage::Validate, CompositionMode::ChainedDocument) => {
-            prepare_direct_with_schema_and_prompt(source, options, prompt_source)?
+            crate::composition::schema::prepare_direct_with_schema_and_prompt_selecting(source, options, prompt_source, select)?
         }
         (SchemaStage::Validate, CompositionMode::InlineFrontmatterPrompt) => {
-            prepare_inline_with_schema(source, options)?
+            match select {
+                Some(select) => crate::composition::schema::prepare_inline_with_schema_selecting(source, options, select)?,
+                None => prepare_inline_with_schema(source, options)?,
+            }
         }
         (SchemaStage::DeferToStabilizedReread, CompositionMode::ChainedDocument) => {
             options.defer_schema_verdict = true;
-            super::prepare_direct_with_prompt(source, options, prompt_source)?
+            super::prepare_direct_with_prompt_selecting(source, options, prompt_source, select)?
         }
         (SchemaStage::DeferToStabilizedReread, CompositionMode::InlineFrontmatterPrompt) => {
             options.defer_schema_verdict = true;
-            super::prepare_inline(source, options)?
+            super::prepare_inline_selecting(source, options, select)?
         }
     };
     prepared.entry = entry;

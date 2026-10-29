@@ -1,0 +1,4 @@
+$schema:
+    name: string(required)
+    color: enum(red,blue,green)
+    age: number

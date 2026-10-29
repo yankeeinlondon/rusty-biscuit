@@ -1007,7 +1007,7 @@ fn no_error_flag_is_accepted_on_every_action_category() {
             {
                 "set_frontmatter": { "file": "@a.md", "prop": "x", "value": "y", "no_error": true },
             },
-            { "length": { "x": "hello", "no_error": true } },
+            { "length": { "val": "hello", "no_error": true } },
         ],
     });
     let config = parse_lifecycle_config(&fm, dummy_path()).unwrap();
@@ -1261,7 +1261,7 @@ fn proxy_with_rejects_unparseable_whole_value_span() {
 }
 
 #[test]
-fn proxy_with_iteration_preserves_authored_order_and_is_complete() {
+fn proxy_with_iteration_follows_authored_order_and_is_complete() {
     let fm = json!({
         "initialize": [{ "proxy": { "target": "@next.md", "with": { "zebra": 1, "apple": 2, "mango": 3 } } }],
     });

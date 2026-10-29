@@ -40,7 +40,7 @@ by compose remote policy:
 ```
 
 Remote URL reads are deny-all by default. In the CLI, allow hosts with
-`--allow-host`; cache remote artifacts with `--cache-root`; and control stale
+`--allow host=HOST`; cache remote artifacts with `--cache-root`; and control stale
 behavior with `--remote-freshness`, `--remote-ttl`, and `--remote-refresh`.
 See [Remote URL References](../topics/remote-url-references.md) for details.
 

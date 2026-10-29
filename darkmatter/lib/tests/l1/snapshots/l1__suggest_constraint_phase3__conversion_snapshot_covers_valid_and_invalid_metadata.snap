@@ -3,6 +3,7 @@ source: darkmatter/lib/tests/l1/suggest_constraint_phase3.rs
 expression: "serde_json::to_string_pretty(&schema).unwrap()"
 ---
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": true,
   "properties": {
@@ -24,7 +25,8 @@ expression: "serde_json::to_string_pretty(&schema).unwrap()"
       ],
       "minimum": 0,
       "maximum": 10,
-      "type": "integer"
+      "type": "integer",
+      "x-darkmatter-integer": true
     },
     "tags": {
       "anyOf": [
@@ -47,6 +49,5 @@ expression: "serde_json::to_string_pretty(&schema).unwrap()"
   "required": [
     "label",
     "score"
-  ],
-  "$schema": "https://json-schema.org/draft/2020-12/schema"
+  ]
 }

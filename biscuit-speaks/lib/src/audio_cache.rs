@@ -150,46 +150,27 @@ impl CacheKey {
 
 /// Atomically write data to a file.
 ///
-/// Uses a write-to-temp-then-rename pattern to prevent partial writes
-/// from corrupting the cache. This is safe for concurrent access.
-///
-/// ## Arguments
-///
-/// * `path` - Final destination path
-/// * `data` - Data to write
+/// Concurrent publishers replace the destination with complete files; the last
+/// rename wins. Failed writes or publication remove their temporary file and
+/// preserve the previous destination.
 ///
 /// ## Errors
 ///
 /// Returns `CacheError::WriteError` if the write or rename fails.
 pub fn write_atomic(path: &std::path::Path, data: &[u8]) -> Result<(), CacheError> {
-    // Create a temp file in the same directory to ensure same filesystem
     let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-
-    // Ensure parent directory exists
     if !parent.exists() {
         fs::create_dir_all(parent)?;
     }
-
-    // Use a unique temp file name with PID and timestamp
-    let temp_path = parent.join(format!(
-        ".biscuit-speaks-tmp-{}-{}.tmp",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
-
-    // Write to temp file
-    {
-        let mut file = fs::File::create(&temp_path)?;
-        file.write_all(data)?;
-        file.sync_all()?;
-    }
-
-    // Atomically rename to final path
-    fs::rename(&temp_path, path)?;
-
+    let mut file = tempfile::Builder::new()
+        .prefix(".biscuit-speaks-tmp-")
+        .suffix(".tmp")
+        .tempfile_in(parent)?;
+    file.write_all(data)?;
+    file.as_file().sync_all()?;
+    file.into_temp_path()
+        .persist(path)
+        .map_err(|error| error.error)?;
     Ok(())
 }
 
@@ -348,5 +329,22 @@ mod tests {
         let read_data = fs::read(&test_file).expect("Should be able to read");
         assert_eq!(read_data, b"updated");
         // temp_dir is automatically cleaned up on drop
+    }
+
+    #[test]
+    fn failed_atomic_publication_removes_its_staging_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("entry.mp3");
+        fs::create_dir(&destination).unwrap();
+        let sentinel = destination.join("existing");
+        fs::write(&sentinel, b"keep").unwrap();
+
+        assert!(matches!(write_atomic(&destination, b"complete"), Err(CacheError::WriteError(_))));
+        assert_eq!(fs::read(&sentinel).unwrap(), b"keep");
+        let entries: Vec<_> = fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(entries, [destination], "failed publication leaves no staging file");
     }
 }

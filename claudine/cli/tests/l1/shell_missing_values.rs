@@ -70,9 +70,7 @@ fn compose(name: &str, document: &str) -> Run {
     }
 }
 
-#[test]
-fn a_missing_value_fails_pre_flight_on_every_shell_surface() {
-    for (row, document, command) in [
+const MISSING_SHELL_SURFACES: &[(&str, &str, &str)] = &[
         (
             "body",
             "---\ntarget: null\nstart:\n  - shell: \"git init --quiet ran\"\n---\n::shell ls {{ target }}\n",
@@ -93,13 +91,41 @@ fn a_missing_value_fails_pre_flight_on_every_shell_surface() {
             "---\nstart:\n  - shell: \"git init --quiet ran\"\n  - set:\n      listing: \"$(ls {{ fm.target }})\"\n---\nBody.\n",
             "ls {{ fm.target }}",
         ),
-    ] {
-        let run = compose(&format!("shell-missing-{}", row.replace(' ', "-")), document);
-        assert_ne!(run.code, Some(0), "{row}: {}", run.output);
-        assert!(run.output.contains(command), "{row}: {}", run.output);
-        assert!(run.output.contains("which is missing"), "{row}: {}", run.output);
-        assert!(!run.ran, "{row}: a command ran before the missing value was reported");
-    }
+    ];
+
+macro_rules! missing_shell_surface_cases {
+    ($($name:ident: $index:literal),+ $(,)?) => {
+        const SCHEDULED_MISSING_SHELL_SURFACES: &[usize] = &[$($index),+];
+
+        $(
+            #[test]
+            fn $name() {
+                missing_shell_surface($index);
+            }
+        )+
+    };
+}
+
+missing_shell_surface_cases! {
+    a_missing_value_fails_pre_flight_on_every_shell_surface: 0,
+    a_missing_frontmatter_shell_value_fails_pre_flight: 1,
+    a_missing_lifecycle_shell_value_fails_pre_flight: 2,
+    a_missing_lifecycle_set_shell_value_fails_pre_flight: 3,
+}
+
+#[test]
+fn every_missing_shell_surface_is_scheduled_once() {
+    let expected: Vec<usize> = (0..MISSING_SHELL_SURFACES.len()).collect();
+    assert_eq!(SCHEDULED_MISSING_SHELL_SURFACES, expected);
+}
+
+fn missing_shell_surface(index: usize) {
+    let (row, document, command) = MISSING_SHELL_SURFACES[index];
+    let run = compose(&format!("shell-missing-{}", row.replace(' ', "-")), document);
+    assert_ne!(run.code, Some(0), "{row}: {}", run.output);
+    assert!(run.output.contains(command), "{row}: {}", run.output);
+    assert!(run.output.contains("which is missing"), "{row}: {}", run.output);
+    assert!(!run.ran, "{row}: a command ran before the missing value was reported");
 }
 
 #[test]

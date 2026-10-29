@@ -1,3 +1,6 @@
+---
+kind: canonical-documentation
+---
 # File Reference Failures
 
 When a file reference cannot be resolved, `md` says **why** in one stable

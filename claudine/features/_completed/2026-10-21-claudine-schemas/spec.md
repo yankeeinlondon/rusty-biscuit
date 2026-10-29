@@ -1,5 +1,12 @@
 ---
 area: claudine
+canonical_docs:
+    - claudine/docs/topics/schemas.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/dmls/docs/editors/README.md
 status: finalized-spec
 created: 2026-10-10
 owner: Ken Snyder <ken@ken.net>

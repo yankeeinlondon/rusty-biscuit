@@ -30,6 +30,10 @@
 //! module deliberately does not touch it. The `outputs` entry stays undecorated
 //! either way: the bar is added on the rendering path only.
 
+use claudine::composition::preflight::checks::{LIFECYCLE_SHELL_AUDIT, claudine_preflight, run_check};
+use darkmatter::lifecycle::preflight::CheckStage;
+use darkmatter::lifecycle::run::EntryReason;
+use claudine::diagnostics::DiagnosticSnapshotExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -112,13 +116,14 @@ pub(super) fn run_step_task(
         repo: None,
     };
     let term = crate::log::terminal();
-    let live = std::sync::Mutex::new(frontmatter.clone());
+    let frontmatter_view = darkmatter::markdown::compose::SharedFrontmatter::from(frontmatter.clone());
+    let live = std::sync::Mutex::new(frontmatter_view.clone());
 
     let stack = StackExecutionContext {
         seq: None,
         signal: claudine::composition::LifecycleSignal::Start,
         scope: None,
-        frontmatter: &frontmatter,
+        frontmatter: &frontmatter_view,
         live_frontmatter: Some(&live),
         runtime_state: Some(runtime_state),
         err: None,
@@ -242,7 +247,8 @@ pub(super) fn root_step_guard(
         );
         return Ok(true);
     }
-    let frontmatter = claudine::composition::sequence::task::step_guard_frontmatter(authored, overrides.values());
+    let frontmatter: darkmatter::markdown::compose::SharedFrontmatter =
+        claudine::composition::sequence::task::step_guard_frontmatter(authored, overrides.values()).into();
     let source_context = run
         .prep_context
         .invocation
@@ -394,6 +400,7 @@ fn push_action_scan(action: &PreflightAction, scan: &mut String) {
                 tasks,
                 origin_path: _,
                 loop_config,
+                sources: _,
             } = group;
             push_scan(name, scan);
             // The loop condition reads `ctx.*` against the group's run.
@@ -644,8 +651,9 @@ impl<'a> WrapperPromptRunner<'a> {
     ///   from a list; otherwise the hint decides it by the canonical
     ///   non-interactive rule, so a document an earlier task rewrote launches
     ///   on its fresh `agent`;
-    /// - the model stays `planned`'s while the provider does and the hints
-    ///   name no `model`; otherwise it is re-resolved from the hints.
+    /// - an enclosing or reviewed model stays while the provider does and
+    ///   the hints name no `model`; a document-owned prediction is re-resolved
+    ///   so removing that document's model also removes its selected value.
     ///
     /// ## Errors
     ///
@@ -676,7 +684,16 @@ impl<'a> WrapperPromptRunner<'a> {
                     })
         };
         if let Some(planned) = planned.as_ref().filter(|planned| keeps_provider(planned)) {
-            if composed.model.is_none() {
+            let document_model = match &selection.site.own {
+                super::providers::OwnHints::Task(prediction) => matches!(
+                    &prediction.model,
+                    claudine::composition::sequence::preflight::providers::HintState::Static { source, .. }
+                        if source.layer == claudine::composition::sequence::preflight::providers::HintLayer::Document
+                ),
+                super::providers::OwnHints::Body(Some((_, hints))) => hints.model.is_some(),
+                _ => false,
+            };
+            if composed.model.is_none() && !document_model {
                 return Ok(Some(planned.clone()));
             }
             return Ok(Some(self.run.selection.for_document(
@@ -790,7 +807,11 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         let mut approval_options = approval_options;
         approval_options.closed_approvals = Some(self.run.approved.clone());
         approval_options.approval_handler = None;
-        composition::resolve_shell_approvals(None, None, &approval_options, Some(&lifecycle), Some(&source.resolved_path))?;
+        #[allow(clippy::result_large_err)]
+        let audit = || {
+            composition::resolve_shell_approvals(None, None, &approval_options, Some(&lifecycle), Some(&source.resolved_path))
+        };
+        run_check(claudine_preflight(), LIFECYCLE_SHELL_AUDIT, CheckStage::InRun, EntryReason::Initial, audit)?;
         *request.document_epoch.lock().expect("prompt document epoch poisoned") = options.document_epoch.clone();
         *request.prepared_context.lock().expect("prompt document context poisoned") = options.prepared_context.clone();
         Ok(())

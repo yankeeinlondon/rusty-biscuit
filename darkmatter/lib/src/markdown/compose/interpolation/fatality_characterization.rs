@@ -18,7 +18,7 @@
 //! - **The helper under [`ExpressionFailurePolicy::Lenient`]**
 //!   ([`interpolate_text`]) is what preflight discovery still uses. There, **three** classes are fatal: an
 //!   **unknown function**, a **present file reference that fails to resolve**
-//!   (missing file or malformed path), and a **focused provider failure**
+//!   (a missing file), and a **focused provider failure**
 //!   ([`ExpressionError::Provider`]). A present file reference that does not
 //!   resolve is a real authoring mistake rather than a tolerated absence
 //!   (real-errors finding #1, ratified), and a provider failure is actionable
@@ -27,7 +27,10 @@
 //!   repository fixture and a mock transport, which this harness deliberately
 //!   does not build); the cells below pin the purely local failure kinds.
 //!   The remaining failures (arity, arg-type, parse) are demoted to a
-//!   `ComposeWarning` with the original `{{ … }}` left in place.
+//!   `ComposeWarning` with the original `{{ … }}` left in place. Arity and
+//!   arg-type failures are now call-binding errors
+//!   ([`ExpressionError::Call`]), and so is a malformed path: the `file`
+//!   parameter type rejects it before the handler runs.
 //! - **Specified contract violation** ([`ContractViolation`]): fatal on every
 //!   cell. A function's specification makes the call a compose error (for
 //!   example `recent_commits(0)`), so it is never demoted to a warning.
@@ -49,6 +52,7 @@
 //! [`ExpressionFailurePolicy::Strict`]: super::rewrite::ExpressionFailurePolicy::Strict
 //! [`ExpressionFailurePolicy::Lenient`]: super::rewrite::ExpressionFailurePolicy::Lenient
 //! [`ExpressionError::Provider`]: crate::markdown::compose::expression::ExpressionError::Provider
+//! [`ExpressionError::Call`]: crate::markdown::compose::expression::ExpressionError::Call
 //! [`ContractViolation`]: crate::markdown::compose::expression::ExpressionError::ContractViolation
 //! [`ContextNotCaptured`]: crate::markdown::compose::expression::ExpressionError::ContextNotCaptured
 //! [`ContextProjectionInvariant`]: crate::markdown::compose::expression::ExpressionError::ContextProjectionInvariant
@@ -103,10 +107,9 @@ struct Case {
 /// The failure kinds: the six from the integrated-design §5 matrix plus the two
 /// missing-runtime-context kinds.
 ///
-/// `missing-file` and `malformed-path` share the `invalid file path` fragment
-/// and the same (now fatal) lenient-body disposition, but are listed separately
-/// because they map to distinct typed causes
-/// (`FileRefFailure::NotFound` vs the malformed/`Malformed` case).
+/// `missing-file` reaches its handler and fails as `FileRefFailure::NotFound`;
+/// `malformed-path` fails its `file` parameter type while binding, so it is a
+/// call type error with the arg-type disposition.
 const CASES: &[Case] = &[
     Case {
         kind: "unknown-function",
@@ -121,20 +124,22 @@ const CASES: &[Case] = &[
     Case {
         // An empty reference string is rejected by `FileReference::new` itself
         // (the reference is malformed, distinct from a well-formed-but-absent
-        // file).
+        // file). The `file` parameter type applies that same syntax check, so
+        // the call no longer binds: it is a call type error, not a file
+        // reference failure, and keeps the arg-type severity.
         kind: "malformed-path",
         input: "{{ absolute(\"\") }}",
-        fragment: "invalid file path",
+        fragment: "invalid arguments for absolute",
     },
     Case {
         kind: "arity",
         input: "{{ min(1) }}",
-        fragment: "requires",
+        fragment: "no signature takes",
     },
     Case {
         kind: "arg-type",
         input: "{{ min(\"a\", \"b\") }}",
-        fragment: "numeric",
+        fragment: "invalid arguments for min",
     },
     Case {
         kind: "parse",
@@ -249,11 +254,12 @@ fn expected(kind: &str, surface: Surface, policy: ExpressionFailurePolicy) -> Ou
             // Ratified (real-errors finding #1): a present-but-unresolvable
             // file reference is fatal even under the lenient policy, alongside
             // the always-fatal unknown function. Arity/arg-type/parse remain
-            // warnings — they are not file references.
+            // warnings — they are not file references. A malformed reference
+            // fails its `file` parameter's type before the handler runs, so it
+            // is a call type error with the arg-type severity.
             ExpressionFailurePolicy::Lenient => match kind {
                 "unknown-function"
                 | "missing-file"
-                | "malformed-path"
                 | "context-not-captured"
                 | "context-projection-invariant" => Outcome::Fatal,
                 _ => Outcome::Warning,
@@ -369,26 +375,28 @@ fn body_missing_file_is_fatal_under_the_lenient_policy() {
 }
 
 #[test]
-fn body_malformed_path_is_fatal_under_the_lenient_policy() {
-    // Ratified (real-errors finding #1): a malformed (present) reference is fatal
-    // even in lenient body mode — it was a warning before this change.
+fn body_malformed_path_is_a_type_error_warning_under_the_lenient_policy() {
+    // A malformed reference no longer reaches the handler: the `file`
+    // parameter's syntax check rejects it while binding, so it is a call type
+    // error with the arg-type severity rather than a fatal file-reference
+    // failure (real-errors finding #1 still holds for references that bind).
     let (outcome, message) = classify("malformed-path", "{{ absolute(\"\") }}", Surface::Body, ExpressionFailurePolicy::Lenient);
-    assert_eq!(outcome, Outcome::Fatal);
-    assert!(message.contains("invalid file path"), "message: {message}");
+    assert_eq!(outcome, Outcome::Warning);
+    assert!(message.contains("invalid arguments for absolute"), "message: {message}");
 }
 
 #[test]
 fn body_arity_is_warning_under_the_lenient_policy() {
     let (outcome, message) = classify("arity", "{{ min(1) }}", Surface::Body, ExpressionFailurePolicy::Lenient);
     assert_eq!(outcome, Outcome::Warning);
-    assert!(message.contains("requires"), "message: {message}");
+    assert!(message.contains("no signature takes"), "message: {message}");
 }
 
 #[test]
 fn body_arg_type_is_warning_under_the_lenient_policy() {
     let (outcome, message) = classify("arg-type", "{{ min(\"a\", \"b\") }}", Surface::Body, ExpressionFailurePolicy::Lenient);
     assert_eq!(outcome, Outcome::Warning);
-    assert!(message.contains("numeric"), "message: {message}");
+    assert!(message.contains("invalid arguments for min"), "message: {message}");
 }
 
 #[test]

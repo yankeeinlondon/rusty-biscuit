@@ -1,3 +1,4 @@
+use crate::diagnostics::DiagnosticSnapshotExt;
 use std::error::Error as StdError;
 
 use serde_json::json;

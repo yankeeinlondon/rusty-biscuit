@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Flow Control
 
 Claudine runs three _executable primitives_: a markdown **document**, a **group** of tasks, and a **sequence** of steps. For any of them, Claudine lets the markdown (or YAML) author change the natural flow of execution through [lifecycle events](./lifecycle.md).
@@ -154,7 +158,7 @@ A recovery that works reports the recovered attempt's outcome, so a `retry` that
 
 ## `retry`
 
-Runs the prompt again with a **fresh** agent session. The agent starts over and does not remember the previous attempt. On a sequence or group, `retry` reruns all children after the old children settle; it preserves runtime mutations but clears abandoned child results. It does not repeat `initialize` or run the abandoned attempt’s `finalize`. Container `retry.with` values become runtime writes for the new attempt. Disk edits and external effects remain. See [Container lifecycle and recovery](sequences.md#container-lifecycle-and-recovery).
+Runs the prompt again with a **fresh** agent session. The agent starts over and does not remember the previous attempt. On a sequence or group, `retry` reruns the current attempt after the old children settle. A non-looping container preserves runtime mutations and clears abandoned child results. A looping container restores the current pass's entry state, retaining completed passes; see [Retry inside a looping container](looping.md#retry-inside-a-looping-container). It does not repeat `initialize` or run the abandoned attempt’s `finalize`. Container `retry.with` values become runtime writes for the new attempt. Disk edits and external effects remain. See [Container lifecycle and recovery](sequences.md#container-lifecycle-and-recovery).
 
 ```yaml
 finalize:

@@ -1,0 +1,15 @@
+kind: schema
+categories:
+    - Math -> Arithmetic on numbers.
+    - Devops
+    - |-
+        Filesystem ->
+        Questions about files and paths, such as whether a file
+        exists or what kind of file it is.
+types:
+    min: |-
+        function(
+            parameters(a: number, b: number);
+            returns(number);
+            category(Math);
+        ) -> Returns the smaller of two numbers.

@@ -235,6 +235,14 @@ impl FrontmatterExcerpt {
     }
 }
 
+/// Carried opaquely by a [`DiagnosticSnapshot`](crate::diagnostics::DiagnosticSnapshot)
+/// so a restored diagnostic renders the same appendix.
+impl darkmatter::lifecycle::SourceAppendix for FrontmatterExcerpt {
+    fn render_appendix(&self, term: &Terminal) -> String {
+        FrontmatterExcerpt::render_appendix(self, term)
+    }
+}
+
 #[cfg(test)]
 impl FrontmatterExcerpt {
     /// Test-only accessor for the first highlighted line.

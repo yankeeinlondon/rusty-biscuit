@@ -5,17 +5,16 @@ use sniff::remote::{
 };
 
 use super::escape::{collapse_and_escape, markdown_destination};
-use super::{EvaluationMode, FunctionBinding, FunctionHandler, ResolutionContext};
+use super::{BoundCall, FunctionBinding, ResolutionContext};
 use crate::markdown::compose::expression::{ExpressionError, ProviderFailureKind};
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding { canonical: "pr", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(pr_fn)) },
-    FunctionBinding { canonical: "pr_list", aliases: &["prlist"], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(pr_list_fn)) },
+    FunctionBinding::context("pr", &[], pr_fn),
+    FunctionBinding::context("pr_list", &["prlist"], pr_list_fn),
 ];
 
-fn pr_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    if args.len() != 1 { return Err(other("pr", format!("requires one identifier, got {}", args.len()))); }
-    let id = positive_identifier("pr", &args[0])?;
+fn pr_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    let id = positive_identifier("pr", call.args().get(0))?;
     context.cached_provider_query("pr", format!("pr:{id}"), || {
         let record = if id.starts_with("http://") || id.starts_with("https://") {
             let (client, query_id) = sniff::remote::FocusedProviderClient::from_pull_request_url(
@@ -38,9 +37,13 @@ fn pr_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, Expressio
     })
 }
 
-fn pr_list_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    if args.len() != 1 { return Err(other("pr_list", format!("requires one query or count, got {}", args.len()))); }
-    let (remote, query) = parse_query(&args[0])?;
+/// Overloads in catalog order: `(query: object)`, then `(count)`; a count
+/// arrives already bound to a whole number from 1 to 100.
+fn pr_list_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    let (remote, query) = match call.args().object(0) {
+        Some(object) => parse_query(object)?,
+        None => (None, count_query(call.args().number(0))),
+    };
     let key = format!(
         "pr_list:{}:{}",
         remote.as_deref().unwrap_or_default(),
@@ -92,12 +95,15 @@ struct AuthoredPullRequestQuery {
     limit: Option<usize>,
 }
 
-fn parse_query(value: &Value) -> Result<(Option<String>, PullRequestQuery), ExpressionError> {
-    if let Some(count) = value.as_u64() {
-        let limit = usize::try_from(count).ok().filter(|count| (1..=100).contains(count)).ok_or_else(|| other("pr_list", "count must be between 1 and 100"))?;
-        return Ok((None, PullRequestQuery { limit: Some(limit), ..Default::default() }));
-    }
-    let mut object = value.as_object().cloned().ok_or_else(|| other("pr_list", "query must be an object or positive integer"))?;
+/// The newest-first query a bare `count` asks for.
+fn count_query(count: Option<f64>) -> PullRequestQuery {
+    PullRequestQuery { limit: count.map(|count| count as usize), ..Default::default() }
+}
+
+fn parse_query(
+    object: &serde_json::Map<String, Value>,
+) -> Result<(Option<String>, PullRequestQuery), ExpressionError> {
+    let mut object = object.clone();
     let remote = super::provider::authored_remote("pr_list", object.remove("remote"))?;
     let authored: AuthoredPullRequestQuery = serde_json::from_value(Value::Object(object))
         .map_err(|error| other("pr_list", format!("invalid query: {error}")))?;
@@ -147,13 +153,17 @@ pub(super) fn format_pr(record: &PullRequestRecord) -> String {
     output
 }
 
-fn positive_identifier(function: &str, value: &Value) -> Result<String, ExpressionError> {
-    let id = value
-        .as_u64()
-        .map(|id| id.to_string())
-        .or_else(|| value.as_str().map(str::to_string))
-        .filter(|id| !id.is_empty() && id != "0")
-        .ok_or_else(|| other(function, "identifier must be a positive integer or canonical URL"))?;
+/// The bound identifier as text: a whole number from the `number` arm, or the
+/// `string` arm, which must still spell a positive number or a canonical URL.
+fn positive_identifier(function: &str, value: Option<&Value>) -> Result<String, ExpressionError> {
+    let id = match value {
+        // A whole float such as `3.0` binds `integer` too.
+        Some(Value::Number(number)) => number.as_u64().or_else(|| number.as_f64().map(|id| id as u64)).map(|id| id.to_string()),
+        Some(Value::String(text)) => Some(text.clone()),
+        _ => None,
+    }
+    .filter(|id| !id.is_empty() && id != "0")
+    .ok_or_else(|| other(function, "identifier must be a positive integer or canonical URL"))?;
     if id.chars().all(|character| character.is_ascii_digit())
         || id.starts_with("http://")
         || id.starts_with("https://")
@@ -183,6 +193,41 @@ mod tests {
 
     use super::*;
     use crate::markdown::compose::expression::functions::escape::harness;
+
+    /// [`super::parse_query`] for an authored object literal.
+    fn parse_query(value: &Value) -> Result<(Option<String>, PullRequestQuery), ExpressionError> {
+        super::parse_query(value.as_object().expect("an object query"))
+    }
+
+    /// Criterion 23: a count that converts selects the count overload with
+    /// the converted number; one that cannot bind either overload is a type
+    /// error naming both signatures, raised before the handler (so before any
+    /// provider request).
+    #[test]
+    fn counts_select_the_count_overload_or_fail_before_the_handler() {
+        use crate::markdown::compose::expression::functions::test_hooks::{handler_entries, reset_handler_entries};
+
+        let registration = super::super::function_registration("pr_list").expect("registered");
+        for count in [json!("3"), json!(3)] {
+            let call = registration.bind_call(std::slice::from_ref(&count)).expect("binds");
+            assert_eq!(call.overload(), 1, "{count} selects `count`");
+            assert_eq!(call.args().get(0), Some(&json!(3)), "{count}");
+        }
+
+        reset_handler_entries();
+        let context = crate::markdown::compose::expression::ResolutionContext::default();
+        for count in [json!("0"), json!("2.5"), json!(0), json!(101)] {
+            let error = super::super::call_function("pr_list", std::slice::from_ref(&count), Some(&context))
+                .expect("registered")
+                .unwrap_err();
+            assert!(matches!(error, ExpressionError::Call(_)), "{count}: {error:?}");
+            let message = error.to_string();
+            assert!(message.contains("no signature accepts these arguments"), "{count}: {message}");
+            assert!(message.contains("pr_list(query: object)"), "{count}: {message}");
+            assert!(message.contains("pr_list(count: number(integer;min(1);max(100)))"), "{count}: {message}");
+        }
+        assert_eq!(handler_entries("pr_list"), 0);
+    }
 
     fn record() -> PullRequestRecord {
         PullRequestRecord {
@@ -310,8 +355,6 @@ mod tests {
     #[test]
     fn query_validation_rejects_bad_shapes_before_repository_resolution() {
         for value in [
-            json!(0),
-            json!(101),
             json!({"unknown": true}),
             json!({"direction": "sideways"}),
             // Internal Sniff query fields are not authored vocabulary; both
@@ -383,10 +426,11 @@ mod tests {
     /// D24: the object, empty-object, and count forms must all agree.
     #[test]
     fn every_call_form_defaults_to_newest_first() {
-        for value in [json!({}), json!({"limit": 5}), json!(5)] {
+        for value in [json!({}), json!({"limit": 5})] {
             let (_, query) = parse_query(&value).unwrap();
             assert!(query.descending, "{value} did not default to newest-first");
         }
+        assert!(count_query(Some(5.0)).descending, "a bare count did not default to newest-first");
         let (_, explicit) = parse_query(&json!({"direction": "ascending"})).unwrap();
         assert!(!explicit.descending);
     }

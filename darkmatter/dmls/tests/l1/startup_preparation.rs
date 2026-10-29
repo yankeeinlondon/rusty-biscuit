@@ -26,8 +26,8 @@ use serde_json::{Value, json};
 /// `ServerCancelled`.
 const SERVER_CANCELLED: i32 = -32802;
 
-const ENVELOPE: &str = "kind: trigger-schema\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
-const BROKEN_ENVELOPE: &str = "kind: trigger-schema\nmatch: {}\n";
+const ENVELOPE: &str = "kind: schema-trigger\nmatch:\n  prompt: string(required)\n$schema: prompt.yaml\n";
+const BROKEN_ENVELOPE: &str = "kind: schema-trigger\nmatch: {}\n";
 const PAYLOAD: &str = "$schema:\n  model: string(required)\n";
 const DOC: &str = "---\nprompt: hello\n---\n\n# Heading\n\nBody.\n";
 
@@ -297,8 +297,14 @@ fn a_request_overtakes_the_remaining_startup_probes_after_an_unchanged_configura
         plain + 1,
         "a plain startup's scans plus the document's own"
     );
-    let completion: Vec<String> =
-        logs.matching("request complete").into_iter().filter(|line| line.contains(" id=900 ")).collect();
+    // 900's elapsed time includes the held startup probe, so on a loaded host
+    // it crosses `SLOW_THRESHOLD` and completes as a `slow request` instead.
+    let completion: Vec<String> = logs
+        .lines()
+        .into_iter()
+        .filter(|line| line.contains("request complete") || line.contains("slow request"))
+        .filter(|line| line.contains(" id=900 "))
+        .collect();
     assert_eq!(completion.len(), 1, "{:#?}", logs.lines());
     fixture.shutdown();
 }

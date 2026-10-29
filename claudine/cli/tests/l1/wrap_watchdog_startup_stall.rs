@@ -125,7 +125,7 @@ fn write_provider(fixture: &CliProcessFixture, behavior: ProviderBehavior) {
                 "while :; do printf '\\n'; /bin/sleep 0.4; done\n"
             }
             ProviderBehavior::ChattyThenExit => {
-                "i=0\nwhile [ $i -lt 8 ]; do\n  printf 'loading config\\n' >&2\n  /bin/sleep 0.2\n  i=$((i + 1))\ndone\nexit 0\n"
+                "i=0\nwhile [ $i -lt 8 ]; do\n  printf 'loading config\\n' >&2\n  /bin/sleep 0.2\n  i=$((i + 1))\ndone\nprintf '%s' complete > \"$CLAUDINE_CHATTER_COMPLETE\"\nexit 0\n"
             }
             ProviderBehavior::OneEventThenSilent => {
                 "printf '%s\\n' '{\"type\":\"init\",\"session_id\":\"startup-stall\",\"model\":\"test-model\"}'\nwhile :; do /bin/sleep 1; done\n"
@@ -149,7 +149,7 @@ fn write_provider(fixture: &CliProcessFixture, behavior: ProviderBehavior) {
                 ":loop\r\necho.\r\nping -n 2 127.0.0.1 >nul\r\ngoto loop\r\n"
             }
             ProviderBehavior::ChattyThenExit => {
-                "for /l %%i in (1,1,6) do (\r\n  echo loading config 1>&2\r\n  ping -n 2 127.0.0.1 >nul\r\n)\r\nexit /b 0\r\n"
+                "for /l %%i in (1,1,3) do (\r\n  echo loading config 1>&2\r\n  ping -n 2 127.0.0.1 >nul\r\n)\r\n> \"%CLAUDINE_CHATTER_COMPLETE%\" echo complete\r\nexit /b 0\r\n"
             }
             ProviderBehavior::OneEventThenSilent => {
                 "echo {\"type\":\"init\",\"session_id\":\"startup-stall\",\"model\":\"test-model\"}\r\n:loop\r\nping -n 2 127.0.0.1 >nul\r\ngoto loop\r\n"
@@ -275,13 +275,16 @@ fn watchdog_startup_stall_terminates_without_a_wall_clock_timeout() {
 
 /// Acceptance criterion 2, positive half. Non-whitespace bytes arriving
 /// before any semantic event are real progress and must push the deadline
-/// out: the fixture chatters for ~1.6s against a 1s budget and is not killed.
+/// out: the fixture chatters for ~1.6s against a 1s budget (about 3s against
+/// 2s on Windows) and reaches its completion marker rather than being killed.
 #[test]
 fn watchdog_startup_bytes_move_the_deadline() {
     let (fixture, md_file) = stall_fixture("startup-chatty", ProviderBehavior::ChattyThenExit);
+    let completed = fixture.cwd().join("chatter-complete");
 
     let assert = fixture
         .command()
+        .env("CLAUDINE_CHATTER_COMPLETE", &completed)
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_STEP_TIMEOUT", format!("{}s", CHATTY_STEP_TIMEOUT_MS as f64 / 1000.0))
         .env("CLAUDINE_WATCHDOG_INTERVAL", "0.2s")
@@ -290,6 +293,10 @@ fn watchdog_startup_bytes_move_the_deadline() {
         .timeout(Duration::from_secs(60))
         .assert();
 
+    assert_eq!(
+        fs::read_to_string(&completed).expect("the provider must complete its full chatter interval").trim(),
+        "complete",
+    );
     let plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
     assert!(
         !plain.contains("terminating due to step_timeout"),

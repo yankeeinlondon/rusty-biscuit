@@ -39,6 +39,7 @@ fn materialized_with_prompt(prompt: &str) -> MaterializedHarnessPrompt {
         compose_context: None,
         document_epoch: None,
         lifecycle: None,
+        frontmatter_view: darkmatter::markdown::compose::SharedFrontmatter::default(),
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         loop_values: None,

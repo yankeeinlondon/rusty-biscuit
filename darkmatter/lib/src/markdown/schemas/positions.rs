@@ -200,7 +200,10 @@ fn locate_in(root: &SchemaValueNode, segments: &[String], target: PositionTarget
             SchemaValueKind::Scalar => return Some(node.span.start),
             SchemaValueKind::Mapping(entries) => entries
                 .iter()
-                .find(|entry| entry.key == *segment)
+                .find(|entry| {
+                    crate::note_work!(PositionKeyComparison);
+                    entry.key == *segment
+                })
                 .map(|entry| &entry.value),
             SchemaValueKind::Sequence(items) => {
                 segment.parse::<usize>().ok().and_then(|index| items.get(index))
@@ -217,7 +220,10 @@ fn locate_in(root: &SchemaValueNode, segments: &[String], target: PositionTarget
     match (target, &node.kind) {
         (PositionTarget::Key(key), SchemaValueKind::Mapping(entries)) => entries
             .iter()
-            .find(|entry| entry.key == key)
+            .find(|entry| {
+                crate::note_work!(PositionKeyComparison);
+                entry.key == key
+            })
             .map(|entry| entry.key_span.start)
             .or(deepest_non_root),
         (PositionTarget::Key(_), SchemaValueKind::Scalar) => Some(node.span.start),

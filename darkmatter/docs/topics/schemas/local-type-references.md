@@ -1,3 +1,6 @@
+---
+kind: canonical-documentation
+---
 # Local Type References
 
 A schema can define reusable named types and use them by name. A type defined
@@ -15,6 +18,12 @@ $schema:
 prefer. `@` is only needed for a type from another file, such as
 `person@./people.yaml`. A bare reference also survives renaming the file,
 which a `@./this-file.yaml` self-reference does not.
+
+Besides `this`, one other right-hand side is a reserved word rather than a
+file: `darkmatter:<stem>` names a type in one of the schema partials
+Darkmatter ships, such as `count@darkmatter:lifecycle`. It resolves the same
+from any schema, on disk or embedded, and never reads the disk; see
+[Reserved Darkmatter References](./definition.md#reserved-darkmatter-references-namedarkmatterstem).
 
 See [External Schemas](./authoring-schemas.md#external-schemas) for an
 authoring walkthrough and
@@ -60,10 +69,15 @@ them is a schema error.
   frontmatter, or runtime globals. A misspelled built-in such as `strng`
   therefore fails at the reference, unless a local type happens to have that
   name.
-- **Cycles and depth are bounded.** A type that references itself, directly
-  or through other types, is a `SchemaError::ImportCycle` whose message shows
-  the chain (for example `b -> a -> b`), whether the hops are bare or
-  explicit. Chains deeper than 32 references are rejected.
+- **A type may refer to itself.** A local name can close a cycle, directly
+  (`item: "{ children: item[] }"`) or through other types, as long as the
+  cycle passes through a child value: an object property, a dictionary value,
+  a list item, or a tuple slot. A cycle that never does, such as `a: b` with
+  `b: a`, or `a: [a, string]`, is a `SchemaError::NonDescendingCycle` naming
+  each reference in it, whether the hops are bare or explicit. See
+  [Recursive Named Types](#recursive-named-types) below.
+- **Chains are bounded.** A chain of references that never repeats a type
+  and is deeper than 32 is a `SchemaError::ImportCycle`.
 
 ### Resolution stays in the defining file
 
@@ -158,6 +172,115 @@ from the higher-precedence schema.
 
 For how presence inheritance interacts with optional values and `generated`,
 see [Presence travels with the type](./authoring-schemas.md#presence-travels-with-the-type).
+
+## Descriptions and Editor Assistance
+
+A reference also inherits the named type's description. A description at the
+use site replaces that prose without changing the inherited constraints:
+
+```yaml
+kind: schema
+types:
+    label: string(min(3)) -> A human-readable label
+    title: label(max(80)) -> The title shown above the article
+```
+
+`title` still accepts 3 to 80 characters, but its description is the
+article-specific one. A property written simply as `title: label` keeps the
+original description.
+
+In DMLS, completion offers local names bare and uses `@this` only when a name
+collides with a built-in. Hover shows the selected definition, and
+go-to-definition opens its defining key. If two declarations introduce
+contradictory constraints, the diagnostic identifies the consuming reference
+and links to both declarations. Editing an imported definition refreshes the
+documents that use it. See [DMLS Schema Support](./dmls-schema-support.md#named-type-references)
+for the diagnostics and editor limits.
+
+## Recursive Named Types
+
+A local type can use its own name to describe a structure that nests to any
+depth:
+
+```yaml
+kind: schema
+types:
+    item: "{ value: string(required), children: item[](required) }"
+    tree: item(required)
+```
+
+`tree` holds an `item` whose `children` are items, and `children: []` ends a
+branch. Mutual recursion (`group: "{ members: member[] }"` with
+`member: "{ name: string, group: group }"`) and a cycle that crosses into
+another file through `Name@file` work the same way.
+
+A recursive type keeps the rules on this page. A bare name inside it resolves
+in its defining file, and every use inherits its constraints. The difference
+is in storage: the type is stored once and each property refers to it, so the
+use site, not the shared definition, decides presence (`required`,
+`generated`, `eager`), whether `null` is accepted, the description, and any
+extra bounds:
+
+```yaml
+kind: schema
+types:
+    item: "{ value: string(required), children: item[](required) }"
+    root: item(required)       # must be present and not null
+    optional: item             # may be missing or null
+    few: item[](min(1))        # one or more items, none of them null
+```
+
+Two types with the same name in different schemas stay separate: `item` in
+this schema and `item@./other.yaml` are two definitions. The same holds for
+inline schemas: a document's own `$schema` mapping and the inline `$schema`
+payload of each matching schema trigger each keep their own `item`, so
+validation, completion, and hover under a trigger's properties use that
+trigger's `item` even when the document or another trigger declares one too.
+The child-value
+rule, the error a rejected cycle reports, and how recursion reaches
+validation, phases, conversion, and editors are described in
+[Recursive Named Types](./definition.md#recursive-named-types).
+
+## Shared Named Types
+
+A local type does not have to be recursive to be stored once. When a
+structured type (an object, a dictionary, a tuple, or a list or union that
+holds one) is referenced from two or more places in the same schema, the
+generated JSON Schema keeps one copy of its body and each use refers to it:
+
+```yaml
+$schema:
+    person: "{ name: string(required), email: email }"
+    author: person              # one use
+    reviewers: person[]         # a second use: `person` is stored once
+    slug: string(min(3))
+    handle: slug(max(20))       # primitive aliases are always copied
+```
+
+Nothing about the rules on this page changes. Each use still inherits the
+type's constraints and description, adds its own, and decides its own
+presence, exactly as a copy would. A use whose additions a reference cannot
+express, such as `suggest(...)`, is copied on its own while the other uses
+stay references.
+
+Which places count follows the same identity rules as recursive types:
+
+- **A type is its schema plus its name.** `person` here and
+  `person@./people.yaml` are two types, each with its own count. Two
+  spellings of one file, such as `person@./people.yaml` and
+  `person@people.yaml`, are one type, and their uses add up.
+- **Each schema layer counts on its own.** A document's `$schema`, each
+  matching trigger payload, and the baseline are resolved separately, so a
+  type each of them uses once is not shared, even when all of them apply to
+  one document.
+- **Merging keeps each layer's types apart.** When layers that store
+  definitions are combined, an equal body under the same key is kept once,
+  and a different body with the same key is renamed together with the
+  references its layer wrote. A shared definition merges exactly like a
+  recursive one.
+
+The full eligibility, counting, and fallback rules are in
+[Shared Named Types](./definition.md#shared-named-types).
 
 ## Serialization
 

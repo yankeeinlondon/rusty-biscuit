@@ -45,6 +45,7 @@ fn requeue_materialized(prompt: &str) -> MaterializedHarnessPrompt {
         file_resolution_context: crate::request::test_context(),
         compose_context: None,
         document_epoch: None,
+        frontmatter_view: MaterializedHarnessPrompt::view_of(&live_frontmatter),
         live_frontmatter,
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         lifecycle: None,

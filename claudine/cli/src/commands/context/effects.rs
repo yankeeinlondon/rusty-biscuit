@@ -3,6 +3,7 @@
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::table::Table;
+use darkmatter::catalog::Described;
 use darkmatter::effects::{effect_descriptors, EffectDescriptor};
 
 use crate::commands::context_render::{
@@ -80,7 +81,7 @@ pub(super) fn render_side_effects_report() {
         // `example_column_floor`.
         let example_strings: Vec<String> = effects
             .iter()
-            .map(|effect| format_effect_example(effect.example.as_ref(), &term))
+            .map(|effect| format_effect_example(effect.example(), &term))
             .collect();
         let example_width = example_column_floor(example_strings.iter().map(String::as_str));
 
@@ -112,7 +113,7 @@ pub(super) fn render_side_effects_report() {
                 if with_examples {
                     row.insert(
                         2,
-                        format_effect_example(effect.example.as_ref(), &term).into(),
+                        format_effect_example(effect.example(), &term).into(),
                     );
                 }
                 table.add_row(row);

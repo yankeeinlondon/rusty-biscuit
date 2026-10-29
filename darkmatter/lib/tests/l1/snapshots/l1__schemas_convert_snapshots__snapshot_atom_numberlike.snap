@@ -3,6 +3,7 @@ source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: "convert_atom(\"numberlike\")"
 ---
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": true,
   "properties": {
@@ -12,18 +13,13 @@ expression: "convert_atom(\"numberlike\")"
           "type": "null"
         },
         {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "string",
-              "pattern": "^-?\\d+(\\.\\d+)?$"
-            }
-          ]
+          "type": [
+            "number",
+            "string"
+          ],
+          "format": "darkmatter-numberlike"
         }
       ]
     }
-  },
-  "$schema": "https://json-schema.org/draft/2020-12/schema"
+  }
 }

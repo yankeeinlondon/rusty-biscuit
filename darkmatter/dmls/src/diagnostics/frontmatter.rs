@@ -17,33 +17,50 @@ use darkmatter::markdown::schemas::{
     PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason,
     ValidationOptions, ValidationProblem, ValidationProblemCode, ValidationReport,
     SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
-    decode_scalar_node,
-    locate_schema_value,
-    parse_property_definition, parse_schema_declaration, parse_yaml_schema,
+    SchemaSourcePath, SchemaSourcePathSegment, locate_schema_value,
+    LocatedDefinitionFailure, locate_standalone_definition_failure, parse_property_definition,
+    parse_property_definition_with_source, parse_schema_declaration,
+    parse_schema_declaration_with_source, parse_yaml_schema,
 };
+use darkmatter::markdown::schemas::triggers::InvalidTriggerFinding;
 use darkmatter::style::{self, StyleWarningKind};
 use lsp_types::{
-    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString, Range,
+    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString, Position,
+    Range,
 };
 
 use crate::context::resolution_failure_data;
 use crate::diagnostics::codes::{code, source};
 use crate::diagnostics::named_types;
 use crate::diagnostics::nested_span;
+use crate::overlay::event_views::LifecycleHost;
 use crate::overlay::{
     FrontmatterAst, SchemaAuthoringState, SchemaBundle, SchemaOutcome, SuggestionState,
 };
+use crate::overlay::named_types::AuthoredDeclaration;
 use crate::overlay::schema::MetaSchemaKind;
 use crate::providers::DocumentContext;
 use crate::providers::frontmatter::ExpressionValue;
 use crate::source_map::SourceMap;
 use crate::workspace::file_path_to_uri;
 
-/// All frontmatter/schema diagnostics for the current document.
+/// All frontmatter/schema diagnostics for the current document, discovering
+/// its lifecycle host when a lifecycle check needs it.
 pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
+    diagnostics_under(ctx, None)
+}
+
+/// [`diagnostics`] with every lifecycle check under `host`, which is not
+/// rediscovered.
+pub fn diagnostics_with_host(ctx: &DocumentContext, host: &LifecycleHost) -> Vec<Diagnostic> {
+    diagnostics_under(ctx, Some(host))
+}
+
+fn diagnostics_under(ctx: &DocumentContext, host: Option<&LifecycleHost>) -> Vec<Diagnostic> {
     let Some(overlay) = ctx.overlay else {
         return Vec::new();
     };
+    let _host_functions = crate::providers::dsl::enter_host_functions(ctx);
     let mut out = Vec::new();
 
     // A hard YAML parse error from the *current* buffer, ranged at the parser's
@@ -72,18 +89,33 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
                 // One effective-schema validation drives both the generic schema
                 // problems and the expression pass, which reads it to decide
                 // whether a union as a whole rejects a malformed-expression value.
-                let report = bundle.effective.validate_with_options(
-                    &bundle.frontmatter_json,
-                    &PositionMap::new(),
-                    &ValidationOptions::default(),
-                );
+                let report = crate::validation_timing::part(|| {
+                    bundle.effective.validate_with_options(
+                        &bundle.frontmatter_json,
+                        &PositionMap::new(),
+                        &ValidationOptions::default(),
+                    )
+                });
                 // Likewise one expression-value set per publication: it decodes
                 // every Expression-typed value, and both passes read it.
                 let expression_values =
-                    crate::providers::frontmatter::expression_values(ctx, ast);
+                    crate::providers::frontmatter::expression_values(ctx);
                 schema_problem_diagnostics(ctx, ast, bundle, &report, &expression_values, &mut out);
                 style_diagnostics(ctx, ast, &mut out);
-                expression_diagnostics(ctx, ast, &report, &expression_values, &mut out);
+                // One lifecycle host and one library walk serve every
+                // expression inside a stack, schema-typed or not.
+                let discovered;
+                let lifecycle = match host {
+                    Some(host) => host,
+                    None => {
+                        discovered = LifecycleHost::for_document(ctx);
+                        &discovered
+                    }
+                };
+                let guarded = GuardedStackCalls::for_document(ctx, lifecycle);
+                expression_diagnostics(ctx, ast, &report, &expression_values, lifecycle, &guarded, &mut out);
+                stack_expression_diagnostics(ctx, ast, &expression_values, lifecycle, &guarded, &mut out);
+                interpolation_call_diagnostics(ctx, ast, lifecycle, &mut out);
             }
         }
         SchemaOutcome::Ready(None) => {}
@@ -103,6 +135,12 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
     {
         let scope = named_types::NamedTypeScope::standalone(ctx, model);
         named_types::standalone_diagnostics(&scope, error, None, &mut out);
+    }
+
+    if let SuggestionState::TriggerWarning(finding) = &overlay.suggestions {
+        let span = trigger_yaml_span(ctx.text, finding.cause()).unwrap_or(0..ctx.text.len());
+        let range = ctx.source_map.byte_range_to_lsp(span).unwrap_or_else(zero_range);
+        out.push(invalid_trigger_diagnostic_at(finding, range));
     }
 
     if let SuggestionState::TriggerError(error) = &overlay.suggestions {
@@ -142,15 +180,32 @@ fn schema_advisory_diagnostics(
     }));
 }
 
-/// Builds the file-level diagnostic for a failed trigger-registry scan.
-pub fn trigger_load_diagnostic(error: &SchemaError) -> Diagnostic {
-    diagnostic(
-        zero_range(),
-        DiagnosticSeverity::ERROR,
-        source::SCHEMA,
-        code::SCHEMA_PREPARE,
-        error.to_string(),
-    )
+/// The warning a trigger discovery skipped publishes on its closed file:
+/// at the start of a malformed envelope's YAML error line, else at the file
+/// start.
+pub fn invalid_trigger_diagnostic(finding: &InvalidTriggerFinding) -> Diagnostic {
+    let range = finding.position().map_or_else(zero_range, |(line, _)| {
+        let start = Position::new(u32::try_from(line.saturating_sub(1)).unwrap_or(u32::MAX), 0);
+        Range::new(start, start)
+    });
+    invalid_trigger_diagnostic_at(finding, range)
+}
+
+/// The skipped-trigger warning at `range`, with the payload or import its
+/// cause points into as related information.
+fn invalid_trigger_diagnostic_at(finding: &InvalidTriggerFinding, range: Range) -> Diagnostic {
+    let mut out = diagnostic(range, DiagnosticSeverity::WARNING, finding.source_family(), finding.code(), finding.message());
+    out.related_information = finding
+        .cause_path()
+        .and_then(file_path_to_uri)
+        .map(|uri| {
+            vec![DiagnosticRelatedInformation {
+                location: Location::new(uri, zero_range()),
+                // The cause may sit in the payload or in a file it imports.
+                message: "the trigger's schema failed to load here".to_string(),
+            }]
+        });
+    out
 }
 
 /// A schema resolution/preparation failure, ranged at `$schema` (or the block).
@@ -193,19 +248,10 @@ fn schema_prepare_diagnostic_with_origin(
         SchemaError::Grammar { property, .. } | SchemaError::Convert { property, .. }
             if property != "<root>" =>
         {
+            // A referenced file's failure has no range in this buffer.
             let span = referenced_origin
                 .is_none()
-                .then(|| {
-                    ast.and_then(|ast| {
-                        ast.entry_by_key_path(&["$schema", property])
-                            .or_else(|| {
-                                let mut path = vec!["$schema"];
-                                path.extend(property.split('.'));
-                                ast.entry_by_key_path(&path)
-                            })
-                    })
-                    .map(|entry| entry.value_span.clone())
-                })
+                .then(|| ast.and_then(|ast| inline_definition_span(ctx, ast, error, property)))
                 .flatten()
                 .or_else(|| fallback_span.clone());
             (code::SCHEMA_INVALID_TYPE_DEFINITION, error.to_string(), span)
@@ -240,6 +286,39 @@ fn schema_prepare_diagnostic_with_origin(
         }]);
     }
     out.push(diagnostic);
+}
+
+/// The authored range of an inline `$schema` definition failure.
+///
+/// When the source-aware declaration parser reports this same error, its
+/// located token wins, then the rejected value, then the deepest entry along
+/// its structural path. An error that parser does not report (a conversion
+/// failure) keeps the entry its property label names.
+fn inline_definition_span(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    error: &SchemaError,
+    property: &str,
+) -> Option<std::ops::Range<usize>> {
+    let fresh = ctx.overlay.is_some_and(|overlay| !overlay.stale);
+    if let Some(failure) = fresh
+        .then(|| AuthoredDeclaration::frontmatter_failure(ctx.text, ast))
+        .flatten()
+        .filter(|failure| failure.error.to_string() == error.to_string())
+    {
+        return failure
+            .authored_span
+            .clone()
+            .or_else(|| failure.value_span.clone())
+            .or_else(|| enclosing_entry_span(ctx.text, ast, &["$schema"], &failure.path));
+    }
+    ast.entry_by_key_path(&["$schema", property])
+        .or_else(|| {
+            let mut path = vec!["$schema"];
+            path.extend(property.split('.'));
+            ast.entry_by_key_path(&path)
+        })
+        .map(|entry| entry.value_span.clone())
 }
 
 /// Instance-validation problems mapped onto concrete ranges.
@@ -431,20 +510,22 @@ fn semantic_authored_diagnostics(
         let Some((kind, error)) = failures.into_iter().next() else {
             continue;
         };
-        let fallback_span = match &error {
-            SchemaError::Grammar { property, .. }
-                if property != "<root>" && property != &entry.key =>
-            {
-                nested_property_value_span(ast, ctx.text, entry, property)
-                    .unwrap_or_else(|| value_span.clone())
-            }
-            _ => value_span.clone(),
-        };
-        let span = if kind == MetaSchemaKind::TypeDefinition {
-            smallest_invalid_definition_span(ctx.text, entry).unwrap_or(fallback_span)
-        } else {
-            fallback_span
-        };
+        // Acceptance stays with the source-free parsers above; the
+        // source-aware parser only locates the failure they reported.
+        // A declaration failure on no property is the declaration's own shape,
+        // which keeps the whole value, as a standalone envelope's does.
+        let span = locate_meta_type_failure(ctx.text, value_span.clone(), kind, &entry.key)
+            .filter(|failure| failure.error.to_string() == error.to_string())
+            .filter(|failure| {
+                kind == MetaSchemaKind::TypeDefinition
+                    || failure
+                        .path
+                        .segments()
+                        .iter()
+                        .any(|segment| matches!(segment, SchemaSourcePathSegment::Property(_)))
+            })
+            .and_then(|failure| failure.authored_span.or(failure.value_span))
+            .unwrap_or_else(|| value_span.clone());
         let Some(range) = ctx.source_map.byte_range_to_lsp(span) else {
             continue;
         };
@@ -468,85 +549,28 @@ fn semantic_authored_diagnostics(
     diagnosed
 }
 
-/// The narrowest authored sub-definition of `parent` that the shared parser
-/// rejects, or `None` when the failure belongs to `parent` itself.
+/// The failure of a meta-typed frontmatter value at `value_span`, from the
+/// source-aware parser for `kind`, with ranges in `text`'s bytes; `None` when
+/// the value parses or is not YAML on its own.
 ///
-/// Candidates come from the library's structural locator
-/// ([`locate_schema_value`]), which is the same block/flow reader the
-/// source-aware parsers use. That matters because the frontmatter tree does not
-/// enumerate the interior of a sequence item, and because a delimiter search
-/// over the raw text would mistake a `[]` inside a quoted scalar for an empty
-/// union.
-fn smallest_invalid_definition_span(
+/// The value is re-parsed in place (the text before it on its first line
+/// replaced with spaces), so the parser reads the authored columns.
+fn locate_meta_type_failure(
     text: &str,
-    parent: &crate::overlay::FmEntry,
-) -> Option<std::ops::Range<usize>> {
-    let value_span = crate::overlay::frontmatter::line_aligned_span(
-        text,
-        complete_flow_value_span(text, parent.value_span.clone()),
-    );
-    // The slice is deliberately not dedented, and starts at its line: the
-    // locator reads indentation, so keeping the authored columns keeps every
-    // span it reports an exact document offset.
-    let root = locate_schema_value(text.get(value_span.clone())?, value_span.start)?;
-    let mut candidates = Vec::new();
-    collect_definition_candidates(&root, &parent.key, 0, &mut candidates);
-    candidates.sort_by_key(|(depth, _, _)| std::cmp::Reverse(*depth));
-    candidates.into_iter().find_map(|(_, key, span)| {
-        let raw = text.get(span.clone())?;
-        let raw = dedent_entry_yaml(raw, source_column(text, span.start));
-        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&raw).ok()?;
-        parse_property_definition(&key, &yaml).is_err().then_some(span)
-    })
-}
-
-/// Flattens a located value into `(depth, property_name, span)` candidates,
-/// skipping the root — a root failure is already the caller's fallback range.
-fn collect_definition_candidates(
-    node: &SchemaValueNode,
+    value_span: std::ops::Range<usize>,
+    kind: MetaSchemaKind,
     key: &str,
-    depth: usize,
-    out: &mut Vec<(usize, String, std::ops::Range<usize>)>,
-) {
-    if depth > 0 {
-        out.push((depth, key.to_string(), node.span.clone()));
-    }
-    match &node.kind {
-        SchemaValueKind::Scalar => {}
-        SchemaValueKind::Mapping(entries) => {
-            for entry in entries {
-                collect_definition_candidates(&entry.value, &entry.key, depth + 1, out);
-            }
+) -> Option<LocatedDefinitionFailure> {
+    let line_start = text[..value_span.start].rfind('\n').map_or(0, |index| index + 1);
+    let mut source = " ".repeat(value_span.start - line_start);
+    source.push_str(text.get(value_span)?);
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).ok()?;
+    match kind {
+        MetaSchemaKind::TypeDefinition => {
+            parse_property_definition_with_source(key, &yaml, &source, line_start).err()
         }
-        SchemaValueKind::Sequence(items) => {
-            for item in items {
-                collect_definition_candidates(item, key, depth + 1, out);
-            }
-        }
+        MetaSchemaKind::Schema => parse_schema_declaration_with_source(&yaml, &source, line_start).err(),
     }
-}
-
-fn nested_property_value_span(
-    ast: &FrontmatterAst,
-    text: &str,
-    parent: &crate::overlay::FmEntry,
-    property: &str,
-) -> Option<std::ops::Range<usize>> {
-    // Sequence interiors are excluded so the chosen property is the one the
-    // mapping-only arena reported before sequence descent.
-    ast.entries()
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| !ast.is_in_sequence(*index))
-        .map(|(_, entry)| entry)
-        .filter(|entry| {
-            entry.key == property
-                && entry.key_span.as_ref().is_some_and(|key| {
-                    key.start >= parent.value_span.start && key.end <= parent.value_span.end
-                })
-        })
-        .max_by_key(|entry| entry.depth)
-        .map(|entry| complete_flow_value_span(text, entry.value_span.clone()))
 }
 
 fn complete_flow_value_span(text: &str, span: std::ops::Range<usize>) -> std::ops::Range<usize> {
@@ -602,15 +626,10 @@ fn semantic_problem_range(
 ) -> Option<Range> {
     let entry = ast.entry_or_ancestor(&problem.path)?;
     let span = if kind == SemanticProblemKind::TypeDefinition {
-        let raw = ctx.text.get(entry.value_span.clone())?;
-        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(raw).ok()?;
-        match parse_property_definition(&entry.key, &yaml) {
-            Err(SchemaError::Grammar { property, .. }) if property != entry.key => ast
-                .child_entry(&entry.pointer, property.as_str())
-                .map(|nested| nested.value_span.clone())
-                .unwrap_or_else(|| entry.value_span.clone()),
-            _ => entry.value_span.clone(),
-        }
+        let value_span = complete_flow_value_span(ctx.text, entry.value_span.clone());
+        locate_meta_type_failure(ctx.text, value_span, MetaSchemaKind::TypeDefinition, &entry.key)
+            .and_then(|failure| failure.authored_span.or(failure.value_span))
+            .unwrap_or_else(|| entry.value_span.clone())
     } else {
         entry.value_span.clone()
     };
@@ -648,7 +667,9 @@ fn problem_range(
 /// `dm.expression.undeclared_property` (`WARNING`) for each unhandled
 /// identifier, in any operand position, that is an undeclared document property,
 /// `dm.expression.unknown_function` (`ERROR`) for each call to a function
-/// outside Darkmatter's catalog,
+/// outside Darkmatter's catalog, the design-time call check's
+/// `dm.expression.incompatible_call` / `dm.expression.uncertain_call`
+/// ([`FrontmatterCalls`]),
 /// and `dm.expression.nested_span_in_literal` for a lifecycle predicate. All
 /// carry source `darkmatter.frontmatter`; ranges go through the scalar
 /// projection, exact (YAML quotes excluded) for untagged single-line plain or
@@ -661,6 +682,8 @@ fn expression_diagnostics(
     ast: &FrontmatterAst,
     report: &ValidationReport,
     expression_values: &[ExpressionValue<'_>],
+    lifecycle: &crate::overlay::event_views::LifecycleHost,
+    guarded: &GuardedStackCalls,
     out: &mut Vec<Diagnostic>,
 ) {
     let union_rejected = union_rejected_paths(report);
@@ -673,6 +696,8 @@ fn expression_diagnostics(
     let mut settled = std::collections::HashSet::new();
     let mut unreported_errors = std::collections::HashMap::new();
     let stale = ctx.overlay.is_some_and(|overlay| overlay.stale);
+    let declared = crate::diagnostics::call_check::declared_types(ctx);
+    let calls = FrontmatterCalls::new(ctx, &declared);
 
     for value in expression_values {
         let expression = value.expression();
@@ -735,6 +760,28 @@ fn expression_diagnostics(
             }
             Ok(parsed) => {
                 settled.insert(expression_span);
+                match guarded.surface(ast, value.index) {
+                    // A stack surface is typed at its site by the library's
+                    // walk, under the `when` items around it.
+                    Some(surface) => {
+                        let checks: Vec<_> = surface.checks.iter().map(|found| found.check.clone()).collect();
+                        for found in crate::diagnostics::call_check::check_diagnostics(&checks, calls.strict) {
+                            let doc_span = value.project(found.span.clone()).unwrap_or_else(|| value.expression_span());
+                            calls.push(ctx, doc_span, found, out);
+                        }
+                        for found in crate::diagnostics::call_check::incomplete_diagnostics(&parsed) {
+                            let doc_span = value.project(found.span.clone()).unwrap_or_else(|| value.expression_span());
+                            calls.push(ctx, doc_span, found, out);
+                        }
+                    }
+                    None => {
+                        for found in calls.check(&parsed) {
+                            let doc_span = value.project(found.span.clone()).unwrap_or_else(|| value.expression_span());
+                            calls.push(ctx, doc_span, found, out);
+                        }
+                    }
+                }
+                let event = lifecycle.stack_event(&path);
                 for (name, span) in crate::overlay::expressions::unknown_function_calls(&parsed, expression) {
                     let doc_span = value.project(span).unwrap_or_else(|| value.expression_span());
                     if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
@@ -750,7 +797,21 @@ fn expression_diagnostics(
                 let Some(known_roots) = &known_roots else {
                     continue;
                 };
+                let view = known_roots.view(event.as_ref());
+                for (span, message) in crate::overlay::expressions::unavailable_global_reads(&parsed, &view) {
+                    let doc_span = value.project(span).unwrap_or_else(|| value.expression_span());
+                    if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
+                        out.push(diagnostic(
+                            range,
+                            DiagnosticSeverity::ERROR,
+                            source::FRONTMATTER,
+                            code::EXPRESSION_UNAVAILABLE_GLOBAL,
+                            message,
+                        ));
+                    }
+                }
                 let findings = known_roots.findings(
+                    &view,
                     &parsed,
                     expression,
                     crate::overlay::expressions::parse_condition,
@@ -789,6 +850,219 @@ fn expression_diagnostics(
                     }
                 }
             }
+        }
+    }
+}
+
+/// Expression diagnostics for the `{{ … }}` spans and `when` guards inside
+/// lifecycle stack values that are not Expression-typed values (those are
+/// [`expression_diagnostics`]'), each classified against its event's view
+/// ([`KnownRoots::view`](crate::providers::dsl::KnownRoots::view)): an unknown
+/// function and a read of a global the event makes unavailable are errors, an
+/// undeclared document property a warning, and each call gets the call check
+/// ([`FrontmatterCalls`]). A span or guard that does not parse is left to the
+/// runtime; a stale tree reports nothing.
+fn stack_expression_diagnostics(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    expression_values: &[ExpressionValue<'_>],
+    lifecycle: &crate::overlay::event_views::LifecycleHost,
+    guarded: &GuardedStackCalls,
+    out: &mut Vec<Diagnostic>,
+) {
+    if ctx.overlay.is_some_and(|overlay| overlay.stale) {
+        return;
+    }
+    let Some(known_roots) = crate::providers::dsl::KnownRoots::for_document(ctx) else {
+        return;
+    };
+    let typed: std::collections::HashSet<usize> = expression_values.iter().map(|value| value.index).collect();
+    let stacks =
+        crate::overlay::event_views::stack_expressions(lifecycle, ctx.text, ast, |index| typed.contains(&index));
+    let declared = crate::diagnostics::call_check::declared_types(ctx);
+    let calls = FrontmatterCalls::new(ctx, &declared);
+    let mut checked_entries = std::collections::HashSet::new();
+    let mut views = std::collections::HashMap::new();
+    for expression in stacks {
+        let Ok(parsed) = expression.parse() else {
+            continue;
+        };
+        match guarded.surface(ast, expression.index) {
+            // The library checked the whole scalar at its site; report it once.
+            Some(surface) => {
+                if checked_entries.insert(expression.index) {
+                    let checks: Vec<_> = surface.checks.iter().map(|found| found.check.clone()).collect();
+                    for found in crate::diagnostics::call_check::check_diagnostics(&checks, calls.strict) {
+                        let doc_span = expression.scalar_range(found.span.clone());
+                        calls.push(ctx, doc_span, found, out);
+                    }
+                }
+                // The library's checks skip a host function it knows nothing about.
+                for found in crate::diagnostics::call_check::incomplete_diagnostics(&parsed) {
+                    let doc_span = expression.range(found.span.clone());
+                    calls.push(ctx, doc_span, found, out);
+                }
+            }
+            None => {
+                for found in calls.check(&parsed) {
+                    let doc_span = expression.range(found.span.clone());
+                    calls.push(ctx, doc_span, found, out);
+                }
+            }
+        }
+        let view = views.entry(expression.event.id()).or_insert_with(|| known_roots.view(Some(&expression.event)));
+        let mut push = |span: std::ops::Range<usize>, severity, code_value: &str, message: String| {
+            if let Some(range) = ctx.source_map.byte_range_to_lsp(expression.range(span)) {
+                out.push(diagnostic(range, severity, source::FRONTMATTER, code_value, message));
+            }
+        };
+        for (name, span) in crate::overlay::expressions::unknown_function_calls(&parsed, &expression.text) {
+            push(
+                span,
+                DiagnosticSeverity::ERROR,
+                code::EXPRESSION_UNKNOWN_FUNCTION,
+                crate::overlay::expressions::unknown_function_message(&name),
+            );
+        }
+        for (span, message) in crate::overlay::expressions::unavailable_global_reads(&parsed, view) {
+            push(span, DiagnosticSeverity::ERROR, code::EXPRESSION_UNAVAILABLE_GLOBAL, message);
+        }
+        let quote = ctx
+            .text
+            .get(expression.entry.value_span.start..)
+            .and_then(|value| value.chars().next())
+            .filter(|first| matches!(first, '\'' | '"'));
+        let findings = known_roots.findings(view, &parsed, &expression.text, expression.dialect.parser(), quote);
+        for finding in findings {
+            let span = crate::providers::dsl::finding_span(&finding).clone();
+            // A fix edits authored bytes, so it rides only on an exact range
+            // whose text is the expression's.
+            let doc_span = expression.range(span.clone());
+            let finding = if expression.is_exact() && ctx.text.get(doc_span.clone()) == expression.text.get(span) {
+                finding
+            } else {
+                without_fix(finding)
+            };
+            if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
+                out.push(crate::providers::dsl::undeclared_property_diagnostic(range, source::FRONTMATTER, &finding));
+            }
+        }
+    }
+}
+
+/// The library's call check of every surface of the document's lifecycle
+/// under its host ([`LifecycleHost`](crate::overlay::event_views::LifecycleHost):
+/// the host's recorded profile, else `md`), through
+/// [`darkmatter::lifecycle::lifecycle_call_checks`]: each typed at its own
+/// site, narrowed by the `when` items around it, with facts ended by writes
+/// and never carried across events, exactly as the host's composition types
+/// it.
+///
+/// Empty when the lifecycle does not parse under the host (the parser's
+/// error to report); a stack scalar the library does not check (a `set`
+/// shell value) keeps the unguarded per-expression check.
+struct GuardedStackCalls {
+    surfaces: std::collections::HashMap<Vec<darkmatter::lifecycle::AuthoredSegment>, darkmatter::lifecycle::LifecycleSurfaceCalls>,
+}
+
+impl GuardedStackCalls {
+    fn for_document(ctx: &DocumentContext, host: &crate::overlay::event_views::LifecycleHost) -> Self {
+        let mut surfaces = std::collections::HashMap::new();
+        if let Some(bundle) = ctx.overlay.and_then(|overlay| overlay.bundle())
+            && let Ok(lifecycle) = host.parse_lifecycle(&bundle.frontmatter_json, ctx.path)
+        {
+            let found = darkmatter::lifecycle::lifecycle_call_checks(
+                &bundle.frontmatter_json,
+                &lifecycle,
+                host.registry(),
+                Some(&bundle.effective),
+            );
+            for surface in found {
+                surfaces.insert(surface.location.clone(), surface);
+            }
+        }
+        Self { surfaces }
+    }
+
+    /// The library's surface at the frontmatter entry `index`.
+    fn surface(&self, ast: &FrontmatterAst, index: usize) -> Option<&darkmatter::lifecycle::LifecycleSurfaceCalls> {
+        let location: Vec<darkmatter::lifecycle::AuthoredSegment> = ast
+            .path_at(index)
+            .into_iter()
+            .map(|segment| match segment {
+                crate::overlay::FmPathSegment::Key(key) => darkmatter::lifecycle::AuthoredSegment::Key(key.to_string()),
+                crate::overlay::FmPathSegment::Index(index) => darkmatter::lifecycle::AuthoredSegment::Index(index),
+            })
+            .collect();
+        self.surfaces.get(&location)
+    }
+}
+
+/// The design-time call check over the `{{ … }}` spans of frontmatter values
+/// outside lifecycle stacks (those are [`stack_expression_diagnostics`]'),
+/// which frontmatter interpolation evaluates. `$schema` declarations are not
+/// interpolated; a span that does not parse, and a stale tree, report
+/// nothing.
+fn interpolation_call_diagnostics(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    lifecycle: &crate::overlay::event_views::LifecycleHost,
+    out: &mut Vec<Diagnostic>,
+) {
+    if ctx.overlay.is_some_and(|overlay| overlay.stale) {
+        return;
+    }
+    let declared = crate::diagnostics::call_check::declared_types(ctx);
+    let calls = FrontmatterCalls::new(ctx, &declared);
+    for interpolation in crate::overlay::expressions::frontmatter_interpolations(ctx.text, ast) {
+        let path = ast.path_at(interpolation.index);
+        if matches!(path.first(), Some(crate::overlay::FmPathSegment::Key("$schema")))
+            || lifecycle.stack_event(&path).is_some()
+        {
+            continue;
+        }
+        let Ok(parsed) = crate::overlay::expressions::parse(&interpolation.text) else {
+            continue;
+        };
+        for found in calls.check(&parsed) {
+            let doc_span = interpolation.project(found.span.clone()).unwrap_or_else(|| interpolation.outer_span());
+            calls.push(ctx, doc_span, found, out);
+        }
+    }
+}
+
+/// The frontmatter's call-check site: unguarded over the declaration-only
+/// types. A lifecycle stack's own surfaces are narrowed by its `when` items
+/// through [`GuardedStackCalls`]; this site serves the rest.
+struct FrontmatterCalls<'d> {
+    site: darkmatter::markdown::compose::expression::TypeScope<'d>,
+    strict: bool,
+}
+
+impl<'d> FrontmatterCalls<'d> {
+    fn new(ctx: &DocumentContext, declared: &'d darkmatter::markdown::compose::expression::DeclaredTypes<'d>) -> Self {
+        Self {
+            site: darkmatter::markdown::compose::expression::TypeScope::unguarded(declared),
+            strict: ctx.config.expressions.strict,
+        }
+    }
+
+    fn check(
+        &self,
+        expr: &darkmatter::markdown::compose::expression::SpannedExpr,
+    ) -> Vec<crate::diagnostics::call_check::CallDiagnostic> {
+        crate::diagnostics::call_check::call_diagnostics(expr, &self.site, self.strict)
+    }
+
+    fn push(
+        &self,
+        ctx: &DocumentContext,
+        doc_span: std::ops::Range<usize>,
+        found: crate::diagnostics::call_check::CallDiagnostic,
+        out: &mut Vec<Diagnostic>,
+    ) {
+        if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
+            out.push(crate::diagnostics::call_check::lsp_diagnostic(range, source::FRONTMATTER, found));
         }
     }
 }
@@ -920,7 +1194,7 @@ fn suggestion_diagnostics(
     out: &mut Vec<Diagnostic>,
 ) {
     match suggestions {
-        SuggestionState::Inactive | SuggestionState::TriggerError(_) => {}
+        SuggestionState::Inactive | SuggestionState::TriggerError(_) | SuggestionState::TriggerWarning(_) => {}
         SuggestionState::Inline(problems) => {
             for problem in problems {
                 out.push(suggestion_warning(ctx, problem));
@@ -1016,133 +1290,53 @@ fn standalone_error_diagnostic(ctx: &DocumentContext, error: &SchemaError) -> Di
     )
 }
 
+/// A standalone definition the shared parser rejects, ranged at the library's
+/// located token, then the rejected value, then the enclosing definition, and
+/// only then the whole document. `None` leaves the failure to the outer
+/// declaration and document diagnostics.
 fn standalone_type_definition_diagnostic(ctx: &DocumentContext) -> Option<Diagnostic> {
-    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(ctx.text).ok()?;
-    let mapping = yaml.as_mapping()?;
-    let payload_key = standalone_payload_key(mapping);
-    let payload = mapping.get(serde_yaml_ng::Value::String(payload_key.to_string()))?;
-    let payload = payload.as_mapping()?;
-    let parsed = FrontmatterAst::parse_yaml(ctx.text);
-    let ast = parsed.ast?;
-
-    for (key, value) in payload {
-        let key = key.as_str()?;
-        let Err(error) = parse_property_definition(key, value) else {
-            continue;
-        };
-        // Key segments, not a dotted join: a property name containing `.` would
-        // otherwise miss its entry and fall through to the whole-document
-        // `dm.schema.document_malformed` fallback.
-        let entry = ast.entry_by_key_path(&[payload_key, key])?;
-        let token = grammar_token_span(ctx.text, payload_key, key, value, &error);
-        let span = token.unwrap_or_else(|| match &error {
-            SchemaError::Grammar { property, .. } if property != key => ast
-                .entry_by_key_path(&[payload_key, key, property])
-                .map(|nested| nested.value_span.clone())
-                .unwrap_or_else(|| entry.value_span.clone()),
-            _ => entry.value_span.clone(),
-        });
-        let range = ctx.source_map.byte_range_to_lsp(span)?;
-        return Some(diagnostic(
-            range,
-            DiagnosticSeverity::ERROR,
-            source::SCHEMA,
-            code::SCHEMA_INVALID_TYPE_DEFINITION,
-            error.to_string(),
-        ));
-    }
-    None
+    let failure = locate_standalone_definition_failure(ctx.text)?;
+    let span = failure
+        .authored_span
+        .clone()
+        .or_else(|| failure.value_span.clone())
+        .or_else(|| {
+            enclosing_entry_span(ctx.text, &FrontmatterAst::parse_yaml(ctx.text).ast?, &[], &failure.path)
+        })
+        .unwrap_or(0..ctx.text.len());
+    let range = ctx.source_map.byte_range_to_lsp(span).unwrap_or_else(zero_range);
+    Some(diagnostic(
+        range,
+        DiagnosticSeverity::ERROR,
+        source::SCHEMA,
+        code::SCHEMA_INVALID_TYPE_DEFINITION,
+        failure.error.to_string(),
+    ))
 }
 
-/// The authored range of the token a standalone definition's grammar error
-/// names, or `None` when it cannot be recovered exactly.
-///
-/// The grammar error's span is relative to the decoded expression, which a
-/// folded or quoted scalar does not author verbatim, so it is projected
-/// through the offending scalar's decoded map. The offending scalar is the one
-/// whose own re-parse reproduces the error; the decoded text must also equal
-/// the YAML parser's value, or the map describes other text. `None` keeps the
-/// caller's whole-value fallback, and never yields an empty range.
-fn grammar_token_span(
+/// The value span of the deepest entry `ast` holds along `path`'s leading
+/// property keys (under `prefix`), for a failure whose own node could not be
+/// located. Keys are matched as whole segments, so a key containing `.` is
+/// never split.
+fn enclosing_entry_span(
     text: &str,
-    payload_key: &str,
-    key: &str,
-    value: &serde_yaml_ng::Value,
-    error: &SchemaError,
+    ast: &FrontmatterAst,
+    prefix: &[&str],
+    path: &SchemaSourcePath,
 ) -> Option<std::ops::Range<usize>> {
-    let SchemaError::Grammar { span, message: expected, .. } = error else {
-        return None;
-    };
-    let SchemaValueKind::Mapping(definitions) = standalone_payload_node(text, payload_key)?.kind
-    else {
-        return None;
-    };
-    let definition = definitions.into_iter().find(|entry| entry.key == key)?;
-    let mut scalars = Vec::new();
-    collect_string_scalars(
-        text,
-        key,
-        source_column(text, definition.key_span.start),
-        &definition.value,
-        value,
-        &mut scalars,
+    let mut keys: Vec<&str> = prefix.to_vec();
+    keys.extend(
+        path.segments()
+            .iter()
+            .map_while(|segment| match segment {
+                SchemaSourcePathSegment::Property(key) => Some(key.as_str()),
+                SchemaSourcePathSegment::UnionArm(_) => None,
+            }),
     );
-    scalars.into_iter().find_map(|(property, holder, node, semantic)| {
-        let reproduced = matches!(
-            parse_property_definition(&property, &serde_yaml_ng::Value::String(semantic.to_string())),
-            Err(SchemaError::Grammar { span: ref candidate, ref message, .. })
-                if candidate == span && *message == *expected
-        );
-        if !reproduced {
-            return None;
-        }
-        let (scalar, _) = decode_scalar_node(text, node.span.start, holder)?;
-        if scalar.decoded() != semantic {
-            return None;
-        }
-        scalar.project(span.clone()).filter(|range| !range.is_empty())
-    })
-}
-
-/// Pairs each located string scalar under a definition with its YAML value,
-/// as `(property, holder column, node, value)`. A sequence item inherits its
-/// property; a structural disagreement between the two trees contributes
-/// nothing below it.
-fn collect_string_scalars<'a>(
-    text: &str,
-    property: &str,
-    holder: usize,
-    node: &'a SchemaValueNode,
-    value: &'a serde_yaml_ng::Value,
-    out: &mut Vec<(String, usize, &'a SchemaValueNode, &'a str)>,
-) {
-    match (&node.kind, value) {
-        (SchemaValueKind::Scalar, serde_yaml_ng::Value::String(semantic)) => {
-            out.push((property.to_string(), holder, node, semantic));
-        }
-        (SchemaValueKind::Mapping(entries), serde_yaml_ng::Value::Mapping(mapping)) => {
-            for entry in entries {
-                if let Some(child) = mapping.get(entry.key.as_str()) {
-                    let holder = source_column(text, entry.key_span.start);
-                    collect_string_scalars(text, &entry.key, holder, &entry.value, child, out);
-                }
-            }
-        }
-        (SchemaValueKind::Sequence(items), serde_yaml_ng::Value::Sequence(values))
-            if items.len() == values.len() =>
-        {
-            for (item, child) in items.iter().zip(values) {
-                // An item's continuation lines must sit deeper than its `-`,
-                // which is the last indicator before the item on its line.
-                let line_start = text[..item.span.start].rfind('\n').map_or(0, |index| index + 1);
-                let holder = text[line_start..item.span.start]
-                    .rfind('-')
-                    .unwrap_or(holder);
-                collect_string_scalars(text, property, holder, item, child, out);
-            }
-        }
-        _ => {}
-    }
+    (1..=keys.len())
+        .rev()
+        .find_map(|length| ast.entry_by_key_path(&keys[..length]))
+        .map(|entry| complete_flow_value_span(text, entry.value_span.clone()))
 }
 
 /// An invalid **outer** standalone declaration, ranged at the smallest authored
@@ -1854,12 +2048,12 @@ mod tests {
             (
                 "---\n$schema:\n  definition: type-definition\ndefinition: string(nope)\n---\n\nbody\n",
                 "dm.schema.invalid_type_definition",
-                "string(nope)",
+                "nope",
             ),
             (
                 "---\n$schema:\n  definition: type-definition\ndefinition: 'string(nope)'\n---\n\nbody\n",
                 "dm.schema.invalid_type_definition",
-                "'string(nope)'",
+                "nope",
             ),
             (
                 "---\n$schema:\n  definition: type-definition\ndefinition: 42\n---\n\nbody\n",
@@ -1916,7 +2110,7 @@ mod tests {
                 let expected = source_map
                     .byte_range_to_lsp(start..start + authored_value.len())
                     .expect("authored value range");
-                assert_eq!(specialized[0].range, expected, "smallest authored value range");
+                assert_eq!(specialized[0].range, expected, "authored token, else the rejected value");
             });
         }
 

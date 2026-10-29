@@ -1,5 +1,6 @@
 //! Tests for composition errors.
 
+use crate::diagnostics::DiagnosticSnapshotExt;
 use super::*;
 
 fn source_from(text: &str) -> ResolvedCompositionSource {
@@ -3551,4 +3552,22 @@ fn a_blank_line_in_a_row_paragraph_still_separates_paragraphs() {
     let first = rows.iter().position(|row| row == "First").expect("`First` row");
     assert_eq!(rows[first + 1], "", "a blank row between paragraphs: {rows:#?}");
     assert_eq!(rows[first + 2], "Second", "{rows:#?}");
+}
+
+#[test]
+fn lifecycle_renamed_event_is_a_lifecycle_authoring_error_naming_the_replacement() {
+    let err = CompositionError::LifecycleRenamedEvent {
+        source_path: PathBuf::from("prompts/review.md"),
+        authored: "failed".to_string(),
+        replacement: "blocked".to_string(),
+    };
+    assert_eq!(err.code(), "composition.lifecycle_invalid");
+    assert_eq!(err.detail()["property"], json!("failed"));
+    assert!(err.detail()["message"].as_str().is_some_and(|message| message.contains("`blocked`")));
+    let term = Terminal::new_optimistic(80);
+    let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+    // Inline code may lose its backticks when rendered.
+    let prose = rendered.replace(['┃', '`'], " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(prose.contains("renamed lifecycle event"), "{prose}");
+    assert!(prose.contains("Rename the failed: key to blocked:"), "{prose}");
 }

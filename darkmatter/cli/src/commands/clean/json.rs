@@ -4,9 +4,12 @@
 //! coordinates; this module adds the source description and 1-based line and
 //! byte-column positions, and is the only place the wire shape is defined.
 
+use crate::commands::trigger_findings::FindingRow;
 use biscuit_file::{SourceSpan, YamlCertainty, YamlRepair};
 use darkmatter::markdown::cleanup::diagnostic::{CleanCode, CleanDiagnostic};
 use darkmatter::markdown::cleanup::{CleanOutcome, CleanResult};
+use darkmatter::markdown::extract_frontmatter_block;
+use darkmatter::markdown::schemas::InvalidTriggerFinding;
 use darkmatter::markdown::span::line_col_of_offset;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -21,6 +24,10 @@ pub struct CleanJsonReport {
     /// Whether the emitted document differs from the source (outcome
     /// `Changed`). A declined or invalid run is always `false`.
     pub changed: bool,
+    /// The schema triggers discovery skipped as invalid. Separate from
+    /// `diagnostics`, whose spans are positions in this document and cannot
+    /// name a trigger file; always present, empty when there are none.
+    pub warnings: Vec<FindingRow>,
 }
 
 #[derive(Debug, Serialize)]
@@ -82,14 +89,7 @@ pub fn json_report(
     path: Option<PathBuf>,
     document_source: &str,
 ) -> CleanJsonReport {
-    let source = CleanJsonSource {
-        kind: if path.is_some() {
-            CleanJsonSourceKind::File
-        } else {
-            CleanJsonSourceKind::Stdin
-        },
-        path,
-    };
+    let source = json_source(path);
     let frontmatter = CleanJsonFrontmatter {
         present: result.frontmatter_span.is_some(),
         span: result.frontmatter_span.as_ref().map(json_span),
@@ -106,6 +106,45 @@ pub fn json_report(
             .collect(),
         applied: result.applied.iter().map(json_repair).collect(),
         changed: result.outcome == CleanOutcome::Changed,
+        warnings: result.trigger_findings.iter().map(FindingRow::from).collect(),
+    }
+}
+
+/// Builds the `--json` envelope for a run that failed loading a schema,
+/// written before the failure is returned so the warnings discovery
+/// retained still reach the report.
+///
+/// No clean result exists: `diagnostics` and `applied` are empty and
+/// `changed` is `false`, as for an `Invalid` run. A schema is only loaded
+/// behind a frontmatter block, whose span `frontmatter` reports.
+pub fn schema_failure_report(
+    trigger_findings: &[InvalidTriggerFinding],
+    path: Option<PathBuf>,
+    document_source: &str,
+) -> CleanJsonReport {
+    let span = match extract_frontmatter_block(document_source) {
+        Ok(Some(extraction)) => Some(json_span(&extraction.yaml_span)),
+        _ => None,
+    };
+    CleanJsonReport {
+        version: 1,
+        source: json_source(path),
+        frontmatter: CleanJsonFrontmatter { present: span.is_some(), span },
+        diagnostics: Vec::new(),
+        applied: Vec::new(),
+        changed: false,
+        warnings: trigger_findings.iter().map(FindingRow::from).collect(),
+    }
+}
+
+fn json_source(path: Option<PathBuf>) -> CleanJsonSource {
+    CleanJsonSource {
+        kind: if path.is_some() {
+            CleanJsonSourceKind::File
+        } else {
+            CleanJsonSourceKind::Stdin
+        },
+        path,
     }
 }
 

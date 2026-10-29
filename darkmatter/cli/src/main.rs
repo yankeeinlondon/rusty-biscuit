@@ -68,6 +68,15 @@ fn main() {
     CompleteEnv::with_factory(Cli::command).complete();
 
     if let Err(e) = run() {
+        // A usage error the policy verbs found after parsing exits as clap's
+        // own do.
+        if let Some(usage) = e.downcast_ref::<clap::Error>() {
+            usage.exit();
+        }
+        // `--output report-json` already wrote the failure to stdout.
+        if let Some(reported) = e.downcast_ref::<darkmatter_cli::commands::ReportedExit>() {
+            std::process::exit(reported.code());
+        }
         // Prefer `BlockError` rendering when any error in the chain implements it.
         // Walk the cause chain so wrapper errors (eyre Report, Box<dyn Error>) don't
         // mask an inner BlockError implementation. Darkmatter's downcast registry
@@ -132,9 +141,50 @@ fn error_chain_prose(e: &color_eyre::Report) -> Prose {
     Prose::new(msg).with_line_breaks(LineBreaks::Hard)
 }
 
+/// Flags removed with no alias, each with its replacement.
+const REMOVED_FLAGS: &[(&str, &str)] = &[
+    ("--allow-missing-hyperlinks", "--allow missing-hyperlinks"),
+    ("--allow-missing-image-refs", "--allow missing-image-refs"),
+    ("--allow-missing-transclusions", "--allow missing-transclusions"),
+    (
+        "--allow-any-missing-reference",
+        "--allow missing-hyperlinks --allow missing-image-refs --allow missing-transclusions",
+    ),
+    ("--allow-ctx-override", "--allow ctx-override"),
+    ("--allow-invalid-frontmatter-assignment", "--allow invalid-frontmatter-assignment"),
+    ("--allow-reassigned-frontmatter-property", "--allow reassigned-frontmatter-property"),
+    ("--allow-shell-timeout", "--allow shell-timeout"),
+    ("--allow-host", "--allow host=HOST"),
+    ("--no-baseline-schema", "--disable baseline-schema"),
+    ("--no-schema-triggers", "--disable schema-triggers"),
+    ("--no-trigger-schemas", "--disable schema-triggers"),
+    ("--strict-style", "--deny style"),
+];
+
+/// Exits with a usage error when an argument before `--` is a removed flag.
+///
+/// The check runs before parsing instead of declaring the old flag as a
+/// hidden argument, because dynamic completion still offers a hidden flag
+/// whose prefix is typed; completions must list only the replacement.
+fn reject_removed_flags(args: impl Iterator<Item = std::ffi::OsString>) {
+    for arg in args.skip(1).take_while(|arg| arg != "--") {
+        let Some(arg) = arg.to_str() else { continue };
+        let flag = arg.split_once('=').map_or(arg, |(flag, _)| flag);
+        if let Some((_, replacement)) = REMOVED_FLAGS.iter().find(|(removed, _)| *removed == flag) {
+            Cli::command()
+                .error(
+                    clap::error::ErrorKind::UnknownArgument,
+                    format!("`{flag}` was removed with no alias; use `{replacement}`"),
+                )
+                .exit();
+        }
+    }
+}
+
 fn run() -> Result<()> {
     color_eyre::install()?;
 
+    reject_removed_flags(std::env::args_os());
     let cli = Cli::parse();
     init_tracing(cli.debug_level);
 
@@ -163,6 +213,11 @@ fn run() -> Result<()> {
     }
 
     if cli.save {
+        if !cli.deny.is_empty() {
+            Cli::command()
+                .error(clap::error::ErrorKind::ArgumentConflict, "`--deny` does not apply to `--save` (a clean)")
+                .exit();
+        }
         let options = CleanOptions {
             save: true,
             verbose: cli.verbose > 0,
@@ -179,11 +234,19 @@ fn run() -> Result<()> {
     }
 
     // Run as implicit render using top-level args
+    let policy = darkmatter_cli::args::policy::resolve_for(
+        darkmatter_cli::args::policy::PolicyCommand::Render,
+        &[],
+        &cli.deny,
+        &[],
+        None,
+    )?;
     run_render(
         cli.input.as_ref(),
         cli.output,
         cli.show,
         None,
+        policy.denies("style"),
         &cli.features,
         &cli,
         &request,

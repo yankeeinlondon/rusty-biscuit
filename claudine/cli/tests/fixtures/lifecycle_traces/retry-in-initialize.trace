@@ -1,0 +1,8 @@
+# scenario: retry-in-initialize
+# doc: retry-in-initialize.md
+# given: invoked as `claudine compose --claude retry-in-initialize.md` from the directory holding the fixture documents
+# given: initialize returns retry with one extra attempt
+# given: retry in initialize raises LifecycleSetupPhaseRecoveryUnsupported (event initialize, action retry) and ends the run with no catch event and no finalize
+# given: the provider never launches
+event initialize
+exit 1

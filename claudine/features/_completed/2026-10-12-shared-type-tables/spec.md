@@ -37,6 +37,8 @@ message_to_agent: |-
     - Local macOS gates: darkmatter `just test` 9160/9160, `just lint` clean; claudine `just test` 8673/8673, `just lint` clean. No cross-OS run; existing CI cells cover Linux/macOS/Windows/WSL2.
 implemented: true
 pipeline_step: 2
+canonical_docs:
+    - darkmatter/docs/topics/schemas/definition.md
 related:
     - 2026-10-29-recursive-schema-types
 ---

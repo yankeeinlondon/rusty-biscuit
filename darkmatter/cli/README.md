@@ -177,19 +177,31 @@ md compose README.md --output json
 md compose README.md --timeout 3
 
 # Convert timed out shell commands into empty strings and warnings
-md compose README.md --timeout 3 --allow-shell-timeout
+md compose README.md --timeout 3 --allow shell-timeout
 
 # Report compose-tree shell commands without executing them
 md compose README.md --shell
 
 # Allow non-object ctx frontmatter (downgrades error to warning)
-md compose README.md --allow-ctx-override
+md compose README.md --allow ctx-override
+
+# Fail instead of writing a document when any warning is reported
+md compose README.md --deny all
 
 # Emit structured performance report to stderr
 md compose README.md --perf
 ```
 
+Commands that relax or tighten checks share three policy verbs: `--allow`
+permits a named recovery or grants a host (`--allow host=example.com`),
+`--deny` makes the selected diagnostics blocking (`md render --deny style`
+fails on unknown `style:` keys), and `--disable` stops a feature such as
+`baseline-schema` or `schema-triggers`. See [Policy Flags](../docs/cli/policy.md)
+for the identifiers each command accepts and how the verbs combine.
+
 During `compose`, Darkmatter supports both body `::shell ...` directives and top-level frontmatter `$(...)` expressions. Both use the same whitelist/blacklist and approval flow. Frontmatter shell expansion stores trimmed `stdout` only; body shell expansion stores combined `stdout` + `stderr`. Use `--shell` to inspect the shell commands discovered across the compose tree before approving or executing them.
+
+A root document that authors `initialize`, `composed`, `failed`, `cancelled`, or `finalize` runs those lifecycle stacks around composition. See [Lifecycle Events](../docs/topics/lifecycle/index.md) and the [`compose` reference](../docs/cli/compose.md#lifecycle-events).
 
 ### Frontmatter Set
 
@@ -265,8 +277,8 @@ md clean README.md --json
 # Control the effective frontmatter schema
 md clean README.md --schema docs.schema.yaml
 md clean README.md --baseline-schema project-baseline.yaml
-md clean README.md --no-baseline-schema
-md clean README.md --no-trigger-schemas
+md clean README.md --disable baseline-schema
+md clean README.md --disable schema-triggers
 
 # Save cleaned file in place and report delta-style changes
 md clean README.md --save
@@ -301,7 +313,7 @@ Mappings](../docs/cli/clean.md#indented-root-mappings-yamlroot-indentation).
 
 Schema precedence is baseline → matching repository triggers → document
 `$schema`. `--baseline-schema` replaces the default Darkmatter baseline,
-`--no-baseline-schema` removes it, `--no-trigger-schemas` disables trigger
+`--disable baseline-schema` removes it, `--disable schema-triggers` disables trigger
 discovery, and `--schema` replaces the document `$schema` layer. Stdin has no
 document path, so trigger discovery is always inert for stdin, while explicit
 schema and baseline flags remain active.

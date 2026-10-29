@@ -125,6 +125,34 @@ mod yaml_json_json5_jsonl_and_ndjson_sources_produce_the_same_plan {
         ndjson => "ndjson.md",
     }
 
+    /// Every source format the loader classifies has a row, and both
+    /// line-delimited extensions keep theirs.
+    #[test]
+    fn every_source_format_has_a_row() {
+        use claudine::composition::sequence::data::SourceFormat;
+
+        let data_files: Vec<String> =
+            ROWS.iter().map(|(name, _)| format!("d.{}", name.trim_end_matches(".md"))).collect();
+        // Exhaustive on purpose: a new format fails to compile here until it
+        // has a row above.
+        let all = [
+            SourceFormat::Yaml,
+            SourceFormat::Json,
+            SourceFormat::Json5,
+            SourceFormat::LineDelimited,
+        ];
+        for format in all {
+            match format {
+                SourceFormat::Yaml | SourceFormat::Json | SourceFormat::Json5 | SourceFormat::LineDelimited => {}
+            }
+            assert!(
+                data_files.iter().any(|file| SourceFormat::for_path(Path::new(file)) == format),
+                "{format:?} has no same-plan row"
+            );
+        }
+        assert_eq!(data_files, ["d.yaml", "d.json", "d.json5", "d.jsonl", "d.ndjson"]);
+    }
+
     fn assert_row_produces_the_shared_plan(name: &str) {
         let (_, source) = ROWS.iter().find(|(row, _)| *row == name).expect("a listed row");
         let workspace = CliProcessFixture::named("sequence-sources-cli");
@@ -234,7 +262,9 @@ mod every_string_list_form_classifies_through_the_real_invocation_path {
     const ROWS: [(&str, &str, &[&str]); 5] = [
         ("csv", "\"alpha, beta, gamma\"", &["alpha", "beta", "gamma"]),
         ("tsv", "\"alpha\tbeta\"", &["alpha", "beta"]),
-        ("lines", "\"alpha\nbeta\"", &["alpha", "beta"]),
+        // YAML's `\n` escape: a raw newline inside a double-quoted scalar
+        // folds to a space, which would classify as space-separated instead.
+        ("lines", "\"alpha\\nbeta\"", &["alpha", "beta"]),
         ("spaces", "\"alpha beta gamma\"", &["alpha", "beta", "gamma"]),
         ("scalar", "\"solo\"", &["solo"]),
     ];
@@ -257,6 +287,51 @@ mod every_string_list_form_classifies_through_the_real_invocation_path {
         lines => "lines",
         spaces => "spaces",
         scalar => "scalar",
+    }
+
+    /// Each row classifies as the format it names once YAML has read it, and
+    /// every `ListFormat` has a row here or in
+    /// `markdown_list_markers_win_over_line_splitting`.
+    #[test]
+    fn every_list_format_has_a_row() {
+        use biscuit_file::{ListFormat, Yaml};
+
+        let intended = |name: &str| match name {
+            "csv" => ListFormat::Csv,
+            "tsv" => ListFormat::Tsv,
+            "lines" => ListFormat::LineSeparated,
+            "spaces" => ListFormat::SpaceSeparated,
+            "scalar" => ListFormat::Scalar,
+            _ => panic!("row {name} names no format"),
+        };
+        for (name, raw, _) in ROWS {
+            let yaml = Yaml::from_str(format!("raw: {raw}")).unwrap();
+            let value = yaml.value().get("raw").and_then(|v| v.as_str()).unwrap().to_string();
+            assert_eq!(ListFormat::classify(&value), intended(name), "row {name} reads as {value:?}");
+        }
+
+        // Exhaustive on purpose: a new format fails to compile here until it
+        // has a test.
+        let all = [
+            ListFormat::MarkdownOrdered,
+            ListFormat::MarkdownUnordered,
+            ListFormat::LineSeparated,
+            ListFormat::Tsv,
+            ListFormat::Csv,
+            ListFormat::SpaceSeparated,
+            ListFormat::Scalar,
+        ];
+        for format in all {
+            let covered = match format {
+                ListFormat::MarkdownOrdered | ListFormat::MarkdownUnordered => true,
+                ListFormat::LineSeparated
+                | ListFormat::Tsv
+                | ListFormat::Csv
+                | ListFormat::SpaceSeparated
+                | ListFormat::Scalar => ROWS.iter().any(|(name, _, _)| intended(name) == format),
+            };
+            assert!(covered, "{format:?} has no string-form row");
+        }
     }
 
     fn assert_form_classifies(name: &str) {

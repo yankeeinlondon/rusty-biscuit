@@ -172,7 +172,7 @@ bodies. It is the only persistent cache a compose run uses.
 
 Persistence is explicit opt-in:
 
-- CLI: `md compose FILE --allow-host HOST --cache-root DIR`
+- CLI: `md compose FILE --allow host=HOST --cache-root DIR`
 - Library: `ComposeOptions::with_cache_root(dir)`, optionally
   `with_cache_namespace(name)` for branch or profile isolation
 
@@ -208,7 +208,7 @@ A cache root never authorizes a host. `RemoteFetchRuntime::register_and_fetch`
 checks the exact-host `FetchPolicy` before any fetch task is created, and
 therefore before the transport cache is read. A denied host fails without a
 cache read or a network request, even when a fresh entry for that URL is on
-disk. The default policy is deny-all; the CLI grants hosts with `--allow-host`.
+disk. The default policy is deny-all; the CLI grants hosts with `--allow host=HOST`.
 
 ### Freshness
 

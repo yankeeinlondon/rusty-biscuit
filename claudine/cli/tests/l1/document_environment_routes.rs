@@ -292,7 +292,7 @@ fn re_entering_a_document_reads_its_map_without_capturing_again() {
     fixture.write_doc(
         "target.md",
         &format!(
-            "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\n{}success:\n        - when: \"!file_exists('retried.txt')\"\n          then:\n              - append_line: [\"retried.txt\", \"once\"]\n              - append_line: [\"events.log\", 'target retry {READS}']\n              - retry: 1\n        - append_line: [\"events.log\", 'target success {READS}']\n{}---\nloop body\n",
+            "---\nn: 0\nloop:\n    while: \"n < 1\"\n    action: \"increment(n)\"\n{}success:\n        - when: \"!file_exists('retried.txt')\"\n          then:\n              - append_line: [\"retried.txt\", \"once\"]\n              - append_line: [\"events.log\", 'target retry {READS}']\n              - retry: 1\n        - append_line: [\"events.log\", 'target success {READS}']\n{}---\nloop body\n",
             trail("start", "target start"),
             trail("finalize", "target finalize"),
         ),
@@ -323,9 +323,15 @@ fn re_entering_a_document_reads_its_map_without_capturing_again() {
             run.output
         );
     }
-    assert!(
-        target.iter().filter(|line| line.starts_with("target start")).count() >= 2,
-        "the retry and the loop re-entered the document: {events:?}"
+    assert_eq!(
+        target.iter().filter(|line| line.starts_with("target start")).count(),
+        3,
+        "one retried attempt and a second loop pass must both start: {events:?}"
+    );
+    assert_eq!(
+        target.iter().filter(|line| line.starts_with("target success")).count(),
+        2,
+        "both loop passes must succeed: {events:?}"
     );
     for line in &target {
         assert!(line.ends_with(&fixture.reads("target")), "{line} read another map: {events:?}");

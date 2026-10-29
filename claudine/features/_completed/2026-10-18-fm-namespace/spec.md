@@ -32,6 +32,20 @@ review_iterations: 6
 completed: true
 human_review: false
 pipeline_step: 8
+canonical_docs:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/state-management/index.md
+    - darkmatter/docs/topics/state-management/context-variables.md
+    - darkmatter/docs/inline/fm-interpolation.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/topics/compose-requests.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/state-management/context-variables.md
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/pre-flight-checks.md
+    - darkmatter/dmls/docs/autocomplete.md
+    - darkmatter/dmls/docs/hover.md
+    - darkmatter/dmls/docs/diagnostics.md
 related:
     - 2026-10-20-lifecycle-grammar
     - 2026-10-24-sequence-containers

@@ -14,7 +14,7 @@
 //!   `ctx.*` unresolved.
 //! - [`EventMetaConditionLookup`] — used by hook `when` evaluation. Layers
 //!   Darkmatter's lazy `ctx.*` capture on top of [`EventMetaExpressionLookup`]
-//!   so that conditions like `ctx.today != ''` resolve correctly.
+//!   so that conditions like `!is_empty(ctx.today)` resolve correctly.
 //!
 //! ## Resolution Order (both adapters)
 //!
@@ -254,6 +254,7 @@ fn resolve_top_level(meta: &EventMeta, path: &str) -> Option<Value> {
 /// `git`, `project`) as a JSON object. Process environment (`env.*`) is
 /// deliberately excluded.
 fn hook_payload_object(meta: &EventMeta) -> Value {
+    crate::note_work!(HookPayloadMaterialize);
     const TOP_LEVEL_KEYS: [&str; 14] = [
         "provider",
         "event",

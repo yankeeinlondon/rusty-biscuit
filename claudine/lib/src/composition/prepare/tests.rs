@@ -389,6 +389,40 @@ fn direct_composition_parses_lifecycle_config() {
     assert!(prepared.lifecycle.stack(crate::composition::lifecycle::LifecycleSignal::Failure).is_empty());
 }
 
+/// An included document's lifecycle keys never reach the parent's stacks: the
+/// parent's `start` keeps its own actions, in order, at its own paths.
+#[test]
+fn a_transcluded_childs_start_stack_never_replaces_the_parents() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("child.md"), "---\nstart:\n  - stderr: child\n---\nCHILD body\n").unwrap();
+    let source = make_source(
+        &dir,
+        &[("start", json!([{ "stderr": "parent first" }, { "stderr": "parent second" }]))],
+        "Parent.\n\n::file ./child.md\n",
+    );
+
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context_for(&source.resolved_path))).unwrap();
+
+    assert!(prepared.prompt.contains("CHILD body"), "{}", prepared.prompt);
+    let mut actions = Vec::new();
+    crate::composition::lifecycle_actions::for_each_action(
+        prepared.lifecycle.stack(crate::composition::lifecycle::LifecycleSignal::Start),
+        &mut |action| {
+            let crate::composition::lifecycle_actions::LifecycleActionKind::Communication(comm) = &action.kind else {
+                panic!("only `stderr` actions: {:?}", action.kind);
+            };
+            let darkmatter::markdown::compose::expression::Expr::StringLiteral(text) = &comm.text else {
+                panic!("literal text: {:?}", comm.text);
+            };
+            actions.push((action.path.to_string(), text.clone()));
+        },
+    );
+    assert_eq!(
+        actions,
+        [("start[0].stderr".to_string(), "parent first".to_string()), ("start[1].stderr".to_string(), "parent second".to_string())]
+    );
+}
+
 /// Regression: Darkmatter's `normalize_list_spacing` used to insert a
 /// blank line between a tight parent list item and the first child of a
 /// nested unordered list. That blank line was mis-rendered as an indented

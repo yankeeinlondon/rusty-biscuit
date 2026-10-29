@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "timing": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "document_ms": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "Wall-clock duration of the current document's composition, in milliseconds, or null when not collected.",
+              "x-darkmatter-generated": true
+            },
+            "total_ms": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "Wall-clock duration of the whole run so far, in milliseconds, or null when not captured.",
+              "x-darkmatter-generated": true
+            },
+            "step_ms": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "minimum": 0,
+                  "type": "integer",
+                  "x-darkmatter-integer": true
+                }
+              ],
+              "description": "Wall-clock duration of the current sequence step, in milliseconds; null outside a sequence or when not collected.",
+              "x-darkmatter-generated": true
+            }
+          }
+        }
+      ]
+    }
+  }
+}

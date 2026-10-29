@@ -1,0 +1,31 @@
+---
+source: darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+expression: "pretty(\"point: 'tuple([number, number])'\\n\")"
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "point": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "minItems": 2,
+          "items": false
+        }
+      ]
+    }
+  }
+}

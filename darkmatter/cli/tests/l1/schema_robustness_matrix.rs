@@ -200,7 +200,7 @@ fn run(files: &[(String, String)], cells: &[Cell], compared: &BTreeSet<String>) 
     // merging have their own tests in `schema_validate_baseline_selection`.
     let output = process
         .command()
-        .args(["schema", "validate", "--format", "json", "--no-baseline-schema"])
+        .args(["schema", "validate", "--format", "json", "--disable", "baseline-schema"])
         .args(cells.iter().map(|cell| cell.name.as_str()))
         .output()
         .expect("md runs");

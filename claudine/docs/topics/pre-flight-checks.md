@@ -1,14 +1,20 @@
+---
+kind: canonical-documentation
+---
+
 # Pre-Flight Shell Approval
 
 Before any Claudine wrapper session launches a provider, it needs to know that every shell command the session might execute has been authorized. This is what the pre-flight check does: it scans all possible shell commands, resolves their approval status, and asks the user to approve anything that is not already whitelisted. Once the pre-flight completes, the session runs without further shell-related prompts.
 
 ## Why This Exists
 
-Shell commands can appear in three places during a Claudine session:
+Shell commands can appear in these places during a Claudine session:
 
-1. **Template `::shell` directives** — Darkmatter's compose pipeline executes these during document composition. A prompt like `commit.md` might contain `::shell sniff repo packages` to inject dynamic content.
+1. **Template `::shell` and `::shell-block` directives** — Darkmatter's compose pipeline executes these during document composition. A prompt like `commit.md` might contain `::shell sniff repo packages` to inject dynamic content.
 2. **Frontmatter `$(cmd)` expressions** — top-level frontmatter string values of the form `$(command arg ...)` are evaluated by Darkmatter's frontmatter shell expansion phase, with the command's trimmed `stdout` written back into the frontmatter. Example: `today: $(date +%Y-%m-%d)`.
 3. **Lifecycle `shell` stack actions** — short-form `shell: "…"` and long-form `shell: { command: "…" }` actions declared in any reachable lifecycle stack (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`), in both the `then` and `else` bodies of every `when` guard, and every command a lifecycle `set` value written as a whole-value `$( … )` can run (both branches of a ternary). Some are conditional (guarded by `when:` or reachable only on a recovery path) but they still need pre-authorization because there is no opportunity to prompt the user mid-session. A `set` value's command is approved under its bare bytes: `set: { clean: "$(git diff --quiet)::ok" }` approves `git diff --quiet`.
+
+4. **Sequence `shell:` tasks** — primary commands in the root sequence, nested sequences, and group legs, plus their container lifecycle commands. Their approval mode depends on task position and whether they read values produced by the run; see [Sequence Execution](#sequence-execution).
 
 Without pre-flight, a shell command that lacks whitelist coverage would either block the process waiting for interactive approval that will never come (in a non-interactive session) or fail with a confusing error deep inside the composition pipeline. The pre-flight eliminates both problems by resolving all approvals upfront.
 
@@ -78,7 +84,7 @@ same function the preparation that executes the document uses:
 - the document's own frontmatter defaults and derived values;
 - the immediate `proxy` `with:` overlay of a handed-off document;
 - caller values (`--set`, `key=value`) and run-produced values (loop values, lifecycle `set`, `seq.outputs`);
-- the reserved sequence inputs (`state`, `previous`, `next`);
+- the lexical sequence roots (`seq`, `group`, and `loop`), when available; sequence preflight records run-dependent reads without evaluating them;
 - the same document environment and the same source-relative base directory (see [Composition — One Environment per Document](composition.md#one-environment-per-document)).
 
 A transcluded partial is discovered with the state composition hands it: its parent's composed values as defaults, overlaid by the directive's own `set.*` values. A partial nested two levels deep inherits through its parent the same way.
@@ -92,7 +98,8 @@ start:
 
 <!-- target.md -->
 ---
-base: string(required)
+$schema:
+  base: string(required)
 ---
 ::file ./part.md
 
@@ -113,6 +120,15 @@ Each command is checked against shell policy (blacklist, whitelist, approval cac
 ### Missing Values
 
 A shell command never runs with a missing value. A placeholder whose expression evaluates to `null` (an absent property reads as `null`) fails pre-flight before anything runs, on every surface: `::shell`, `::shell-block`, frontmatter `$( … )`, a lifecycle `shell` action, and a lifecycle `set` value written as `$( … )`.
+
+The one exception is a placeholder that a guard enclosing its command proves present: a lifecycle item's `when:` (for its `then:` and the actions beside the `when:`; the negation for its `else:`), or a sequence task's `when:` (for its `shell:` command). Such a command is approved only by its shape and reads the value when its guard has selected it; if the value is `null` then, that action fails with `MissingValue` and none of it launches. A `when: msg` excuses only `msg`, never another placeholder, and a lifecycle `set` of `msg` earlier in the same branch ends the excuse. The excuse never carries over to another event, loop pass, retry, resume, or proxy target, which check their guards again. Pre-flight reads a `file_exists(x)` guard without touching the filesystem: it proves only that `x` is a present string, because today's `file_exists` accepts nothing else, never that the file exists. See [What a guard proves to the actions it selects](flow-control/lifecycle.md#what-a-guard-proves-to-the-actions-it-selects), [Task guards](flow-control/sequences.md#task-guards-when), and Darkmatter's [Guarded values](../../../darkmatter/docs/inline/preflight-checks.md#guarded-values).
+
+```yaml
+success:
+  - when: "ctx.dirty_files && commit_message"
+    then:
+      - shell: git commit -m "{{commit_message}}"   # approved by its shape; skipped when the guard is false
+```
 
 ```md
 ---
@@ -149,7 +165,7 @@ start:
 ---
 ```
 
-With `template git add {{ string }}` in the whitelist, the action runs `git` with the two arguments `add` and whatever `target` holds when `start` fires, even if an earlier action in the same event changed it, and even if it holds a space or a `;`. With `exact git add src` instead, it runs the pre-flight bytes `git add src`. An exact approval wins when both match. A value that inserts command syntax (`;`, a pipe, an unbalanced quote) leaves no readable bytes, so such a command can then be approved only by its shape. See [Lifecycle → Shell actions approved by their shape](flow-control/lifecycle.md#shell-actions-approved-by-their-shape) for what a template-mode action reads and how it fails.
+With `template git add {{ string }}` in the whitelist, the action runs `git` with the two arguments `add` and whatever `target` holds when `start` fires, even if an earlier action in the same event changed it, and even if it holds a space or a `;`. With `exact git add src` instead, it runs the pre-flight bytes `git add src`. An exact approval wins when both match. A quoted empty word stays in the bytes: with `commit_message: ""`, `git commit -m "{{ commit_message }}"` is shown and approved as `exact git commit -m ""` and passes `git` an empty argument; `exact git commit -m` approves only the unquoted `git commit -m {{ commit_message }}`. A value that inserts command syntax (`;`, a pipe, an unbalanced quote) leaves no readable bytes, so such a command can then be approved only by its shape. See [Lifecycle → Shell actions approved by their shape](flow-control/lifecycle.md#shell-actions-approved-by-their-shape) for what a template-mode action reads and how it fails.
 
 ### Re-Audits: Handoffs, Retries, and Loop Iterations
 
@@ -187,6 +203,15 @@ Each command is checked against Claudine's shell policy:
 
 Commands that match the whitelist are marked as approved. Commands that match a blacklist are rejected immediately with a clear error. Everything else is presented to the user.
 
+The two user files are read at different moments, and neither is cached between reads:
+
+| Moment | Files read | When a file cannot be used |
+| --- | --- | --- |
+| An approval decision (pre-flight, or a re-audit) | the blacklist and the whitelist under the policy root | a missing or unreadable file has no rules; a policy root whose file locations cannot be worked out denies the command |
+| A template-mode command about to start (dispatch) | the blacklist only | a missing or unreadable blacklist, no policy root, or an underivable root gives no user rules; the built-in blacklist still applies |
+
+Dispatch never opens the whitelist, because a command that reaches dispatch is already approved; only the blacklist can still refuse it. The blacklist is read again for every dispatched command, so a rule added while a session runs refuses the next matching command. In both cases a malformed line is warned about and skipped, and the file's valid rules still apply. The policy root is the one captured for the session; neither read looks up the home directory, the working directory, or the repository again.
+
 A document command with a placeholder is also matched by its shape. When no `exact` rule covers its bytes but a `template` rule covers its shape, the command is approved by that shape: an `exact` rule wins, then a `template` rule, then a `prefix` rule. Its bytes are still checked against both blacklists. A document command (`::shell`, `::shell-block`, or a frontmatter `$( … )`) approved by its shape runs as a template: each placeholder is checked against its declared type and fills exactly one argument, the filled command meets both blacklists again before it starts, and its program must run without a shell. See Darkmatter's [Running a command as a template](../../../darkmatter/docs/inline/preflight-checks.md#running-a-command-as-a-template). A lifecycle `shell` action or `set` value approved by its shape runs as a template the same way (see [Phase 2](#phase-2-lifecycle-shell-commands)). Sequence task commands and container lifecycle commands use the same template validation. Late holes are checked at task entry and retained for dispatch, while ordinary holes read current task state at command entry. Structured task dispatch retains process-tree ownership, output capture, timeout, cancellation, and runaway guards.
 
 A command whose value is produced later in the run has no bytes at pre-flight and is approved only by its shape: a `template` rule, `prefix` rules for each of its programs, or a decision for that shape. An `exact` rule or an earlier exact decision never covers it. Discovery reports such a command when its host declares the late root to Darkmatter (`ComposeOptions::with_deferred_shell_roots`); a sequence declares `seq.outputs`, `loop`, and `group` this way (see [Sequence Execution](#sequence-execution)).
@@ -218,7 +243,7 @@ Any command not already covered by the whitelist or approval cache is presented 
 
 | Choice | Listed when | Saves |
 |--------|-------------|-------|
-| **Allow this exact command** | every value is known at pre-flight | `exact <resolved command>` to the whitelist |
+| **Allow this exact command** | resolved-byte approval is eligible and every value is known at pre-flight | `exact <resolved command>` to the whitelist |
 | **Allow this command shape** | the command has a placeholder and valid template grammar | `template <shape>` to the whitelist |
 | **Allow this program with any arguments** | every program word is fixed | `prefix <program>` for each distinct program of the chain, all listed in the prompt |
 | **Allow once** | always | nothing; this session only (for a command with no exact choice, its shape for this session) |
@@ -262,7 +287,7 @@ Claudine and Darkmatter each have shell approval infrastructure, but they serve 
 
 **Claudine's role is authorization.** It takes the list from Darkmatter, combines it with commands from the harness, checks everything against the whitelist, and prompts the user for anything that is missing. Claudine is the single source of truth for what is allowed.
 
-**During composition**, Darkmatter receives the pre-approved set (`ShellPreApprovals`: resolved bytes and template shapes) and skips its own whitelist, blacklist, and approval handler checks. Each command must prove it is a member: its resolved bytes are in the exact set, or its authored shape is in the template set. Nothing at execution adds bytes to the set. This means Darkmatter's standalone approval flow (which still works when used outside of Claudine) is bypassed entirely when Claudine provides pre-approvals.
+**During composition**, Darkmatter receives the pre-approved set (`ShellPreApprovals`: resolved bytes and template shapes) instead of making another whitelist or interactive approval decision. Each command must first prove membership: its resolved bytes are in the exact set, or its authored shape is in the template set. Execution never adds newly filled bytes to that set. A template member still validates every value, checks the filled chain against the built-in and user blacklists, and verifies every direct target before dispatch or result-cache reuse. Pre-approval supplies authorization, not an exemption from runtime checks.
 
 This separation ensures that:
 
@@ -286,7 +311,7 @@ No provider session was started.
 
 ### Command Not Pre-Approved at Runtime
 
-A shell command was encountered during composition or harness execution that was not in the pre-approved set. This should never happen — it means the pre-flight scanner missed a command.
+A shell command encountered during composition or harness execution did not belong to the pre-approved set. This can expose a discovery defect or a source change after approval closed. The run refuses the command rather than granting new approval during execution.
 
 It is always a hard failure of the composition: nothing absorbs it. A `when_error` fallback applies only to a command that ran and failed, a transcluded partial that fails for this reason is not replaced by a "could not transclude" notice, an `as_markdown(…) || fallback` does not fall back, and a lifecycle `no_error` does not suppress it.
 
@@ -345,7 +370,7 @@ approval set before executing the current bytes or filling the current shape.
 
 Upfront graph approval includes every task's `shell:` commands, container lifecycle `shell` actions and shell-valued `set` actions (in every branch), and the commands of every document a `prompt:` task names. How a command with a placeholder is approved depends on where its task sits:
 
-- **The first task** — the first step's task, or every leg of a first-step group — has known values resolved to bytes. All commands with valid placeholders, including task `shell:`, setup/teardown, and shell-valued `set`, offer both exact and shape approval. Exact rules retain priority; a saved shape or shape choice selects template execution.
+- **The first task** — the root sequence's first task, every leg of a first-task group, or the first child recursively through first-task nested sequences — has known values resolved to bytes. Commands with valid placeholders, including task `shell:` and lifecycle `shell` or shell-valued `set` actions, offer both exact and shape approval. Exact rules retain priority; a saved shape or shape choice selects template execution.
 - **Every later task** has each command with a placeholder approved only by its typed shape, even when its values are known now, because an earlier task may change them. "Allow this exact command" is not offered, and an `exact` rule for today's bytes does not cover it. A later command with no placeholder is approved as its literal bytes.
 
 Known first-task lifecycle `shell` commands in referenced prompt documents retain the system shell grammar, including a configured executable (`{{ tool }} probe`) or a semicolon chain (`tool {{ out }}; tool tail` on POSIX). They can use exact approval even when no template shape exists. Later tasks and commands that read late values must satisfy template grammar. Existing restrictions on interpolated executables in document directives and shell-valued `set` still apply.
@@ -391,7 +416,7 @@ flowchart TD
     N --> O[validate, check filled chain<br/>and direct targets, then dispatch]
 ```
 
-**Missing values.** Every value a command reads that exists at pre-flight — the sequence's frontmatter, caller values (`key=value`, `--set`), step values, `ctx.*`, `env.*` — is checked in every task, later ones included: a `null` fails pre-flight before step 1, naming the command and the value. A late value is checked when its task is reached, before any of that task's commands run: a `null`, an array or object, or a value its type refuses fails the task with `SequenceShellLateValue`, which never shows the value. Effects of earlier steps stand. A group checks every member before any member command runs.
+**Missing values.** Every value a command reads that exists at pre-flight — the sequence's frontmatter, caller values (`key=value`, `--set`), step values, `ctx.*`, `env.*` — is checked in every task, later ones included: a `null` fails pre-flight before step 1, naming the command and the value, unless the task's `when:` proves that placeholder present. A late value is checked when its task is reached, before any of that task's commands run: a `null`, an array or object, or a value its type refuses fails the task with `SequenceShellLateValue`, which never shows the value. Effects of earlier steps stand. A group checks every member before any member command runs. A value the task's `when:` proves present is checked instead by its command once the guard has selected the task, so a member whose guard is false is skipped without failing that check. A prompt task's `with:` value written as one `{{ … }}` that its `when:` proves present, but that is missing at pre-flight, is late for the document.
 
 Concurrent groups validate member commands at group entry and retain checked
 late inputs for execution. Nested sequences and group lifecycle events are

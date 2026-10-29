@@ -3,6 +3,10 @@
 //! This module provides the `compose()` family of methods on `Markdown`
 //! for running operations in four phases:
 //!
+//! Before any operation, a passive **call check** rejects the document when an
+//! authored call on the composed surface is proven wrong (category 5) against
+//! its schema's declared types, in any branch; nothing has been evaluated yet.
+//!
 //! **Inline Pre** (serial):
 //! 0. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values.
 //!    When shell expansion is enabled, templated keys that reference
@@ -97,17 +101,22 @@
 
 pub(crate) mod body_origin;
 pub(crate) mod cache;
+mod call_precheck;
 pub mod conditions;
 pub mod context;
 mod frontmatter_interpolation;
+pub(crate) use frontmatter_interpolation::locate_frontmatter_span;
 pub(crate) mod frontmatter_shell_expansion;
 pub(crate) mod glob_listing;
 pub(crate) mod icmp;
 pub(crate) mod indent;
 pub(crate) mod parse_utils;
 pub(crate) mod perf;
+pub mod policy;
+pub mod report_diagnostics;
 pub(crate) mod pipeline;
-mod schema_validation;
+pub(crate) mod schema_validation;
+pub use schema_validation::effective_schema_for;
 pub mod subtree;
 mod unknown_identifiers;
 mod util;
@@ -160,12 +169,13 @@ pub use frontmatter_shell_expansion::{
     parse_frontmatter_shell_suffixes, parse_frontmatter_shell_value_spanned,
 };
 pub use icmp::PlannedIcmpProbe;
-pub use preflight::{ComposePreflightApprovals, ComposePreflightReport, PreflightApprovalStats, collect_frontmatter_shell_commands, collect_shell_commands};
+pub use preflight::{ComposePreflightApprovals, ComposePreflightReport, ExtraShellSources, PreflightApprovalStats, collect_frontmatter_shell_commands, collect_shell_commands};
 pub use shell_blocks::ShellBlockError;
 pub use shell_expansion::ShellCommandOrigin;
 pub use shell_expansion::ShellExpansionError;
 pub use shell_expansion::ShellTimeoutBehavior;
 pub use context::effective_state::{EffectiveState, EffectiveStateBuilder};
+pub use context::shared_frontmatter::SharedFrontmatter;
 pub(crate) use context::effective_state::ResolvingLookup;
 pub use context::options::{
     CallerInputRecord, CallerInputRecords, ComposeOptions, ComposeSource, caller_input_records_for_overrides,
@@ -179,7 +189,7 @@ pub use context::request::{
 pub(crate) use context::request::test_support::{request as test_request, request_in as test_request_in};
 pub use context::repository_scope_catalog;
 pub(crate) use context::options::ReferenceGraphOptionsIdentity;
-pub use context::report::{ComposeReport, ComposeWarning, SourceRange};
+pub use context::report::{ComposeFailure, ComposeReport, ComposeWarning, SourceRange};
 pub use context::runtime::ComposeContext;
 pub use value_origin::{OverrideLayer, OverrideOrigin};
 pub use perf::{
@@ -249,6 +259,23 @@ impl Markdown {
         let mut result = self.clone();
         let report = result.run_compose_pipeline(request)?;
         Ok((result, report))
+    }
+
+    /// [`compose_with`](Self::compose_with), keeping on failure the warnings
+    /// the composition had already reported.
+    ///
+    /// ## Errors
+    ///
+    /// A boxed [`ComposeFailure`]: the error [`compose_with`](Self::compose_with)
+    /// returns, with the failed documents' warnings, the outer document's
+    /// first. A child that had already succeeded reported into its parent, so
+    /// its warnings appear there.
+    pub fn compose_with_warnings(&self, request: &ComposeRequest) -> Result<(Markdown, ComposeReport), Box<ComposeFailure>> {
+        let mut result = self.clone();
+        match result.run_root_pipeline_collecting(request.clone(), None) {
+            (Ok(report), _) => Ok((result, report)),
+            (Err(error), warnings) => Err(Box::new(ComposeFailure { error, warnings })),
+        }
     }
 
     /// [`compose_with`](Self::compose_with), letting the host choose the

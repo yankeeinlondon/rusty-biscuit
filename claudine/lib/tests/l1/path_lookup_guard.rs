@@ -18,13 +18,6 @@ const SAME_FILE: &str = "both operands are canonicalized identically and only th
 
 const EXCEPTIONS: &[Exception] = &[
     private(
-        "claudine/lib/src/composition/lifecycle/control.rs",
-        "proxy_handoff_allowed",
-        "std::fs::canonicalize",
-        2,
-        SAME_FILE,
-    ),
-    private(
         "claudine/lib/src/composition/resolve.rs",
         "with_prompt_magic_roots",
         "fs::canonicalize",

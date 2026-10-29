@@ -1,0 +1,12 @@
+# scenario: catch-start
+# doc: catch-start.md
+# given: invoked as `claudine compose --claude catch-start.md` from the directory holding the fixture documents
+# given: the start guard raises an evaluation error (frontmatter() of a missing file)
+# given: the provider never launches
+event initialize
+event start
+event failure
+err uncoded: invalid file path: nope-start.md
+event finalize
+err uncoded: invalid file path: nope-start.md
+exit 1

@@ -221,6 +221,37 @@ fn a_caller_value_is_judged_from_the_launch_directory() {
     assert!(format!("{error:?}").contains("severity"), "{error:?}");
 }
 
+/// The same judgment through a recursive type: the arm's enforcing copy of
+/// `node` sits under `$defs`, away from the `spec` property, and still judges
+/// a caller-supplied `spec` from the launch directory (the repository root).
+/// From the document's folder, `docs/repo-doc.md` falls back to the same
+/// existing file, which is outside that folder's `./docs/`, so only the
+/// launch directory admits it.
+#[test]
+fn a_caller_value_below_a_recursive_reference_is_judged_from_the_launch_directory() {
+    let fixture = monorepo();
+    let root = fixture.path();
+    let document = root.join("area/prompts/recursive-union.md");
+    write(
+        &document,
+        "---\n$schema:\n  - node: \"file(match(./docs/*.md)) | { children: node[] }\"\n    spec: node(required)\n  - spec: file(match(**/*spec*.md))\n    severity: string(required)\n---\nBody\n",
+    );
+    let compose_from = |launch: &Path, spec: &str| {
+        let options = ComposeOptions::new()
+            .with_source_file(&document)
+            .with_set_overrides(json!({ "spec": spec }));
+        let snapshot = darkmatter::markdown::compose::RequestSnapshot::new(launch)
+            .with_home(biscuit_file::home_dir());
+        let request = darkmatter::markdown::compose::ComposeRequest::prepare(options, &snapshot).expect("request");
+        Markdown::try_from(document.as_path()).unwrap().compose_with(&request)
+    };
+    compose_from(root, "docs/repo-doc.md").unwrap_or_else(|error| panic!("judged from the launch directory: {error:?}"));
+    // Control: an existing file outside the launch directory's `docs/` (and
+    // outside the other arm's glob).
+    let error = compose_from(root, "area/docs/area-doc.md").expect_err("both arms rule the file out");
+    assert!(format!("{error:?}").contains("is outside this schema arm's `match(./docs/*.md)`"), "{error:?}");
+}
+
 /// Criterion 8: a `match()` pattern that is not a glob reference is a schema
 /// definition error naming the property and the pattern.
 #[test]

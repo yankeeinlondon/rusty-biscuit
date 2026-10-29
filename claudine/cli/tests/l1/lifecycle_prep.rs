@@ -306,3 +306,121 @@ sequence:
     assert_eq!(run.trace, ["helper", "helper", "helper"]);
     assert_eq!(run.prompts, ["Helper", "Caller 1", "Helper", "Caller 2", "Helper", "Caller 3"]);
 }
+
+#[test]
+fn prep_runs_a_yaml_sequence_with_its_own_runtime_and_output_ledger() {
+    let caller = r#"---
+note: caller
+start:
+  - append_line: [trace.log, "caller before"]
+  - prep: { target: "@helper.yaml", with: { stage: prepared } }
+  - append_line: [trace.log, "caller after {{ note }} {{ length(seq.outputs) }}"]
+---
+Caller {{ note }}
+"#;
+    let helper = r#"initialize:
+  - append_line: [trace.log, "helper initialize {{ length(seq.outputs) }}"]
+  - set: { note: helper }
+finalize:
+  - append_line: [trace.log, "helper finalize {{ length(seq.outputs) }}"]
+sequence:
+  - name: work
+    side_effect: { append_line: [trace.log, "helper {{ stage }} {{ note }}"] }
+  - name: inspect
+    side_effect: { append_line: [trace.log, "helper outputs {{ length(seq.outputs) }}"] }
+"#;
+    let run = run("compose", &[("caller.md", caller), ("helper.yaml", helper)], "caller.md");
+    assert_eq!(run.status.code(), Some(0), "stderr:\n{}", run.stderr);
+    assert_eq!(
+        run.trace,
+        [
+            "caller before",
+            "helper initialize 0",
+            "helper prepared helper",
+            "helper outputs 1",
+            "helper finalize 2",
+            "caller after caller 0",
+        ],
+        "stderr:\n{}",
+        run.stderr
+    );
+    assert_eq!(run.prompts, ["Caller caller"]);
+}
+
+#[test]
+fn prep_dispatches_an_inline_prompt_before_resuming_its_caller() {
+    let caller = r#"---
+note: caller
+start:
+  - prep: { target: "@inline.md", with: { stage: prepared } }
+  - append_line: [trace.log, "caller after {{ note }}"]
+---
+Caller {{ note }}
+"#;
+    let helper = r#"---
+prompt: "Inline {{ stage }} {{ note }}"
+note: helper
+start:
+  - set: { note: changed }
+finalize:
+  - append_line: [trace.log, "inline finalize {{ note }}"]
+---
+Previous inline result
+"#;
+    let fixture = CliProcessFixture::named("prep-inline");
+    fs::write(fixture.cwd().join("caller.md"), caller).unwrap();
+    fs::write(fixture.cwd().join("inline.md"), helper).unwrap();
+    let recordings = launch_recorder::install(
+        &fixture,
+        "claude",
+        "if [ \"$n\" = 0 ]; then printf '\\nUpdated helper body\\n' >> inline.md; fi\nprintf 'ok\\n'",
+    );
+    let output = fixture
+        .command()
+        .args(["compose", "--claude", "--yolo"])
+        .arg(fixture.cwd().join("caller.md"))
+        .output()
+        .unwrap();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.status.code(), Some(0), "stderr:\n{stderr}");
+    assert_eq!(
+        fs::read_to_string(fixture.cwd().join("trace.log")).unwrap().lines().collect::<Vec<_>>(),
+        ["inline finalize changed", "caller after caller"]
+    );
+    let prompts = launch_recorder::prompts(&recordings);
+    assert_eq!(prompts.len(), 2, "{prompts:?}");
+    assert!(prompts[0].contains("Inline prepared helper"), "{}", prompts[0]);
+    assert_eq!(prompts[1].trim(), "Caller caller");
+    assert!(fs::read_to_string(fixture.cwd().join("inline.md")).unwrap().contains("Updated helper body"));
+    assert_eq!(fs::read_to_string(fixture.cwd().join("caller.md")).unwrap(), caller);
+    assert!(!fixture.audio_spool().exists());
+}
+
+#[test]
+fn prep_refuses_a_standalone_group_without_running_its_legs_or_continuing() {
+    let caller = r#"---
+start:
+  - append_line: [trace.log, "caller before"]
+  - prep: "@group.md"
+  - append_line: [trace.log, "caller after"]
+finalize:
+  - append_line: [trace.log, "caller finalize"]
+---
+Caller
+"#;
+    let group = r#"---
+kind: group
+name: helper
+tasks:
+  - name: work
+    side_effect: { append_line: [trace.log, "group leg"] }
+---
+"#;
+    let run = run("compose", &[("caller.md", caller), ("group.md", group)], "caller.md");
+    assert_eq!(run.status.code(), Some(1), "stderr:\n{}", run.stderr);
+    assert_eq!(run.trace, ["caller before", "caller finalize"]);
+    assert!(run.prompts.is_empty(), "{:?}", run.prompts);
+    let prose = run.prose();
+    assert!(prose.contains("`prep` of `@group.md` failed"), "{prose}");
+    assert!(prose.contains("a group executes only as a sequence task"), "{prose}");
+}

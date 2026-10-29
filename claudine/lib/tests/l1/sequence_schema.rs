@@ -4,7 +4,9 @@
 //! `md schema validate` use.
 //!
 //! Every fixture under `tests/fixtures/sequence-schema/` is named by exactly
-//! one test; `sequence_schema_fixtures_are_all_named` keeps that true. The
+//! one test (the `containers-depth4-*` controls by
+//! `container_schema_recursion.rs`); `sequence_schema_fixtures_are_all_named`
+//! keeps that true. The
 //! embedded copy the `claudine` launch verdict judges is covered in
 //! `claudine_schemas_embedded.rs`.
 
@@ -99,11 +101,11 @@ fn every_sequence_example_of_the_container_and_loop_specs_is_valid() {
     ]);
 }
 
-/// Each of the three typed container levels accepts a well-formed task and
-/// group and rejects a malformed one at its own path; below the third level
-/// the schema accepts any list, and the task parser judges it.
+/// Every container level accepts a well-formed task and group and rejects a
+/// malformed one at its own path: the container types recurse, so the fourth
+/// and fifth levels are judged like the first.
 #[test]
-fn each_typed_container_level_validates_and_deeper_levels_are_untyped() {
+fn every_container_level_is_typed() {
     assert_sequence_rows(&[
         ("level1-valid", include_str!("../fixtures/sequence-schema/level1-valid.md"), Valid),
         (
@@ -126,7 +128,14 @@ fn each_typed_container_level_validates_and_deeper_levels_are_untyped() {
                 ("/sequence/0/sequence/0/sequence/1/group", "\"execution\""),
             ]),
         ),
-        ("deeper-than-typed-levels", include_str!("../fixtures/sequence-schema/deeper-than-typed-levels.md"), Valid),
+        (
+            "level4-invalid",
+            include_str!("../fixtures/sequence-schema/level4-invalid.md"),
+            Invalid(&[
+                ("/sequence/0/sequence/0/sequence/0/sequence/0/with", "not of type \"object\""),
+                ("/sequence/0/sequence/0/sequence/0/sequence/0/sequence/0/group", "\"execution\""),
+            ]),
+        ),
     ]);
 }
 
@@ -266,7 +275,11 @@ fn sequence_schema_fixtures_are_all_named() {
         "level2-invalid",
         "level3-valid",
         "level3-invalid",
-        "deeper-than-typed-levels",
+        "level4-invalid",
+        "containers-depth4-seq-seq",
+        "containers-depth4-seq-group",
+        "containers-depth4-group-seq",
+        "containers-depth4-group-group",
         "group-execution",
         "group-misspelled-max-parallel",
         "root-fail-fast",

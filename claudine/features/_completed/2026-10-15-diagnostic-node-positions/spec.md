@@ -42,6 +42,12 @@ message_to_agent: |-
     not run locally. See "## Phase 4" in the implementation log.
 implemented: true
 pipeline_step: 5
+canonical_docs:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/errors/file-reference-failures.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
 related:
     - 2026-10-17-content-policy-base-schema
 ---

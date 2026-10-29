@@ -4,30 +4,15 @@
 
 use serde_json::Value;
 
-use super::{EvaluationMode, FunctionBinding, FunctionHandler, ResolutionContext};
+use super::{BoundCall, FunctionBinding, ResolutionContext};
 use crate::markdown::compose::expression::ExpressionError;
 
-pub(super) const BINDINGS: &[FunctionBinding] = &[FunctionBinding {
-    canonical: "as_markdown",
-    aliases: &[],
-    evaluation: EvaluationMode::Context,
-    handler: Some(FunctionHandler::Context(as_markdown_fn)),
-}];
+pub(super) const BINDINGS: &[FunctionBinding] = &[FunctionBinding::context("as_markdown", &[], as_markdown_fn)];
 
-fn as_markdown_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, ExpressionError> {
-    let [content] = args else {
-        return Err(ExpressionError::Other {
-            function: "as_markdown".to_string(),
-            message: format!("requires 1 argument, got {}", args.len()),
-        });
-    };
-    let Some(content) = content.as_str() else {
-        return Err(ExpressionError::ArgType {
-            function: "as_markdown",
-            index: 0,
-            expected: "string",
-            actual_type: super::git::value_type(content),
-        });
+/// `null` passes through without composing anything.
+fn as_markdown_fn(call: &BoundCall<'_>, context: &ResolutionContext) -> Result<Value, ExpressionError> {
+    let Some(content) = call.args().text(0) else {
+        return Ok(Value::Null);
     };
     context.nested_compose.evaluate(content).map(Value::String)
 }
@@ -36,13 +21,13 @@ fn as_markdown_fn(args: &[Value], context: &ResolutionContext) -> Result<Value, 
 mod tests {
     use serde_json::{Value, json};
 
-    use super::super::dispatch_fs;
+    use super::super::call_function;
     use crate::markdown::compose::expression::{ExpressionError, ResolutionContext};
     use crate::markdown::compose::nested::NestedComposeSlot;
 
     #[test]
     fn a_surface_without_a_compose_request_is_a_contract_violation() {
-        let error = dispatch_fs("as_markdown", &[json!("# Title")], &ResolutionContext::default())
+        let error = call_function("as_markdown", &[json!("# Title")], Some(&ResolutionContext::default()))
             .expect("as_markdown is a context function")
             .unwrap_err();
 
@@ -53,23 +38,25 @@ mod tests {
         assert!(error.is_authoring_fatal());
     }
 
+    /// Ledger row 111 (`as_markdown(content: string | null)`): `null` passes
+    /// through without composing, a number arrives as its text, and a list or
+    /// a wrong argument count fails at binding before the handler.
     #[test]
-    fn non_string_arguments_are_argument_type_errors() {
+    fn arguments_bind_before_composing() {
         let context = ResolutionContext {
             nested_compose: NestedComposeSlot::discover(),
             ..ResolutionContext::default()
         };
-        for (argument, actual) in [(json!(42), "number"), (Value::Null, "null"), (json!(["a"]), "array")] {
-            let error = dispatch_fs("as_markdown", &[argument], &context).unwrap().unwrap_err();
-            assert!(
-                matches!(error, ExpressionError::ArgType { function: "as_markdown", index: 0, expected: "string", actual_type } if actual_type == actual),
-                "{actual}: {error:?}"
-            );
+        assert_eq!(call_function("as_markdown", &[Value::Null], Some(&context)).unwrap().unwrap(), Value::Null);
+        for arguments in [vec![json!(["a"])], vec![]] {
+            let error = call_function("as_markdown", &arguments, Some(&context)).unwrap().unwrap_err();
+            assert!(matches!(error, ExpressionError::Call(_)), "{arguments:?}: {error:?}");
+            assert!(error.to_string().contains("as_markdown"), "{error}");
         }
         assert!(context.nested_compose.take_discovered().is_empty());
 
-        let arity = dispatch_fs("as_markdown", &[], &context).unwrap().unwrap_err();
-        assert!(arity.to_string().contains("as_markdown"), "{arity}");
+        assert_eq!(call_function("as_markdown", &[json!(42)], Some(&context)).unwrap().unwrap(), json!(""));
+        assert_eq!(context.nested_compose.take_discovered(), ["42"]);
     }
 
     /// Discovery records what it was given, empty content included, and
@@ -83,7 +70,7 @@ mod tests {
         let clone = context.clone();
 
         for content in ["::shell echo hi", ""] {
-            let value = dispatch_fs("as_markdown", &[json!(content)], &clone).unwrap().unwrap();
+            let value = call_function("as_markdown", &[json!(content)], Some(&clone)).unwrap().unwrap();
             assert_eq!(value, json!(""));
         }
 

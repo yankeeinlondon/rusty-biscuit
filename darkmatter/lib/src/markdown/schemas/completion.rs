@@ -9,6 +9,18 @@
 //! [`for_list_item`], [`for_property_value`], and [`alternatives_for_def`]
 //! answer a second question for editors: which keys and scalar values to
 //! offer inside one incomplete union value, such as an element of `U[]`.
+//! [`for_path`] asks it at any depth, following the cursor's [`PathStep`]s
+//! through inline objects, array elements, and recursive references.
+//!
+//! ## Recursive references
+//!
+//! A recursive named type, or a shared acyclic one, is a [`TypeExpr::Ref`]
+//! into a definition table.
+//! Every entry point here opens a reference only where the position it answers
+//! is one, through a [`DefinitionLookup`] (the [`EffectiveSchema`] itself, or
+//! a table), so descending `tree.children[0].children[0]` opens `item` once
+//! per level and never the definitions the path does not reach. A reference
+//! whose definition is missing offers nothing.
 //!
 //! Three property categories are surfaced by [`for_property`]:
 //!
@@ -37,22 +49,38 @@
 //! ```
 
 use std::borrow::Cow;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use serde_json::Value;
 
 use super::EffectiveSchema;
 use super::discriminant::select_literal_discriminant_arm;
+pub use super::simplified::query::DefinitionLookup;
 use super::simplified::query::{
-    Alternative, SuggestionItem, flattened_alternatives, suggestions_by_alternative, yaml_double_quote,
+    Alternative, SuggestionItem, reachable_definitions, resolve_with_bodies, resolved_alternatives,
+    suggestions_by_resolved_alternative, yaml_double_quote,
 };
 use super::simplified::{
-    Constraint, PropertyAtom, PropertyDef, SchemaArm, SchemaShape, SimplifiedSchema, SimplifiedType,
-    TypeExpr, to_json_schema,
+    Constraint, DefKey, Definition, DefinitionTable, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
+    SimplifiedSchema, SimplifiedType, TypeExpr, to_json_schema_with_definitions,
 };
 use super::validate::ValidatorCache;
 
 static ALTERNATIVE_VALIDATOR_CACHE: LazyLock<ValidatorCache> = LazyLock::new(ValidatorCache::new);
+
+/// Empties this module's process-wide caches (see
+/// [`super::reset_process_caches_for_bench`]).
+pub(crate) fn reset_process_caches() {
+    ALTERNATIVE_VALIDATOR_CACHE.clear();
+}
+
+/// Resolves a reference in the document's table or a trigger payload's, as
+/// [`EffectiveSchema::definition`] does.
+impl DefinitionLookup for EffectiveSchema {
+    fn lookup_definition(&self, key: &DefKey) -> Option<&Definition> {
+        self.definition(key)
+    }
+}
 
 /// Completion data derived from a single property.
 #[derive(Debug, Clone, PartialEq)]
@@ -101,7 +129,7 @@ pub enum CompletionKind {
 /// the spec's intent of "treat the property as that type for the purpose of
 /// completion" without merging competing arms. A resolved union-typed
 /// reference (`U`, `U(required)`, `U[]`) is read through its arms the same
-/// way.
+/// way, and so is a recursive reference whose definition is a union.
 ///
 /// For a **root-level union**, `property` is gathered from every inline arm
 /// that declares it. When every contributing arm is a `file`, each arm's
@@ -112,9 +140,9 @@ pub fn for_property(effective: &EffectiveSchema, property: &str) -> Option<Compl
     match effective.simplified.as_ref()? {
         SimplifiedSchema::Single(shape) => {
             let def = shape.properties.get(property)?;
-            suggestion_from_def(property, def)
+            suggestion_from_def(property, def, effective)
         }
-        SimplifiedSchema::Union(arms) => suggestion_from_union(property, arms),
+        SimplifiedSchema::Union(arms) => suggestion_from_union(property, arms, effective),
     }
 }
 
@@ -130,12 +158,12 @@ pub fn completable_properties(effective: &EffectiveSchema) -> Vec<String> {
         return Vec::new();
     };
     match simplified {
-        SimplifiedSchema::Single(shape) => completable_in_shape(shape),
+        SimplifiedSchema::Single(shape) => completable_in_shape(shape, effective),
         SimplifiedSchema::Union(arms) => {
             let mut out: Vec<String> = Vec::new();
             for arm in arms {
                 if let SchemaArm::Inline(shape) = arm {
-                    for name in completable_in_shape(shape) {
+                    for name in completable_in_shape(shape, effective) {
                         if !out.contains(&name) {
                             out.push(name);
                         }
@@ -147,11 +175,11 @@ pub fn completable_properties(effective: &EffectiveSchema) -> Vec<String> {
     }
 }
 
-fn completable_in_shape(shape: &SchemaShape) -> Vec<String> {
+fn completable_in_shape(shape: &SchemaShape, definitions: &EffectiveSchema) -> Vec<String> {
     shape
         .properties
         .iter()
-        .filter_map(|(name, def)| first_completable_atom(def).map(|_| name.clone()))
+        .filter_map(|(name, def)| first_completable_atom(def, definitions).map(|_| name.clone()))
         .collect()
 }
 
@@ -167,14 +195,18 @@ fn completable_in_shape(shape: &SchemaShape) -> Vec<String> {
 /// Otherwise the first contributing atom wins, matching the single-shape
 /// "first completable arm" rule. Unresolved [`SchemaArm::FileRef`] arms are
 /// skipped.
-fn suggestion_from_union(property: &str, arms: &[SchemaArm]) -> Option<CompletionSuggestion> {
-    let alternatives: Vec<Alternative<'_>> = arms
+fn suggestion_from_union<'a>(
+    property: &str,
+    arms: &'a [SchemaArm],
+    definitions: &'a EffectiveSchema,
+) -> Option<CompletionSuggestion> {
+    let alternatives: Vec<Alternative<'a>> = arms
         .iter()
         .filter_map(|arm| match arm {
             SchemaArm::Inline(shape) => shape.properties.get(property),
             SchemaArm::FileRef(_) => None,
         })
-        .filter_map(first_completable_atom)
+        .filter_map(|def| first_completable_atom(def, definitions))
         .collect();
 
     let first = *alternatives.first()?;
@@ -211,8 +243,12 @@ fn suggestion_from_union(property: &str, arms: &[SchemaArm]) -> Option<Completio
     })
 }
 
-fn suggestion_from_def(property: &str, def: &PropertyDef) -> Option<CompletionSuggestion> {
-    let alternative = first_completable_atom(def)?;
+fn suggestion_from_def(
+    property: &str,
+    def: &PropertyDef,
+    definitions: &EffectiveSchema,
+) -> Option<CompletionSuggestion> {
+    let alternative = first_completable_atom(def, definitions)?;
     let atom = alternative.atom;
     let kind = kind_for_atom(atom)?;
     Some(CompletionSuggestion {
@@ -226,9 +262,10 @@ fn suggestion_from_def(property: &str, def: &PropertyDef) -> Option<CompletionSu
 
 /// The first completable alternative of `def`, looking through a resolved
 /// union-typed reference so `U(required)` and `U[]` complete like the
-/// property-level union `U` expands to.
-fn first_completable_atom(def: &PropertyDef) -> Option<Alternative<'_>> {
-    flattened_alternatives(def)
+/// property-level union `U` expands to, and through a recursive reference to
+/// its definition's alternatives.
+fn first_completable_atom<'a>(def: &'a PropertyDef, definitions: &'a EffectiveSchema) -> Option<Alternative<'a>> {
+    resolved_alternatives(def, definitions)
         .into_iter()
         .find(|alternative| is_completable(&alternative.atom.ty))
 }
@@ -256,8 +293,14 @@ fn is_completable(ty: &TypeExpr) -> bool {
         // property level — they describe a typed shape. Imported types are
         // resolved before completion runs; an unresolved one is not
         // completable here. A union never reaches here: callers read its
-        // arms through `flattened_alternatives`.
-        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => false,
+        // arms through `resolved_alternatives`, which also opens a reference,
+        // so a `Ref` here is one whose definition is missing.
+        TypeExpr::InlineObject(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Union(_)
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => false,
     }
 }
 
@@ -275,7 +318,12 @@ fn match_groups(atom: &PropertyAtom) -> Vec<Vec<String>> {
 fn kind_for_atom(atom: &PropertyAtom) -> Option<CompletionKind> {
     let ty = match &atom.ty {
         TypeExpr::Primitive(ty) => *ty,
-        TypeExpr::InlineObject(_) | TypeExpr::Imported { .. } | TypeExpr::Union(_) => return None,
+        TypeExpr::InlineObject(_)
+        | TypeExpr::Imported { .. }
+        | TypeExpr::Union(_)
+        | TypeExpr::Tuple(_)
+        | TypeExpr::Function(_)
+        | TypeExpr::Ref(_) => return None,
     };
     match ty {
         SimplifiedType::File => {
@@ -382,14 +430,16 @@ pub struct AlternativeValue {
 /// effective schema has no SimplifiedSchema projection. A root-level union
 /// contributes the property's alternatives from every inline arm that
 /// declares it. Each element is judged on its own, so neighboring items can
-/// narrow to different alternatives. See [`alternatives_for_def`].
+/// narrow to different alternatives. A recursive reference resolves through
+/// `effective`. See [`alternatives_for_def_in`].
 pub fn for_list_item(
     effective: &EffectiveSchema,
     property: &str,
     item: &Value,
 ) -> Option<AlternativeCompletion> {
-    let def = property_def(effective, property)?;
-    alternatives_for_def(&def, AlternativeSite::Item, item)
+    let schema = effective.simplified.as_ref()?;
+    let def = root_property_def(schema, property)?;
+    alternatives_for_def_in(&def, AlternativeSite::Item, item, effective)
 }
 
 /// Completion for the value of `property` itself, given the value as
@@ -401,8 +451,154 @@ pub fn for_property_value(
     property: &str,
     value: &Value,
 ) -> Option<AlternativeCompletion> {
-    let def = property_def(effective, property)?;
-    alternatives_for_def(&def, AlternativeSite::Value, value)
+    let schema = effective.simplified.as_ref()?;
+    let def = root_property_def(schema, property)?;
+    alternatives_for_def_in(&def, AlternativeSite::Value, value, effective)
+}
+
+/// One step of a cursor path from the frontmatter root, as [`for_path`] and
+/// [`def_at_path`] read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathStep<'a> {
+    /// A mapping key.
+    Key(&'a str),
+    /// An element of an array. The position only locates the authored element
+    /// that narrows a discriminated union; an element not authored yet (an
+    /// index past the end) has the same type as any other.
+    Index(usize),
+}
+
+/// The keys and values to offer for the value at `path`, given the whole
+/// authored frontmatter mapping (`Value::Null` when none is available).
+///
+/// `path` starts at a top-level property and may cross inline objects, array
+/// elements, and recursive references to any depth: `[Key("tree"),
+/// Key("children"), Index(0), Key("children"), Index(0)]` offers the keys of
+/// the second-level `item` even when that element is still empty or missing
+/// required keys. Ending on an [`PathStep::Index`] completes one element
+/// ([`AlternativeSite::Item`]); ending on a key completes that property's
+/// value. Each ancestor that is a discriminated union narrows to the arm its
+/// authored literal tag selects, as [`alternatives_for_def_in`] narrows the
+/// final value; without a tag every object arm contributes.
+///
+/// Returns `None` for an empty path, a path that leaves the schema, or a
+/// SimplifiedSchema-less effective schema. See [`for_path_in`] for the
+/// reference-resolution contract.
+pub fn for_path(effective: &EffectiveSchema, frontmatter: &Value, path: &[PathStep<'_>]) -> Option<AlternativeCompletion> {
+    for_path_in(effective.simplified.as_ref()?, effective, frontmatter, path)
+}
+
+/// [`for_path`] over `schema`, resolving recursive references through
+/// `definitions`.
+///
+/// ## Notes
+///
+/// Lazy: a definition is looked up only where the path stands on a reference
+/// (or the completed value is one), once per reference at that position, so
+/// `item[]` reached through `n` levels of `children` costs `n + 1` lookups and
+/// a definition the path does not reach is never opened. A lookup that
+/// returns `None` ends the descent with no completion there.
+pub fn for_path_in<L>(
+    schema: &SimplifiedSchema,
+    definitions: &L,
+    frontmatter: &Value,
+    path: &[PathStep<'_>],
+) -> Option<AlternativeCompletion>
+where
+    L: DefinitionLookup + ?Sized,
+{
+    let (def, site) = def_at_path(schema, definitions, frontmatter, path)?;
+    let value = instance_at(frontmatter, path).unwrap_or(&Value::Null);
+    alternatives_for_def_in(&def, site, value, definitions)
+}
+
+/// The definition governing the value at `path` and where that value sits in
+/// it: [`AlternativeSite::Value`] for a path ending on a key, the definition's
+/// property; [`AlternativeSite::Item`] for a path ending on an index, the
+/// definition of the array that holds the element.
+///
+/// The returned definition may itself be a reference (an element of `item[]`
+/// is the `Ref` of `item`); pass it with `definitions` to
+/// [`alternatives_for_def_in`] or [`resolved_alternatives`] to open it. Narrowing,
+/// laziness, and `None` are as for [`for_path`] and [`for_path_in`]. A key
+/// that several unnarrowed object arms declare resolves to the union of their
+/// atoms.
+///
+/// [`resolved_alternatives`]: super::simplified::query::resolved_alternatives
+pub fn def_at_path<'a, L>(
+    schema: &'a SimplifiedSchema,
+    definitions: &'a L,
+    frontmatter: &Value,
+    path: &[PathStep<'_>],
+) -> Option<(Cow<'a, PropertyDef>, AlternativeSite)>
+where
+    L: DefinitionLookup + ?Sized,
+{
+    let (PathStep::Key(first), rest) = path.split_first()? else {
+        return None;
+    };
+    let mut def = root_property_def(schema, first)?;
+    let mut site = AlternativeSite::Value;
+    for (offset, step) in rest.iter().enumerate() {
+        match step {
+            PathStep::Index(_) if site == AlternativeSite::Value => site = AlternativeSite::Item,
+            // An element of an element has no leaf alternative to descend.
+            PathStep::Index(_) => return None,
+            PathStep::Key(key) => {
+                let parent = instance_at(frontmatter, &path[..=offset]).unwrap_or(&Value::Null);
+                def = match def {
+                    Cow::Borrowed(def) => property_in(def, site, key, parent, definitions)?,
+                    Cow::Owned(def) => Cow::Owned(property_in(&def, site, key, parent, definitions)?.into_owned()),
+                };
+                site = AlternativeSite::Value;
+            }
+        }
+    }
+    Some((def, site))
+}
+
+/// The definition of `key` in the object alternatives of `def` at `site`,
+/// narrowed by the authored `parent` object's literal tag.
+fn property_in<'a, L>(
+    def: &'a PropertyDef,
+    site: AlternativeSite,
+    key: &str,
+    parent: &Value,
+    definitions: &'a L,
+) -> Option<Cow<'a, PropertyDef>>
+where
+    L: DefinitionLookup + ?Sized,
+{
+    let is_array = site == AlternativeSite::Item;
+    let shapes: Vec<&SchemaShape> = resolved_alternatives(def, definitions)
+        .into_iter()
+        .filter(|alternative| alternative.is_array == is_array)
+        .filter_map(|alternative| match &alternative.atom.ty {
+            TypeExpr::InlineObject(shape) => Some(shape),
+            _ => None,
+        })
+        .collect();
+    let selected = parent.is_object().then(|| {
+        let projections: Vec<Value> = shapes.iter().map(|shape| shape_discriminant_json(shape)).collect();
+        select_literal_discriminant_arm(&projections, parent)
+    });
+    let defs: Vec<&PropertyDef> = match selected.flatten() {
+        Some(index) => shapes[index].properties.get(key).into_iter().collect(),
+        None => shapes.iter().filter_map(|shape| shape.properties.get(key)).collect(),
+    };
+    match defs.as_slice() {
+        [] => None,
+        [only] => Some(Cow::Borrowed(*only)),
+        _ => union_of(defs).map(Cow::Owned),
+    }
+}
+
+/// The authored value at `path` in `frontmatter`, if it is there.
+fn instance_at<'v>(frontmatter: &'v Value, path: &[PathStep<'_>]) -> Option<&'v Value> {
+    path.iter().try_fold(frontmatter, |value, step| match step {
+        PathStep::Key(key) => value.get(*key),
+        PathStep::Index(index) => value.get(*index),
+    })
 }
 
 /// Whether `value` is a valid instance of one leaf alternative (an
@@ -414,26 +610,93 @@ pub fn for_property_value(
 /// one accepts it. It is structural and passive: a `file` alternative is
 /// judged by syntax, never by probing the filesystem, so it must not authorize
 /// a transformation.
+///
+/// An alternative that is or contains a recursive reference has no
+/// definition in scope here and accepts nothing; use [`alternative_accepts_in`].
 pub fn alternative_accepts(atom: &PropertyAtom, value: &Value) -> bool {
-    let mut present = atom.clone();
-    present.constraints.push(Constraint::Required);
-    let mut shape = SchemaShape::default();
-    shape
-        .properties
-        .insert("value".to_string(), PropertyDef::Single(present));
-    let Ok(schema) = to_json_schema(&SimplifiedSchema::Single(shape)) else {
-        return false;
-    };
-    ALTERNATIVE_VALIDATOR_CACHE
-        .structural_validator_for(&schema)
-        .is_ok_and(|validator| validator.is_valid(&serde_json::json!({ "value": value })))
+    alternative_accepts_in(atom, value, &DefinitionTable::default())
+}
+
+/// [`alternative_accepts`] with recursive references resolved through
+/// `definitions`: the alternative is lowered with every definition it reaches,
+/// so a value is judged against the recursive type at any depth. `false` when
+/// a reached definition is missing.
+pub fn alternative_accepts_in<L>(atom: &PropertyAtom, value: &Value, definitions: &L) -> bool
+where
+    L: DefinitionLookup + ?Sized,
+{
+    AlternativeMatcher::prepare(atom, definitions).accepts(value)
+}
+
+/// [`alternative_accepts_in`] for one alternative, lowered and compiled once
+/// so it can judge many values. Cloning shares the compiled validator.
+#[derive(Clone)]
+pub struct AlternativeMatcher {
+    /// `None` when the alternative reaches a missing definition or does not
+    /// lower to a valid schema: it accepts nothing.
+    validator: Option<Arc<jsonschema::Validator>>,
+}
+
+impl AlternativeMatcher {
+    /// Lowers `atom` as a present value, with every definition it reaches
+    /// through `definitions`, and fetches or compiles its structural
+    /// validator.
+    pub fn prepare<L>(atom: &PropertyAtom, definitions: &L) -> Self
+    where
+        L: DefinitionLookup + ?Sized,
+    {
+        crate::note_work!(AlternativeMatcherPrepare);
+        let validator = reachable_definitions(atom, definitions).and_then(|table| {
+            let mut present = atom.clone();
+            present.constraints.push(Constraint::Required);
+            let mut shape = SchemaShape::default();
+            shape
+                .properties
+                .insert("value".to_string(), PropertyDef::Single(present));
+            let schema = to_json_schema_with_definitions(&SimplifiedSchema::Single(shape), &table).ok()?;
+            ALTERNATIVE_VALIDATOR_CACHE.structural_validator_for(&schema).ok()
+        });
+        Self { validator }
+    }
+
+    /// Whether `value` is a valid instance of the prepared alternative.
+    pub fn accepts(&self, value: &Value) -> bool {
+        self.validator
+            .as_ref()
+            .is_some_and(|validator| validator.is_valid(&serde_json::json!({ "value": value })))
+    }
+}
+
+/// A content fingerprint of `atom` together with every definition it reaches
+/// through `definitions`: two alternatives with equal fingerprints prepare
+/// the same [`AlternativeMatcher`], so a caller can key prepared matchers on
+/// it across schema assemblies. Taking one builds no schema and allocates
+/// only the traversal's reference keys. `None` when a reached definition is
+/// missing (the alternative accepts nothing). Stable within one process only.
+pub fn alternative_fingerprint<L>(atom: &PropertyAtom, definitions: &L) -> Option<u64>
+where
+    L: DefinitionLookup + ?Sized,
+{
+    super::simplified::query::reachable_fingerprint(atom, definitions)
+}
+
+/// [`alternatives_for_def_in`] with no definition in scope: a recursive
+/// reference offers nothing.
+pub fn alternatives_for_def(
+    def: &PropertyDef,
+    site: AlternativeSite,
+    value: &Value,
+) -> Option<AlternativeCompletion> {
+    alternatives_for_def_in(def, site, value, &DefinitionTable::default())
 }
 
 /// Completion for one incomplete value of `def` at `site`, given the value as
-/// authored so far.
+/// authored so far, with recursive references opened through `definitions`.
 ///
-/// The applicable alternatives follow the authored value's JSON kind, which
-/// no alternative of another kind can ever accept: `null` keeps every
+/// The alternatives are `def`'s, with a reference replaced by its
+/// definition's (one level: a reference nested in a property of the result is
+/// not opened). They follow the authored value's JSON kind, which no
+/// alternative of another kind can ever accept: `null` keeps every
 /// alternative; an object keeps the inline-object alternatives and narrows to
 /// one when [`select_literal_discriminant_arm`] picks it; a string, number, or
 /// boolean keeps the scalar alternatives; an array keeps none. A missing,
@@ -445,13 +708,18 @@ pub fn alternative_accepts(atom: &PropertyAtom, value: &Value) -> bool {
 ///
 /// Passive: reads the resolved definition only, with no I/O or expression
 /// evaluation.
-pub fn alternatives_for_def(
+pub fn alternatives_for_def_in<L>(
     def: &PropertyDef,
     site: AlternativeSite,
     value: &Value,
-) -> Option<AlternativeCompletion> {
+    definitions: &L,
+) -> Option<AlternativeCompletion>
+where
+    L: DefinitionLookup + ?Sized,
+{
     let is_array = site == AlternativeSite::Item;
-    let alternatives: Vec<&PropertyAtom> = flattened_alternatives(def)
+    let (resolved, bodies) = resolve_with_bodies(def, definitions);
+    let alternatives: Vec<&PropertyAtom> = resolved
         .into_iter()
         .filter(|alternative| alternative.is_array == is_array)
         .map(|alternative| alternative.atom)
@@ -468,7 +736,7 @@ pub fn alternatives_for_def(
 
     // Candidates are judged against the whole definition, so a list a union
     // stores on one arm keeps the entries its sibling arms accept.
-    let suggestions = suggestions_by_alternative("item", def);
+    let suggestions = suggestions_by_resolved_alternative("item", def, &bodies);
     let mut completion = AlternativeCompletion {
         is_array,
         selected_arm,
@@ -489,43 +757,53 @@ pub fn alternatives_for_def(
                 add_values(&mut completion.values, atom, arm, suggested);
             }
             // An unresolved import has no shape to offer; flattening never
-            // yields a union.
-            TypeExpr::Imported { .. } | TypeExpr::Union(_) => {}
+            // yields a union; a reference left here could not be opened.
+            TypeExpr::Imported { .. }
+            | TypeExpr::Union(_)
+            | TypeExpr::Tuple(_)
+            | TypeExpr::Function(_)
+            | TypeExpr::Ref(_) => {}
         }
     }
     Some(completion)
 }
 
-/// `property`'s definition; across a root union, every declaring inline arm's
-/// atoms as one property-level union.
-fn property_def<'a>(effective: &'a EffectiveSchema, property: &str) -> Option<Cow<'a, PropertyDef>> {
-    match effective.simplified.as_ref()? {
+/// `property`'s top-level definition; across a root union, every declaring
+/// inline arm's atoms as one property-level union.
+fn root_property_def<'a>(schema: &'a SimplifiedSchema, property: &str) -> Option<Cow<'a, PropertyDef>> {
+    match schema {
         SimplifiedSchema::Single(shape) => shape.properties.get(property).map(Cow::Borrowed),
-        SimplifiedSchema::Union(arms) => {
-            let mut atoms: Vec<PropertyAtom> = Vec::new();
-            for arm in arms {
-                let SchemaArm::Inline(shape) = arm else {
-                    continue;
-                };
-                let Some(def) = shape.properties.get(property) else {
-                    continue;
-                };
-                let declared = match def {
-                    PropertyDef::Single(atom) => std::slice::from_ref(atom),
-                    PropertyDef::Union(atoms) => atoms.as_slice(),
-                };
-                for atom in declared {
-                    if !atoms.contains(atom) {
-                        atoms.push(atom.clone());
-                    }
-                }
-            }
-            match atoms.len() {
-                0 => None,
-                1 => atoms.pop().map(|atom| Cow::Owned(PropertyDef::Single(atom))),
-                _ => Some(Cow::Owned(PropertyDef::Union(atoms))),
+        SimplifiedSchema::Union(arms) => union_of(
+            arms.iter()
+                .filter_map(|arm| match arm {
+                    SchemaArm::Inline(shape) => shape.properties.get(property),
+                    SchemaArm::FileRef(_) => None,
+                })
+                .collect(),
+        )
+        .map(Cow::Owned),
+    }
+}
+
+/// The atoms of `defs` as one definition, without duplicates: `None` for no
+/// atom, a single atom alone, otherwise a property-level union.
+fn union_of(defs: Vec<&PropertyDef>) -> Option<PropertyDef> {
+    let mut atoms: Vec<PropertyAtom> = Vec::new();
+    for def in defs {
+        let declared = match def {
+            PropertyDef::Single(atom) => std::slice::from_ref(atom),
+            PropertyDef::Union(atoms) => atoms.as_slice(),
+        };
+        for atom in declared {
+            if !atoms.contains(atom) {
+                atoms.push(atom.clone());
             }
         }
+    }
+    match atoms.len() {
+        0 => None,
+        1 => atoms.pop().map(PropertyDef::Single),
+        _ => Some(PropertyDef::Union(atoms)),
     }
 }
 
@@ -541,11 +819,16 @@ fn applies_to(atom: &PropertyAtom, value: &Value) -> bool {
 
 /// The minimal JSON [`select_literal_discriminant_arm`] reads: an inline
 /// object's `literal(...)` keys as consts. A scalar alternative projects to
-/// `{}` so indexes stay aligned.
+/// `{}` so indexes stay aligned. A recursive reference was already opened to
+/// its definition's object, so the unscoped selector needs no `$defs`.
 fn discriminant_json(atom: &PropertyAtom) -> Value {
-    let TypeExpr::InlineObject(shape) = &atom.ty else {
-        return serde_json::json!({});
-    };
+    match &atom.ty {
+        TypeExpr::InlineObject(shape) => shape_discriminant_json(shape),
+        _ => serde_json::json!({}),
+    }
+}
+
+fn shape_discriminant_json(shape: &SchemaShape) -> Value {
     let mut properties = serde_json::Map::new();
     for (key, def) in &shape.properties {
         if let PropertyDef::Single(child) = def

@@ -162,24 +162,21 @@ fn frontmatter_and_body_calls_return_composed_markdown_with_authored_frontmatter
     assert!(!text.contains("leaked:"), "request state must not serialize: {text}");
 }
 
-/// Adversarial arguments: an empty string composes to nothing, while a
-/// non-string or null argument is the usual argument-type error, fatal in a
-/// document body.
+/// Adversarial arguments: an empty string composes to nothing. Ledger row
+/// 111 (`as_markdown(content: string | null)`): a number composes as its text,
+/// and a list is a binding type error, fatal in a document body.
 #[test]
 fn empty_and_non_string_arguments() {
     let (composed, _) = compose(&Markdown::from("empty=[{{ as_markdown(\"\") }}]\n"), probe_options());
     assert!(composed.content().contains("empty=[]"), "{}", composed.content());
 
-    for (actual, body) in [
-        ("number", "number={{ as_markdown(42) }}\n"),
-        ("null", "null={{ as_markdown(missing) }}\n"),
-    ] {
-        let error = Markdown::from(body)
-            .compose_with(&crate::request_support::request(probe_options()))
-            .expect_err("a non-string argument fails the document");
-        let expected = format!("as_markdown() argument 0: expected string, got {actual}");
-        assert!(error.to_string().contains(&expected), "{expected}: {error}");
-    }
+    let (composed, _) = compose(&Markdown::from("number=[{{ as_markdown(42) }}]\n"), probe_options());
+    assert!(composed.content().contains("number=[42]"), "{}", composed.content());
+
+    let error = Markdown::from("list={{ as_markdown([\"a\"]) }}\n")
+        .compose_with(&crate::request_support::request(probe_options()))
+        .expect_err("a list argument fails the document");
+    assert!(error.to_string().contains("as_markdown: invalid arguments"), "{error}");
 }
 
 /// Nested diagnostics are tagged with their nested stage, and a nested

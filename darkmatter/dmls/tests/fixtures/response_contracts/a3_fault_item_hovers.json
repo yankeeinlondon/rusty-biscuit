@@ -1,0 +1,44 @@
+[
+  {
+    "at": "unknown verb",
+    "hover": null
+  },
+  {
+    "at": "undeclared read in a verb interpolation",
+    "hover": {
+      "contents": {
+        "kind": "markdown",
+        "value": "**Expression**\n\n`nope_root`"
+      },
+      "range": {
+        "start": {
+          "line": 40,
+          "character": 13
+        },
+        "end": {
+          "line": 40,
+          "character": 28
+        }
+      }
+    }
+  },
+  {
+    "at": "err read in a guard",
+    "hover": {
+      "contents": {
+        "kind": "markdown",
+        "value": "**Expression**\n\n`err.kind == \"timeout\"`\n\n**`err`** — The failure the run is handling.\n\nIn `initialize`: unavailable (claudine.event-has-no-error)\n\n**`err.kind`** — `string(generated;required)` — Deprecated spelling of `category`; a facet-less action failure carries the failure's source type."
+      },
+      "range": {
+        "start": {
+          "line": 41,
+          "character": 12
+        },
+        "end": {
+          "line": 41,
+          "character": 33
+        }
+      }
+    }
+  }
+]

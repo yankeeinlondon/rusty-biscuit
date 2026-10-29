@@ -3,6 +3,7 @@ mod command;
 mod completion;
 mod enums;
 mod parsers;
+pub mod policy;
 mod target;
 mod wrappers;
 
@@ -14,7 +15,7 @@ pub use completion::{
     complete_theme_names,
 };
 pub use enums::{
-    CodeBlockOutput, Feature, GraphFormat, HashKind, OutputFormat, RemoteFreshness,
+    CodeBlockOutput, ComposeOutputFormat, Feature, GraphFormat, HashKind, OutputFormat, RemoteFreshness,
     SchemaDetectFormat, SchemaValidateFormat, ValidateOutputFormat,
 };
 pub use parsers::{

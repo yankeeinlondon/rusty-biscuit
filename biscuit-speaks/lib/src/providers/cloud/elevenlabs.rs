@@ -33,7 +33,7 @@
 mod snapshot;
 
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -44,7 +44,7 @@ use schematic_schema::elevenlabs::{
 use schematic_schema::prelude::{Credential, ElevenLabs, TransportError};
 use schematic_schema::schematic_runtime::{ApiError, CallError, ErrorKind, NoDeclaredError};
 
-use crate::audio_cache::{CacheKey, write_atomic};
+use crate::audio_cache::{CacheError, CacheKey, write_atomic};
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
 #[cfg(feature = "playa")]
@@ -63,6 +63,10 @@ const DEFAULT_MODEL_ID: &str = "eleven_multilingual_v2";
 
 /// Voices requested per `/v2/voices` page; the API's maximum.
 const VOICES_PAGE_SIZE: i64 = 100;
+
+/// Publishes bytes at a path atomically; always [`write_atomic`] outside
+/// tests, which substitute one to observe where publication runs.
+type AtomicWriter = Arc<dyn Fn(&Path, &[u8]) -> Result<(), CacheError> + Send + Sync>;
 
 /// ElevenLabs cloud TTS provider.
 ///
@@ -99,6 +103,9 @@ pub struct ElevenLabsProvider {
     default_voice_id: String,
     /// Default model ID to use.
     default_model_id: String,
+    /// Publishes audio and default-voice records; called only on the
+    /// blocking pool.
+    writer: AtomicWriter,
 }
 
 impl std::fmt::Debug for ElevenLabsProvider {
@@ -182,6 +189,7 @@ impl ElevenLabsProvider {
             account_context: snapshot::account_context(base_url),
             default_voice_id: DEFAULT_VOICE_ID.into(),
             default_model_id: DEFAULT_MODEL_ID.into(),
+            writer: Arc::new(write_atomic),
         }
     }
 
@@ -206,6 +214,7 @@ impl ElevenLabsProvider {
             account_context: None,
             default_voice_id: DEFAULT_VOICE_ID.into(),
             default_model_id: DEFAULT_MODEL_ID.into(),
+            writer: Arc::new(write_atomic),
         }
     }
 
@@ -213,6 +222,14 @@ impl ElevenLabsProvider {
     #[cfg(test)]
     pub(crate) fn with_account_context(mut self, account_context: Option<String>) -> Self {
         self.account_context = account_context;
+        self
+    }
+
+    /// Publish audio and default-voice records through `writer` instead of
+    /// [`write_atomic`].
+    #[cfg(test)]
+    pub(crate) fn with_writer(mut self, writer: AtomicWriter) -> Self {
+        self.writer = writer;
         self
     }
 
@@ -453,14 +470,33 @@ impl ElevenLabsProvider {
         let request = CreateSpeechRequest::new(voice_id.to_string(), body);
 
         let audio_bytes = self.transport.create_speech(request).await?;
+        let audio_size = audio_bytes.len();
 
-        // Write to cache atomically
-        write_atomic(&cache_path, &audio_bytes).map_err(|e| TtsError::TempFileError {
-            source: std::io::Error::other(e.to_string()),
-        })?;
+        // The whole atomic publication runs, and is awaited, on the blocking
+        // pool: its fsync must not stall the executor worker. The closure owns
+        // its inputs, so a dropped caller leaves it to publish or clean up.
+        let writer = Arc::clone(&self.writer);
+        let destination = cache_path.clone();
+        let published =
+            tokio::task::spawn_blocking(move || writer(&destination, &audio_bytes)).await;
+        match published {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                return Err(TtsError::TempFileError {
+                    source: std::io::Error::other(error.to_string()),
+                });
+            }
+            Err(error) => {
+                return Err(TtsError::TempFileError {
+                    source: std::io::Error::other(format!(
+                        "audio cache publication did not complete: {error}"
+                    )),
+                });
+            }
+        }
 
         tracing::debug!(
-            audio_size = audio_bytes.len(),
+            audio_size,
             cache_path = %cache_path.display(),
             "Saved ElevenLabs audio to cache"
         );
@@ -562,8 +598,10 @@ impl ElevenLabsProvider {
 
     /// Select, and record a selection made from the account's voice list.
     ///
-    /// A record that cannot be written only costs a later detached request
-    /// its cache hit, so the failure is logged rather than returned.
+    /// The record is published on the blocking pool and awaited. A record
+    /// that cannot be written, including one whose writer panicked, only
+    /// costs a later detached request its cache hit, so the failure is
+    /// logged rather than returned.
     async fn select_and_record(&self, config: &TtsConfig) -> Selection {
         let selection = self.select(config).await;
         if selection.source == VoiceSource::Account
@@ -576,8 +614,15 @@ impl ElevenLabsProvider {
                 account_context: account_context.clone(),
                 written_at: self.clock.now_unix_seconds(),
             };
-            if let Err(error) = snapshot::write(&record) {
-                tracing::warn!(%error, "Failed to record the ElevenLabs default voice");
+            let writer = Arc::clone(&self.writer);
+            match tokio::task::spawn_blocking(move || snapshot::write(&record, &*writer)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    tracing::warn!(%error, "Failed to record the ElevenLabs default voice");
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "Recording the ElevenLabs default voice did not complete");
+                }
             }
         }
         selection
@@ -2241,6 +2286,83 @@ mod tests {
         assert_eq!(fixture.audio_files(), 0);
     }
 
+    struct InterruptedSpeech {
+        fail: bool,
+        started: tokio::sync::Notify,
+        dropped: std::sync::atomic::AtomicBool,
+    }
+
+    impl ElevenLabsTransport for InterruptedSpeech {
+        fn list_voices(&self) -> TransportFuture<'_, Result<ListVoicesResponse, TtsError>> {
+            panic!("an explicit voice must not list voices");
+        }
+
+        fn create_speech(
+            &self,
+            _request: CreateSpeechRequest,
+        ) -> TransportFuture<'_, Result<Vec<u8>, TtsError>> {
+            Box::pin(async move {
+                if self.fail {
+                    return Err(TtsError::HttpError {
+                        provider: "elevenlabs".into(),
+                        message: "scripted synthesis failure".into(),
+                    });
+                }
+                struct OnDrop<'a>(&'a std::sync::atomic::AtomicBool);
+                impl Drop for OnDrop<'_> {
+                    fn drop(&mut self) {
+                        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+                let _pending = OnDrop(&self.dropped);
+                self.started.notify_one();
+                std::future::pending().await
+            })
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn a_failed_synthesis_prepares_and_records_nothing() {
+        let fixture = RecordFixture::new();
+        let transport = Arc::new(InterruptedSpeech {
+            fail: true,
+            started: tokio::sync::Notify::new(),
+            dropped: std::sync::atomic::AtomicBool::new(false),
+        });
+        let provider = ElevenLabsProvider::with_transport(transport, Arc::new(fake::FakeClock::at(NOW)))
+            .with_account_context(Some(ACCOUNT.into()));
+        let result = provider.prepare(TEXT, &female().with_voice("f1")).await;
+        assert!(matches!(result, Err(TtsError::HttpError { message, .. }) if message == "scripted synthesis failure"));
+        assert_eq!(fixture.audio_files(), 0);
+        assert!(fixture.records().is_empty());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn cancelling_synthesis_drops_the_request_without_publishing_audio() {
+        let fixture = RecordFixture::new();
+        let transport = Arc::new(InterruptedSpeech {
+            fail: false,
+            started: tokio::sync::Notify::new(),
+            dropped: std::sync::atomic::AtomicBool::new(false),
+        });
+        let provider = ElevenLabsProvider::with_transport(
+            Arc::clone(&transport) as Arc<dyn ElevenLabsTransport>,
+            Arc::new(fake::FakeClock::at(NOW)),
+        )
+        .with_account_context(Some(ACCOUNT.into()));
+        let task = tokio::spawn(async move { provider.prepare(TEXT, &female().with_voice("f1")).await });
+        tokio::time::timeout(std::time::Duration::from_secs(2), transport.started.notified())
+            .await
+            .expect("the synthesis request starts");
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(transport.dropped.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(fixture.audio_files(), 0);
+        assert!(fixture.records().is_empty());
+    }
+
     #[tokio::test]
     #[serial_test::serial]
     async fn a_requested_voice_prepares_without_listing_or_recording() {
@@ -2485,6 +2607,226 @@ mod tests {
         assert_eq!(calls[1].voice_id, "f1", "not the account's new default");
         assert_eq!(calls[1].speed.as_deref(), Some("1.2"));
         assert_eq!(fixture.audio_files(), 1);
+    }
+
+    // ========================================================================
+    // Publication on the blocking pool
+    // ========================================================================
+
+    /// How long a gated writer waits to be released. This is the test's own
+    /// watchdog: a Tokio timeout cannot fire while the runtime's only worker
+    /// is blocked inside an inline write.
+    const RELEASE_WATCHDOG: std::time::Duration = std::time::Duration::from_millis(1500);
+
+    /// The test side of [`gated_writer`].
+    struct Gate {
+        /// Each path a write was entered for, in order.
+        entered: tokio::sync::mpsc::UnboundedReceiver<PathBuf>,
+        release: std::sync::mpsc::Sender<()>,
+        /// Each path a released write finished publishing.
+        published: tokio::sync::mpsc::UnboundedReceiver<PathBuf>,
+        /// Set when a write was never released, as happens when it runs on
+        /// the runtime thread that would have to release it.
+        timed_out: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl Gate {
+        /// Wait for the next write to start, then let it publish.
+        ///
+        /// The release is best effort: a write that ran inline has already
+        /// timed out and dropped its receiver, which `timed_out` reports.
+        async fn release_next(&mut self) -> PathBuf {
+            let path = self.entered.recv().await.expect("a write starts");
+            let _ = self.release.send(());
+            path
+        }
+
+        fn timed_out(&self) -> bool {
+            self.timed_out.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    /// A writer that reports entry and blocks until another task on the
+    /// test's runtime releases it, then publishes with [`write_atomic`].
+    ///
+    /// An inline write blocks that runtime, so the release cannot arrive:
+    /// the writer gives up after [`RELEASE_WATCHDOG`] and fails without
+    /// publishing, and every thread the test started finishes.
+    fn gated_writer() -> (AtomicWriter, Gate) {
+        let (entered_tx, entered) = tokio::sync::mpsc::unbounded_channel();
+        let (published_tx, published) = tokio::sync::mpsc::unbounded_channel();
+        let (release, release_rx) = std::sync::mpsc::channel::<()>();
+        let release_rx = std::sync::Mutex::new(release_rx);
+        let timed_out = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = Arc::clone(&timed_out);
+        let writer: AtomicWriter = Arc::new(move |path: &Path, data: &[u8]| {
+            let _ = entered_tx.send(path.to_path_buf());
+            if release_rx.lock().unwrap().recv_timeout(RELEASE_WATCHDOG).is_err() {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                return Err(CacheError::WriteError(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "never released: the write blocked the async worker",
+                )));
+            }
+            write_atomic(path, data)?;
+            let _ = published_tx.send(path.to_path_buf());
+            Ok(())
+        });
+        let gate = Gate {
+            entered,
+            release,
+            published,
+            timed_out,
+        };
+        (writer, gate)
+    }
+
+    /// Release the next `count` writes from a separate task on the runtime.
+    fn release_writes(mut gate: Gate, count: usize) -> tokio::task::JoinHandle<(Gate, Vec<PathBuf>)> {
+        tokio::spawn(async move {
+            let mut paths = Vec::new();
+            for _ in 0..count {
+                paths.push(gate.release_next().await);
+            }
+            (gate, paths)
+        })
+    }
+
+    fn in_dir(path: &Path, fixture: &RecordFixture, dir: &str) -> bool {
+        path.parent() == Some(fixture.root.path().join(dir).as_path())
+    }
+
+    /// A cache miss for a default voice publishes the record and then the
+    /// audio, each on the blocking pool while the runtime thread is free.
+    #[tokio::test(flavor = "current_thread")]
+    #[serial_test::serial]
+    async fn default_voice_preparation_publishes_record_and_audio_off_the_async_worker() {
+        let fixture = RecordFixture::new();
+        let transport = listed_voices();
+        let (writer, gate) = gated_writer();
+        let releaser = release_writes(gate, 2);
+        let prepared = recording_provider(&transport, NOW, Some(ACCOUNT))
+            .with_writer(writer)
+            .prepare_resolved(TEXT, &female())
+            .await;
+        let (gate, paths) = releaser.await.unwrap();
+
+        assert!(!gate.timed_out(), "a publication ran on the runtime thread");
+        assert!(matches!(prepared, Ok(Some(ResolvedSynthesis::ElevenLabs { ref voice, .. })) if voice == "f1"));
+        assert!(in_dir(&paths[0], &fixture, "records"), "{paths:?}");
+        assert!(in_dir(&paths[1], &fixture, "tmp"), "{paths:?}");
+        assert_eq!(std::fs::read(&paths[1]).unwrap(), fake::FAKE_AUDIO);
+        assert_eq!(fixture.record()["written_at"], NOW);
+    }
+
+    /// The record is published off the runtime thread even when the audio
+    /// is already cached and nothing else is written.
+    #[tokio::test(flavor = "current_thread")]
+    #[serial_test::serial]
+    async fn a_default_voice_record_on_an_audio_cache_hit_publishes_off_the_async_worker() {
+        let fixture = RecordFixture::new();
+        let transport = listed_voices();
+        recording_provider(&transport, NOW, Some(ACCOUNT))
+            .prepare_resolved(TEXT, &female())
+            .await
+            .unwrap();
+        let (writer, gate) = gated_writer();
+        let releaser = release_writes(gate, 1);
+        recording_provider(&transport, NOW + 10, Some(ACCOUNT))
+            .with_writer(writer)
+            .prepare_resolved(TEXT, &female())
+            .await
+            .unwrap();
+        let (mut gate, paths) = releaser.await.unwrap();
+
+        assert!(!gate.timed_out(), "the record was written on the runtime thread");
+        assert!(in_dir(&paths[0], &fixture, "records"), "{paths:?}");
+        assert_eq!(fixture.record()["written_at"], NOW + 10);
+        assert_eq!(transport.speech_calls().len(), 1, "the audio was a cache hit");
+        assert!(gate.entered.try_recv().is_err(), "only the record was written");
+    }
+
+    /// A writer that fails, or panics, for one directory and publishes
+    /// normally everywhere else.
+    fn failing_writer(failing_dir: PathBuf, panic: bool) -> AtomicWriter {
+        Arc::new(move |path: &Path, data: &[u8]| {
+            if path.parent() != Some(failing_dir.as_path()) {
+                return write_atomic(path, data);
+            }
+            if panic {
+                // Staged before the panic: unwinding must remove it.
+                let _staged = tempfile::Builder::new()
+                    .prefix(".biscuit-speaks-tmp-")
+                    .tempfile_in(&failing_dir)
+                    .unwrap();
+                panic!("scripted publication panic");
+            }
+            Err(CacheError::WriteError(std::io::Error::other("scripted write failure")))
+        })
+    }
+
+    async fn assert_audio_fatal_and_record_nonfatal(panic: bool) {
+        let fixture = RecordFixture::new();
+        let transport = listed_voices();
+
+        let audio = recording_provider(&transport, NOW, Some(ACCOUNT))
+            .with_writer(failing_writer(fixture.root.path().join("tmp"), panic))
+            .prepare_resolved(TEXT, &female().with_voice("chosen"))
+            .await;
+        let Err(TtsError::TempFileError { source }) = audio else {
+            panic!("an audio publication failure fails preparation: {audio:?}");
+        };
+        let expected = if panic { "did not complete" } else { "scripted write failure" };
+        assert!(source.to_string().contains(expected), "{source}");
+        assert_eq!(fixture.audio_files(), 0, "nothing published or staged");
+
+        let recorded = recording_provider(&transport, NOW, Some(ACCOUNT))
+            .with_writer(failing_writer(fixture.root.path().join("records"), panic))
+            .prepare_resolved(TEXT, &female())
+            .await;
+        assert!(matches!(recorded, Ok(Some(ResolvedSynthesis::ElevenLabs { ref voice, .. })) if voice == "f1"));
+        assert!(fixture.records().is_empty(), "nothing published or staged");
+        assert_eq!(fixture.audio_files(), 1, "the audio is still published");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[serial_test::serial]
+    async fn an_audio_write_error_fails_preparation_and_a_record_write_error_only_warns() {
+        assert_audio_fatal_and_record_nonfatal(false).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[serial_test::serial]
+    async fn a_panicking_audio_write_fails_preparation_and_a_panicking_record_write_only_warns() {
+        assert_audio_fatal_and_record_nonfatal(true).await;
+    }
+
+    /// Dropping the caller does not cancel a publication already running:
+    /// the closure owns its path and bytes and publishes the complete file.
+    #[tokio::test(flavor = "current_thread")]
+    #[serial_test::serial]
+    async fn a_caller_dropped_after_write_entry_still_publishes_the_owned_audio() {
+        let fixture = RecordFixture::new();
+        let transport = listed_voices();
+        let (writer, mut gate) = gated_writer();
+        let provider = recording_provider(&transport, NOW, Some(ACCOUNT)).with_writer(writer);
+        let caller = tokio::spawn(async move {
+            provider.prepare_resolved(TEXT, &female().with_voice("chosen")).await
+        });
+
+        let entered = gate.entered.recv().await.expect("the audio write starts");
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+        gate.release.send(()).expect("the orphaned writer still waits");
+        let published = tokio::time::timeout(RELEASE_WATCHDOG * 2, gate.published.recv())
+            .await
+            .expect("the orphaned write finishes")
+            .expect("the write publishes");
+
+        assert_eq!(published, entered);
+        assert!(!gate.timed_out());
+        assert_eq!(std::fs::read(&published).unwrap(), fake::FAKE_AUDIO);
+        assert_eq!(fixture.audio_files(), 1, "no staging file is left behind");
     }
 
     #[test]

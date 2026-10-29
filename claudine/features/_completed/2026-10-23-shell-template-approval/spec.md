@@ -32,6 +32,11 @@ review_iterations: 4
 completed: true
 human_review: false
 pipeline_step: 13
+canonical_docs:
+    - darkmatter/docs/inline/preflight-checks.md
+    - claudine/docs/topics/pre-flight-checks.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/flow-control/lifecycle.md
 depends-on:
     - 2026-10-16-core-schema-types
 related:

@@ -73,11 +73,11 @@ struct StyleWarning {
 
 The `StyleWarningKind` enum distinguishes three categories:
 
-| Variant | Meaning | Strict mode behavior |
+| Variant | Meaning | Behavior under `--deny style` |
 |---|---|---|
 | `UnknownKey` | Path does not appear anywhere in the schema (likely a typo). | Upgraded to error |
 | `Deprecated { replacement }` | Path matched a snake-case alias for a canonicalized kebab-case key. | Upgraded to error |
-| `KnownButInactive { sub_spec }` | Key is schema-valid but no rendering wiring exists for it yet. Carries the sub-spec number that will wire it. | **Never** causes strict failure |
+| `KnownButInactive { sub_spec }` | Key is schema-valid but no rendering wiring exists for it yet. Carries the sub-spec number that will wire it. | **Never** blocks |
 
 ### Error Type
 
@@ -352,15 +352,15 @@ pub fn apply_page_style(
 
 `PageStyleOverrides` is CLI-agnostic by design: `darkmatter-cli` constructs it from the parsed `Cli` struct after shorthand expansion, then passes it to `apply_page_style`. This keeps the library crate independent of CLI argument types. Both `render_terminal_output` and `html_artifact` in `darkmatter/cli/src/output.rs` call this helper before invoking `page.render(md)` / `page.render_to_browser(md)`, ensuring terminal and HTML rendering share the same frontmatter behavior.
 
-### `--strict-style`
+### `--deny style`
 
-`md --strict-style` promotes schema-validation warnings to errors:
+`md --deny style` promotes schema-validation warnings to errors:
 
 - `UnknownKey` → error
 - `Deprecated` → error
-- `KnownButInactive` → **still informational** (never fails strict mode)
+- `KnownButInactive` → **still informational** (informational notices never block)
 
-Use it in CI to catch typos, snake-case aliases, and deprecated HR syntax such as inline `style:` on `---` rules.
+Use it in CI to catch typos, snake-case aliases, and deprecated HR syntax such as inline `style:` on `---` rules. `--deny style` is accepted by `md FILE`, `md render`, and `md compose`; see [Policy Flags](../cli/policy.md).
 
 ### Errors
 
@@ -956,16 +956,16 @@ The integration order in `darkmatter-cli` extends sub-spec #5's pipeline:
 9. `darkmatter::style::apply_bespoke_style(page, &style, bespoke_overrides, source_path)` — stylesheet, meta, code-theme, hyperlink/image local-style
 10. `render / render_to_browser`
 
-### `--strict-style` and HR
+### `--deny style` and HR
 
-`md --strict-style` rejects deprecated HR syntax by promoting `Deprecated` warnings to errors:
+`md --deny style` rejects deprecated HR syntax by promoting `Deprecated` warnings to errors:
 
 - Inline `--- { style: waves }` → error
 - `style.hr.alignment: centered` → error
 
 ### Inline Attributes
 
-`HorizontalRuleAttrs` preserves deprecation provenance so strict mode can reject the legacy inline `style` key:
+`HorizontalRuleAttrs` preserves deprecation provenance so `--deny style` can reject the legacy inline `style` key:
 
 ```rust
 pub struct HorizontalRuleAttrs {
@@ -1262,7 +1262,7 @@ In this example, all hyperlinks render with cyan-400 text on a slate-900 backgro
 | `color` | Tailwind, hex, or web named | Foreground color for the disclosure summary |
 | `bg-color` | Tailwind, hex, or web named | Background color for the disclosure summary |
 
-Snake-case aliases (`max_width`, `bg_color`) parse but emit a `Deprecated` warning; `--strict-style` rejects them.
+Snake-case aliases (`max_width`, `bg_color`) parse but emit a `Deprecated` warning; `--deny style` rejects them.
 
 ### PageComponent
 

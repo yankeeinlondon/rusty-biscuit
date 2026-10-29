@@ -24,7 +24,7 @@ parses or evaluates validation rules or handler tables.
 A composed document that still declares any retired key fails preparation with a
 typed `CompositionError::RemovedValidationKey` that names the offending key and its
 replacement surface. The scan (`scan_removed_validation_keys` in
-`composition/lifecycle/parse.rs`) runs **before** lifecycle event blocks are parsed, so
+`darkmatter/lib/src/lifecycle/parse.rs`) runs **before** lifecycle event blocks are parsed, so
 the diagnostic is specific rather than a generic unknown-field error.
 
 | Removed key | Replacement surface |

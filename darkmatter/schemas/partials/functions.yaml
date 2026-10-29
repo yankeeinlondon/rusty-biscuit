@@ -1,0 +1,1092 @@
+kind: schema
+categories:
+    - |-
+        Type Predicates ->
+        Ask what kind of value something is. Most inspect the original value
+        without converting it; the sign predicates take a number.
+    - Math -> Compare numbers, take absolute values, and round.
+    - |-
+        Collection ->
+        Select from lists and inspect lists, maps, and text: first and last
+        elements, membership, size, keys, and values.
+    - String Predicates -> Test how a piece of text begins or ends.
+    - |-
+        String Mutations ->
+        Change the case of text, trim it, add a prefix or suffix, or replace
+        literal substrings.
+    - Rendering -> Render Prose markup as terminal text.
+    - Date Formatting -> Turn an ISO date or datetime into a human-readable phrase.
+    - |-
+        Date Validators ->
+        Check whether a value is an ISO date or datetime, or whether it falls
+        on today, yesterday, tomorrow, this month, or this year, by the local
+        clock or by UTC.
+    - |-
+        Date Arithmetic ->
+        Compare two dates against a duration such as `14d`, `2mo`, or
+        `1 hour`.
+    - Logical -> Combine values by truthiness, stopping as soon as the answer is known.
+    - Type Conversion -> Convert a value to a number explicitly, with an optional fallback.
+    - |-
+        Filesystem ->
+        Resolve, inspect, and link files and paths, read another document's
+        frontmatter or title, and look for host commands.
+    - Context -> Ask about the executing agent's environment, such as which skills it has.
+    - List Formatting -> Render a list as delimited text, a Markdown list, JSON, or JSON5.
+    - |-
+        Git ->
+        Ask the caller's Git repository and its remotes about branches,
+        conflicts, the hosting provider, and recent history.
+    - Pull Requests -> Read pull or merge requests from the repository's hosting provider.
+    - CI/CD -> Read CI/CD jobs from the repository's hosting provider.
+    - |-
+        Shell ->
+        Ask the login shell whether a name is an alias, a builtin, or a
+        function, without running it.
+    - Agentic CLIs -> Ask whether an agentic coding CLI is installed.
+    - |-
+        Repository ->
+        Locate a path among the packages and package areas of the captured
+        monorepo.
+    - Network -> List the host's IP addresses and probe reachability with ICMP.
+    - Composition -> Compose text as Markdown within the current request.
+types:
+    # Named helper types. They are not functions; signatures below use them.
+    agentic-cli: |-
+        enum(claude, codex, gemini, goose, kimi, kimicode, kimi_code, kimi-code,
+        opencode, open_code, open-code, qwen, qwencode, qwen_code, qwen-code,
+        pi, kilo, antigravity)
+        -> An agentic CLI name accepted by `has_agentic_cli`: a Claudine
+        provider roster slug or one of its aliases.
+    ip-address: |-
+        string(pattern('^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}|(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:(:[0-9a-fA-F]{1,4}){1,6}|:((:[0-9a-fA-F]{1,4}){1,7}|:)|([0-9a-fA-F]{1,4}:){6}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}|::([0-9a-fA-F]{1,4}:){0,5}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}|([0-9a-fA-F]{1,4}:){1,5}:([0-9a-fA-F]{1,4}:){0,4}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})(%[^%/\\s]+)?)$'))
+        -> An IP address literal: IPv4 (`192.168.1.1`), IPv6 (`2001:db8::10`), or
+        scoped IPv6 (`fe80::1%en0`). A host name is never an address; nothing
+        resolves DNS.
+    recent-commits: |-
+        string[]
+        -> Recent commits, newest first, each rendered exactly as
+        `sniff repo recent-commits --plain` renders it (a multi-line block).
+        The result of `recent_commits(count)` and the type of
+        `ctx.recent_commits`.
+
+    # Type Predicates
+    is_array: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Type Predicates);
+            example(is_array([1, 2, 3]) => true);
+        ) -> Returns true when the value is an array.
+    is_empty: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Type Predicates);
+            example(is_empty("") => true);
+        ) -> Returns true when the value is null, empty text, an empty array, or an empty object.
+    is_integer: |-
+        function(
+            parameters(val: unknown | null);
+            returns(boolean);
+            category(Type Predicates);
+            example(is_integer(7) => true);
+        ) -> Returns true when the value is a number with no fractional part; text is never an integer.
+    is_negative: |-
+        function(
+            parameters(val: number | null);
+            returns(boolean);
+            category(Type Predicates);
+            example(is_negative(-3) => true);
+        ) -> Returns true when the number is less than zero; null is false.
+    is_null: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Type Predicates);
+            example(is_null(null) => true);
+        ) -> Returns true when the value is null.
+    is_number: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Type Predicates);
+            example(is_number(42) => true);
+        ) -> Returns true when the value is a number; numeric text such as `"4"` is not.
+    is_object: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Type Predicates);
+            example(is_object({a: 1}) => true);
+        ) -> Returns true when the value is an object.
+    is_positive: |-
+        function(
+            parameters(val: number | null);
+            returns(boolean);
+            category(Type Predicates);
+            example(is_positive(5) => true);
+        ) -> Returns true when the number is greater than zero; null is false.
+    is_string: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Type Predicates);
+            example(is_string("hello") => true);
+        ) -> Returns true when the value is text.
+
+    # Math
+    abs: |-
+        function(
+            parameters(x: number);
+            returns(number);
+            category(Math);
+            example(abs(-3) => 3);
+        ) -> Returns the absolute value of a number.
+    max: |-
+        function(
+            parameters(a: number, b: number);
+            returns(number);
+            category(Math);
+            example(max(2, 5) => 5);
+        ) -> Returns the larger of two numbers.
+    min: |-
+        function(
+            parameters(a: number, b: number);
+            returns(number);
+            category(Math);
+            example(min(2, 5) => 2);
+            example(min("4", 5) => 4);
+            example(min("pear", 5) => error);
+        ) -> Returns the smaller of two numbers.
+    round: |-
+        function(
+            parameters(x: numberlike, fallback?: number);
+            returns(number);
+            category(Math);
+            example(round(3.7) => 4);
+            example(round("3.7") => 4);
+            example(round(-2.5) => -3);
+            example(round("pear", 2.7) => 3);
+            example(round("pear") => error);
+        ) -> Rounds a number or numeric text to the nearest whole number, halfway values away from zero. When `x` is not a number or numeric text, a supplied `fallback` is rounded and returned instead; without one the call is a type error.
+
+    # Collection
+    contains: |-
+        function(
+            parameters(haystack: string | any[] | object | null, needle: unknown | null);
+            returns(boolean);
+            category(Collection);
+            example(contains("hello", "ell") => true);
+            example(contains([4], "4") => true);
+            example(contains({a: "x"}, "a") => false);
+        ) -> Returns true when the needle occurs in the haystack. Text is searched for a case-sensitive substring; array elements and object values (never keys) are compared by their rendered text, so `4` matches `"4"`. A null needle renders as empty text, and a null haystack is false.
+    first: |-
+        function(
+            parameters(x: any[] | null);
+            returns(any);
+            category(Collection);
+            example(first([1, 2, 3]) => 1);
+        ) -> Returns the first element of a list, or null when the list is empty or null.
+    has_key: |-
+        function(
+            parameters(obj: object | null, key: string | null);
+            returns(boolean);
+            category(Collection);
+            example(has_key({a: 1}, "a") => true);
+        ) -> Returns true when the object has the given key; a null object or key is false.
+    keys: |-
+        function(
+            parameters(obj: object | null);
+            returns(string[]);
+            category(Collection);
+            example(keys({b: 1, a: 2}) => ["b", "a"]);
+        ) -> Returns the keys of a map in the order they were written; a null map has no keys. Its counterpart is `values`.
+    last: |-
+        function(
+            parameters(x: any[] | null);
+            returns(any);
+            category(Collection);
+            example(last([1, 2, 3]) => 3);
+        ) -> Returns the last element of a list, or null when the list is empty or null.
+    length: |-
+        function(
+            parameters(val: string | any[] | object);
+            returns(number);
+            category(Collection);
+            example(length("hello") => 5);
+            example(length("true") => 4);
+            example(length(2.5) => 3);
+            example(length({a: 1}) => 1);
+            example(length(true) => error);
+        ) -> Counts the characters of text, the elements of an array, or the keys of an object; a number counts the characters of its displayed text. A boolean is a type error.
+    values: |-
+        function(
+            parameters(obj: object | null);
+            returns(any[]);
+            category(Collection);
+            example(values({b: 1, a: 2}) => [1, 2]);
+        ) -> Returns the values of a map in the order their keys were written; a null map has no values. Its counterpart is `keys`.
+
+    # String Predicates
+    ends_with: |-
+        function(
+            parameters(x: string | null, find: string | null);
+            returns(boolean);
+            category(String Predicates);
+            example(ends_with("hello", "lo") => true);
+        ) -> Returns true when the text ends with the given suffix (case-sensitive); null is false.
+    starts_with: |-
+        function(
+            parameters(x: string | null, find: string | null);
+            returns(boolean);
+            category(String Predicates);
+            example(starts_with("hello", "he") => true);
+        ) -> Returns true when the text starts with the given prefix (case-sensitive); null is false.
+
+    # String Mutations
+    camel_case: |-
+        function(
+            parameters(x: string | null);
+            returns(string | null);
+            category(String Mutations);
+            example(camel_case("hello world") => "helloWorld");
+        ) -> Converts text to camelCase; null passes through.
+    capitalize: |-
+        function(
+            parameters(x: string | null);
+            returns(string | null);
+            category(String Mutations);
+            example(capitalize("hello") => "Hello");
+        ) -> Capitalizes the first character of the text; null passes through.
+    ensure_leading: |-
+        function(
+            parameters(var: string | number | null, prefix: string | number | null);
+            returns(string | number | null);
+            category(String Mutations);
+            example(ensure_leading("world", "hello ") => "hello world");
+        ) -> Ensures the text form of a value starts with a prefix, adding it only when missing. A value that already starts with it is returned unchanged, and a number given a numeric prefix stays a number. Null passes through.
+    ensure_trailing: |-
+        function(
+            parameters(var: string | number | null, postfix: string | number | null);
+            returns(string | number | null);
+            category(String Mutations);
+            example(ensure_trailing("hello", " world") => "hello world");
+        ) -> Ensures the text form of a value ends with a postfix, adding it only when missing. A value that already ends with it is returned unchanged, and a number given a numeric postfix stays a number. Null passes through.
+    kebab_case: |-
+        function(
+            parameters(x: string | null);
+            returns(string | null);
+            category(String Mutations);
+            example(kebab_case("Hello World") => "hello-world");
+        ) -> Converts text to kebab-case; null passes through.
+    lower: |-
+        function(
+            parameters(x: string | null);
+            returns(string | null);
+            category(String Mutations);
+            example(lower("HELLO") => "hello");
+        ) -> Converts text to lowercase; null passes through.
+    pascal_case: |-
+        function(
+            parameters(x: string | null);
+            returns(string | null);
+            category(String Mutations);
+            example(pascal_case("hello world") => "HelloWorld");
+        ) -> Converts text to PascalCase; null passes through.
+    replace: |-
+        function(
+            parameters(x: string | null, find: string | null, replacement: string | null);
+            returns(string | null);
+            category(String Mutations);
+            example(replace("a.b.c", ".", "/") => "a/b/c");
+        ) -> Replaces every literal, case-sensitive occurrence of a substring; an empty `find` changes nothing. Null passes through.
+    replace_first: |-
+        function(
+            parameters(x: string | null, find: string | null, replacement: string | null);
+            returns(string | null);
+            category(String Mutations);
+            example(replace_first("a.b.c", ".", "/") => "a/b.c");
+        ) -> Replaces the first literal, case-sensitive occurrence of a substring; an empty `find` changes nothing. Null passes through.
+    replace_last: |-
+        function(
+            parameters(x: string | null, find: string | null, replacement: string | null);
+            returns(string | null);
+            category(String Mutations);
+            example(replace_last("a.b.c", ".", "/") => "a.b/c");
+        ) -> Replaces the last literal, case-sensitive occurrence of a substring; an empty `find` changes nothing. Null passes through.
+    snake_case: |-
+        function(
+            parameters(x: string | null);
+            returns(string | null);
+            category(String Mutations);
+            example(snake_case("Hello World") => "hello_world");
+        ) -> Converts text to snake_case; null passes through.
+    title_case: |-
+        function(
+            parameters(x: string | null);
+            returns(string | null);
+            category(String Mutations);
+            example(title_case("hello world") => "Hello World");
+        ) -> Converts text to Title Case; null passes through.
+    trim: |-
+        function(
+            parameters(text: string | null);
+            returns(string | null);
+            category(String Mutations);
+            example(trim("  a  ") => "a");
+            example(trim(null) => null);
+        ) -> Removes leading and trailing whitespace; null passes through.
+    upper: |-
+        function(
+            parameters(x: string | null);
+            returns(string | null);
+            category(String Mutations);
+            example(upper("hello") => "HELLO");
+            example(upper(2026) => "2026");
+        ) -> Converts text to uppercase; null passes through.
+    without_date: |-
+        function(
+            parameters(string: string | null);
+            returns(string | null);
+            category(String Mutations);
+            example(without_date("Note 2024-06-15") => "Note ");
+        ) -> Removes every substring that is a real YYYY-MM-DD calendar date, leaving the surrounding text untouched; null passes through.
+
+    # Rendering
+    terminal: |-
+        function(
+            parameters(content: string | null);
+            returns(string | null);
+            category(Rendering);
+            example(terminal("hello") => "hello");
+        ) -> Renders Prose markup to terminal text with ANSI SGR sequences; null passes through.
+
+    # Date Formatting
+    date: |-
+        function(
+            parameters(
+                iso: date | datetime | null,
+                fmt: enum('MMMM Do', short, 'MMMM Do [YYYY]', short-optional, 'MMMM Do YYYY', 'D MMMM [YYYY]', 'D MMMM YYYY', 'ddd, MMMM Do, YYYY', long) | null
+            );
+            returns(string | null);
+            category(Date Formatting);
+            example(date("2024-06-15", "long") => "Sat, June 15th, 2024");
+        ) -> Formats an ISO date or datetime in a named format. `short` is `MMMM Do`, `short-optional` is `MMMM Do [YYYY]`, and `long` is `ddd, MMMM Do, YYYY`; a `[YYYY]` year appears only when it is not the current year. Null passes through.
+
+    # Date Validators
+    is_date: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Date Validators);
+            example(is_date("2024-06-15") => true);
+        ) -> Returns true when the value is text holding a valid ISO date (YYYY-MM-DD).
+    is_date_time: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Date Validators);
+            example(is_date_time("2024-06-15T12:30:00") => true);
+        ) -> Returns true when the value is text holding a valid ISO datetime, with or without an offset.
+    is_date_time_utc: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Date Validators);
+            example(is_date_time_utc("2024-06-15T12:30:00Z") => true);
+        ) -> Same as is_date_time; a datetime's format does not depend on the time zone.
+    is_date_utc: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Date Validators);
+            example(is_date_utc("2024-06-15") => true);
+        ) -> Same as is_date; a date's format does not depend on the time zone.
+    is_this_month: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Date Validators);
+            example(is_this_month("2024-06-15") => true; display-only: wall-clock dependent);
+        ) -> Returns true when the value is an ISO date or datetime in the current local month.
+    is_this_month_utc: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Date Validators);
+            example(is_this_month_utc("2024-06-15") => true; display-only: wall-clock dependent);
+        ) -> Returns true when the value is an ISO date or datetime in the current UTC month.
+    is_this_year: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Date Validators);
+            example(is_this_year("2024-06-15") => true; display-only: wall-clock dependent);
+        ) -> Returns true when the value is an ISO date or datetime in the current local year.
+    is_this_year_utc: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Date Validators);
+            example(is_this_year_utc("2024-06-15") => true; display-only: wall-clock dependent);
+        ) -> Returns true when the value is an ISO date or datetime in the current UTC year.
+    is_today: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Date Validators);
+            example(is_today("2024-06-15") => true; display-only: wall-clock dependent);
+        ) -> Returns true when the value is an ISO date or datetime that falls on today's local date.
+    is_today_utc: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Date Validators);
+            example(is_today_utc("2024-06-15") => true; display-only: wall-clock dependent);
+        ) -> Returns true when the value is an ISO date or datetime that falls on today's UTC date.
+    is_tomorrow: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Date Validators);
+            example(is_tomorrow("2024-06-16") => true; display-only: wall-clock dependent);
+        ) -> Returns true when the value is an ISO date or datetime that falls on tomorrow's local date.
+    is_tomorrow_utc: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Date Validators);
+            example(is_tomorrow_utc("2024-06-16") => true; display-only: wall-clock dependent);
+        ) -> Returns true when the value is an ISO date or datetime that falls on tomorrow's UTC date.
+    is_yesterday: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Date Validators);
+            example(is_yesterday("2024-06-14") => true; display-only: wall-clock dependent);
+        ) -> Returns true when the value is an ISO date or datetime that falls on yesterday's local date.
+    is_yesterday_utc: |-
+        function(
+            parameters(x: unknown | null);
+            returns(boolean);
+            category(Date Validators);
+            example(is_yesterday_utc("2024-06-14") => true; display-only: wall-clock dependent);
+        ) -> Returns true when the value is an ISO date or datetime that falls on yesterday's UTC date.
+
+    # Date Arithmetic
+    date_delta: |-
+        function(
+            parameters(
+                date1: date | datetime,
+                date2: date | datetime,
+                diff: string(pattern('(?i)^\\s*[0-9]+\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\s*$'))
+            );
+            returns(boolean);
+            category(Date Arithmetic);
+            fallible;
+            example(date_delta("2024-06-01", "2024-06-20", "14d") => true);
+        ) -> Returns true when the two dates are at least the given duration apart, in either order. A duration is a whole count and a unit, such as `14d`, `2mo`, or `1 hour`; `m` means minutes and `mo` months.
+    newer_than: |-
+        function(
+            parameters(
+                date1: date | datetime,
+                date2: date | datetime,
+                diff: string(pattern('(?i)^\\s*[0-9]+\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\s*$'))
+            );
+            returns(boolean);
+            category(Date Arithmetic);
+            fallible;
+            example(newer_than("2024-06-20", "2024-06-01", "14d") => true);
+        ) -> Returns true when date1 is at least the given duration newer (later) than date2.
+    older_than: |-
+        function(
+            parameters(
+                date1: date | datetime,
+                date2: date | datetime,
+                diff: string(pattern('(?i)^\\s*[0-9]+\\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mos?|months?|y|yrs?|years?)\\s*$'))
+            );
+            returns(boolean);
+            category(Date Arithmetic);
+            fallible;
+            example(older_than("2024-06-01", "2024-06-20", "14d") => true);
+        ) -> Returns true when date1 is at least the given duration older (earlier) than date2.
+
+    # Logical
+    and: |-
+        function(
+            parameters(...values: unknown | null);
+            returns(boolean);
+            category(Logical);
+            example(and(true, true) => true);
+        ) -> Returns true when every argument is truthy, evaluating them in order and stopping at the first falsy one.
+    or: |-
+        function(
+            parameters(...values: unknown | null);
+            returns(boolean);
+            category(Logical);
+            example(or(false, true) => true);
+        ) -> Returns true when any argument is truthy, evaluating them in order and stopping at the first truthy one.
+
+    # Type Conversion
+    number: |-
+        function(
+            parameters(x: numberlike, fallback?: number);
+            returns(number);
+            category(Type Conversion);
+            example(number("42") => 42);
+            example(number("4") => 4);
+            example(number(" 4 ") => 4);
+            example(number("pear", 7) => 7);
+            example(number(null, 7) => 7);
+            example(number(true, 7) => 7);
+            example(number([], 7) => 7);
+            example(number("9007199254740993", 7) => 7);
+            example(number("pear") => error);
+            example(number("4", "x") => error);
+            example(number() => error);
+        ) -> Converts a number or numeric text to a number. When `x` cannot convert (malformed text, null, a boolean, a list, an object, or a number that cannot be held exactly), a supplied `fallback` is returned instead; without one the call is a type error. The fallback must itself be a number.
+
+    # Filesystem
+    absolute: |-
+        function(
+            parameters(file: file | null);
+            returns(file | null);
+            category(Filesystem);
+            fallible;
+            example(absolute("fixture.md") => "/path/to/fixture.md"; display-only: resolves to an absolute path of the resolution context, which is not portable);
+        ) -> Returns the absolute path a file reference names, in native spelling. A missing target returns the first location it would be resolved at, so the result does not prove the file exists. Rejects HTTP(S) URLs; null passes through.
+    basename: |-
+        function(
+            parameters(file: file | null);
+            returns(string | null);
+            category(Filesystem);
+            fallible;
+            example(basename("sub/note.md") => "note.md");
+        ) -> Returns the final path component, including its extension; null passes through.
+    basename_without_index: |-
+        function(
+            parameters(file: file | null);
+            returns(string | null);
+            category(Filesystem);
+            fallible;
+            example(basename_without_index("review-1.md") => "review.md");
+        ) -> Returns the basename with any index suffix (`-NNN`) removed from its stem; null passes through.
+    code_link:
+        - |-
+            function(
+                parameters(file: file | null);
+                returns(string | null);
+                category(Filesystem);
+                fallible;
+                example(code_link("fixture.md") => "[`fixture.md`](/path/to/fixture.md)"; display-only: result includes an absolute path, which is not portable);
+            ) -> Creates a Markdown link to a local file whose text is its relative path as inline code. Destinations, null handling, and errors match link().
+        - |-
+            function(
+                parameters(target: file | null, desc: string | null);
+                returns(string | null);
+                category(Filesystem);
+                fallible;
+                example(code_link("fixture.md", "md hash") => "[`md hash`](/path/to/fixture.md)"; display-only: result includes an absolute destination path, which is not portable);
+            ) -> Creates a Markdown link whose text is the description as inline code; brackets and backslashes are kept as written. Destinations, null handling, and errors match link().
+    decrement_file_index: |-
+        function(
+            parameters(file: file | null);
+            returns(file | null);
+            category(Filesystem);
+            fallible;
+            example(decrement_file_index("review-2.md") => "review-1.md");
+        ) -> Decrements the numeric index suffix, clamped at 0, in the resolved file's directory; an unindexed name gets index 0. An absolute input returns an absolute path; null passes through.
+    dir_leading: |-
+        function(
+            parameters(file: file | null);
+            returns(string | null);
+            category(Filesystem);
+            fallible;
+            example(dir_leading("sub/note.md") => "");
+        ) -> Returns the directory path above the last directory segment, dropping the basename and its parent (the complement of file_trailing); empty when there is none. Null passes through.
+    dirname: |-
+        function(
+            parameters(file: file | null);
+            returns(string | null);
+            category(Filesystem);
+            fallible;
+            example(dirname("sub/note.md") => "sub");
+        ) -> Returns the directory portion of the display path; an absolute input returns its absolute parent directory. Null passes through.
+    ext: |-
+        function(
+            parameters(file: file | null);
+            returns(string | null);
+            category(Filesystem);
+            fallible;
+            example(ext("sub/note.md") => "md");
+        ) -> Returns the final extension without its leading dot, or empty text when there is none; null passes through.
+    file_exists: |-
+        function(
+            parameters(value: unknown | null);
+            returns(boolean);
+            category(Filesystem);
+            fallible;
+            example(file_exists("fixture.md") => true);
+        ) -> Returns true when the file exists, locally or as a fetched remote URL. The argument is inspected, never converted, so null, a number, a boolean, an array, or an object is false, and so is text that is not a well-formed file reference (`""`, `https://`), which is never looked up. A resolution failure (a tree escape or a missing home, vault, or repository anchor), a probe failure, or a failed remote fetch is an error.
+    file_index: |-
+        function(
+            parameters(file: file | null);
+            returns(number | null);
+            category(Filesystem);
+            fallible;
+            example(file_index("review-1.md") => 1);
+        ) -> Returns the numeric index suffix of the file's stem, or -1 when it has none; null passes through.
+    file_trailing: |-
+        function(
+            parameters(file: file | null);
+            returns(string | null);
+            category(Filesystem);
+            fallible;
+            example(file_trailing("sub/note.md") => "sub/note.md");
+        ) -> Returns the last directory segment plus the basename, or the basename alone when there is no directory; null passes through.
+    find_files: |-
+        function(
+            parameters(pattern: string | null);
+            returns(file[]);
+            category(Filesystem);
+            fallible;
+            example(length(find_files("**/note.md")) => 2);
+        ) -> Returns every file a glob reference matches (`&dir/**/name.md`, `^docs/*.md`) as absolute paths, merged across every root of its prefix: the most local root first, then the shallowest, then by path component. A bare pattern searches the document's folder, then the repository root. A matched file symlink whose target leaves the file tree is skipped with a `dm.glob.skipped_symlink` warning, and a directory the search cannot read is an error. A null pattern lists nothing.
+    find_first_index: |-
+        function(
+            parameters(file: file | null);
+            returns(file | null);
+            category(Filesystem);
+            fallible;
+            example(find_first_index("review-2.md") => "review-1.md");
+        ) -> Returns the lowest-indexed existing member of the file's index family in its directory, the unindexed base sorting first; returns the input when no member exists. An absolute input returns an absolute path; null passes through.
+    find_last_index: |-
+        function(
+            parameters(file: file | null);
+            returns(file | null);
+            category(Filesystem);
+            fallible;
+            example(find_last_index("review-1.md") => "review-2.md");
+        ) -> Returns the highest-indexed existing member of the file's index family in its directory; returns the input when no member exists. An absolute input returns an absolute path; null passes through.
+    frontmatter:
+        - |-
+            function(
+                parameters(file: file | null);
+                returns(object | null);
+                category(Filesystem);
+                fallible;
+                example(frontmatter("fixture.md") => {title: "Fixture Title"});
+            ) -> Reads the frontmatter of a Markdown file as an object; null passes through. A missing or unparsable file is an error.
+        - |-
+            function(
+                parameters(file: file | null, prop: string);
+                returns(any);
+                category(Filesystem);
+                fallible;
+                example(frontmatter("fixture.md", "title") => "Fixture Title");
+            ) -> Reads one top-level frontmatter property of a Markdown file, or null when the property is absent or the file is null.
+    has_binary: |-
+        function(
+            parameters(name_or_path: string | null);
+            returns(boolean);
+            category(Filesystem);
+            example(has_binary("sh") => true; display-only: result is host-dependent);
+        ) -> Returns true when the command is found on PATH or is an existing executable absolute path; the same check as has_command. The command is never run.
+    has_command: |-
+        function(
+            parameters(cmd: string | null);
+            returns(boolean);
+            category(Filesystem);
+            example(has_command("sh") => true; display-only: result is host-dependent);
+        ) -> Returns true when the command is found on PATH or is an existing executable absolute path; it is never run. Null, empty text, and a relative path with a directory part are false.
+    increment_file_index: |-
+        function(
+            parameters(file: file | null);
+            returns(file | null);
+            category(Filesystem);
+            fallible;
+            example(increment_file_index("review-1.md") => "review-2.md");
+        ) -> Increments the numeric index suffix, preserving its zero-padding width, in the resolved file's directory; an unindexed name gets index 2. An absolute input returns an absolute path; null passes through.
+    is_file_type: |-
+        function(
+            parameters(value: unknown | null);
+            returns(boolean);
+            category(Filesystem);
+            example(is_file_type("./docs/spec.md") => true);
+            example(is_file_type("hello world") => true);
+            example(is_file_type("https://") => false);
+            example(is_file_type(42) => false);
+        ) -> Returns true when the value is text that is a well-formed file reference (a local, Windows, project, vault, recursive, or HTTP(S) reference, on every host); it never resolves, reads, or fetches anything, so true does not mean the file exists. Empty text, malformed reference syntax, and every non-text value are false.
+    is_indexed_file: |-
+        function(
+            parameters(file: file | null);
+            returns(boolean);
+            category(Filesystem);
+            fallible;
+            example(is_indexed_file("review-1.md") => true);
+        ) -> Returns true when the file's stem ends in a numeric index suffix (`base-NNN`); null is false.
+    join: |-
+        function(
+            parameters(left: string | null, right: string | null);
+            returns(string | null);
+            category(Filesystem);
+            fallible;
+            example(join("sub", "note.md") => "sub/note.md");
+        ) -> Joins two path strings with normalized separators and validates the result as a path; HTTP(S) arguments are rejected. Null passes through.
+    link:
+        - |-
+            function(
+                parameters(file: file | null);
+                returns(string | null);
+                category(Filesystem);
+                fallible;
+                example(link("fixture.md") => "[fixture.md](/path/to/fixture.md)"; display-only: result includes an absolute path, which is not portable);
+            ) -> Creates a Markdown link to a local file, using its relative path as the link text and its absolute path as the destination. HTTP(S) URLs are rejected because they need a description; null passes through.
+        - |-
+            function(
+                parameters(target: file | null, desc: string | null);
+                returns(string | null);
+                category(Filesystem);
+                fallible;
+                example(link("fixture.md", "Fixture") => "[Fixture](/path/to/fixture.md)"; display-only: result includes an absolute destination path, which is not portable);
+            ) -> Creates a Markdown link to a local file or an HTTP(S) URL with the given description as its text; null passes through.
+    markdown_body_empty: |-
+        function(
+            parameters(file: file | null);
+            returns(boolean);
+            category(Filesystem);
+            fallible;
+            example(markdown_body_empty("fixture.md") => false);
+        ) -> Returns true when the Markdown file's body holds only whitespace; null is false.
+    markdown_title: |-
+        function(
+            parameters(file: file | null);
+            returns(string | null);
+            category(Filesystem);
+            fallible;
+            example(markdown_title("fixture.md") => "Fixture Title");
+        ) -> Returns the Markdown file's frontmatter `title`, else its first H1 heading, else null; null passes through.
+    parent_dir: |-
+        function(
+            parameters(file: file | null);
+            returns(string | null);
+            category(Filesystem);
+            fallible;
+            example(parent_dir("sub/note.md") => "sub");
+        ) -> Returns the directory segment immediately above the basename, or empty text when there is none; null passes through.
+    relative: |-
+        function(
+            parameters(file: file | null);
+            returns(file | null);
+            category(Filesystem);
+            fallible;
+            example(relative("fixture.md") => "fixture.md");
+        ) -> Returns a best-effort relative path from the document's base directory, with forward slashes; null passes through.
+    try_frontmatter: |-
+        function(
+            parameters(file: file | null);
+            returns(object | null);
+            category(Filesystem);
+            example(try_frontmatter("fixture.md") => {ok: true, value: {title: "Fixture Title"}, error: null});
+        ) -> Reads the frontmatter of a Markdown file as `{ok, value, error}`. A file that reads and parses gives `ok` true and the frontmatter as `value`; a missing, unreadable, or unparsable file gives `ok` false and its reason as `error` instead of failing. Null passes through.
+    validate_schema:
+        - |-
+            function(
+                parameters(file: file | null);
+                returns(boolean | null);
+                category(Filesystem);
+                fallible;
+                example(validate_schema("fixture.md") => true);
+            ) -> Returns whether a Markdown document's frontmatter is valid against its declared schema; a document that declares no schema is valid. Null passes through; a file that cannot be loaded, or a schema that cannot be processed, is an error.
+        - |-
+            function(
+                parameters(file: file | null, obj: object);
+                returns(boolean | null);
+                category(Filesystem);
+                fallible;
+                example(validate_schema("fixture.md", {}) => true);
+            ) -> Merges `obj` over a Markdown document's frontmatter (nested objects merge; supplied values, arrays, and explicit nulls win) and returns whether the combined page is valid against its schema. Validation happens in memory; the file and `obj` are never modified.
+
+    # Context
+    has_local_skill: |-
+        function(
+            parameters(name: string | null);
+            returns(boolean);
+            category(Context);
+            fallible;
+            example(has_local_skill("darkmatter") => true; display-only: depends on agent-specific skill roots outside the tempdir fixture);
+        ) -> Returns true when a skill directory with this name exists in a local-scoped skill root of the executing agent. Null and empty text are false; a name with a path separator is an error.
+    has_skill: |-
+        function(
+            parameters(name: string | null);
+            returns(boolean);
+            category(Context);
+            fallible;
+            example(has_skill("darkmatter") => true; display-only: depends on agent-specific skill roots outside the tempdir fixture);
+        ) -> Returns true when a skill directory with this name exists in a user-scoped or local-scoped skill root of the executing agent. Null and empty text are false; a name with a path separator is an error.
+
+    # List Formatting
+    as_csv: |-
+        function(
+            parameters(list: any[] | null);
+            returns(string | null);
+            category(List Formatting);
+            example(as_csv([1, 2, 3]) => "1, 2, 3");
+        ) -> Joins a list into comma-separated text (`, ` between elements); null passes through.
+    as_json: |-
+        function(
+            parameters(list: any[] | null);
+            returns(string | null);
+            category(List Formatting);
+            example(as_json(["a", 1]) => '["a",1]');
+        ) -> Renders a list as compact JSON, the explicit spelling of how a bare array renders in text. An empty list renders as `[]`; null passes through.
+    as_json5: |-
+        function(
+            parameters(list: any[] | null);
+            returns(string | null);
+            category(List Formatting);
+            example(as_json5(["a", 1]) => "['a', 1]");
+        ) -> Renders a list as compact single-line JSON5, with single-quoted strings and unquoted object keys where they are valid identifiers. An empty list renders as `[]`; null passes through.
+    as_line_separated: |-
+        function(
+            parameters(list: any[] | null);
+            returns(string | null);
+            category(List Formatting);
+            example(./function-examples/as_line_separated.yaml);
+        ) -> Joins a list into newline-separated text, one element per line; null passes through.
+    as_ordered_list: |-
+        function(
+            parameters(list: any[] | null);
+            returns(string | null);
+            category(List Formatting);
+            example(./function-examples/as_ordered_list.yaml);
+        ) -> Renders a list as a Markdown ordered list, nesting nested arrays and object-array shapes as indented sublists; null passes through.
+    as_space_separated: |-
+        function(
+            parameters(list: any[] | null);
+            returns(string | null);
+            category(List Formatting);
+            example(as_space_separated([1, 2, 3]) => "1 2 3");
+        ) -> Joins a list into space-separated text; null passes through.
+    as_tsv: |-
+        function(
+            parameters(list: any[] | null);
+            returns(string | null);
+            category(List Formatting);
+            example(./function-examples/as_tsv.yaml);
+        ) -> Joins a list into tab-separated text; null passes through.
+    as_unordered_list: |-
+        function(
+            parameters(list: any[] | null);
+            returns(string | null);
+            category(List Formatting);
+            example(./function-examples/as_unordered_list.yaml);
+        ) -> Renders a list as a Markdown unordered list, nesting nested arrays and object-array shapes as indented sublists; null passes through.
+
+    # Git
+    branch_exists_on_remote:
+        - |-
+            function(
+                parameters(void);
+                returns(boolean);
+                category(Git);
+                fallible;
+                example(branch_exists_on_remote() => true; display-only: Requires an allowlisted remote-provider fixture.);
+            ) -> Returns whether the caller's current branch exists on the selected remote, from its live ref advertisement or authoritative provider API.
+        - |-
+            function(
+                parameters(branch: string);
+                returns(boolean);
+                category(Git);
+                fallible;
+                example(branch_exists_on_remote("main") => true; display-only: Requires an allowlisted remote-provider fixture.);
+            ) -> Returns whether the exact branch exists on the selected remote, from its live ref advertisement or authoritative provider API.
+        - |-
+            function(
+                parameters(branch: string, remote: string);
+                returns(boolean);
+                category(Git);
+                fallible;
+                example(branch_exists_on_remote("main", "origin") => true; display-only: Requires an allowlisted remote-provider fixture.);
+            ) -> Returns whether the exact branch exists on the named remote, from its live ref advertisement or authoritative provider API.
+    predict_conflicts: |-
+        function(
+            parameters(branch: string | null);
+            returns(string[] | null);
+            category(Git);
+            fallible;
+            example(predict_conflicts("feature/example") => ["src/config.rs"]; display-only: Requires a Git fixture with divergent local branch tips.);
+        ) -> Returns the repository-relative paths that would conflict if the named local branch were merged into the caller's current branch; null passes through.
+    recent_commits: |-
+        function(
+            parameters(count: number(integer; min(1)));
+            returns(recent-commits);
+            category(Git);
+            fallible;
+            example(recent_commits(3) => ["- [abc1234] feat(sniff) at 1:01pm Today: add gateways\n\n"]; display-only: result depends on the repository history and the local clock);
+        ) -> Returns the newest `count` commits of the caller's repository, newest first, rendered as `ctx.recent_commits` renders them. `ctx.recent_commits` holds the last 10, captured at the start of execution; `recent_commits(count)` returns the newest `count`, evaluated at call time. Commits that touched no files are left out, so the list can be shorter than `count`; it is empty outside a repository.
+    remote_vendor: |-
+        function(
+            parameters(remote?: string);
+            returns(enum('', github, gitlab, gitea, forgejo, bitbucket, azure_devops, aws_code_commit, source_hut));
+            category(Git);
+            fallible;
+            example(remote_vendor() => "github"; display-only: Requires a configured caller repository remote.);
+        ) -> Returns the canonical provider token for the selected configured remote, probing an ambiguous self-hosted server only when allowlisted.
+
+    # Pull Requests
+    pr: |-
+        function(
+            parameters(id: number(integer; min(1)) | string(min(1)));
+            returns(string);
+            category(Pull Requests);
+            fallible;
+            example(pr(123) => "[PR #123 — Fix parser](https://provider/pr/123) · open · @alice"; display-only: Requires an allowlisted remote-provider fixture.);
+        ) -> Returns one pull or merge request, addressed by number or canonical URL, in canonical Markdown form.
+    pr_list:
+        - |-
+            function(
+                parameters(query: object);
+                returns(string[]);
+                category(Pull Requests);
+                fallible;
+                example(pr_list({ state: "open", limit: 5 }) => ["[PR #123 — Fix parser](https://provider/pr/123) · open · @alice"]; display-only: Requires an allowlisted remote-provider fixture.);
+            ) -> Queries pull or merge requests with the canonical bounded filter vocabulary. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds.
+        - |-
+            function(
+                parameters(count: number(integer; min(1); max(100)));
+                returns(string[]);
+                category(Pull Requests);
+                fallible;
+                example(pr_list(5) => ["[PR #123 — Fix parser](https://provider/pr/123) · open · @alice"]; display-only: Requires an allowlisted remote-provider fixture.);
+            ) -> Lists the most recent `count` pull or merge requests, from 1 to 100.
+
+    # CI/CD
+    cicd: |-
+        function(
+            parameters(id: number(integer; min(1)) | string(min(1)));
+            returns(string);
+            category(CI/CD);
+            fallible;
+            example(cicd(456) => "[CI job #456 — test](https://provider/job/456) · failed"; display-only: Requires an allowlisted remote-provider fixture.);
+        ) -> Returns one provider-addressable CI/CD job, addressed by number or canonical URL, in canonical Markdown form.
+    cicd_list:
+        - |-
+            function(
+                parameters(query: object);
+                returns(string[]);
+                category(CI/CD);
+                fallible;
+                example(cicd_list({ statuses: ["failed"], limit: 5 }) => ["[CI job #456 — test](https://provider/job/456) · failed"]; display-only: Requires an allowlisted remote-provider fixture.);
+            ) -> Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds.
+        - |-
+            function(
+                parameters(count: number(integer; min(1); max(100)));
+                returns(string[]);
+                category(CI/CD);
+                fallible;
+                example(cicd_list(5) => ["[CI job #456 — test](https://provider/job/456) · failed"]; display-only: Requires an allowlisted remote-provider fixture.);
+            ) -> Lists the most recent `count` CI/CD jobs, from 1 to 100.
+
+    # Shell
+    can_execute: |-
+        function(
+            parameters(name: string | null);
+            returns(boolean);
+            category(Shell);
+            example(can_execute("git") => true; display-only: result depends on the host and the login shell profile);
+        ) -> Returns true when the name is a binary, an alias, a shell builtin, or a user function (has_binary, then the login-shell probes). Null and empty text are false; the name is never run.
+    has_alias: |-
+        function(
+            parameters(name: string | null);
+            returns(boolean);
+            category(Shell);
+            example(has_alias("ll") => true; display-only: result depends on the login shell profile);
+        ) -> Returns true when the name is an alias in the login shell ($SHELL, or pwsh then powershell.exe on Windows). Any probe failure, null, and empty text are false; the name is never run.
+    has_builtin_function: |-
+        function(
+            parameters(name: string | null);
+            returns(boolean);
+            category(Shell);
+            example(has_builtin_function("cd") => true; display-only: result depends on the login shell);
+        ) -> Returns true when the name is a shell builtin (or a PowerShell cmdlet) in the login shell. Any probe failure, null, and empty text are false; the name is never run.
+    has_user_function: |-
+        function(
+            parameters(name: string | null);
+            returns(boolean);
+            category(Shell);
+            example(has_user_function("mkcd") => true; display-only: result depends on the login shell profile);
+        ) -> Returns true when the name is a user-defined function in the login shell. Any probe failure, null, and empty text are false; the name is never run.
+
+    # Agentic CLIs
+    has_agentic_cli: |-
+        function(
+            parameters(agent: agentic-cli | null);
+            returns(boolean);
+            category(Agentic CLIs);
+            fallible;
+            example(has_agentic_cli("claude") => true; display-only: result depends on the host PATH);
+        ) -> Returns true when the named agentic CLI is installed on PATH, from the request's captured agent observation. Names are the Claudine provider roster slugs and their aliases; null is false.
+
+    # Repository
+    package: |-
+        function(
+            parameters(where: file);
+            returns(string);
+            category(Repository);
+            fallible;
+            example(package("darkmatter/lib/src/lib.rs") => "darkmatter"; display-only: result depends on the captured repository);
+        ) -> Returns the name of the package containing the path, from the captured repository observation. Returns empty text outside the repository, outside a monorepo, or when no package contains the path.
+    package_area: |-
+        function(
+            parameters(where: file);
+            returns(string);
+            category(Repository);
+            fallible;
+            example(package_area("darkmatter/lib/src/lib.rs") => "darkmatter"; display-only: result depends on the captured repository);
+        ) -> Returns the name of the package area containing the path, from the captured repository observation. Returns empty text outside the repository, outside a monorepo, or when no area contains the path.
+
+    # Network
+    ipv4: |-
+        function(
+            parameters(filter?: string);
+            returns(string[]);
+            category(Network);
+            fallible;
+            example(ipv4("192.168.0.0/16") => ["192.168.10.5"]; display-only: result depends on the host interfaces);
+        ) -> Returns the host's IPv4 addresses, excluding loopback and link-local, from the request's captured network observation. A valid CIDR filter selects addresses inside that network (and can include loopback or link-local); any other filter is a substring match over the default set.
+    ipv6: |-
+        function(
+            parameters(filter?: string);
+            returns(string[]);
+            category(Network);
+            fallible;
+            example(ipv6("::1/128") => ["::1"]; display-only: result depends on the host interfaces);
+        ) -> Returns the host's IPv6 addresses, excluding loopback and link-local; scoped addresses keep their %scope suffix. Filters behave as in ipv4.
+    ping: |-
+        function(
+            parameters(address: ip-address, timeout?: number);
+            returns(boolean | null);
+            category(Network);
+            fallible;
+            example(ping("192.168.1.1", 250) => true; display-only: result depends on the network and the ICMP grant);
+        ) -> Sends one ICMP echo to an IP address and returns true when it replies within `timeout` milliseconds (default 100, at most 60000). Returns null with a warning when the address is not granted through --allow host=HOST, false when there is no reply, and an error when the host cannot send ICMP.
+    ping_under: |-
+        function(
+            parameters(address: ip-address, timeout: number, attempts?: number(integer; min(1); max(100)));
+            returns(boolean | enum(unstable) | null);
+            category(Network);
+            fallible;
+            example(ping_under("192.168.1.1", 50, 5) => "unstable"; display-only: result depends on the network and the ICMP grant);
+        ) -> Sends `attempts` ICMP echoes (default 3) one after another, each with a timeout of `timeout` milliseconds. Returns true when every reply arrives in time, false when none does, and "unstable" otherwise. Consent and error rules match ping.
+
+    # Composition
+    as_markdown: |-
+        function(
+            parameters(content: string | null);
+            returns(string | null);
+            category(Composition);
+            fallible;
+            example(as_markdown("::file ./intro.md") => "# Introduction"; display-only: result depends on the transcluded file);
+        ) -> Composes the text as Markdown through the root document's request (same context, base directory, consent, and recursion budget) and returns the composed Markdown; null passes through.

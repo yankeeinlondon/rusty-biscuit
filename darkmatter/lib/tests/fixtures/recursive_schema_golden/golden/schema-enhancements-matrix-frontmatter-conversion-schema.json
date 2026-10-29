@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "n": {
+      "type": "number"
+    },
+    "maybe": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "zip": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "flag": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "values": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        }
+      ]
+    },
+    "meta": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "level": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "codes": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "darkmatter-numberlike"
+          }
+        }
+      ]
+    },
+    "toggles": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": [
+              "boolean",
+              "string"
+            ],
+            "format": "darkmatter-boolish"
+          }
+        }
+      ]
+    },
+    "nested": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "zip": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": [
+                    "number",
+                    "string"
+                  ],
+                  "format": "darkmatter-numberlike"
+                }
+              ]
+            },
+            "on": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": [
+                    "boolean",
+                    "string"
+                  ],
+                  "format": "darkmatter-boolish"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "pair": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "minItems": 2,
+          "items": false
+        }
+      ]
+    },
+    "dict": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          },
+          "properties": {}
+        }
+      ]
+    },
+    "either": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        }
+      ]
+    },
+    "config": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "format": "darkmatter-json"
+        }
+      ]
+    }
+  },
+  "required": [
+    "n"
+  ]
+}

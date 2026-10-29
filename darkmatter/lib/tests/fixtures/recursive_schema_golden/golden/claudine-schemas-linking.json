@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "name": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "the linked resource's name"
+    },
+    "allowed-tools": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "description": "tools the resource may use, as one comma- or space-separated string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "tools the resource may use"
+        }
+      ]
+    },
+    "tools": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "description": "tools the resource may use, as one string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "tools the resource may use"
+        },
+        {
+          "type": "object",
+          "description": "tools the resource may use, keyed by tool name"
+        }
+      ]
+    },
+    "skills": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "description": "skills the resource loads, as one string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "skills the resource loads"
+        }
+      ]
+    },
+    "license": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "the resource's license"
+    },
+    "compatibility": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "description": "the environments the resource supports"
+        },
+        {
+          "type": "object",
+          "description": "the environments the resource supports, keyed by provider"
+        }
+      ]
+    },
+    "metadata": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object"
+        }
+      ],
+      "description": "arbitrary author metadata, preserved unchanged"
+    },
+    "user-invocable": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        }
+      ],
+      "description": "whether a user may invoke the resource directly"
+    },
+    "disable-model-invocation": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        }
+      ],
+      "description": "whether the model is prevented from invoking the resource"
+    },
+    "argument-hint": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "description": "the argument hint shown to the user"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "the argument hint shown to the user (a bracketed hint such as [msg] reads as a list)"
+        }
+      ]
+    },
+    "max_turns": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "integer",
+          "x-darkmatter-integer": true
+        }
+      ],
+      "description": "the most agent turns the resource may take"
+    }
+  }
+}

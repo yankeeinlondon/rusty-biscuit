@@ -467,6 +467,7 @@ impl<'a> TransclusionEngine<'a> {
         resolved_cache: Option<
             &HashMap<String, crate::markdown::compose::preflight::PreflightResolvedTarget>,
         >,
+        mut watch: Option<&mut crate::markdown::compose::pipeline::ReportWatch<'_>>,
     ) -> MarkdownResult<()> {
         let ignore_invalid = self.resolve_ignore_invalid(options);
         let transclusion_opts = options.transclusion_options();
@@ -495,16 +496,19 @@ impl<'a> TransclusionEngine<'a> {
                     transclusion::DeferredSetError::InvalidAssignment { raw, reason, line } => {
                         if options.allow_invalid_frontmatter_assignment {
                             report.add_warning(
-                                ComposeWarning::new(
-                                    "transclusion",
-                                    format!(
-                                        "Invalid frontmatter assignment on ::{} directive at line {}: {} (value: {})",
-                                        directive.kind.as_str(),
-                                        line,
-                                        reason,
-                                        raw
-                                    ),
-                                )
+                                ComposeWarning {
+                                    code: Some(crate::markdown::compose::policy::INVALID_FRONTMATTER_ASSIGNMENT_CODE.to_string()),
+                                    ..ComposeWarning::new(
+                                        "transclusion",
+                                        format!(
+                                            "Invalid frontmatter assignment on ::{} directive at line {}: {} (value: {})",
+                                            directive.kind.as_str(),
+                                            line,
+                                            reason,
+                                            raw
+                                        ),
+                                    )
+                                }
                                 .at_line(*line),
                             );
                         } else {
@@ -522,15 +526,18 @@ impl<'a> TransclusionEngine<'a> {
                     transclusion::DeferredSetError::ReassignedProperty { name } => {
                         if options.allow_reassigned_frontmatter_property {
                             report.add_warning(
-                                ComposeWarning::new(
-                                    "transclusion",
-                                    format!(
-                                        "Duplicate set property '{}' on ::{} directive at line {}; rightmost assignment wins",
-                                        name,
-                                        directive.kind.as_str(),
-                                        directive.line
-                                    ),
-                                )
+                                ComposeWarning {
+                                    code: Some(crate::markdown::compose::policy::REASSIGNED_FRONTMATTER_PROPERTY_CODE.to_string()),
+                                    ..ComposeWarning::new(
+                                        "transclusion",
+                                        format!(
+                                            "Duplicate set property '{}' on ::{} directive at line {}; rightmost assignment wins",
+                                            name,
+                                            directive.kind.as_str(),
+                                            directive.line
+                                        ),
+                                    )
+                                }
                                 .at_line(directive.line),
                             );
                         } else {
@@ -558,6 +565,12 @@ impl<'a> TransclusionEngine<'a> {
                     )
                 {
                     report.add_warning(warning.at_line(directive.line));
+                }
+                // A blocking finding of an earlier directive, or of this
+                // condition's context check, stops before this condition
+                // runs: it may compose nested content.
+                if let Some(watch) = watch.as_deref_mut() {
+                    watch.check(report)?;
                 }
                 let mut missing = Vec::new();
                 let should_include =
@@ -624,12 +637,11 @@ impl<'a> TransclusionEngine<'a> {
                     self.markdown.source_context_for_errors(),
                 ) {
                     Ok(resolved) => resolved,
-                    Err(err) if ignore_invalid => {
+                    Err(err) if ignore_invalid || removes_missing(options, &err) => {
                         let mut fixed_report = ComposeReport::new();
                         fixed_report.transclusions_skipped = 1;
                         fixed_report.add_warning(
-                            ComposeWarning::new("transclusion", err.to_string())
-                                .at_line(directive.line),
+                            skipped_transclusion_warning(&err).at_line(directive.line),
                         );
                         prepared.push(PreparedTransclusion::FixedReplace {
                             order: *next_order,
@@ -806,10 +818,10 @@ impl<'a> TransclusionEngine<'a> {
             self.markdown.source_context_for_errors(),
         ) {
             Ok(resolved) => resolved,
-            Err(err) if ignore_invalid => {
+            Err(err) if ignore_invalid || removes_missing(options, &err) => {
                 let mut fixed_report = ComposeReport::new();
                 fixed_report.transclusions_skipped = 1;
-                fixed_report.add_warning(ComposeWarning::new("transclusion", err.to_string()));
+                fixed_report.add_warning(skipped_transclusion_warning(&err));
                 prepared.push(PreparedTransclusion::FixedSection {
                     order: *next_order,
                     slot,
@@ -1700,21 +1712,20 @@ pub(crate) fn apply_directive_set_overlay(
 /// every authored value once.
 pub(crate) fn markdown_child_options(
     parent: &crate::markdown::compose::ComposeRequest,
-    parent_data: &Map<String, Value>,
+    parent_data: &crate::markdown::compose::SharedFrontmatter,
     directive_options: &transclusion::BlockOptions,
     path: &Path,
     opening: Option<SourceOpening>,
 ) -> crate::markdown::compose::ComposeRequest {
-    let mut inherited = parent_data.clone();
     // Prologue/epilogue are scoped to the defining document — never propagate.
     // ctx is captured fresh per-document by EffectiveStateBuilder, so the
     // parent's merged runtime context must not leak into children (it would
     // appear as a document-defined ctx and trigger false collision warnings).
-    // `shift_remove`, not `remove` (a swap-remove under `preserve_order`), so
-    // the inherited keys keep the parent's order.
-    inherited.shift_remove("prologue");
-    inherited.shift_remove("epilogue");
-    inherited.shift_remove("ctx");
+    let inherited: Map<String, Value> = parent_data
+        .iter()
+        .filter(|(key, _)| !matches!(key.as_str(), "prologue" | "epilogue" | "ctx"))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
 
     let one_off = match &directive_options.replace {
         transclusion::ReplaceOption::OneOff(one_off) => Some(one_off.clone()),
@@ -1764,6 +1775,20 @@ fn parse_bool(raw: &str) -> Option<bool> {
         "0" | "false" | "no" | "off" => Some(false),
         _ => None,
     }
+}
+
+/// Whether `options` removes the transclusion `err` failed to resolve: its
+/// target does not exist and the missing-transclusion recovery is on.
+fn removes_missing(options: &crate::markdown::compose::ComposeRequest, err: &transclusion::TransclusionError) -> bool {
+    options.allow_missing_transclusions && err.resolution_failure() == Some(biscuit_file::ResolutionFailure::NoMatch)
+}
+
+/// The warning of a transclusion removed because it did not resolve; a
+/// missing target carries the code its recovery governs.
+fn skipped_transclusion_warning(err: &transclusion::TransclusionError) -> ComposeWarning {
+    let code = (err.resolution_failure() == Some(biscuit_file::ResolutionFailure::NoMatch))
+        .then(|| crate::markdown::compose::policy::MISSING_TRANSCLUSION_CODE.to_string());
+    ComposeWarning { code, ..ComposeWarning::new("transclusion", err.to_string()) }
 }
 
 #[cfg(test)]

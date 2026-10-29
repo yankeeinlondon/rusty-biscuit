@@ -45,6 +45,7 @@ Each reference is validated relative to its **own origin source**, not the root 
 | `references_valid` | Count that passed |
 | `issues` | `Vec<ReferenceIssue>` with code, message, severity, origin |
 | `warnings` | Non-blocking informational messages |
+| `trigger_warnings` | `Vec<ComposeWarning>`: each [schema trigger skipped as invalid](../topics/schemas/schema-triggers.md#invalid-discovered-triggers) that preparing the root or a transcluded document (each in its own context) found, once per trigger, in discovery order; not serialized |
 
 Helper methods: `is_valid()` (no error-severity issues), `error_count()`.
 

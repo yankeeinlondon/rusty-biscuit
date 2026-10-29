@@ -51,10 +51,14 @@ fn run(fixture: &CliProcessFixture, record: &Path, args: &[&str]) -> Run {
     let envs: Vec<String> = (0..)
         .map_while(|n| fs::read_to_string(record.join(format!("env-{n}"))).ok())
         .collect();
-    let launches = launch_recorder::launches(record)
+    let argv = launch_recorder::launches(record);
+    let prompts = launch_recorder::prompts(record);
+    assert_eq!(argv.len(), envs.len(), "every launched provider must record its environment");
+    assert_eq!(argv.len(), prompts.len(), "every launched provider must record its prompt");
+    let launches = argv
         .into_iter()
         .zip(envs)
-        .zip(launch_recorder::prompts(record))
+        .zip(prompts)
         // A provider gets its prompt on stdin or in argv (Goose's `--text`).
         .map(|((argv, env), prompt)| (argv[0].clone(), env, format!("{} {}", argv[1..].join(" "), prompt.trim())))
         .collect();
@@ -586,10 +590,14 @@ fn run_with_env(fixture: &CliProcessFixture, record: &Path, args: &[&str], envs:
     let envs: Vec<String> = (0..)
         .map_while(|n| fs::read_to_string(record.join(format!("env-{n}"))).ok())
         .collect();
-    let launches = launch_recorder::launches(record)
+    let argv = launch_recorder::launches(record);
+    let prompts = launch_recorder::prompts(record);
+    assert_eq!(argv.len(), envs.len(), "every launched provider must record its environment");
+    assert_eq!(argv.len(), prompts.len(), "every launched provider must record its prompt");
+    let launches = argv
         .into_iter()
         .zip(envs)
-        .zip(launch_recorder::prompts(record))
+        .zip(prompts)
         .map(|((argv, env), prompt)| (argv[0].clone(), env, format!("{} {}", argv[1..].join(" "), prompt.trim())))
         .collect();
     Run {
@@ -1183,5 +1191,100 @@ fn identity_shell_document_agent_on_retry() {
         assert!(argv.iter().any(|arg| arg == "BODY_AGENT=goose"), "attempt {attempt} argv: {argv:?}");
     }
     assert_eq!(fs::read_to_string(record.join("env-1")).unwrap(), "goose|unset", "the retried child");
+}
+
+fn stage_model_removal(name: &str, opening_model: &str, sequence_frontmatter: &str, with: &str) -> (CliProcessFixture, PathBuf) {
+    let fixture = CliProcessFixture::named(name);
+    fixture.seed_user_config();
+    let record = launch_recorder::install(
+        &fixture,
+        "goose",
+        &format!("{RECORD_ENV}; if [ \"$n\" = 0 ]; then cp fresh.md task.md; exit 1; fi"),
+    );
+    fs::write(
+        fixture.cwd().join("task.md"),
+        format!("---\nagent: goose\n{opening_model}failure:\n  - {{retry: {{max_attempts: 1}}}}\n---\nBODY_MODEL={{{{ env.MODEL }}}}\n"),
+    )
+    .unwrap();
+    fs::write(
+        fixture.cwd().join("fresh.md"),
+        "---\nagent: goose\nfailure:\n  - {retry: {max_attempts: 1}}\n---\nBODY_MODEL={{ env.MODEL }}\n",
+    )
+    .unwrap();
+    fs::write(fixture.cwd().join("seq.md"), format!("---\n{sequence_frontmatter}sequence:\n  - name: run\n    prompt: task.md\n{with}---\n")).unwrap();
+    (fixture, record)
+}
+
+#[test]
+fn a_retry_drops_a_model_removed_from_its_document() {
+    let (fixture, record) = stage_model_removal("seq-task-model-removed-on-retry", "model: opening-model\n", "", "");
+
+    let run = run(&fixture, &record, &[]);
+
+    assert_eq!(run.code, Some(0), "stderr:\n{}", run.stderr);
+    assert_eq!(binaries(&run), ["goose", "goose"], "stderr:\n{}", run.stderr);
+    assert_eq!(run.launches[0].1, "goose|opening-model");
+    assert_eq!(run.launches[1].1, "goose|unset", "the reread must clear the document-owned model");
+    assert!(!run.launches[1].2.contains("opening-model"), "the retried argv and prompt: {}", run.launches[1].2);
+}
+
+#[test]
+fn a_retry_retains_a_model_supplied_by_with() {
+    let (fixture, record) = stage_model_removal("seq-task-with-model-on-retry", "model: opening-model\n", "", "    with: {model: with-model}\n");
+    let run = run(&fixture, &record, &[]);
+    assert_eq!(run.code, Some(0), "stderr:\n{}", run.stderr);
+    assert_eq!(run.launches.len(), 2);
+    for (_, env, prompt) in &run.launches {
+        assert_eq!(env, "goose|with-model");
+        assert!(prompt.contains("BODY_MODEL=with-model"), "{prompt}");
+    }
+}
+
+#[test]
+fn a_retry_retains_a_genuine_enclosing_model_fallback() {
+    let (fixture, record) = stage_model_removal("seq-task-enclosing-model-on-retry", "", "agent: goose\nmodel: enclosing-model\n", "");
+    // The task inherits the sequence's provider and model.
+    for name in ["task.md", "fresh.md"] {
+        let path = fixture.cwd().join(name);
+        let text = fs::read_to_string(&path).unwrap().replace("agent: goose\n", "");
+        fs::write(path, text).unwrap();
+    }
+    let run = run(&fixture, &record, &[]);
+    assert_eq!(run.code, Some(0), "stderr:\n{}", run.stderr);
+    assert_eq!(run.launches.len(), 2);
+    for (_, env, prompt) in &run.launches {
+        assert_eq!(env, "goose|enclosing-model");
+        assert!(prompt.contains("BODY_MODEL=enclosing-model"), "{prompt}");
+    }
+}
+
+#[test]
+fn a_retry_keeps_the_callers_captured_model() {
+    let (fixture, record) = stage_model_removal("seq-task-captured-model-on-retry", "model: opening-model\n", "", "");
+    let run = run_with_env(&fixture, &record, &[], &[("MODEL", "captured-model")]);
+    assert_eq!(run.code, Some(0), "stderr:\n{}", run.stderr);
+    assert_eq!(run.launches.len(), 2);
+    for (_, env, prompt) in &run.launches {
+        assert_eq!(env, "goose|captured-model");
+        assert!(prompt.contains("BODY_MODEL=captured-model"), "{prompt}");
+    }
+}
+
+#[test]
+fn a_rewritten_prompt_drops_its_predicted_model_before_first_launch() {
+    let (fixture, record) = stage(
+        "seq-task-model-removed-before-first-launch",
+        &[
+            ("task.md", "---\nagent: goose\nmodel: opening-model\n---\nBODY_MODEL={{ env.MODEL }}\n"),
+            ("fresh.md", "---\nagent: goose\n---\nBODY_MODEL={{ env.MODEL }}\n"),
+            ("seq.md", "---\nsequence:\n  - name: rewrite\n    shell: cp fresh.md task.md\n  - name: run\n    prompt: task.md\n---\n"),
+        ],
+        &["goose"],
+    );
+    let run = run(&fixture, &record, &[]);
+    assert_eq!(run.code, Some(0), "stderr:\n{}", run.stderr);
+    assert_eq!(binaries(&run), ["goose"]);
+    assert_eq!(run.launches[0].1, "goose|unset");
+    assert!(!run.launches[0].2.contains("opening-model"), "{}", run.launches[0].2);
 }
 

@@ -7,7 +7,8 @@
 //!
 //! The lifecycle is:
 //!
-//! 1. Collect every command the document *could* run (condition-blind).
+//! 1. Collect every command the document *could* run (condition-blind), and
+//!    stop when a warning the walk found blocks under the request's policy.
 //! 2. Validate the set against the built-in blacklist, the user
 //!    blacklist, and the whitelist. Each command site is decided once: a
 //!    site whose value is late by its shape; any other by an `exact` rule,
@@ -32,7 +33,7 @@ use crate::markdown::compose::shell_expansion::store::{
     self, load_ruleset, resolve_policy_paths,
 };
 use crate::markdown::compose::shell_expansion::template::{
-    ModeRequirement, OfferedChoices, ShellCandidate, ShellPreApprovals,
+    ModeRequirement, OfferedChoices, ShellCandidate, ShellPreApprovals, SuggestedRules,
 };
 use crate::markdown::compose::shell_expansion::types::{
     ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellCommandEntry,
@@ -62,11 +63,17 @@ pub struct PreflightApprovalStats {
 /// `ComposeOptions::with_preflight_graph(...)` so the final transclusion stage
 /// reuses the resolved targets instead of resolving them a third time — the v2
 /// design's "reuse the collection walk" goal on the primary user-facing path.
+///
+/// The [`warnings`](Self::warnings) are the collection walk's skipped-trigger
+/// warnings ([`ComposePreflightReport::warnings`](super::ComposePreflightReport::warnings)),
+/// for the caller to deliver with the invocation: composition does not
+/// report a trigger only a child it skips holds.
 #[derive(Debug, Clone, Default)]
 pub struct ComposePreflightApprovals {
     pub pre_approved_commands: ShellPreApprovals,
     pub stats: PreflightApprovalStats,
     pub preflight_graph: super::PreflightGraphNode,
+    pub warnings: Vec<crate::markdown::compose::ComposeWarning>,
 }
 
 impl Markdown {
@@ -94,19 +101,74 @@ impl Markdown {
     ///   `ShellExpansionError::ApprovalRequired` for the first such
     ///   command.
     /// - Collection, policy-file, or pre-flight failures.
+    /// - A walk warning the request's
+    ///   [`BlockingPolicy`](crate::markdown::compose::policy::BlockingPolicy)
+    ///   blocks (a denied skipped trigger) → `ShellExpansionError::Preflight`
+    ///   holding [`MarkdownError::BlockedDiagnostics`](crate::markdown::MarkdownError::BlockedDiagnostics),
+    ///   judged before any policy file is read or the handler is asked.
+    ///
+    /// Whatever the error, the warnings the walk reported before it are left
+    /// for [`ComposeOptions::take_preflight_failure_warnings`](crate::markdown::compose::ComposeOptions::take_preflight_failure_warnings):
+    /// a policy error after a successful walk leaves the walk's
+    /// skipped-trigger warnings there.
     pub fn compose_preflight_approvals(
         &self,
         request: &crate::markdown::compose::ComposeRequest,
         approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
     ) -> Result<ComposePreflightApprovals, ShellExpansionError> {
-        let options = request.options();
-        let report = self.compose_preflight(request).map_err(|e| match e {
+        self.compose_preflight_approvals_with(request, approval_handler, ExtraShellSources::default())
+    }
+
+    /// [`Self::compose_preflight_approvals`] with `extra` commands and sites
+    /// judged in the same run, under the same policy and the same batched
+    /// prompt: a host's lifecycle shells, which the document walk does not
+    /// see. They are approved whether or not a body shell operation is
+    /// enabled.
+    ///
+    /// ## Errors
+    ///
+    /// As [`Self::compose_preflight_approvals`].
+    pub fn compose_preflight_approvals_with(
+        &self,
+        request: &crate::markdown::compose::ComposeRequest,
+        approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
+        extra: ExtraShellSources,
+    ) -> Result<ComposePreflightApprovals, ShellExpansionError> {
+        let mut report = self.compose_preflight(request).map_err(|e| match e {
             crate::markdown::types::MarkdownError::ShellExpansion(inner) => *inner,
             // Preserve the rich error (transform parse, ctx merge, schema
             // validation, remote fetch, …) so the caller renders its styled
             // block instead of an opaque policy-I/O string.
             other => ShellExpansionError::Preflight(Box::new(other)),
         })?;
+        let warnings = std::mem::take(&mut report.warnings);
+        // The walk is the first to learn of a trigger only a skipped child
+        // holds: a policy denying it stops here, before any policy file is
+        // read, any prompt is shown, or any approved command can run.
+        let judged = crate::markdown::compose::pipeline::stop_if_warnings_blocked(request, &warnings)
+            .map_err(|stop| ShellExpansionError::Preflight(Box::new(stop)))
+            .and_then(|()| self.approve_collected(request, approval_handler, extra, report));
+        match judged {
+            Ok(approvals) => Ok(ComposePreflightApprovals { warnings, ..approvals }),
+            Err(error) => {
+                request.options().preflight_failure_warnings.record(warnings);
+                Err(error)
+            }
+        }
+    }
+
+    /// Judges a successful walk's `report`, with `extra`, against the
+    /// request's shell policy.
+    fn approve_collected(
+        &self,
+        request: &crate::markdown::compose::ComposeRequest,
+        approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
+        extra: ExtraShellSources,
+        mut report: super::ComposePreflightReport,
+    ) -> Result<ComposePreflightApprovals, ShellExpansionError> {
+        let options = request.options();
+        report.entries.extend(extra.entries);
+        report.candidates.extend(extra.candidates);
 
         let shell_opts = options.shell_options();
         let policy_paths = resolve_policy_paths(&shell_opts, &options.source, request.resolution_context())?;
@@ -165,8 +227,18 @@ impl Markdown {
                 user_approved: policy.user_approved,
             },
             preflight_graph: report.preflight_graph,
+            warnings: Vec::new(),
         })
     }
+}
+
+/// Commands and sites a host adds to one preflight approval run.
+#[derive(Debug, Clone, Default)]
+pub struct ExtraShellSources {
+    /// Commands with known bytes, one entry per chain segment.
+    pub entries: Vec<ShellCommandEntry>,
+    /// Sites holding a placeholder.
+    pub candidates: Vec<ShellCandidate>,
 }
 
 /// The policy one preflight approval run judges every site against, and the
@@ -193,13 +265,19 @@ impl SitePolicy<'_> {
         }
     }
 
-    fn approval_required(&self, command: &str, origin: &ShellCommandOrigin) -> ShellExpansionError {
+    fn approval_required(
+        &self,
+        command: &str,
+        origin: &ShellCommandOrigin,
+        suggested_rules: SuggestedRules,
+    ) -> ShellExpansionError {
         ShellExpansionError::ApprovalRequired {
             ctx: Box::new(self.ctx.clone()),
             command: command.to_string(),
             whitelist_path: Box::new(self.paths.whitelist.clone()),
             blacklist_path: Box::new(self.paths.blacklist.clone()),
             origin: origin.clone(),
+            suggested_rules: Box::new(suggested_rules),
         }
     }
 
@@ -287,7 +365,13 @@ impl SitePolicy<'_> {
         }
 
         let Some(handler) = self.handler else {
-            return Err(self.approval_required(&command, origin));
+            let rules = SuggestedRules::new(
+                candidate.offered(),
+                resolved.map(Vec::as_slice),
+                shape.as_ref(),
+                &executables,
+            );
+            return Err(self.approval_required(&command, origin, rules));
         };
         let first = resolved
             .and_then(|keys| keys.first())
@@ -375,7 +459,13 @@ impl SitePolicy<'_> {
             return Ok(());
         }
         let Some(handler) = self.handler else {
-            return Err(self.approval_required(&entry.normalized, &entry.origin));
+            let rules = SuggestedRules::new(
+                OfferedChoices::resolved_bytes(),
+                Some(std::slice::from_ref(&entry.normalized)),
+                None,
+                std::slice::from_ref(&entry.executable),
+            );
+            return Err(self.approval_required(&entry.normalized, &entry.origin, rules));
         };
         let request = ShellApprovalRequest {
             source: self.source.clone(),

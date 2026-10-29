@@ -1,7 +1,6 @@
 ---
+kind: canonical-documentation
 blast_radius:
-  - darkmatter/features/2026-03-30-fm-interpolation/spec.md
-  - darkmatter/features/2026-03-30-fm-interpolation/tech-design.md
   - darkmatter/lib/src/markdown/compose/mod.rs
   - darkmatter/lib/src/markdown/compose/types.rs
   - darkmatter/lib/src/markdown/compose/state.rs
@@ -399,8 +398,6 @@ The compose report tracks frontmatter interpolation separately from body interpo
 
 This document may need review when any of these files change:
 
-- `darkmatter/features/2026-03-30-fm-interpolation/spec.md`
-- `darkmatter/features/2026-03-30-fm-interpolation/tech-design.md`
 - `darkmatter/lib/src/markdown/compose/mod.rs`
 - `darkmatter/lib/src/markdown/compose/types.rs`
 - `darkmatter/lib/src/markdown/compose/state.rs`

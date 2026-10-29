@@ -9,9 +9,10 @@ use darkmatter::markdown::compose::shell_expansion::store::{
     load_ruleset, load_ruleset_with_warnings,
 };
 use darkmatter::markdown::compose::shell_expansion::template::{
-    ApprovalType, FilledChain, FilledSegment, HoleValidator, TemplateShape, TypeProvenance, parse_authored,
-    project_hole,
+    ApprovalType, FilledChain, FilledSegment, HoleType, HoleValidator, TemplateShape, TypeProvenance,
+    parse_authored,
 };
+use darkmatter::markdown::compose::expression::{DeclaredTypes, TypeScope};
 use darkmatter::markdown::compose::shell_expansion::types::{
     ChainOperator, ShellExpansionError, ShellPolicyPaths, ShellRuleEntry, ShellRuleSet,
 };
@@ -34,10 +35,17 @@ fn schema(schema: &str) -> Option<SimplifiedSchema> {
         .simplified
 }
 
+/// `expression` typed at an unguarded site of a document whose projection
+/// is `schema` and whose host declares `host_globals`.
+fn project_hole(expression: &str, schema: Option<&SimplifiedSchema>, host_globals: &[&str]) -> HoleType {
+    let declared = DeclaredTypes::new(schema).with_host_globals(host_globals);
+    darkmatter::markdown::compose::shell_expansion::template::project_hole(expression, &TypeScope::unguarded(&declared))
+}
+
 /// The shape of `command` typed against `schema`.
 fn typed_shape(command: &str, schema: Option<&SimplifiedSchema>) -> TemplateShape {
     let mut template = parse_authored(command).unwrap_or_else(|error| panic!("{command}: {error}"));
-    template.project_types(schema, &[]);
+    template.project_types(&TypeScope::unguarded(&DeclaredTypes::new(schema)));
     TemplateShape::from_template(&template)
 }
 
@@ -159,7 +167,7 @@ fn numeric_and_union_declarations_disclose_a_string_hole_and_keep_their_validato
     for (name, validated_as) in [("count", "number(min(1))"), ("either", "[alphanumeric, number]")] {
         let hole = project_hole(name, projection.as_ref(), &[]);
         assert_eq!(hole.approval, ApprovalType::BroadString, "{name}");
-        assert!(matches!(hole.validator, HoleValidator::Declared(_)), "{name}");
+        assert!(matches!(hole.validator, HoleValidator::Declared { .. }), "{name}");
         assert_eq!(hole.display_type(), format!("string (validated as {validated_as})"));
     }
     let shape = typed_shape("seq {{ count }}", projection.as_ref());

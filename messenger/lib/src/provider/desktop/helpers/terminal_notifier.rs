@@ -25,12 +25,16 @@ const NOTICE_TIMEOUT_MS: u64 = 5_000;
 /// Helper backend that delivers via the macOS `terminal-notifier` CLI.
 pub(crate) struct TerminalNotifierHelper {
     pub(crate) path: PathBuf,
+    pub(crate) notice_timeout_ms: u64,
 }
 
 impl TerminalNotifierHelper {
     /// Build a helper from sniff detection data.
     pub(crate) fn new(path: PathBuf) -> Self {
-        Self { path }
+        Self {
+            path,
+            notice_timeout_ms: NOTICE_TIMEOUT_MS,
+        }
     }
 
     /// Materialize the argv passed to `terminal-notifier`.
@@ -142,7 +146,7 @@ impl HelperBackend for TerminalNotifierHelper {
         request: &DesktopNotificationRequest,
     ) -> Result<DesktopNotificationReceipt, HelperError> {
         let args = self.build_args(request);
-        let output = run_expect_success(&self.path, &args, None, Some(NOTICE_TIMEOUT_MS)).await?;
+        let output = run_expect_success(&self.path, &args, None, Some(self.notice_timeout_ms)).await?;
         Self::parse_output(request, &output.stdout)
     }
 
@@ -156,7 +160,7 @@ impl HelperBackend for TerminalNotifierHelper {
         // the group so subsequent posts to the same group overwrite this one.
         request.group_id = Some(id.to_string());
         let args = self.build_args(&request);
-        let output = run_expect_success(&self.path, &args, None, Some(NOTICE_TIMEOUT_MS)).await?;
+        let output = run_expect_success(&self.path, &args, None, Some(self.notice_timeout_ms)).await?;
         let mut receipt = Self::parse_output(&request, &output.stdout)?;
         receipt
             .metadata

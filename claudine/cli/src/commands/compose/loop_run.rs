@@ -5,6 +5,7 @@
 //! outcome into the loop engine's typed iteration result. The prep-timing and
 //! warning helpers are shared by both compose entrypoints.
 
+use claudine::composition::TriggerFindings;
 use darkmatter::markdown::compose::ComposeWarning;
 
 use super::interrupt::USER_INTERRUPT_EXIT_CODE;
@@ -29,12 +30,21 @@ pub(crate) fn record_prep_substage(
 /// Emits non-fatal Darkmatter compose warnings to stderr, unless `--silent` is set.
 ///
 /// A tolerated file-reference failure keeps its stable `failure: <class>`
-/// row, as `md` renders it.
-pub(crate) fn emit_compose_warnings(warnings: &[ComposeWarning], silent: bool) {
+/// row, as `md` renders it. Skipped schema triggers are shown through the
+/// invocation's `trigger_findings` record instead ([`emit_trigger_warnings`]),
+/// so a loop iteration, retry, or proxy target that discovers the same
+/// trigger again never repeats its warning.
+pub(crate) fn emit_compose_warnings(
+    warnings: &[ComposeWarning],
+    trigger_findings: &TriggerFindings,
+    silent: bool,
+) {
+    trigger_findings.record_compose_warnings(warnings);
+    emit_trigger_warnings(trigger_findings, silent);
     if silent {
         return;
     }
-    for warning in warnings {
+    for warning in warnings.iter().filter(|warning| warning.invalid_trigger_source().is_none()) {
         let mut message = warning.message.clone();
         if let Some(line) = warning.line_number {
             message = format!("[{}] line {line}: {message}", warning.stage);
@@ -48,6 +58,38 @@ pub(crate) fn emit_compose_warnings(warnings: &[ComposeWarning], silent: bool) {
             );
         }
         crate::log::warn(&message);
+    }
+}
+
+/// Emits the skipped schema triggers this invocation has not shown yet, each
+/// as one warning naming the trigger and why it was skipped; unless
+/// `--silent` is set, which still marks them shown.
+pub(crate) fn emit_trigger_warnings(trigger_findings: &TriggerFindings, silent: bool) {
+    for warning in trigger_findings.take_undelivered() {
+        if !silent {
+            crate::log::warn(&format!("[schema_validation] {}", warning.message));
+        }
+    }
+}
+
+/// Shows, when the invocation it guards ends, every skipped schema trigger
+/// not shown yet: those recorded before a failure (rendered after this drop,
+/// so the warnings precede the error) and those a re-preparation recorded
+/// without rendering warnings of its own (a harness retry's fresh read).
+pub(crate) struct TriggerWarningDrain {
+    trigger_findings: TriggerFindings,
+    silent: bool,
+}
+
+impl TriggerWarningDrain {
+    pub(crate) fn new(trigger_findings: &TriggerFindings, silent: bool) -> Self {
+        Self { trigger_findings: trigger_findings.clone(), silent }
+    }
+}
+
+impl Drop for TriggerWarningDrain {
+    fn drop(&mut self) {
+        emit_trigger_warnings(&self.trigger_findings, self.silent);
     }
 }
 

@@ -274,6 +274,11 @@ pub struct ComposeOptions {
     /// - `Some(false)`: treat invalid references as errors
     pub(crate) ignore_invalid_references: Option<bool>,
 
+    /// When `true`, a transclusion whose target does not exist is removed
+    /// with a warning instead of failing the document. Narrower than
+    /// [`Self::ignore_invalid_references`]: every other failure still fails.
+    pub(crate) allow_missing_transclusions: bool,
+
     /// Whether `@`-prefixed paths resolve to the git repository root.
     /// Default: true.
     pub(crate) resolve_repo_root: bool,
@@ -374,6 +379,12 @@ pub struct ComposeOptions {
     /// and populates `ComposeReport::perf`. Default: `false`.
     pub(crate) perf_enabled: bool,
 
+    // ── Blocking ───────────────────────────────────────────────────
+    /// Which reported warnings fail the document. Default: none. Shared
+    /// rather than inline: the options are held by value in every nested
+    /// composition frame, which the self-composition depth limit multiplies.
+    pub(crate) blocking_policy: std::sync::Arc<crate::markdown::compose::policy::BlockingPolicy>,
+
     // ── Internal (crate-private) ───────────────────────────────────
     /// Runtime context captured at construction time (timestamps,
     /// environment variables).
@@ -413,6 +424,11 @@ pub struct ComposeOptions {
     /// before validation runs. When both baseline and document declare
     /// the same property, the document wins.
     pub(crate) baseline_schema: Option<crate::markdown::schemas::SimplifiedSchema>,
+
+    /// The stored definitions `baseline_schema`'s references point into:
+    /// the shipped baseline's shared types, or empty for a caller-supplied
+    /// baseline.
+    pub(crate) baseline_definitions: std::sync::Arc<crate::markdown::schemas::DefinitionTable>,
 
     /// Whether `baseline_schema` is the authored Darkmatter baseline (set via
     /// [`ComposeOptions::with_darkmatter_baseline_schema`]). When true, schema
@@ -478,6 +494,18 @@ pub struct ComposeOptions {
     /// `false`.
     pub(crate) defer_expression_failures: bool,
 
+    /// The operations whose surfaces the passive call check covers, when they
+    /// differ from [`Self::enabled_operations`]. Set only by the shell-command
+    /// discovery pass, which composes a narrowed surface but must reject (and
+    /// report the warnings before) the same call the terminal pass would.
+    /// Default: `None`, the enabled operations.
+    pub(crate) call_check_operations: Option<ComposeOperationSet>,
+
+    /// The warnings a failed discovery-pass document had reported before its
+    /// failure, shared by every clone of the request; see
+    /// [`Self::take_preflight_failure_warnings`].
+    pub(crate) preflight_failure_warnings: crate::markdown::compose::preflight::PreflightFailureWarnings,
+
     /// When `true`, `has_alias`, `has_builtin_function`, `has_user_function`,
     /// and the shell half of `can_execute` answer `false` without launching the
     /// login shell. Set only by the shell-command discovery pass, which R8
@@ -499,7 +527,7 @@ pub struct ComposeOptions {
     /// during shell-command discovery — the planned-probe sink that lets
     /// preflight report an ICMP effect without sending a packet. The grants
     /// themselves are derived from `remote_read_config.allowed_hosts` each time
-    /// the authority is projected, so `--allow-host` stays the single entry
+    /// the authority is projected, so `--allow host=HOST` stays the single entry
     /// point. Default: no grants, which denies every target.
     pub(crate) icmp: crate::markdown::compose::icmp::IcmpAuthority,
 
@@ -631,6 +659,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("allow_local_code", &self.allow_local_code)
             .field("code_fallback_language", &self.code_fallback_language)
             .field("ignore_invalid_references", &self.ignore_invalid_references)
+            .field("allow_missing_transclusions", &self.allow_missing_transclusions)
             .field("resolve_repo_root", &self.resolve_repo_root)
             .field("shell_timeout", &self.shell_timeout)
             .field("shell_policy_root", &self.shell_policy_root)
@@ -659,6 +688,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("cache_root", &self.cache_root)
             .field("cache_namespace", &self.cache_namespace)
             .field("perf_enabled", &self.perf_enabled)
+            .field("blocking_policy", &self.blocking_policy)
             .field("replace_parent_wins", &self.replace_parent_wins)
             .field("one_off_replace", &self.one_off_replace)
             .field("interpolate_code_blocks", &self.interpolate_code_blocks)
@@ -915,6 +945,7 @@ impl ComposeOptions {
             allow_local_code: true,
             code_fallback_language: "txt".to_string(),
             ignore_invalid_references: None,
+            allow_missing_transclusions: false,
             resolve_repo_root: true,
             source_derivation: SourceDerivation::Ordinary,
             source_opening: None,
@@ -933,6 +964,7 @@ impl ComposeOptions {
             cache_root: None,
             cache_namespace: None,
             perf_enabled: false,
+            blocking_policy: std::sync::Arc::default(),
             context,
             context_authority: super::authority::ContextAuthority::CallerSupplied,
             replace_parent_wins: false,
@@ -942,6 +974,7 @@ impl ComposeOptions {
             portable_env: std::collections::BTreeSet::new(),
             absolute_fallback_warning: true,
             baseline_schema: None,
+            baseline_definitions: std::sync::Arc::default(),
             baseline_is_darkmatter_default: false,
             trigger_schemas: false,
             remote_read_config: RemoteReadConfig::default(),
@@ -950,6 +983,8 @@ impl ComposeOptions {
             caller_owns_post_shell_verdict: false,
             defer_missing_runtime_context: false,
             defer_expression_failures: false,
+            call_check_operations: None,
+            preflight_failure_warnings: Default::default(),
             suppress_shell_probes: false,
             nested_compose: Default::default(),
             icmp: Default::default(),
@@ -996,6 +1031,30 @@ impl ComposeOptions {
     /// Returns true if the given operation is enabled.
     pub fn is_enabled(&self, op: ComposeOperation) -> bool {
         self.enabled_operations.contains(op)
+    }
+
+    /// Whether the passive call check covers `op`'s surface: an enabled
+    /// operation, unless the discovery pass widened the check to the
+    /// terminal pass's operations.
+    pub(crate) fn call_check_covers(&self, op: ComposeOperation) -> bool {
+        match &self.call_check_operations {
+            Some(operations) => operations.contains(op),
+            None => self.is_enabled(op),
+        }
+    }
+
+    /// Drains the warnings a failed
+    /// [`compose_preflight`](crate::markdown::Markdown::compose_preflight) or
+    /// [`compose_preflight_approvals`](crate::markdown::Markdown::compose_preflight_approvals)
+    /// run under these options (or any clone of them) had reported before
+    /// its failure, in report order, each skipped trigger once: what
+    /// [`ComposeFailure::warnings`](crate::markdown::compose::ComposeFailure::warnings)
+    /// holds for a failed composition, plus the skipped triggers of documents
+    /// the walk finished before the one that failed. An approval run that
+    /// fails on policy after a successful walk leaves that walk's
+    /// skipped-trigger warnings. Empty after a successful run.
+    pub fn take_preflight_failure_warnings(&self) -> Vec<crate::markdown::compose::ComposeWarning> {
+        self.preflight_failure_warnings.take()
     }
 
     /// Restricts composition to the effective frontmatter surface: frontmatter
@@ -1536,6 +1595,14 @@ impl ComposeOptions {
         self
     }
 
+    /// Removes a transclusion whose target does not exist, with a warning,
+    /// instead of failing the document.
+    #[must_use]
+    pub fn with_allow_missing_transclusions(mut self, allow: bool) -> Self {
+        self.allow_missing_transclusions = allow;
+        self
+    }
+
     /// Sets how invalid transclusion references are handled.
     #[must_use]
     pub fn with_ignore_invalid_references(mut self, ignore: Option<bool>) -> Self {
@@ -1731,18 +1798,34 @@ impl ComposeOptions {
         schema: crate::markdown::schemas::SimplifiedSchema,
     ) -> Self {
         self.baseline_schema = Some(schema);
+        self.baseline_definitions = std::sync::Arc::default();
         // A caller-supplied baseline is not the cached Darkmatter default, even
         // if it happens to be structurally equal; clear the fast-path marker.
         self.baseline_is_darkmatter_default = false;
         self
     }
 
+    /// [`Self::with_baseline_schema`] for a schema whose stored named types
+    /// are references into `definitions`.
+    #[must_use]
+    pub(crate) fn with_baseline_schema_and_definitions(
+        self,
+        schema: crate::markdown::schemas::SimplifiedSchema,
+        definitions: std::sync::Arc<crate::markdown::schemas::DefinitionTable>,
+    ) -> Self {
+        let mut opts = self.with_baseline_schema(schema);
+        opts.baseline_definitions = definitions;
+        opts
+    }
+
     /// Attaches the Darkmatter baseline frontmatter schema as the baseline.
     ///
-    /// This is a convenience wrapper around
-    /// [`with_baseline_schema`](Self::with_baseline_schema) that uses the
-    /// compiled-in [`darkmatter_base_schema`](crate::markdown::schemas::darkmatter_base_schema),
-    /// whose imports resolve without reading the disk. When both
+    /// This attaches the compiled-in baseline
+    /// ([`darkmatter_base_schema`](crate::markdown::schemas::darkmatter_base_schema)),
+    /// whose imports resolve without reading the disk, in the form that
+    /// stores its shared types once, as
+    /// [`darkmatter_base_json_schema`](crate::markdown::schemas::darkmatter_base_json_schema)
+    /// lowers it. When both
     /// the baseline and the document `$schema` declare the same property, the
     /// document side wins.
     ///
@@ -1755,14 +1838,15 @@ impl ComposeOptions {
     /// ```
     #[must_use]
     pub fn with_darkmatter_baseline_schema(self) -> Self {
-        let mut opts = self.with_baseline_schema(crate::markdown::schemas::darkmatter_base_schema());
+        let (schema, definitions) = crate::markdown::schemas::darkmatter_shared_baseline();
+        let mut opts = self.with_baseline_schema_and_definitions(schema.clone(), std::sync::Arc::clone(definitions));
         // Mark the fast path: schema validation reuses the process-cached
         // compiled JSON Schema instead of re-converting per compose (F9).
         opts.baseline_is_darkmatter_default = true;
         opts
     }
 
-    /// Enables repository-scoped trigger-schema discovery for file sources.
+    /// Enables repository-scoped schema-trigger discovery for file sources.
     ///
     /// This is opt-in for library hosts. The `md compose` CLI enables it by
     /// default; stdin, URL, and in-memory sources remain discovery-free.
@@ -1803,7 +1887,7 @@ impl ComposeOptions {
     }
 
     /// The request's ICMP authority with its grants derived from the
-    /// `--allow-host` allowlist.
+    /// `--allow host=HOST` allowlist.
     ///
     /// Sharing one entry point with HTTP is deliberate (R6), but the two
     /// policies stay disjoint: a CIDR entry grants ICMP and nothing else, and a
@@ -1915,6 +1999,20 @@ impl ComposeOptions {
         self.context = context;
         self.context_authority = super::authority::ContextAuthority::CallerSupplied;
         self
+    }
+
+    /// Fails the document on every reported warning `policy` blocks. A
+    /// warning found by the passive call check blocks before any expression
+    /// or shell of that document runs.
+    #[must_use]
+    pub fn with_blocking_policy(mut self, policy: crate::markdown::compose::policy::BlockingPolicy) -> Self {
+        self.blocking_policy = std::sync::Arc::new(policy);
+        self
+    }
+
+    /// The policy that decides which reported warnings fail the document.
+    pub fn blocking_policy(&self) -> &crate::markdown::compose::policy::BlockingPolicy {
+        &self.blocking_policy
     }
 
     /// Enables or disables performance metric collection.
@@ -2563,25 +2661,28 @@ static DEFAULT_BASELINE_CANONICAL_JSON: std::sync::OnceLock<String> = std::sync:
 ///
 /// `is_darkmatter_default` selects a process-cached encoding derived from the
 /// process-cached compiled baseline (`schemas::darkmatter_base_json_schema_ref`)
-/// rather than re-running `to_json_schema`, which dominates this whole
+/// rather than re-running the conversion, which dominates this whole
 /// classification (~534 µs, vs ~74 µs to canonicalize and ~2 µs for every other
 /// option field combined). Compose already populates that cache for the default
 /// baseline via `schema_validation`'s F9 fast path, so the marked arm adds no
 /// conversion at all.
 ///
 /// The marker is only ever set by `with_darkmatter_baseline_schema`, which
-/// assigns `schemas::darkmatter_base_schema()` in the same call;
+/// assigns the shipped baseline and its shared definitions
+/// (`schemas::darkmatter_shared_baseline()`) in the same call;
 /// `with_baseline_schema` clears it unconditionally. So the marker implies the
 /// schema *is* the default, and the cached bytes are exactly what converting it
-/// would produce — hence the same fingerprint.
+/// with `definitions` would produce — hence the same fingerprint.
 ///
 /// ## Notes
 ///
-/// A caller-supplied schema that happens to equal the default takes the uncached
-/// arm and still fingerprints identically; the marker is a fast path, never a
-/// semantic distinction.
+/// A caller-supplied schema and table equal to the default take the uncached
+/// arm and still fingerprint identically; the marker is a fast path, never a
+/// semantic distinction. The definition-free `schemas::darkmatter_base_schema()`
+/// lowers to different bytes, so it fingerprints as a different baseline.
 fn baseline_canonical_json(
     schema: &crate::markdown::schemas::SimplifiedSchema,
+    definitions: &crate::markdown::schemas::DefinitionTable,
     is_darkmatter_default: bool,
 ) -> std::borrow::Cow<'static, str> {
     use biscuit_hash::canonical_json;
@@ -2592,7 +2693,7 @@ fn baseline_canonical_json(
         }));
     }
 
-    let json = crate::markdown::schemas::to_json_schema(schema)
+    let json = crate::markdown::schemas::to_json_schema_with_definitions(schema, definitions)
         .unwrap_or_else(|_| serde_json::json!({"baseline_schema_error": true}));
     std::borrow::Cow::Owned(canonical_json(&json))
 }
@@ -2740,6 +2841,7 @@ impl ComposeOptions {
             allow_local_code,
             code_fallback_language,
             ignore_invalid_references,
+            allow_missing_transclusions,
             resolve_repo_root,
             source_derivation,
             source_opening,
@@ -2759,12 +2861,14 @@ impl ComposeOptions {
             cache_root,
             cache_namespace,
             perf_enabled,
+            blocking_policy,
             context,
             context_authority,
             replace_parent_wins,
             one_off_replace,
             interpolate_code_blocks,
             baseline_schema,
+            baseline_definitions,
             baseline_is_darkmatter_default,
             trigger_schemas,
             remote_read_config,
@@ -2773,6 +2877,9 @@ impl ComposeOptions {
             caller_owns_post_shell_verdict,
             defer_missing_runtime_context,
             defer_expression_failures,
+            call_check_operations,
+            // A warning sink: it changes the report, never a composed result.
+            preflight_failure_warnings: _,
             suppress_shell_probes,
             nested_compose,
             icmp,
@@ -2805,7 +2912,7 @@ impl ComposeOptions {
         // here and lend it to both encoders rather than paying it per domain.
         let baseline_canonical: Option<std::borrow::Cow<'static, str>> = baseline_schema
             .as_ref()
-            .map(|schema| baseline_canonical_json(schema, *baseline_is_darkmatter_default));
+            .map(|schema| baseline_canonical_json(schema, baseline_definitions, *baseline_is_darkmatter_default));
 
         // ── Graph identity: conservative, covers every value-representable
         //    field (stateful fields are handled by weak instance handles).
@@ -2921,6 +3028,9 @@ impl ComposeOptions {
             Some(false) => enc.tag(1),
             Some(true) => enc.tag(2),
         }
+
+        enc.field("allow_missing_transclusions");
+        enc.bool(*allow_missing_transclusions);
 
         enc.field("resolve_repo_root");
         enc.bool(*resolve_repo_root);
@@ -3051,6 +3161,8 @@ impl ComposeOptions {
 
         enc.field("perf_enabled");
         enc.bool(*perf_enabled);
+        enc.field("blocking_policy");
+        enc.str(&blocking_policy.identity());
 
         // Runtime context: complete encoding of every captured value and env
         // entry — including the volatile per-second and system-state fields the
@@ -3137,6 +3249,18 @@ impl ComposeOptions {
         enc.bool(*defer_missing_runtime_context);
         enc.field("defer_expression_failures");
         enc.bool(*defer_expression_failures);
+        enc.field("call_check_operations");
+        match call_check_operations {
+            Some(operations) => {
+                enc.tag(1);
+                let indices: Vec<usize> = operations.iter().map(|op| op.index()).collect();
+                enc.count(indices.len());
+                for index in indices {
+                    enc.u64(index as u64);
+                }
+            }
+            None => enc.tag(0),
+        }
         enc.field("suppress_shell_probes");
         enc.bool(*suppress_shell_probes);
         // An installed `Active` handle is per-document pipeline state, never
@@ -3255,6 +3379,13 @@ impl ComposeOptions {
             Some(false) => cenc.tag(1),
             Some(true) => cenc.tag(2),
         }
+
+        cenc.field("allow_missing_transclusions");
+        cenc.bool(*allow_missing_transclusions);
+        // A cached result composed under a weaker policy must not stand in
+        // for one whose warnings would block.
+        cenc.field("blocking_policy");
+        cenc.str(&blocking_policy.identity());
 
         cenc.field("resolve_repo_root");
         cenc.bool(*resolve_repo_root);
@@ -3697,9 +3828,10 @@ mod tests {
         let options = ComposeOptions::new().with_darkmatter_baseline_schema();
         let baseline = options
             .baseline_schema
+            .as_ref()
             .expect("baseline schema must be set");
         let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
-            .with_baseline(baseline)
+            .with_baseline_and_definitions(baseline, &options.baseline_definitions)
             .expect("baseline must convert");
 
         // Unknown keys are allowed by the baseline.
@@ -4434,12 +4566,13 @@ mod tests {
     /// The cached-default fast path must be a pure speedup: an identical schema
     /// supplied by hand (marker cleared, uncached arm) must fingerprint exactly
     /// as the marked default does. If `with_darkmatter_baseline_schema` ever
-    /// stops assigning `darkmatter_base_schema()`, the marker would start lying
-    /// about which schema is encoded and this fails.
+    /// stops assigning the shipped baseline and its shared definitions, the
+    /// marker would start lying about which schema is encoded and this fails.
     #[test]
     fn default_baseline_fast_path_fingerprints_as_the_uncached_schema() {
+        let (schema, definitions) = crate::markdown::schemas::darkmatter_shared_baseline();
         let marked = fixed_opts().with_darkmatter_baseline_schema();
-        let by_hand = fixed_opts().with_baseline_schema(crate::markdown::schemas::darkmatter_base_schema());
+        let by_hand = fixed_opts().with_baseline_schema_and_definitions(schema.clone(), Arc::clone(definitions));
 
         assert!(marked.baseline_is_darkmatter_default);
         assert!(!by_hand.baseline_is_darkmatter_default);
@@ -4452,8 +4585,8 @@ mod tests {
             "cached default encoding must equal the freshly converted one"
         );
         assert_eq!(
-            baseline_canonical_json(&crate::markdown::schemas::darkmatter_base_schema(), true),
-            baseline_canonical_json(&crate::markdown::schemas::darkmatter_base_schema(), false),
+            baseline_canonical_json(schema, definitions, true),
+            baseline_canonical_json(schema, definitions, false),
             "cached and uncached arms must produce identical canonical bytes"
         );
     }

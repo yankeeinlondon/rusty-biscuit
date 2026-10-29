@@ -20,9 +20,9 @@ catalog_command: "claudine context --expressions"
 spec_dir: "{{ ctx.repo_root + '/darkmatter/features/' + ctx.today + '-' + (name || 'add-expressions') }}"
 interactive: true
 initialize:
-    - when: "!file_exists(ctx.repo_root + '/darkmatter/docs/schemas/expression-functions.yaml')"
+    - when: "!file_exists(ctx.repo_root + '/darkmatter/schemas/partials/functions.yaml')"
       then:
-          - error: "The **add-expressions** prompt must run inside the rusty-biscuit checkout: it edits `darkmatter/docs/schemas/expression-functions.yaml`, which was not found under `{{ctx.repo_root}}`."
+          - error: "The **add-expressions** prompt must run inside the rusty-biscuit checkout: it edits `darkmatter/schemas/partials/functions.yaml`, which was not found under `{{ctx.repo_root}}`."
 start:
     stderr: "Starting an interactive session to add expression functions; the agent will clarify the requirements, write a spec to `{{spec_dir}}`, then implement it."
     say: "Starting the add expressions session."
@@ -72,15 +72,18 @@ also the clarification agenda in Phase 2 below.
 1. **Name and aliases** — canonical `snake_case`; the established alias convention is the
    underscore-free spelling (`predict_conflicts` / `predictconflicts`). Check
    `claudine context --expressions` for collisions with names and aliases, and check the
-   `ctx.*` catalog: a function that shares a name with a context variable is a **pair** and
-   must share its descriptor entry.
-2. **Signature** — parameters with types from the catalog's vocabulary (`any`, `string`,
-   `number`, `number(integer)`, `boolean`, `file | string`, `IpAddress`, enums), `optional`
-   and `variadic` flags, and overloads when arity changes meaning. Path arguments are
+   `ctx.*` catalog: a function that shares a name with a context variable (`recent_commits`)
+   names the variable in its description, the variable names the function in its own, and
+   they share a named type where the shapes match.
+2. **Signature** — parameters typed in the SimplifiedSchema grammar (`unknown`, `string`,
+   `number`, `number(integer)`, `boolean`, `file`, unions such as `string | null`, `enum(...)`,
+   and the catalog's named helper types such as `ip-address`), optional (`name?: type`) and
+   rest (`...name: type`) parameters, and overloads (a list of `function(...)` types) when
+   arity changes meaning. Path arguments are
    `file | string` and resolve like `absolute()` (document base dir, repo root, magic roots)
    through `FileReference`, never against the process CWD.
-3. **Return shape** — type, `array`, `nullable`, literal unions (`boolean | "unstable"`),
-   and `fallible`. Say what the function returns for a **valid miss** (the lookup found
+3. **Return shape** — the `returns(...)` type, unions included
+   (`boolean | enum(unstable) | null`), and the `fallible` flag. Say what the function returns for a **valid miss** (the lookup found
    nothing) versus a **contract violation** (bad argument); a miss is a documented value
    such as `""`, `[]`, `false`, or `null`, and a violation is a compose error.
 4. **Null and type contract** — the default rule is: a `null` argument propagates `null`,
@@ -100,14 +103,15 @@ also the clarification agenda in Phase 2 below.
 8. **Effects and consent** — does the call run a process, launch a shell profile, send
    packets, fetch a URL, or compose nested content? Then it is an **effect**: it must appear
    in compose preflight as a typed record, be gated by the existing consent model
-   (`--allow-host`, shell approval, `IcmpAuthority`), answer a neutral value in discovery
+   (`--allow host=HOST`, shell approval, `IcmpAuthority`), answer a neutral value in discovery
    mode, and never run during passive validation, DMLS hover, or preflight.
 9. **Surfaces** — the function resolves on every expression surface (frontmatter passes,
    body, `when=`, `$()` ternary branches, Claudine loop and lifecycle strings). Frontmatter
    surfaces are local-only: a remote URL argument there fails loudly.
-10. **Examples** — one per overload with a declared result. `verification: executable` runs
-    through the real evaluator in tests; use `display-only` with a `reason` only when the
-    result depends on the host, repository, clock, or network.
+10. **Examples** — at least one per overload: `example(CALL => RESULT)` runs through the real
+    evaluator in tests; add `; display-only: REASON` only when the result depends on the host,
+    repository, clock, or network. A multi-line result goes in a file-form example,
+    `example(./function-examples/NAME.yaml)`.
 11. **Platform behavior** — anything that differs on macOS, Linux, native Windows, or WSL2
     (shell dialects, path spelling, `PATHEXT`, process containment), and how tests avoid
     depending on the executing host.
@@ -117,12 +121,13 @@ also the clarification agenda in Phase 2 below.
 Work in this order. The parity tests are red between steps; the notes say which red is
 expected.
 
-1. **Author the descriptor.** Add the entry to
-   `darkmatter/docs/schemas/expression-functions.yaml`: `name`, `category`, `order`,
-   `description`, and `overloads[]` with `parameters`, `returns`, and `example`. The file's
-   own `$schema` block at the top is the authoritative shape. For a pair, set `pair: true`
-   and omit `description` (it is authored once, on the `ctx` side of
-   `darkmatter.yaml`). Until step 2 lands, `catalog_and_runtime_bindings_have_bidirectional_canonical_parity` in `expression/functions/mod.rs` is red; that is expected.
+1. **Author the catalog entry.** Add a `types:` entry to
+   `darkmatter/schemas/partials/functions.yaml` whose value is a `function(...)` type (a
+   list of them for overloads) with `parameters(...)`, `returns(...)`, `category(...)` naming
+   a category from the file's `categories:` list, `fallible` when it can fail, and
+   `example(...)`, followed by `-> description`. Entries in the file are grouped by category;
+   documentation sorts them alphabetically within each. A new file-form example also goes in
+   the loader's `EXAMPLE_FILES` table in `expression/catalog/mod.rs`. Until step 2 lands, `catalog_and_runtime_bindings_have_bidirectional_canonical_parity` in `expression/functions/mod.rs` is red; that is expected.
 2. **Bind the handler.** In the owning domain module under
    `darkmatter/lib/src/markdown/compose/expression/functions/` (`strings.rs`, `paths.rs`,
    `git.rs`, `network.rs`, `shell.rs`, …; add a module and list it in `mod.rs`'s
@@ -153,8 +158,8 @@ expected.
    functions, the relevant helper family otherwise) covering the contract, the miss value,
    and any documented gaps.
 6. **Keep passive tooling passive.** DMLS completion and hover
-   (`darkmatter/dmls/src/overlay/expressions.rs`) read `expression_function_descriptors()`;
-   they need no code change, but their descriptor-corpus fixtures may need the new name and
+   (`darkmatter/dmls/src/overlay/expressions.rs`) read `expression_function_descriptors()`
+   and `function_descriptors(name)`; they need no code change, but their descriptor-corpus fixtures may need the new name and
    signature. Nothing there may evaluate.
 7. **Claudine needs no listing edit.** `claudine context --expressions` projects the catalog.
    Only touch Claudine when the function reads late-binding or lifecycle state, or when its
@@ -163,9 +168,9 @@ expected.
 
 The tests that must be green when you finish, all in
 `darkmatter/lib/src/markdown/compose/expression/`: the registration invariants in
-`functions/mod.rs`, `every_descriptor_overload_is_dispatchable_at_its_declared_arity`,
-`every_example_evaluates_to_its_declared_result`, and
-`narrative_doc_function_table_matches_catalog` in `catalog/mod.rs`, plus your own behavior
+`functions/mod.rs`, and `every_executable_example_evaluates_to_its_declared_result`,
+`every_embedded_example_file_evaluates_to_its_returns`, and
+`narrative_doc_function_table_matches_catalog` in `catalog/tests.rs`, plus your own behavior
 tests in the domain module and one composition through `md compose` on a fixture.
 
 ## Rules Learned the Hard Way

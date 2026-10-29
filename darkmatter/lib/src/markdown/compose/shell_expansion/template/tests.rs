@@ -209,6 +209,29 @@ fn rule_types_keep_only_their_canonical_identity() {
     );
 }
 
+/// The widened structural relation reaches rule matching only for sound
+/// string-like subsets; the saved rule grammar and the broad-string rules are
+/// unchanged.
+#[test]
+fn rule_coverage_follows_the_structural_relation_for_string_like_holes() {
+    use crate::markdown::schemas::simplified::grammar::parse_type_expr;
+    let approval = |text: &str| {
+        StringLikeType::from_atom(&parse_type_expr("p", text).unwrap())
+            .map_or(ApprovalType::BroadString, ApprovalType::StringLike)
+    };
+    assert!(rule_covers(&approval("enum(a, b, c)"), &approval("enum(a, b)")));
+    assert!(rule_covers(&approval("enum(a, b, c)"), &approval("literal('a')")));
+    assert!(!rule_covers(&approval("enum(a, b)"), &approval("enum(a, b, c)")));
+    assert!(!rule_covers(&approval("enum(a, b)"), &approval("literal('z')")));
+    // Bounded: a one-member enum is not compared against a literal.
+    assert!(!rule_covers(&approval("literal('a')"), &approval("enum(a)")));
+    // A non-string declaration keeps the broad approval and needs a broad rule.
+    assert_eq!(approval("number"), ApprovalType::BroadString);
+    assert_eq!(approval("literal(4)"), ApprovalType::BroadString);
+    assert!(!rule_covers(&approval("enum('4')"), &approval("literal(4)")));
+    assert!(rule_covers(&ApprovalType::BroadString, &approval("literal(4)")));
+}
+
 #[test]
 fn session_reservations_are_keyed_by_mode_and_policy_root() {
     use crate::markdown::compose::shell_expansion::types::{ReserveOutcome, ShellExpansionRuntime};
@@ -283,5 +306,201 @@ fn shell_template_program_choices_keep_authored_program_evidence() {
         assert!(offered.exact, "{authored}");
         assert_eq!(offered.prefix, prefix, "{authored}");
         assert_eq!(offered.shape, candidate.template.is_ok(), "{authored}");
+    }
+}
+
+// ── guarded discovery (candidate construction at a type scope) ──────────
+
+mod guarded_discovery {
+    use super::super::candidate::CandidateScope;
+    use super::*;
+    use crate::markdown::compose::ShellCommandOrigin;
+    use crate::markdown::compose::expression::{DeclaredTypes, Expr, Polarity, TypeScope, parse};
+    use crate::markdown::compose::shell_expansion::types::ShellExpansionError;
+    use serde_json::{Value, json};
+    use std::collections::HashSet;
+
+    /// The guarded command of the motivating lifecycle action.
+    const COMMIT: &str = r#"git commit -m "{{ commit_message }}""#;
+    const COMMIT_GUARD: &str = "ctx.dirty_files && commit_message";
+
+    /// Builds `command`'s candidate at a site enclosed by `guard` (true side),
+    /// reading approval-time values from `values` by variable path.
+    fn candidate(
+        command: &str,
+        schema: Option<&str>,
+        guard: Option<(&str, Polarity)>,
+        values: Value,
+        deferred: &DeferredShellRoots,
+        host_globals: &[&str],
+    ) -> Result<ShellCandidate, ShellExpansionError> {
+        let schema = schema.map(|yaml| {
+            let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("schema YAML");
+            crate::markdown::schemas::parse_yaml_schema(&value).expect("schema parses")
+        });
+        let declared = DeclaredTypes::new(schema.as_ref()).with_host_globals(host_globals);
+        let site = TypeScope::unguarded(&declared);
+        let types = match guard {
+            Some((guard, polarity)) => site.assume(&parse(guard).unwrap(), polarity),
+            None => site,
+        };
+        let derived = HashSet::new();
+        let ctx = SourceContext::new("/doc.md".into(), "doc.md".into(), command);
+        let scope = CandidateScope {
+            deferred,
+            derived: &derived,
+            source_file: "doc.md".into(),
+            owner: None,
+            ctx: &ctx,
+        };
+        let evaluate = |expr: &Expr| match expr {
+            Expr::Variable(path) => Some(values.get(path).cloned().unwrap_or(Value::Null)),
+            _ => None,
+        };
+        scope.build(
+            command,
+            parse_authored(command),
+            ShellCommandOrigin::Body { line: 1 },
+            &types,
+            &evaluate,
+        )
+    }
+
+    fn timings(candidate: &ShellCandidate) -> Vec<HoleTiming> {
+        candidate.template.as_ref().unwrap().placeholders().map(|hole| hole.timing.clone()).collect()
+    }
+
+    fn missing(result: Result<ShellCandidate, ShellExpansionError>) -> String {
+        match result {
+            Err(ShellExpansionError::MissingValue { expression, .. }) => expression,
+            other => panic!("expected a missing value, got {other:?}"),
+        }
+    }
+
+    /// The motivating case: a guard proving the value present lets a value
+    /// missing at discovery wait for its command, as a template only, with
+    /// its authored expression kept and no resolved bytes.
+    #[test]
+    fn a_guard_proven_missing_value_waits_for_its_command_as_a_template() {
+        let none = DeferredShellRoots::default();
+        let site = candidate(COMMIT, None, Some((COMMIT_GUARD, Polarity::True)), json!({}), &none, &[]).unwrap();
+        let holes = timings(&site);
+        let [HoleTiming::Guarded { guard, roots }] = holes.as_slice() else {
+            panic!("one guarded hole: {holes:?}");
+        };
+        // `assume` labels a guard with its expression; hosts with an authored
+        // location use `assume_at`.
+        assert_eq!(guard.label(), parse(COMMIT_GUARD).unwrap().to_string());
+        assert!(roots.is_empty());
+        assert_eq!(site.requirement, ModeRequirement::TemplateRequired);
+        assert_eq!(site.authored_command, COMMIT);
+        assert_eq!(site.resolved, None, "no discovery value stands in for the live one");
+        assert_eq!(site.template.as_ref().unwrap().placeholders().next().unwrap().expression, "commit_message");
+
+        let offered = site.offered();
+        assert!(!offered.exact && offered.shape && offered.prefix, "{offered:?}");
+        let shape = site.shape().unwrap();
+        assert_eq!(shape.canonical_text(), r#"git commit -m {{ string }}"#);
+        let mut exact_only = ShellPreApprovals::new();
+        exact_only.insert_exact(r#"git commit -m """#.to_string());
+        assert!(!site.authorized_by(&exact_only), "exact bytes never authorize a guarded site");
+        let mut by_shape = ShellPreApprovals::new();
+        by_shape.insert_template(shape);
+        assert!(site.authorized_by(&by_shape));
+    }
+
+    /// Without the guard, or on the guard's false side, or under a guard
+    /// that does not prove the value, a missing value still fails discovery.
+    #[test]
+    fn a_missing_value_no_guard_proves_still_fails_discovery() {
+        let none = DeferredShellRoots::default();
+        assert_eq!(missing(candidate(COMMIT, None, None, json!({}), &none, &[])), "commit_message");
+        assert_eq!(
+            missing(candidate(COMMIT, None, Some((COMMIT_GUARD, Polarity::False)), json!({}), &none, &[])),
+            "commit_message"
+        );
+        for guard in ["!commit_message", "ctx.dirty_files || commit_message", "is_null(commit_message)", "other"] {
+            assert_eq!(
+                missing(candidate(COMMIT, None, Some((guard, Polarity::True)), json!({}), &none, &[])),
+                "commit_message",
+                "{guard}"
+            );
+        }
+    }
+
+    /// A guard on one placeholder never defers another in the same command.
+    #[test]
+    fn a_guard_on_one_value_does_not_defer_another() {
+        let none = DeferredShellRoots::default();
+        let guard = Some(("x", Polarity::True));
+        assert_eq!(missing(candidate("tool {{ x }} {{ y }}", None, guard, json!({}), &none, &[])), "y");
+        let site = candidate("tool {{ x }} {{ y }}", None, guard, json!({ "y": "present" }), &none, &[]).unwrap();
+        assert!(matches!(timings(&site).as_slice(), [HoleTiming::Guarded { .. }, HoleTiming::ApprovalTime]));
+    }
+
+    /// A non-null declaration is not presence: an actual null still fails,
+    /// and the declaration is not guard evidence.
+    #[test]
+    fn a_required_declaration_does_not_excuse_an_actual_null() {
+        let none = DeferredShellRoots::default();
+        let schema = Some("commit_message: string(required)\n");
+        assert_eq!(
+            missing(candidate(COMMIT, schema, None, json!({ "commit_message": null }), &none, &[])),
+            "commit_message"
+        );
+        let guarded = candidate(COMMIT, schema, Some((COMMIT_GUARD, Polarity::True)), json!({}), &none, &[]).unwrap();
+        assert!(matches!(timings(&guarded).as_slice(), [HoleTiming::Guarded { .. }]));
+    }
+
+    /// A value present at discovery keeps its approval-time timing, so the
+    /// site may still run as resolved bytes.
+    #[test]
+    fn a_guarded_value_present_at_discovery_stays_approval_time() {
+        let none = DeferredShellRoots::default();
+        let values = json!({ "commit_message": "msg" });
+        let site = candidate(COMMIT, None, Some((COMMIT_GUARD, Polarity::True)), values, &none, &[]).unwrap();
+        assert_eq!(timings(&site), [HoleTiming::ApprovalTime]);
+        assert_eq!(site.requirement, ModeRequirement::AnyMode);
+    }
+
+    /// A guarded missing value requires template mode, so a command outside
+    /// the template grammar, or with a placeholder as its program, fails.
+    #[test]
+    fn a_guarded_missing_value_in_a_non_template_command_fails_its_grammar() {
+        let none = DeferredShellRoots::default();
+        for (command, reason) in [
+            ("git commit -m {{ m }} | cat", TemplateGrammarError::Pipe),
+            ("{{ m }} run", TemplateGrammarError::ProgramWordHole),
+        ] {
+            match candidate(command, None, Some(("m", Polarity::True)), json!({}), &none, &[]) {
+                Err(ShellExpansionError::TemplateGrammar { reason: actual, .. }) => assert_eq!(actual, reason, "{command}"),
+                other => panic!("{command}: expected a grammar refusal, got {other:?}"),
+            }
+        }
+    }
+
+    /// A late placeholder its guard proves present is guarded, so the
+    /// unconditional barrier skips it; an unguarded late one keeps the
+    /// barrier.
+    #[test]
+    fn only_unguarded_late_values_meet_the_barrier() {
+        let late = DeferredShellRoots::new(["seq"]);
+        let globals = ["seq"];
+        let guarded = candidate("tool {{ seq.previous }}", None, Some(("seq.previous", Polarity::True)), json!({}), &late, &globals)
+            .unwrap();
+        let holes = timings(&guarded);
+        let [HoleTiming::Guarded { roots, .. }] = holes.as_slice() else {
+            panic!("{holes:?}");
+        };
+        assert_eq!(roots, &["seq".to_string()]);
+        assert_eq!(guarded.requirement, ModeRequirement::TemplateRequired);
+        let ordinary = candidate("tool {{ seq.previous }}", None, None, json!({}), &late, &globals).unwrap();
+        assert!(matches!(timings(&ordinary).as_slice(), [HoleTiming::Deferred { .. }]));
+
+        let absent = |_: &str| -> Result<Value, crate::markdown::compose::expression::ExpressionError> { Ok(Value::Null) };
+        let swept = resolve_late_values([("guarded", guarded.template.as_ref().unwrap())], &absent).unwrap();
+        assert!(swept.is_empty(), "an unselected guarded command cannot fail at the barrier");
+        let error = resolve_late_values([("ordinary", ordinary.template.as_ref().unwrap())], &absent).unwrap_err();
+        assert!(matches!(error.error, HoleError::Missing { .. }), "{error:?}");
     }
 }

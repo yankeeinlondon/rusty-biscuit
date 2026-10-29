@@ -109,14 +109,14 @@ fn compose_unknown_frontmatter_keys_remain_allowed() {
 }
 
 #[test]
-fn compose_no_baseline_schema_disables_default_baseline() {
-    let fixture = CliProcessFixture::named("compose_no_baseline_schema_disables_default_baseline");
+fn compose_disable_baseline_schema_disables_default_baseline() {
+    let fixture = CliProcessFixture::named("compose_disable_baseline_schema_disables_default_baseline");
     let dir = tempfile::TempDir::new().unwrap();
     let doc = write_file(&dir, "raw.md", "---\ndraft: maybe\n---\nBody\n");
 
     fixture
         .command()
-        .args(["compose", "--no-baseline-schema"])
+        .args(["compose", "--disable", "baseline-schema"])
         .arg(&doc)
         .assert()
         .success()

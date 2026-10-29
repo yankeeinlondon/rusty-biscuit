@@ -38,7 +38,7 @@ use crate::markdown::compose::shell_expansion::tokenize::{parse_pipeline, tokeni
 use crate::markdown::compose::shell_expansion::types::{
     ShellExpansionError, ShellExpansionRuntime, ShellPipeline,
 };
-use crate::markdown::compose::ComposeContext;
+use crate::markdown::compose::{ComposeContext, SharedFrontmatter};
 use crate::markdown::compose::shell_expansion::site::{SiteFrame, TemplateSite, prepare_site};
 use crate::markdown::compose::shell_expansion::template::{
     CommandSite, CommandTemplate, HoleEvaluator, LookupEvaluator, ModeRequirement, ShellCandidate, SiteValues,
@@ -111,19 +111,22 @@ impl ResolvedShellValue {
     ///
     /// `resolved` is `authored` with its `{{ … }}` spans already interpolated
     /// by the caller; it supplies a plain command's bytes. A ternary's command
-    /// branches are interpolated here from their authored text against
-    /// `state`, so interpolation cannot move a branch boundary. Structure is
-    /// always taken from `authored`, so interpolation also cannot change an
-    /// executable or add a chained command.
+    /// branches are interpolated here from their authored text against the
+    /// state `state` returns, so interpolation cannot move a branch boundary.
+    /// `state` is called only for a ternary. A [`SharedFrontmatter`] view is
+    /// read in place, its shared base never copied; a plain map is moved into
+    /// one. Structure is always taken from `authored`,
+    /// so interpolation also cannot change an executable or add a chained
+    /// command.
     ///
     /// ## Errors
     ///
     /// Any parse, shape, or interpolation error the value raises.
-    pub fn resolve(
+    pub fn resolve<S: Into<SharedFrontmatter>>(
         key: &str,
         authored: &str,
         resolved: &str,
-        state: serde_json::Map<String, Value>,
+        state: impl FnOnce() -> S,
         context: &ComposeContext,
         resolution: ResolutionContext,
     ) -> Result<Self, ShellExpansionError> {
@@ -138,7 +141,7 @@ impl ResolvedShellValue {
             ..
         } = &directive.ast
         {
-            let seed = FrontmatterSeedState::new(state, context.clone())
+            let seed = FrontmatterSeedState::new(state(), context.clone())
                 .with_current_authority(resolution.current.clone())
                 .with_resolution_context(Some(resolution));
             then_pipeline = branch_pipeline(then_branch, BranchPosition::Then, key, &seed, &ctx)?;
@@ -266,7 +269,8 @@ impl ResolvedShellValue {
 /// Executes resolved values against `state` and returns each value's result,
 /// in order.
 ///
-/// All values read the same `state`; none sees another's result. The values
+/// All values read the same `state`, a [`SharedFrontmatter`] view read in
+/// place (a plain map is moved into one); none sees another's result. The values
 /// share one command cache created for this call, so a command two of them
 /// name runs once, and nothing is reused from an earlier call. Commands run
 /// under the request's shell settings and must be in its pre-approved set when it
@@ -281,7 +285,7 @@ impl ResolvedShellValue {
 /// or, for a value without a result suffix, a non-zero exit.
 pub fn execute_resolved_shell_values(
     values: &[&ResolvedShellValue],
-    state: serde_json::Map<String, Value>,
+    state: impl Into<SharedFrontmatter>,
     request: &crate::markdown::compose::ComposeRequest,
 ) -> Result<Vec<(String, Value)>, ShellExpansionError> {
     execute_shell_values_with(values, state, request, None)
@@ -303,7 +307,7 @@ pub fn execute_resolved_shell_values(
 /// suppressed by a result suffix.
 pub fn execute_shell_values_with(
     values: &[&ResolvedShellValue],
-    state: serde_json::Map<String, Value>,
+    state: impl Into<SharedFrontmatter>,
     request: &crate::markdown::compose::ComposeRequest,
     holes: Option<&dyn HoleEvaluator>,
 ) -> Result<Vec<(String, Value)>, ShellExpansionError> {

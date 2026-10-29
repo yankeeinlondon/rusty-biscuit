@@ -1,7 +1,9 @@
 //! The `content_policy: "policy[](min(1))@…"` baseline declaration, loaded
 //! from disk through the normal resolver with the repository's layout: the
-//! runtime baseline at `darkmatter/docs/schemas/darkmatter.yaml` importing
-//! Content Policy's editor schema three directories up.
+//! global catalog at `darkmatter/schemas/darkmatter.yaml`, whose `fm` partial
+//! (`darkmatter/schemas/partials/fm.yaml`) imports Content Policy's editor
+//! schema three directories up. A catalog loaded as a baseline file
+//! contributes its resolved `fm`.
 //!
 //! These tests hold the shared `content_policy_fixtures` tables to the disk
 //! resolver and to Content Policy's parser, so a second schema source can be
@@ -17,7 +19,7 @@ use darkmatter::markdown::schemas::{
 };
 
 use crate::content_policy_fixtures::{
-    BASELINE_PATH, DECLARATIONS, INVALID_CONTROL, LOAD_FAILURES, MIXED_POLICY_FRONTMATTER,
+    BASELINE_PATH, CATALOG_PATH, DECLARATIONS, OTHER_PARTIAL_PATHS, INVALID_CONTROL, LOAD_FAILURES, MIXED_POLICY_FRONTMATTER,
     POLICY_SCHEMA_PATH, SCHEMA_MUTATIONS, SchemaExpect, SchemaFile, VALID_CONTROL, Verdict,
     baseline_with_policy, render,
 };
@@ -30,10 +32,20 @@ fn temp_root() -> (tempfile::TempDir, PathBuf) {
     (dir, root)
 }
 
-/// Writes the baseline and policy schema at their repository-relative paths
-/// below `root`.
-fn write_schemas(root: &Path, baseline: &str, policy: &str) {
-    for (relative, text) in [(BASELINE_PATH, baseline), (POLICY_SCHEMA_PATH, policy)] {
+/// The shipped catalog's texts other than the `fm` partial and the policy
+/// schema: the catalog itself and the [`OTHER_PARTIAL_PATHS`], in order.
+struct Catalog<'a> {
+    catalog: &'a str,
+    others: [&'a str; 4],
+}
+
+/// Writes the catalog, its partials (`baseline` is the `fm` partial), and the
+/// policy schema at their repository-relative paths below `root`.
+fn write_schemas(root: &Path, catalog: &Catalog<'_>, baseline: &str, policy: &str) {
+    let files = [(CATALOG_PATH, catalog.catalog), (BASELINE_PATH, baseline), (POLICY_SCHEMA_PATH, policy)]
+        .into_iter()
+        .chain(OTHER_PARTIAL_PATHS.into_iter().zip(catalog.others));
+    for (relative, text) in files {
         let path = root.join(relative);
         std::fs::create_dir_all(path.parent().expect("parent")).expect("schema dir");
         std::fs::write(path, text).expect("write schema");
@@ -41,7 +53,21 @@ fn write_schemas(root: &Path, baseline: &str, policy: &str) {
 }
 
 fn baseline_api(root: &Path) -> Result<DarkmatterSchemas, SchemaError> {
-    DarkmatterSchemas::new(context_at(root)).with_baseline_from_file(root.join(BASELINE_PATH))
+    DarkmatterSchemas::new(context_at(root)).with_baseline_from_file(root.join(CATALOG_PATH))
+}
+
+macro_rules! shipped_catalog {
+    () => {
+        Catalog {
+            catalog: include_str!("../../../schemas/darkmatter.yaml"),
+            others: [
+                include_str!("../../../schemas/partials/style.yaml"),
+                include_str!("../../../schemas/partials/context-variables.yaml"),
+                include_str!("../../../schemas/partials/error.yaml"),
+                include_str!("../../../schemas/partials/timing.yaml"),
+            ],
+        }
+    };
 }
 
 /// Loads `text` as `root/doc.md`. `None` when the document reader rejects it.
@@ -71,10 +97,11 @@ fn kind_name(kind: &ValidationProblemKind) -> &'static str {
 
 #[test]
 fn the_authoring_example_and_a_policy_free_document_validate_against_the_baseline() {
-    let shipped_baseline = include_str!("../../../docs/schemas/darkmatter.yaml");
+    let shipped_baseline = include_str!("../../../schemas/partials/fm.yaml");
+    let catalog = shipped_catalog!();
     let shipped_policy = include_str!("../../../../content-policy/schemas/content-policy.yaml");
     let (_dir, root) = temp_root();
-    write_schemas(&root, &baseline_with_policy(shipped_baseline), &content_policy_union_schema(shipped_policy));
+    write_schemas(&root, &catalog, &baseline_with_policy(shipped_baseline), &content_policy_union_schema(shipped_policy));
     let api = baseline_api(&root).expect("the baseline prepares");
 
     let mixed = validate(&api, &root, MIXED_POLICY_FRONTMATTER);
@@ -95,10 +122,11 @@ fn the_authoring_example_and_a_policy_free_document_validate_against_the_baselin
 /// expected problems at the authored node.
 #[test]
 fn declarations_meet_their_baseline_expectations() {
-    let shipped_baseline = include_str!("../../../docs/schemas/darkmatter.yaml");
+    let shipped_baseline = include_str!("../../../schemas/partials/fm.yaml");
+    let catalog = shipped_catalog!();
     let shipped_policy = include_str!("../../../../content-policy/schemas/content-policy.yaml");
     let (_dir, root) = temp_root();
-    write_schemas(&root, &baseline_with_policy(shipped_baseline), &content_policy_union_schema(shipped_policy));
+    write_schemas(&root, &catalog, &baseline_with_policy(shipped_baseline), &content_policy_union_schema(shipped_policy));
     let api = baseline_api(&root).expect("the baseline prepares");
 
     let names: BTreeSet<_> = DECLARATIONS.iter().map(|case| case.name).collect();
@@ -172,7 +200,7 @@ fn damaged_frontmatter_fails_document_loading() {
 
 // ── schema mutations ───────────────────────────────────────────────────────
 
-fn run_column(column: &str, shipped_baseline: &str, shipped_policy: &str) {
+fn run_column(column: &str, shipped: &Catalog<'_>, shipped_baseline: &str, shipped_policy: &str) {
     let baseline = baseline_with_policy(shipped_baseline);
     let policy = content_policy_union_schema(shipped_policy);
     let (_dir, root) = temp_root();
@@ -182,11 +210,13 @@ fn run_column(column: &str, shipped_baseline: &str, shipped_policy: &str) {
 
     let mut failures = Vec::new();
     for cell in cells {
-        let (baseline, policy) = match cell.file {
-            SchemaFile::Baseline => (cell.edit.apply(&baseline), policy.clone()),
-            SchemaFile::Policy => (baseline.clone(), cell.edit.apply(&policy)),
+        let (catalog, baseline, policy) = match cell.file {
+            SchemaFile::Catalog => (cell.edit.apply(shipped.catalog), baseline.clone(), policy.clone()),
+            SchemaFile::Baseline => (shipped.catalog.to_string(), cell.edit.apply(&baseline), policy.clone()),
+            SchemaFile::Policy => (shipped.catalog.to_string(), baseline.clone(), cell.edit.apply(&policy)),
         };
-        write_schemas(&root, &baseline, &policy);
+        let catalog = Catalog { catalog: &catalog, others: shipped.others };
+        write_schemas(&root, &catalog, &baseline, &policy);
         let outcome = baseline_api(&root).and_then(|api| {
             let verdict = |frontmatter: &str| -> Result<bool, SchemaError> {
                 let markdown = load(&root, &document(frontmatter)).expect("the control loads");
@@ -228,7 +258,8 @@ macro_rules! mutation_columns {
             fn $test() {
                 run_column(
                     $column,
-                    include_str!("../../../docs/schemas/darkmatter.yaml"),
+                    &shipped_catalog!(),
+                    include_str!("../../../schemas/partials/fm.yaml"),
                     include_str!("../../../../content-policy/schemas/content-policy.yaml"),
                 );
             }
@@ -273,16 +304,17 @@ fn trigger_context(root: &Path) -> biscuit_file::FileResolutionContext {
 /// other documents.
 #[test]
 fn triggers_and_documents_replace_the_baseline_declaration_without_name_collisions() {
-    let shipped_baseline = include_str!("../../../docs/schemas/darkmatter.yaml");
+    let shipped_baseline = include_str!("../../../schemas/partials/fm.yaml");
+    let catalog = shipped_catalog!();
     let shipped_policy = include_str!("../../../../content-policy/schemas/content-policy.yaml");
     let (_dir, root) = temp_root();
-    write_schemas(&root, &baseline_with_policy(shipped_baseline), &content_policy_union_schema(shipped_policy));
+    write_schemas(&root, &catalog, &baseline_with_policy(shipped_baseline), &content_policy_union_schema(shipped_policy));
     std::fs::create_dir_all(root.join(".git")).expect("repository marker");
     std::fs::create_dir_all(root.join("schemas")).expect("schemas dir");
     std::fs::write(root.join("schemas/same-names.yaml"), SAME_NAMED_TYPES).expect("types");
     std::fs::write(
         root.join("schemas/review.trigger.yaml"),
-        "kind: trigger-schema\nmatch:\n  review: string(required)\n$schema: review.yaml\n",
+        "kind: schema-trigger\nmatch:\n  review: string(required)\n$schema: review.yaml\n",
     )
     .expect("trigger");
     std::fs::write(
@@ -292,7 +324,7 @@ fn triggers_and_documents_replace_the_baseline_declaration_without_name_collisio
     .expect("trigger payload");
 
     let api = DarkmatterSchemas::new(trigger_context(&root))
-        .with_baseline_from_file(root.join(BASELINE_PATH))
+        .with_baseline_from_file(root.join(CATALOG_PATH))
         .expect("the baseline prepares")
         .with_trigger_discovery()
         .expect("the trigger loads");

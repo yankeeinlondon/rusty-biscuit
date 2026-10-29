@@ -167,19 +167,21 @@ fn yaml_matrix_walks_every_rule_and_shape() {
     }
     let defaults = ResolvedMarkdownRules::defaults();
 
-    // Wrong whole type, chosen per column to include the coercion traps:
-    // quoted booleans and numerals are strings, never coerced.
+    // Wrong whole type, chosen per column to stay wrong after the conversion
+    // engine binds the value: `"80"` would become `80`, but `"80.5"` and
+    // `"3"` become numbers the rule rejects, and a native number is never a
+    // boolean.
     let wrong_type = [
         ("frontmatter", "123"),
-        ("table-layout", "\"true\""),
-        ("fixed-width", "\"80\""),
+        ("table-layout", "\"maybe\""),
+        ("fixed-width", "\"80.5\""),
         ("unwrap", "1"),
-        ("indentation", "\"2\""),
-        ("ordered-lists", "\"false\""),
+        ("indentation", "\"3\""),
+        ("ordered-lists", "\"maybe\""),
         ("list-padding", "0"),
         ("list-item-padding", "1"),
         ("list-interior-padding", "true"),
-        ("default-language", "5"),
+        ("default-language", "{ lang: sh }"),
     ];
 
     for ((rule, value), (_, wrong)) in COLUMNS.into_iter().zip(wrong_type) {
@@ -246,6 +248,23 @@ fn yaml_matrix_walks_every_rule_and_shape() {
                 .any(|diagnostic| diagnostic.code == biscuit_file::YamlDiagnosticCode::DuplicateKey),
             "duplicate {rule} must be reported as a duplicate key"
         );
+    }
+}
+
+/// A document's quoted spellings bind through the conversion engine, as
+/// schema validation holds them, so cleanup and validation agree.
+#[test]
+fn quoted_rule_values_bind_like_schema_validation() {
+    for (rule, value, quoted, expected) in [
+        ("table-layout", "false", "\"true\"", "true"),
+        ("fixed-width", "80", "\"100\"", "100"),
+        ("indentation", "2", "\"8\"", "8"),
+        ("ordered-lists", "false", "\"yes\"", "true"),
+        ("default-language", "sh", "5", "5"),
+    ] {
+        let document = mutate(rule, value, &control_line(rule, quoted));
+        let rules = resolve(&MarkdownRuleOverrides::default(), Some(&overrides(&document)), None);
+        assert_eq!(resolved(&rules, rule), (expected.to_string(), RuleSource::Document), "{rule}: {quoted}");
     }
 }
 

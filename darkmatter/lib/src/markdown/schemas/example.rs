@@ -123,6 +123,13 @@ fn example_cache() -> &'static Mutex<HashMap<u64, Value>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Empties this module's process-wide caches (see
+/// [`super::reset_process_caches_for_bench`]).
+pub(crate) fn reset_process_caches() {
+    RETURNS_TARGET_VALIDATOR_CACHE.clear();
+    example_cache().lock().expect("example cache poisoned").clear();
+}
+
 /// Validates one example artifact's raw file bytes against the envelope (and its
 /// `parameters` shape) and returns the resolved example object to embed under
 /// `x-darkmatter-example`.

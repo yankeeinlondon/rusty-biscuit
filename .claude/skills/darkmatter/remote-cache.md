@@ -2,7 +2,7 @@
 
 Detail behind the "Remote and cache safety" section of [SKILL.md](SKILL.md).
 
-- CLI callers opt in with `md compose --allow-host <host>`.
+- CLI callers opt in with `md compose --allow host=<host>`.
 - Use the two-category vocabulary everywhere (help, docs, comments):
   **semantic-result artifacts** (composed documents, `::file` children,
   `::code`/`::toc-linking` results, snapshots) are memory-only until a

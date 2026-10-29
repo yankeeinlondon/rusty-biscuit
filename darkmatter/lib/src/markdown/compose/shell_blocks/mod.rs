@@ -28,6 +28,9 @@ use types::{ShellBlockCommandResult, SourceExcerpt};
 /// are read from.
 pub(crate) struct BlockTemplates<'a> {
     pub authored: &'a AuthoredBody,
+    /// The authored body's `::block when=` guards; a command is typed on the
+    /// true side of those around it, as discovery typed it.
+    pub guards: super::page_blocks::BodyGuards,
     pub scope: SiteScope<'a>,
     pub evaluator: &'a dyn HoleEvaluator,
     /// The authored document, for template diagnostics.
@@ -358,6 +361,7 @@ fn block_site<'a>(
             templates.ctx.clone(),
             templates.evaluator,
             frame,
+            &templates.guards.enclosing_line(raw.start_line),
         )
         .map_err(|error| ShellBlockError::Command {
             block_start_line: opener_line + line_offset,

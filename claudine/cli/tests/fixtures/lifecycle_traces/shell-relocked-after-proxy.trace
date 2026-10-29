@@ -1,0 +1,19 @@
+# scenario: shell-relocked-after-proxy
+# doc: shell-relocked-after-proxy.md
+# given: invoked as `claudine compose --claude --yolo shell-relocked-after-proxy.md` from the directory holding the fixture documents
+# given: shell approval is granted by --yolo
+# given: source start runs its shell, then proxies to the target
+# given: the target body transcludes a file that does not exist, so the target's preflight fails after its initialize
+# given: the target's blocked shell is reached before the target's start, while shells are locked again
+# given: the provider never launches
+event initialize
+event start
+shell start
+event target:initialize
+event target:blocked
+err composition.failed
+event target:failure
+err uncoded: shell commands are forbidden during initialize and before preflight completes; move the command to start or a later event
+event target:finalize
+err uncoded: shell commands are forbidden during initialize and before preflight completes; move the command to start or a later event
+exit 1

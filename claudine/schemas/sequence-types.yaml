@@ -2,23 +2,14 @@
 # sequence.yaml to a document's `sequence:` list. Hand-maintained; see
 # README.md.
 #
-# Named types are inlined, never referenced, so a type cannot contain itself:
-# the containers are unrolled into three typed levels (`task`/`group`, then
-# `task-2`/`group-2`, then `task-3`/`group-3`). Below the third level a nested
-# `sequence:` list and a group's `tasks:` are any list, which the task parser
-# checks; the parser itself accepts unlimited nesting.
-#
-# Each level inlines the next one twice (through a task's `sequence:` and its
-# group's `tasks:`), so the cost of a container field grows fourfold per
-# level. That is why the containers type only what is cheap at every level:
-# - `cancelled` uses `cancelled-stack` at the first two levels and is left to
-#   the task parser at the third;
-# - `loop` uses the shared `loop` type at the first level and is typed as an
-#   object below it;
-# - the other events (`initialize`, `start`, `blocked`, `success`, `failure`,
-#   `finalize`) are checked for list-or-mapping shape only.
-# Typing them like a document's events made every Claudine launch about three
-# seconds slower (see docs/topics/schemas.md).
+# `task` and `group` are recursive: a task's inline `sequence:` items and a
+# group's `tasks:` legs reference them again, so containers are typed at every
+# depth and the resolver stores each once as a definition. Every container
+# event is typed with the same family as the document's event of that name:
+# `initialize` with `initialize-stack`, `cancelled` with `cancelled-stack`, and
+# the others with `stack`. The task parser accepts unlimited nesting, and the
+# schema adds no container-depth limit; each event stack starts its own
+# conditional-depth count, which the lifecycle parser checks.
 #
 # A task object is open: an undeclared key is authored step data, read as
 # `seq.<key>`. A group object is closed, so `execution` (removed) and a
@@ -41,7 +32,7 @@ types:
         shell: "unknown -> a shell command; the task parser checks its form"
         side_effect: "unknown -> a side effect; the task parser checks its arguments"
         task: "unknown -> a referenced task; the task parser checks its form"
-        sequence: "steps-2 -> a nested sequence"
+        sequence: "steps -> a nested sequence"
         group:
             - group
             - "string -> a group file reference"
@@ -49,17 +40,17 @@ types:
         flow: "string -> the task flow"
         timeout: "string -> the per-command shell timeout, such as 45s"
         loop: "loop@./lifecycle.yaml -> an inline sequence's loop, beside `sequence:`"
-        initialize: loose-body@./lifecycle.yaml
-        start: loose-body@./lifecycle.yaml
-        blocked: loose-body@./lifecycle.yaml
-        success: loose-body@./lifecycle.yaml
-        failure: loose-body@./lifecycle.yaml
-        cancelled: cancelled-stack@./lifecycle.yaml
-        finalize: loose-body@./lifecycle.yaml
+        initialize: "initialize-stack@./lifecycle.yaml -> actions run before the container starts; shell-free"
+        start: "stack@./lifecycle.yaml -> actions run when the container starts"
+        blocked: "stack@./lifecycle.yaml -> actions run when the container is blocked"
+        success: "stack@./lifecycle.yaml -> actions run after the container succeeds"
+        failure: "stack@./lifecycle.yaml -> actions run after the container fails"
+        cancelled: "cancelled-stack@./lifecycle.yaml -> opt into cancellation; actions run when cancelled"
+        finalize: "stack@./lifecycle.yaml -> actions run last, whatever the outcome"
         "<string>": "unknown -> authored step data, read as `seq.<key>`; the task parser rejects reserved keys"
     group:
         name: "string(not-empty) -> the container name"
-        tasks: "task-2[](required; min(1)) -> named legs; the task parser checks unique names"
+        tasks: "task[](required; min(1)) -> named legs; the task parser checks unique names"
         variables: "object -> bindings scoped to this group, read as `group.<variable>`"
         description: "string -> the container summary"
         operation: "string -> default operation for prompt legs"
@@ -67,110 +58,10 @@ types:
         fail_fast: "boolean -> cancel opted-in siblings after a leg fails; defaults to true"
         max_parallel: "number(integer; min(1)) -> the maximum number of concurrent legs"
         loop: "loop@./lifecycle.yaml -> the group's loop, beside `tasks:`"
-        initialize: loose-body@./lifecycle.yaml
-        start: loose-body@./lifecycle.yaml
-        blocked: loose-body@./lifecycle.yaml
-        success: loose-body@./lifecycle.yaml
-        failure: loose-body@./lifecycle.yaml
-        cancelled: cancelled-stack@./lifecycle.yaml
-        finalize: loose-body@./lifecycle.yaml
-    steps-2:
-        - "step-2[] -> an inline list of steps"
-        - "string -> a sequence file reference (with an optional `-> offset` and `::operator`), a `{{ expression }}`, or a `$( command )`"
-    step-2:
-        - "string -> shorthand for `{ name: <string> }`"
-        - number
-        - boolean
-        - task-2
-    task-2:
-        name: "string(not-empty) -> the step or leg name"
-        when: "string(not-empty) -> the task's guard, a condition expression read at the task's turn; false skips the task"
-        with: "object -> a prompt task's frontmatter values for the document it runs"
-        prompt: "string -> the prompt file reference"
-        shell: "unknown -> a shell command; the task parser checks its form"
-        side_effect: "unknown -> a side effect; the task parser checks its arguments"
-        task: "unknown -> a referenced task; the task parser checks its form"
-        sequence: "steps-3 -> a nested sequence"
-        group:
-            - group-2
-            - "string -> a group file reference"
-        operation: "string -> the task operation"
-        flow: "string -> the task flow"
-        timeout: "string -> the per-command shell timeout, such as 45s"
-        loop: "object -> an inline sequence's loop, beside `sequence:`; below the first container level the loop parser checks it"
-        initialize: loose-body@./lifecycle.yaml
-        start: loose-body@./lifecycle.yaml
-        blocked: loose-body@./lifecycle.yaml
-        success: loose-body@./lifecycle.yaml
-        failure: loose-body@./lifecycle.yaml
-        cancelled: cancelled-stack@./lifecycle.yaml
-        finalize: loose-body@./lifecycle.yaml
-        "<string>": "unknown -> authored step data, read as `seq.<key>`; the task parser rejects reserved keys"
-    group-2:
-        name: "string(not-empty) -> the container name"
-        tasks: "task-3[](required; min(1)) -> named legs; the task parser checks unique names"
-        variables: "object -> bindings scoped to this group, read as `group.<variable>`"
-        description: "string -> the container summary"
-        operation: "string -> default operation for prompt legs"
-        flow: "string -> default flow for prompt legs"
-        fail_fast: "boolean -> cancel opted-in siblings after a leg fails; defaults to true"
-        max_parallel: "number(integer; min(1)) -> the maximum number of concurrent legs"
-        loop: "object -> the group's loop, beside `tasks:`; below the first container level the loop parser checks it"
-        initialize: loose-body@./lifecycle.yaml
-        start: loose-body@./lifecycle.yaml
-        blocked: loose-body@./lifecycle.yaml
-        success: loose-body@./lifecycle.yaml
-        failure: loose-body@./lifecycle.yaml
-        cancelled: cancelled-stack@./lifecycle.yaml
-        finalize: loose-body@./lifecycle.yaml
-    steps-3:
-        - "step-3[] -> an inline list of steps"
-        - "string -> a sequence file reference (with an optional `-> offset` and `::operator`), a `{{ expression }}`, or a `$( command )`"
-    step-3:
-        - "string -> shorthand for `{ name: <string> }`"
-        - number
-        - boolean
-        - task-3
-    task-3:
-        name: "string(not-empty) -> the step or leg name"
-        when: "string(not-empty) -> the task's guard, a condition expression read at the task's turn; false skips the task"
-        with: "object -> a prompt task's frontmatter values for the document it runs"
-        prompt: "string -> the prompt file reference"
-        shell: "unknown -> a shell command; the task parser checks its form"
-        side_effect: "unknown -> a side effect; the task parser checks its arguments"
-        task: "unknown -> a referenced task; the task parser checks its form"
-        sequence:
-            - "unknown[] -> a nested sequence below the typed levels; the task parser checks it"
-            - "string -> a sequence file reference, optionally with an offset and operator"
-        group:
-            - group-3
-            - "string -> a group file reference"
-        operation: "string -> the task operation"
-        flow: "string -> the task flow"
-        timeout: "string -> the per-command shell timeout, such as 45s"
-        loop: "object -> an inline sequence's loop, beside `sequence:`; below the first container level the loop parser checks it"
-        initialize: loose-body@./lifecycle.yaml
-        start: loose-body@./lifecycle.yaml
-        blocked: loose-body@./lifecycle.yaml
-        success: loose-body@./lifecycle.yaml
-        failure: loose-body@./lifecycle.yaml
-        cancelled: "loose-body@./lifecycle.yaml -> below the second container level the task parser checks it"
-        finalize: loose-body@./lifecycle.yaml
-        "<string>": "unknown -> authored step data, read as `seq.<key>`; the task parser rejects reserved keys"
-    group-3:
-        name: "string(not-empty) -> the container name"
-        tasks: "unknown[](required; min(1)) -> named legs below the typed levels; the task parser checks them"
-        variables: "object -> bindings scoped to this group, read as `group.<variable>`"
-        description: "string -> the container summary"
-        operation: "string -> default operation for prompt legs"
-        flow: "string -> default flow for prompt legs"
-        fail_fast: "boolean -> cancel opted-in siblings after a leg fails; defaults to true"
-        max_parallel: "number(integer; min(1)) -> the maximum number of concurrent legs"
-        loop: "object -> the group's loop, beside `tasks:`; below the first container level the loop parser checks it"
-        initialize: loose-body@./lifecycle.yaml
-        start: loose-body@./lifecycle.yaml
-        blocked: loose-body@./lifecycle.yaml
-        success: loose-body@./lifecycle.yaml
-        failure: loose-body@./lifecycle.yaml
-        cancelled: "loose-body@./lifecycle.yaml -> below the second container level the task parser checks it"
-        finalize: loose-body@./lifecycle.yaml
+        initialize: "initialize-stack@./lifecycle.yaml -> actions run before the group starts; shell-free"
+        start: "stack@./lifecycle.yaml -> actions run when the group starts"
+        blocked: "stack@./lifecycle.yaml -> actions run when the group is blocked"
+        success: "stack@./lifecycle.yaml -> actions run after the group succeeds"
+        failure: "stack@./lifecycle.yaml -> actions run after the group fails"
+        cancelled: "cancelled-stack@./lifecycle.yaml -> opt into cancellation; actions run when cancelled"
+        finalize: "stack@./lifecycle.yaml -> actions run last, whatever the outcome"

@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Interpolation
 
 The Darkmatter compose pipeline provides interpolation of frontmatter, context, and environment values into a document.
@@ -86,11 +90,12 @@ approval rather than disappearing and later revealing unapproved content.
         - `round(property, default = 0)`
             - rounds a number up or down to an integer value
             - non-numeric properties are converted to the "default" value
-    - any numeric comparison where one or both of the values _can not_ be converted into a numeric quantity resolve to a `false` outcome
-    - NOTE: if a string value of "6" is used in a numeric comparison we will automatically convert it to the number 6 for the comparison.
+    - `==` and `!=` are strict: values are equal only when they have the same type and value, so `5 == "5"` is false and a missing value equals only `null`
+    - the ordering operators (`>`, `>=`, `<`, `<=`) convert both sides to numbers, so a string value of "6" compares as the number 6 there; non-numeric values become `0`
+    - convert explicitly to compare a number with text by equality: `count == number(limit)`
 
       ```md
-      Bob's favorite color is {{ color || blue == "blue" ? blue (how original) : nice choice! }}
+      Bob's favorite color is {{ (color || "blue") == "blue" ? "blue (how original)" : "nice choice!" }}
       ```
 
 - **Context Variables**
@@ -162,11 +167,44 @@ absence:
 | `{{ x \|\| "d" }}` | no — primary of a fallback |
 | `{{ a \|\| x }}` | yes, when the right-hand side is evaluated |
 | `{{ x ? a : b }}` | no — ternary condition |
-| `{{ x ? x : b }}` | no — the branch is guarded by `x` |
+| `{{ x ? x : b }}` | no — the true branch is reached only when `x` is present |
+| `{{ x ? b : x }}` | yes, when the false branch is evaluated — it learns nothing about `x` |
+| `{{ x != null ? x : b }}`, `{{ is_string(x) ? x : b }}` | the condition's `x` yes; the true branch's `x` no |
+| `{{ x && x.name }}` | no — an `&&` operand binds `and`'s `unknown \| null` parameter (see below), and `x.name` is read only once `x` held |
+| `{{ x.a ? x.b : c }}` | yes — a guard on `x.a` says nothing about its sibling `x.b` |
 | `{{ a ? x : b }}` | yes, when the `x` branch is evaluated |
-| `{{ is_null(x) }}`, `{{ is_empty(x) }}` | no — direct argument of an absence predicate or one of its aliases |
-| `{{ is_empty(lower(x)) }}` | yes — the predicate no longer guards the lookup directly |
+| `{{ is_null(x) }}`, `{{ is_empty(x) }}`, `{{ file_exists(x) }}` | no — a direct argument to a parameter that declares `\| null` |
+| `{{ lower(x) }}`, `{{ trim(x) \|\| "d" }}`, `{{ is_null(x) && y }}` | no for `x` — the same rule, whatever the function returns; `&&`/`\|\|` are operators, not calls that consume `x` |
+| `{{ min(x, 5) }}` | yes — `min`'s `a: number` does not declare `null` (and `min(null, 5)` is a binding error) |
+| `{{ is_empty(trim(x)) }}`, `{{ upper(lower(x)) }}` | yes — the inner call is itself another call's argument, so it hands its result on; `is_empty` receives `trim(x)`, not `x` |
 | `::block when="x"` | yes — a misspelled gate would silently hide content |
+
+A function argument is silent when the call handles a missing value **by its
+declared types**: the argument is a bare variable (or a path on one) passed
+straight to a parameter whose type explicitly includes `| null`, and the call
+is not itself an argument of another call. The function's return type plays
+no part. The rule is the same for every function, including a host
+application's:
+
+- `unknown | null` or `string | null` handles it; a plain `unknown`
+  parameter does not, and neither does an optional parameter whose type has
+  no `null` (`b?: number`).
+- A function with several signatures handles it only when every signature
+  that takes that many arguments declares `null` at that position.
+- A call nested directly in another call's argument (`is_empty(trim(x))`)
+  handles nothing: the outer call receives the inner call's result, not `x`.
+  An operator or fallback in between ends the nesting
+  (`is_empty(trim(x) || "d")` handles `x`), and the logical `&&`/`||` are
+  operators, so `is_null(x) && is_empty(y)` handles both.
+
+The suppression only silences the advisory. A call that cannot bind, an
+unknown function, or an unavailable global is still reported.
+
+A branch is silent for exactly what its side of the condition proves present,
+by the same guard rules that narrow shell placeholders (see
+[Guarded values](./preflight-checks.md#guarded-values)): a ternary branch gets
+its own side only, the right side of `&&` gets the left side's true facts, and
+the right side of `||` its false facts.
 
 Composition reports only what it evaluates, so an unchosen ternary branch or a
 short-circuited fallback is never reported. The same rule applies to frontmatter

@@ -1,0 +1,12 @@
+# scenario: blocked-refused-handoff
+# doc: blocked-refused-handoff.md
+# given: invoked as `claudine compose --claude blocked-refused-handoff.md` from the directory holding the fixture documents
+# given: start proxies to a target that does not exist, so the handoff is refused before any launch
+# given: the provider never launches
+event initialize
+event start
+event blocked
+err composition.invalid_file_reference
+event finalize
+err composition.invalid_file_reference
+exit 1

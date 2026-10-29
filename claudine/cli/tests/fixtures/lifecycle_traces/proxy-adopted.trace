@@ -1,0 +1,16 @@
+# scenario: proxy-adopted
+# doc: proxy-adopted.md
+# given: invoked as `claudine compose --claude proxy-adopted.md` from the directory holding the fixture documents
+# given: every provider launch exits 0 with a result
+# given: source success proxies to the target, which exists and bootstraps
+event initialize
+event start
+work fresh 0
+event success
+event target:initialize
+event target:start
+work fresh 0
+event target:success
+event target:finalize
+err none
+exit 0

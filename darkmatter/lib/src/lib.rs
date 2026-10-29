@@ -44,7 +44,11 @@
 //!   and [`markdown::compose::expression::expression_function_descriptors()`] describe
 //!   every callable function in the expression engine (type predicates, math,
 //!   collection operations, string predicates/mutations, date formatting/validators,
-//!   logical operators, filesystem queries).
+//!   logical operators, filesystem queries). Descriptors are projected from the embedded
+//!   `darkmatter/schemas/partials/functions.yaml` catalog, one per overload with
+//!   its typed signature; see
+//!   [`markdown::compose::expression::expression_function_catalog()`] and
+//!   [`markdown::compose::expression::function_descriptors()`].
 //!
 //! - **Side-effect capabilities** — [`effects::EffectDescriptor`] and
 //!   [`effects::effect_descriptors()`] describe every mutating verb exposed by
@@ -62,6 +66,7 @@
 //! - [`diff`] - Reusable diff utilities
 //! - [`effects`] - Mutating side-effect engine (library surface only)
 //! - [`layout`] - Page-level layout primitive ([`DarkmatterPage`])
+//! - [`lifecycle`] - Lifecycle stack action model, parser, and static validators
 //! - [`mermaid`] - Mermaid diagram theming and rendering
 //! - [`prelude`] - Curated re-exports of every renderable component defined
 //!   in Darkmatter (alongside the render traits)
@@ -74,6 +79,7 @@ pub mod diff;
 pub mod editor;
 pub mod effects;
 pub mod layout;
+pub mod lifecycle;
 pub mod markdown;
 pub mod mermaid;
 pub mod prelude;
@@ -82,6 +88,23 @@ pub mod style;
 pub mod terminal;
 
 pub mod testing;
+#[cfg(feature = "work-counters")]
+pub mod work_counters;
+
+/// Records units of [`Work`](crate::work_counters::Work): `note_work!(ExpressionParse)` adds one,
+/// `note_work!(ExpressionParse, n)` adds `n`. Expands to nothing without the
+/// `work-counters` feature, so `n` is not evaluated in production builds.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! note_work {
+    ($work:ident) => {
+        $crate::note_work!($work, 1)
+    };
+    ($work:ident, $count:expr) => {
+        #[cfg(feature = "work-counters")]
+        $crate::work_counters::add($crate::work_counters::Work::$work, ($count) as u64);
+    };
+}
 
 /// Retained, test-only measurement harness for the 2026-07-15 performance
 /// follow-up's crate-private checkpoints. Adds no public API; see the module

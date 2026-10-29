@@ -1,0 +1,13 @@
+# scenario: proxy-in-initialize
+# doc: proxy-in-initialize.md
+# given: invoked as `claudine compose --claude proxy-in-initialize.md` from the directory holding the fixture documents
+# given: every provider launch exits 0 with a result
+# given: source initialize proxies to the target, which exists and bootstraps; the source runs no further event
+event initialize
+event target:initialize
+event target:start
+work fresh 0
+event target:success
+event target:finalize
+err none
+exit 0

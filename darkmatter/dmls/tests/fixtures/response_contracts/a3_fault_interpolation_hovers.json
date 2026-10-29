@@ -1,0 +1,40 @@
+[
+  {
+    "at": "verb interpolation",
+    "hover": {
+      "contents": {
+        "kind": "markdown",
+        "value": "**Expression**\n\n`log`\n\nStatic value: `{{ dirname(spec || plan) + '/implementation-log.md' }}` (from frontmatter `log`)"
+      },
+      "range": {
+        "start": {
+          "line": 48,
+          "character": 20
+        },
+        "end": {
+          "line": 48,
+          "character": 27
+        }
+      }
+    }
+  },
+  {
+    "at": "message interpolation",
+    "hover": {
+      "contents": {
+        "kind": "markdown",
+        "value": "**Expression**\n\n`plan`\n\nStatic value: `{{ spec ? dirname(spec) + '/plan.md'  : null }}` (from frontmatter `plan`)"
+      },
+      "range": {
+        "start": {
+          "line": 51,
+          "character": 29
+        },
+        "end": {
+          "line": 51,
+          "character": 37
+        }
+      }
+    }
+  }
+]

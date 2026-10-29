@@ -322,6 +322,7 @@ assert_eq!(meta.get("author").unwrap().as_str(), "Ken");
 | `references_valid` | `usize` | References that passed |
 | `issues` | `Vec<ReferenceIssue>` | Validation issues found |
 | `warnings` | `Vec<String>` | Non-blocking warnings |
+| `trigger_warnings` | `Vec<ComposeWarning>` | Schema triggers skipped as invalid (`dm.schema.invalid_trigger`) while preparing the root or a transcluded document, each in its own context; once per trigger, in discovery order; not serialized |
 
 Helper methods: `is_valid()`, `error_count()`.
 

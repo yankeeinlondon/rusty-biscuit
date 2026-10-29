@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # InputTable
 
 The `InputTable` is a grid-based form component for terminal user interfaces. It allows you to arrange multiple rows and columns of heterogeneous editable cells, making it ideal for complex data entry tasks where a single flat list of prompts is insufficient.

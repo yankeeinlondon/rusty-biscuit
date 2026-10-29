@@ -1315,10 +1315,10 @@ fn unparsed_template(
 }
 
 /// What frontmatter shell expansion needs to run a `$( … )` value as a
-/// template: the document's schema projection, which types its placeholders,
+/// template: the document's effective schema, which types its placeholders,
 /// and the authored document, for diagnostics that must not show a value.
 pub(crate) struct FrontmatterTemplates {
-    pub schema: Option<crate::markdown::schemas::SimplifiedSchema>,
+    pub effective: Option<crate::markdown::schemas::EffectiveSchema>,
     pub ctx: SourceContext,
 }
 
@@ -1389,7 +1389,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
             .with_resolution_context(Some(resolution_context.clone()))
     });
     let hole_evaluator = hole_state.as_ref().map(crate::markdown::compose::shell_expansion::template::LookupEvaluator::new);
-    let scope = templates.map(|templates| SiteScope::new(options, templates.schema.clone()));
+    let scope = templates.map(|templates| SiteScope::new(options, templates.effective.clone()));
 
     for (index, candidate) in candidates.iter().enumerate() {
         let site = match (templates, &hole_evaluator, &scope) {
@@ -1857,7 +1857,9 @@ fn template_site<'e>(
         key: candidate.key.clone(),
         line: candidate.line,
     };
-    scope.site(&authored, template, origin, templates.ctx.clone(), evaluator, frame)
+    // A standalone `$( … )` value is unguarded: a body block that later
+    // reads the key grants it nothing.
+    scope.site(&authored, template, origin, templates.ctx.clone(), evaluator, frame, &[])
 }
 
 /// The directive one frontmatter pipeline runs as.

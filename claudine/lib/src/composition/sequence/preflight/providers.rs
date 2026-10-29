@@ -21,8 +21,9 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use darkmatter::markdown::compose::SharedFrontmatter;
 use darkmatter::markdown::compose::shell_expansion::template::{
-    DeferredShellRoots, derived_deferred_keys,
+    DeferredShellRoots, derived_deferred_keys, value_read_roots,
 };
 use serde_json::{Map, Value};
 
@@ -238,7 +239,7 @@ pub(crate) struct HintLayers<'a> {
     pub(crate) with_origin: &'a Path,
     pub(crate) task_property: &'a str,
     /// The early-binding state the `with` values read.
-    pub(crate) step_frontmatter: &'a Map<String, Value>,
+    pub(crate) step_frontmatter: &'a SharedFrontmatter,
     pub(crate) caller_setters: &'a Map<String, Value>,
     /// The sequence source, which a caller setter is attributed to.
     pub(crate) sequence_path: &'a Path,
@@ -262,6 +263,7 @@ pub(crate) fn predict(
     evaluate: &mut Evaluator<'_>,
 ) -> Result<ProviderPrediction, crate::composition::CompositionError> {
     let mut dependencies = Vec::new();
+    crate::note_work!(PredictionStateBuild);
     let mut document_state: Map<String, Value> = layers
         .document
         .iter()
@@ -322,9 +324,8 @@ fn predict_key(
         // document's; a synthetic key keeps the entry apart from a step key of
         // the same name.
         let entry = format!("\u{0}with.{key}");
-        let mut state = layers.step_frontmatter.clone();
-        state.insert(entry.clone(), value.clone());
-        let decided = classify_reads(&entry, &state, &HashSet::new(), dependencies);
+        let lookup = |name: &str| if name == entry { Some(value) } else { layers.step_frontmatter.get(name) };
+        let decided = classify_reads(&entry, &lookup, &HashSet::new(), dependencies);
         if let Some(state) = decided.into_state(source.clone()) {
             return Ok(state);
         }
@@ -347,6 +348,7 @@ fn predict_key(
         source_path: layers.document_path.to_path_buf(),
         property: key.to_string(),
     };
+    crate::note_work!(PredictionStateBuild);
     let mut raw_state: Map<String, Value> = layers.document.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     raw_state.extend(layers.with.iter().map(|(k, v)| (k.clone(), v.clone())));
     raw_state.extend(layers.caller_setters.iter().map(|(k, v)| (k.clone(), v.clone())));
@@ -356,7 +358,7 @@ fn predict_key(
         .filter(|name| !layers.with_failed.contains_key(*name))
         .cloned()
         .collect();
-    let decided = classify_reads(key, &raw_state, &late_with, dependencies);
+    let decided = classify_reads(key, &|name| raw_state.get(name), &late_with, dependencies);
     if let Some(state) = decided.into_state(source.clone()) {
         return Ok(state);
     }
@@ -414,21 +416,27 @@ impl ReadClass {
     }
 }
 
-/// Classify `key` of `state` by what it reads, directly or through other keys
-/// of `state`, and add its value and theirs to `dependencies`. `late` names
-/// keys already known to be late.
-fn classify_reads(
+/// Classify `key` of the state `lookup` reads by what it reads, directly or
+/// through other keys of that state, and add its value and theirs to
+/// `dependencies`. `late` names keys already known to be late.
+///
+/// Only `key` and the keys it reaches can change its class, so the
+/// classification copies and scans those alone: a step state's other keys,
+/// a large `sequence:` list included, are never visited.
+fn classify_reads<'v>(
     key: &str,
-    state: &Map<String, Value>,
+    lookup: &dyn Fn(&str) -> Option<&'v Value>,
     late: &HashSet<String>,
     dependencies: &mut Vec<(String, Value)>,
 ) -> ReadClass {
     // A literal reads nothing.
-    let Some(value) = state.get(key).filter(|value| {
+    let Some(value) = lookup(key).filter(|value| {
         value_text(value).is_some_and(|text| text.contains("{{") || text.contains("$("))
     }) else {
         return ReadClass::Evaluable;
     };
+    let state = read_closure(key, lookup);
+    crate::note_work!(PredictionWithStateNodes, crate::work_counters::value_nodes(state.iter()));
     let mut reads = BTreeSet::new();
     let no_roots = DeferredShellRoots::new(std::iter::empty::<&str>());
     let reaches = |marked: &HashSet<String>| -> bool {
@@ -471,6 +479,28 @@ fn classify_reads(
         return ReadClass::Late(LaunchDecision::LateValue);
     }
     ReadClass::Evaluable
+}
+
+/// `key` and every key of the state `lookup` reads that `key` reads, directly
+/// or through other such keys, with their values.
+///
+/// A key is followed by the first segment of each variable its value names,
+/// which is exactly what [`derived_deferred_keys`] follows, so a scan of the
+/// result decides `key` as a scan of the whole state would. A name `lookup`
+/// has no value for is a read of a key that does not exist yet, and has
+/// nothing to follow.
+fn read_closure<'v>(key: &str, lookup: &dyn Fn(&str) -> Option<&'v Value>) -> HashMap<String, Value> {
+    let mut closure = HashMap::new();
+    let mut pending = vec![key.to_string()];
+    while let Some(name) = pending.pop() {
+        if closure.contains_key(&name) {
+            continue;
+        }
+        let Some(value) = lookup(&name) else { continue };
+        pending.extend(value_read_roots(value).into_iter().filter(|root| !closure.contains_key(root)));
+        closure.insert(name, value.clone());
+    }
+    closure
 }
 
 /// Every string of `value`, joined: the text an expression scan reads.

@@ -1,0 +1,29 @@
+---
+source: darkmatter/lib/tests/l1/schema_grammar_descriptors.rs
+expression: "pretty(\"row: 'tuple([string, number?, ...boolean[]]; required)'\\n\")"
+---
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "row": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        }
+      ],
+      "minItems": 1,
+      "items": {
+        "type": "boolean"
+      }
+    }
+  },
+  "required": [
+    "row"
+  ]
+}

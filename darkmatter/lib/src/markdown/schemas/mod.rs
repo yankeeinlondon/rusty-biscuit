@@ -53,7 +53,9 @@
 //! [`SchemaError`]: crate::markdown::schemas::errors::SchemaError
 
 pub mod about;
+pub mod catalog;
 mod advisory;
+mod bound_operands;
 pub mod clean;
 pub mod coerce;
 pub mod completion;
@@ -64,17 +66,21 @@ pub mod example;
 pub mod file_match;
 pub mod format;
 mod frontmatter_shape;
+mod json_shape;
 mod phase;
 mod reference;
+pub(crate) mod scope;
 pub mod resolve;
 pub mod rewrite;
 pub mod roots;
 pub mod simplified;
+mod timings;
 pub mod triggers;
 pub mod validate;
 mod positions;
-mod embedded;
+pub(crate) mod embedded;
 
+use std::sync::OnceLock;
 use std::{
     collections::{BTreeSet, HashSet},
     path::{Path, PathBuf},
@@ -106,32 +112,38 @@ pub use detect::{
     detect_schema_with_contexts, schema_to_yaml,
 };
 pub use discriminant::select_literal_discriminant_arm;
-pub use errors::SchemaError;
+pub use errors::{CycleReference, SchemaError};
+pub use json_shape::shape_from_json_schema;
 pub use frontmatter_shape::{
     FrontmatterExpressionValue, effective_property_shape, expression_atom,
-    frontmatter_expression_values, nested_property_shape, property_def_at_path,
+    frontmatter_expression_values, frontmatter_expression_values_with_definitions, nested_property_shape, nested_property_shape_with_definitions, property_def_at_path,
+    property_def_at_path_with_definitions,
 };
 pub use phase::SchemaPhase;
 pub use reference::{SchemaReference, SchemaReferenceKind, classify_schema_reference};
 pub use rewrite::NormalizationOutcome;
 pub use simplified::{
-    AlphanumericOption, AlphanumericOptions, AsciiCharSet, Constraint, DRAFT_2020_12, DecodedScalar, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef,
+    AlphanumericOption, AlphanumericOptions, AsciiCharSet, Constraint, DRAFT_2020_12, DecodedScalar, DefKey,
+    DefNamespace, Definition, DefinitionOuter, DefinitionTable, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef,
     SchemaArm,
-    SchemaConstraintConflictKind, SchemaConstraintOrigin, SchemaCursor, SchemaCursorRole,
+    LocatedDefinitionFailure, SchemaConstraintConflictKind, SchemaConstraintOrigin,
+    SchemaConstraintParticipant, SchemaCursor, SchemaCursorRole,
     SchemaDeclaration, SchemaReferenceSite, SchemaShape, SchemaSourceId, SchemaSourceMap,
     SchemaSourcePath, SchemaSourcePathSegment,
     SchemaSpanKind, SchemaUnionRejection, SchemaValueEntry, SchemaValueKind, SchemaValueNode,
     SimplifiedSchema,
     SimplifiedType, SourceAware, SuggestionItem,
     SuggestionLintProblem, SuggestionLintReason, SuggestionQuery, TypeExpr, decode_alias_definition,
-    decode_scalar, decode_partial_scalar_at, decode_scalar_at, decode_scalar_node, flow_collection_end, is_string_like, is_subtype, is_union_arm_path, lint_suggestions, mapping_separator,
-    locate_schema_declaration_cursor, locate_schema_value, locate_type_definition_cursor,
+    decode_plain_scalar_node, decode_scalar, decode_partial_scalar_at, decode_scalar_at, decode_scalar_node, flow_collection_end, is_definition_subtype, is_definition_subtype_with_definitions, is_string_like, is_subtype, is_subtype_with_definitions, is_union_arm_path, lint_suggestions, mapping_separator,
+    locate_schema_declaration_cursor, locate_schema_declaration_cursor_in_scalar,
+    locate_schema_value, locate_standalone_definition_failure,
+    locate_type_definition_cursor, locate_type_definition_cursor_in_scalar,
     parse_property_definition,
     parse_property_definition_with_source, parse_schema_declaration,
     parse_schema_declaration_with_source, suggestions_for_def, suggestions_for_path,
     Alternative, flattened_alternatives,
-    StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
-    parse_yaml_schema, to_json_schema,
+    SchemaCategory, StandaloneSchemaDocument, StandaloneSchemaEnvelope, parse_standalone_schema_document,
+    parse_yaml_schema, to_json_schema, to_json_schema_with_definitions,
 };
 #[cfg(feature = "work-counters")]
 pub use simplified::alias_search_work;
@@ -141,38 +153,49 @@ pub use roots::{
 };
 pub use embedded::EmbeddedSchemaBundle;
 pub use triggers::{
-    LoadedTrigger, MatchArms, MatchExpr, PathGlobs, PathSubject, ShadowedFile, TriggerEnvelope,
-    TriggerArmTrace, TriggerEvaluation, TriggerRegistry, TriggerSource, TriggerTrace,
+    InvalidTriggerFinding, LoadedTrigger, MatchConditions, MatchExpr, PathGlobs, PathSubject, ShadowedFile, TriggerEnvelope,
+    TriggerConditionTrace, TriggerEvaluation, TriggerRegistry, TriggerSource, TriggerTrace,
     TriggerTraceEntry, evaluate_registry, matched_triggers, parse_trigger_envelope,
     parse_trigger_envelope_from_str, trace_registry, scan, scan_with_embedded,
 };
+pub use timings::{CompileCache, ValidationStage, ValidationTimings};
 pub use validate::{CACHE_SIZE_ENV, DEFAULT_CACHE_SIZE, PositionMap, ValidatorCache};
 
 /// The runtime baseline, prepared from the embedded table: its typed form with
-/// every import expanded, and that form lowered to JSON Schema.
+/// every import expanded, the shared definitions its references point into,
+/// and the pair lowered to JSON Schema.
 struct ShippedBaseline {
     schema: SimplifiedSchema,
+    definitions: Arc<DefinitionTable>,
     json_schema: Arc<Value>,
 }
 
 /// Prepared and lowered once per process, on first use.
 static BASELINE: std::sync::OnceLock<ShippedBaseline> = std::sync::OnceLock::new();
 
+/// [`darkmatter_base_schema`]'s definition-free form, resolved on first use.
+static INLINE_BASELINE: std::sync::OnceLock<SimplifiedSchema> = std::sync::OnceLock::new();
+
 fn shipped_baseline() -> &'static ShippedBaseline {
     BASELINE.get_or_init(|| {
-        let resolved = resolve::prepare_embedded_schema(embedded::BASELINE_PATH, embedded::SHIPPED)
-            .unwrap_or_else(|error| panic!("the embedded baseline schema must prepare: {error}"));
-        ShippedBaseline {
-            schema: resolved
-                .simplified
-                .expect("an embedded schema is a SimplifiedSchema"),
-            json_schema: Arc::new(resolved.json_schema),
-        }
+        let (schema, definitions) = catalog::GlobalCatalog::darkmatter()
+            .baseline()
+            .expect("Darkmatter's catalog declares `fm`");
+        let json_schema = to_json_schema_with_definitions(&schema, &definitions)
+            .unwrap_or_else(|error| panic!("the embedded baseline schema must lower: {error}"));
+        ShippedBaseline { schema, definitions, json_schema: Arc::new(json_schema) }
     })
 }
 
+/// The runtime baseline with the shared definitions its references point
+/// into: the form validation lowers ([`darkmatter_base_json_schema`]).
+pub(crate) fn darkmatter_shared_baseline() -> (&'static SimplifiedSchema, &'static Arc<DefinitionTable>) {
+    let baseline = shipped_baseline();
+    (&baseline.schema, &baseline.definitions)
+}
+
 fn darkmatter_base_schema_ref() -> &'static SimplifiedSchema {
-    &shipped_baseline().schema
+    INLINE_BASELINE.get_or_init(catalog::darkmatter_inline_baseline)
 }
 
 fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
@@ -181,11 +204,17 @@ fn darkmatter_base_json_schema_arc() -> &'static Arc<Value> {
 
 /// Returns the Darkmatter baseline frontmatter schema as a [`SimplifiedSchema`].
 ///
-/// The baseline is authored at `darkmatter/docs/schemas/darkmatter.yaml` and
-/// compiled into the library. Its imports, such as `content_policy`'s
-/// Content Policy types, resolve against the other compiled-in schema
-/// documents, never the disk, so the result carries every referenced
-/// definition inline. It is prepared at first call and cached.
+/// The baseline is the resolved `fm` definition of Darkmatter's global
+/// catalog, `darkmatter/schemas/darkmatter.yaml`, compiled into the library
+/// with its partials ([`catalog::GlobalCatalog::darkmatter`]). Its imports,
+/// such as `content_policy`'s Content Policy types, resolve against the other
+/// compiled-in schema documents, never the disk.
+///
+/// The result carries no definition table: every acyclic named type is
+/// expanded at each of its uses. The catalog declaration and the lowered
+/// baseline ([`darkmatter_base_json_schema`]) store a structured type the
+/// baseline uses at two or more sites once instead; both forms validate
+/// alike. It is prepared at first call and cached.
 ///
 /// ## Examples
 ///
@@ -206,9 +235,12 @@ pub fn darkmatter_base_schema() -> SimplifiedSchema {
 /// Returns the Darkmatter baseline frontmatter schema as a compiled Draft
 /// 2020-12 JSON Schema value.
 ///
-/// The result is [`darkmatter_base_schema`] lowered once and cached. Each
-/// call returns an independent owned value; callers that only need to read the
-/// schema can use [`darkmatter_base_json_schema_ref`] instead.
+/// The result is the baseline lowered once and cached, with each structured
+/// type it uses at two or more sites emitted once under its root `$defs`;
+/// [`darkmatter_base_schema`] is the same baseline with those types expanded,
+/// and it validates alike. Each call returns an independent owned value;
+/// callers that only need to read the schema can use
+/// [`darkmatter_base_json_schema_ref`] instead.
 ///
 /// ## Examples
 ///
@@ -244,7 +276,7 @@ pub fn darkmatter_base_json_schema_ref() -> &'static Value {
 /// Top-level entry point for the schemas subsystem.
 ///
 /// Holds the request's file-resolution context, optional baseline schema
-/// configuration, optional trigger-schema configuration, and the process-wide
+/// configuration, optional schema-trigger configuration, and the process-wide
 /// validator cache so repeated validations against the same effective schema
 /// reuse the compiled `jsonschema::Validator`.
 ///
@@ -278,6 +310,35 @@ pub struct DarkmatterSchemas {
 static SHARED_VALIDATOR_CACHE: std::sync::LazyLock<ValidatorCache> =
     std::sync::LazyLock::new(ValidatorCache::new);
 
+/// Benchmarking seam: empties the process-wide schema caches so the next
+/// validation does its schema work cold.
+///
+/// Cleared: the shared, conversion, completion-alternative, and
+/// example-target validator caches; the conversion-plan, format-validator,
+/// example-artifact, emitted-pattern, and named-type parse caches; the
+/// trigger payload and embedded-trigger memos; the trigger merge, phase
+/// derivation, and root-arm memos; and the calling thread's trigger-matcher regex cache. Compiled-in
+/// constants (the shipped baseline, the global catalog) are kept.
+///
+/// Never call it from production code: it only discards work. Verdicts are
+/// unchanged; a reset makes the next lookup of each cache a miss.
+#[doc(hidden)]
+pub fn reset_process_caches_for_bench() {
+    SHARED_VALIDATOR_CACHE.clear();
+    coerce::reset_process_caches();
+    completion::reset_process_caches();
+    example::reset_process_caches();
+    json_shape::reset_process_caches();
+    simplified::convert::reset_process_caches();
+    resolve::reset_process_caches();
+    triggers::assemble::reset_process_caches();
+    triggers::discovery::reset_process_caches();
+    triggers::matcher::reset_thread_caches();
+    DERIVATIONS.lock().expect("phase schema memo poisoned").clear();
+    MERGES.lock().expect("trigger merge memo poisoned").clear();
+    WRAPPED.lock().expect("root arm memo poisoned").clear();
+}
+
 #[derive(Clone)]
 struct BaselineSchema {
     /// Held as `Arc<Value>` so `effective_for` shares it by reference (a
@@ -298,6 +359,8 @@ struct TriggerLayer {
     json_schema: Arc<Value>,
     /// The payload's SimplifiedSchema object shape, when it has one.
     shape: Option<Arc<SchemaShape>>,
+    /// The cyclic named types `shape` reaches.
+    definitions: Arc<DefinitionTable>,
     /// Payload dependency edges (referenced files + imports + examples).
     dependencies: Vec<PathBuf>,
     advisories: Vec<SchemaAdvisory>,
@@ -372,8 +435,18 @@ impl DarkmatterSchemas {
     /// JSON Schema, or [`SchemaError::Baseline`] if the resulting JSON Schema
     /// is not a simple object schema (rooted at `"type": "object"` with only
     /// `properties` / `required`).
-    pub fn with_baseline(mut self, schema: SimplifiedSchema) -> Result<Self, SchemaError> {
-        let json = to_json_schema(&schema).map_err(|err| SchemaError::Baseline {
+    pub fn with_baseline(self, schema: SimplifiedSchema) -> Result<Self, SchemaError> {
+        self.with_baseline_and_definitions(&schema, &DefinitionTable::default())
+    }
+
+    /// [`Self::with_baseline`] for a schema whose stored named types are
+    /// references into `definitions`.
+    pub(crate) fn with_baseline_and_definitions(
+        mut self,
+        schema: &SimplifiedSchema,
+        definitions: &DefinitionTable,
+    ) -> Result<Self, SchemaError> {
+        let json = to_json_schema_with_definitions(schema, definitions).map_err(|err| SchemaError::Baseline {
             message: "baseline could not be converted to JSON Schema".into(),
             source: Some(Box::new(err)),
         })?;
@@ -382,15 +455,30 @@ impl DarkmatterSchemas {
     }
 
     /// Loads a baseline schema from a YAML or JSON file. Uses the same
-    /// disambiguation rule as document `$schema` references.
+    /// disambiguation rule as document `$schema` references, except that a
+    /// global catalog ([`catalog::is_global_catalog`]) contributes its resolved
+    /// `fm` definition, as Darkmatter's built-in baseline does.
     ///
     /// ## Errors
     ///
     /// Propagates [`SchemaError::Io`], [`SchemaError::AmbiguousReferenced`],
-    /// or [`SchemaError::Baseline`] depending on the failure shape.
+    /// or [`SchemaError::Baseline`] depending on the failure shape; a catalog
+    /// that does not load is a [`SchemaError::Baseline`] whose message is the
+    /// field-located [`catalog::CatalogError`].
     pub fn with_baseline_from_file(mut self, path: impl AsRef<Path>) -> Result<Self, SchemaError> {
         let path = path.as_ref();
         let base = path.parent().unwrap_or_else(|| Path::new("."));
+        if std::fs::read_to_string(path).is_ok_and(|text| catalog::is_global_catalog(&text)) {
+            let loaded = catalog::GlobalCatalog::from_file(
+                path,
+                catalog::DARKMATTER_GLOBALS,
+                &self.file_resolution_context,
+            )
+            .map_err(|error| SchemaError::Baseline { message: error.to_string(), source: None })?;
+            let (schema, definitions) = loaded.baseline().expect("Darkmatter's requirements include `fm`");
+            self.set_baseline_json(to_json_schema_with_definitions(&schema, &definitions)?, Vec::new())?;
+            return Ok(self);
+        }
         // Drive resolution through the file-reference path so YAML/JSON
         // disambiguation matches `$schema` references.
         let yaml_value = serde_yaml_ng::Value::String(path.to_string_lossy().into_owned());
@@ -447,24 +535,25 @@ impl DarkmatterSchemas {
         Ok(())
     }
 
-    /// Enables trigger-schema discovery in the five [schema roots](roots) of
+    /// Enables schema-trigger discovery in the five [schema roots](roots) of
     /// this instance's context, which must be the checked document's own
     /// context.
     ///
-    /// The scan is performed eagerly at configuration time: trigger envelopes
-    /// are loaded transactionally (one malformed trigger aborts the whole
-    /// scan). The resulting [`triggers::TriggerRegistry`] is stored and
-    /// consumed by [`Self::effective_for`], whose bare-name `$schema` lookup
-    /// also searches its roots.
+    /// The scan is performed eagerly at configuration time and recovers per
+    /// trigger: an invalid trigger is skipped and reported by
+    /// [`Self::discovery_findings`] while every valid one is installed. The
+    /// resulting [`triggers::TriggerRegistry`] is stored and consumed by
+    /// [`Self::effective_for`], whose bare-name `$schema` lookup also
+    /// searches its roots.
     ///
     /// [`DarkmatterSchemas::new`] never scans disk — discovery is opt-in via
     /// this method or [`Self::with_trigger_registry`].
     ///
     /// ## Errors
     ///
-    /// Propagates [`SchemaError::TriggerLoad`] when a trigger file in a
-    /// searched root claims the `kind: trigger-schema` envelope but is
-    /// malformed (bad envelope, bad match grammar, vacuous arm).
+    /// Only discovery's infrastructure failures (see [`triggers::scan`]): an
+    /// unreadable schema root or enumerated file, a case-fold collision, or
+    /// an invalid embedded bundle structure.
     pub fn with_trigger_discovery(self) -> Result<Self, SchemaError> {
         let registry =
             triggers::scan_with_embedded(&self.file_resolution_context, &self.embedded_bundles)?;
@@ -484,9 +573,10 @@ impl DarkmatterSchemas {
     ///
     /// ## Errors
     ///
-    /// [`SchemaError::EmbeddedBundle`] or [`SchemaError::EmbeddedTriggerLoad`]
-    /// (see [`triggers::TriggerRegistry::append_embedded_bundle`]); the
-    /// instance is consumed.
+    /// [`SchemaError::EmbeddedBundle`] (see
+    /// [`triggers::TriggerRegistry::append_embedded_bundle`]); the instance is
+    /// consumed. An invalid trigger in the bundle is a discovery finding, not
+    /// an error.
     pub fn with_embedded_trigger_bundle(
         mut self,
         bundle: EmbeddedSchemaBundle,
@@ -516,13 +606,21 @@ impl DarkmatterSchemas {
         self.triggers.as_ref()
     }
 
+    /// The schema triggers discovery skipped as invalid, in discovery order;
+    /// empty without a registry. They belong to the discovery result, so they
+    /// are reported whether or not any effective schema applies.
+    #[must_use]
+    pub fn discovery_findings(&self) -> &[triggers::InvalidTriggerFinding] {
+        self.triggers.as_ref().map_or(&[], |registry| registry.findings())
+    }
+
     /// Builds the effective schema for a Markdown document.
     ///
     /// Reads the document's `$schema` frontmatter (if any), resolves it, and
     /// merges the layers in precedence order:
     ///
     /// 1. The caller-configured baseline (if any).
-    /// 2. Matching trigger-schema payloads — first schema root first,
+    /// 2. Matching schema-trigger payloads — first schema root first,
     ///    filename-lexicographic within a root, then embedded bundle triggers
     ///    (the registry's built-in order). Shadowing is applied before matching
     ///    (a shadowed file is never in the registry).
@@ -558,6 +656,8 @@ impl DarkmatterSchemas {
         source: &Markdown,
         schema_override: Option<&Value>,
     ) -> Result<Option<EffectiveSchema>, SchemaError> {
+        let _resolve = timings::stage(ValidationStage::Resolve);
+        crate::note_work!(EffectivePreparation);
         let base_dir = base_dir_for(source, &self.file_resolution_context);
         let frontmatter = source.frontmatter().as_map();
         let schema_value = schema_override.or_else(|| frontmatter.get("$schema"));
@@ -579,7 +679,7 @@ impl DarkmatterSchemas {
                     trigger_roots,
                     &self.file_resolution_context,
                 )?;
-                // The document must not directly reference a trigger-schema
+                // The document must not directly reference a schema-trigger
                 // file — triggers activate by placement and match, never by
                 // reference.
                 triggers::assemble::check_document_schema_not_trigger(&r.referenced_files)?;
@@ -603,11 +703,9 @@ impl DarkmatterSchemas {
             // Baseline only — share the Arc, no deep clone.
             (Some(base), true, None) => Arc::clone(&base.json_schema),
             (None, true, None) => return Ok(None),
-            (None, true, Some(doc)) => Arc::new(doc),
-            (Some(base), true, Some(doc)) => Arc::new(resolve::merge_baseline(&base.json_schema, doc)?),
             // A lone trigger payload is shared as resolved.
             (None, false, None) if trigger_layers.len() == 1 => Arc::clone(&trigger_layers[0].json_schema),
-            (baseline, false, doc) => merged_trigger_schema(
+            (baseline, _, doc) => merged_trigger_schema(
                 baseline.as_ref().map(|base| &base.json_schema),
                 &trigger_layers,
                 doc,
@@ -630,9 +728,16 @@ impl DarkmatterSchemas {
             &trigger_layers,
             resolved.as_ref(),
         );
+        let definitions = resolved.as_ref().map(|r| Arc::clone(&r.definitions)).unwrap_or_default();
         Ok(Some(EffectiveSchema {
             simplified: resolved.and_then(|r| r.simplified),
+            definitions,
             trigger_shapes: trigger_layers.iter().filter_map(|layer| layer.shape.clone()).collect(),
+            trigger_definitions: trigger_layers
+                .iter()
+                .filter(|layer| !layer.definitions.is_empty())
+                .map(|layer| Arc::clone(&layer.definitions))
+                .collect(),
             json_schema: merged_json,
             origins,
             validators,
@@ -642,6 +747,9 @@ impl DarkmatterSchemas {
             caller_origins: self.cache.caller_origins().clone(),
             dependencies,
             advisories,
+            conversion: OnceLock::new(),
+            layered_definitions: OnceLock::new(),
+            raw_declarations: OnceLock::new(),
         }))
     }
 
@@ -673,20 +781,32 @@ impl DarkmatterSchemas {
         // constructed registries do not and fall back to on-demand resolution.
         let pre_resolved = registry.payloads.len() == registry.triggers.len();
 
-        let evaluations =
-            triggers::assemble::evaluate_registry(registry, &fm_json, document);
+        let evaluations = ValidationStage::Match.time(|| {
+            let evaluations = triggers::assemble::evaluate_registry(registry, &fm_json, document);
+            for eval in evaluations.iter().filter(|eval| eval.matched) {
+                timings::matched_trigger(|| {
+                    eval.trigger
+                        .source
+                        .file_name()
+                        .map_or_else(|| eval.trigger.source.to_string(), str::to_owned)
+                });
+            }
+            evaluations
+        });
         let mut layers = Vec::with_capacity(
             evaluations.iter().filter(|eval| eval.matched).count(),
         );
         for (idx, eval) in evaluations.into_iter().enumerate() {
-            if !eval.matched {
+            // A matcher-only trigger (no `$schema`) layers nothing.
+            if !eval.matched || eval.trigger.envelope.payload.is_none() {
                 continue;
             }
-            let (json_schema, shape, dependencies, advisories) = if pre_resolved {
+            let (json_schema, shape, definitions, dependencies, advisories) = if pre_resolved {
                 let payload = &registry.payloads[idx];
                 (
                     payload.json_schema.clone(),
                     payload.shape.clone(),
+                    Arc::clone(&payload.definitions),
                     payload.dependencies.clone(),
                     payload.advisories.clone(),
                 )
@@ -696,12 +816,13 @@ impl DarkmatterSchemas {
                     registry.roots.search_paths(),
                     &self.file_resolution_context,
                 )?;
-                (payload.json_schema, payload.shape, payload.dependencies, payload.advisories)
+                (payload.json_schema, payload.shape, payload.definitions, payload.dependencies, payload.advisories)
             };
             layers.push(TriggerLayer {
                 source: eval.trigger.source.clone(),
                 json_schema,
                 shape,
+                definitions,
                 dependencies,
                 advisories,
             });
@@ -723,17 +844,22 @@ impl DarkmatterSchemas {
     pub fn validate(&self, source: &Markdown) -> Result<ValidationReport, SchemaError> {
         let frontmatter_value = frontmatter_as_json(source);
         let positions = positions_for(source);
-        match self.effective_for(source)? {
-            Some(effective) => {
-                Ok(effective.validate_with_positions(&frontmatter_value, &positions))
-            }
-            None => Ok(ValidationReport {
-                valid: true,
-                problems: Vec::new(),
-                pending: Vec::new(),
-                advisories: Vec::new(),
-            }),
-        }
+        let mut report = match self.effective_for(source)? {
+            Some(effective) => effective.validate_with_positions(&frontmatter_value, &positions),
+            None => ValidationReport::vacuous(),
+        };
+        report.trigger_findings = self.discovery_findings().to_vec();
+        Ok(report)
+    }
+
+    /// [`Self::validate`], also returning the request's stage timings.
+    ///
+    /// The result is exactly what [`Self::validate`] returns; timings are
+    /// returned on failure too, covering the work done before it stopped.
+    /// Trigger discovery done by [`Self::with_trigger_discovery`] is not part
+    /// of this call (see [`ValidationTimings`]).
+    pub fn validate_timed(&self, source: &Markdown) -> (Result<ValidationReport, SchemaError>, ValidationTimings) {
+        ValidationTimings::record(|| self.validate(source))
     }
 
     /// Validates a document's frontmatter at a runtime [`SchemaPhase`].
@@ -752,19 +878,16 @@ impl DarkmatterSchemas {
     ) -> Result<ValidationReport, SchemaError> {
         let frontmatter_value = frontmatter_as_json(source);
         let positions = positions_for(source);
-        match self.effective_for(source)? {
+        let mut report = match self.effective_for(source)? {
             Some(effective) => effective.validate_for_phase_with_positions(
                 &frontmatter_value,
                 &positions,
                 phase,
-            ),
-            None => Ok(ValidationReport {
-                valid: true,
-                problems: Vec::new(),
-                pending: Vec::new(),
-                advisories: Vec::new(),
-            }),
-        }
+            )?,
+            None => ValidationReport::vacuous(),
+        };
+        report.trigger_findings = self.discovery_findings().to_vec();
+        Ok(report)
     }
 
     /// Returns a shared reference to the underlying validator cache. Useful
@@ -815,11 +938,12 @@ fn schema_declares_property(root: &Value, schema: &Value, name: &str, depth: usi
         .filter_map(|key| object.get(key).and_then(Value::as_array))
         .flatten()
         .chain(["if", "then", "else"].into_iter().filter_map(|key| object.get(key)));
-    let referenced = object
-        .get("$ref")
-        .and_then(Value::as_str)
-        .and_then(|reference| reference.strip_prefix('#'))
-        .and_then(|pointer| root.pointer(pointer));
+    // The compiled schema already resolved every reference, so a chain that
+    // fails here declares nothing rather than failing the query.
+    let referenced = scope::SchemaScope::new(root)
+        .chain(schema, "")
+        .map(|hops| hops.into_iter().skip(1).collect::<Vec<_>>())
+        .unwrap_or_default();
     arms.chain(referenced)
         .any(|arm| schema_declares_property(root, arm, name, depth + 1))
 }
@@ -838,10 +962,16 @@ pub struct EffectiveSchema {
     /// editor's full property shape, with matching trigger payloads layered
     /// in, is [`Self::property_shape`].
     pub simplified: Option<SimplifiedSchema>,
+    /// The cyclic named types [`Self::simplified`] reaches through
+    /// [`TypeExpr::Ref`]; empty when nothing recurses.
+    definitions: Arc<DefinitionTable>,
     /// The object shapes of the matching trigger payloads that have a
     /// SimplifiedSchema projection, in layering order (a later shape wins a
     /// shared top-level property, as it does in [`Self::json_schema`]).
     trigger_shapes: Vec<Arc<SchemaShape>>,
+    /// The non-empty definition tables of the matching trigger payloads,
+    /// searched by [`Self::definition`] after [`Self::definitions`].
+    trigger_definitions: Vec<Arc<DefinitionTable>>,
     /// The final Draft 2020-12 JSON Schema used by the validator.
     ///
     /// Held as `Arc<Value>` so the common baseline-only effective schema is
@@ -879,9 +1009,48 @@ pub struct EffectiveSchema {
     /// Non-fatal findings produced while resolving the effective schema's
     /// referenced files, sorted and deduplicated by semantic kind and path.
     advisories: Vec<SchemaAdvisory>,
+    /// The conversion plan for [`Self::json_schema`], found on first use.
+    conversion: OnceLock<Arc<coerce::ConversionPlan>>,
+    /// [`Self::layered_definitions`], merged on first use.
+    layered_definitions: OnceLock<Arc<DefinitionTable>>,
+    /// [`Self::raw_declarations`], projected on first use.
+    raw_declarations: OnceLock<Arc<crate::markdown::compose::expression::RawDeclarations>>,
 }
 
 impl EffectiveSchema {
+    /// The conversion plan for [`Self::json_schema`].
+    fn conversion(&self) -> &coerce::ConversionPlan {
+        self.conversion.get_or_init(|| {
+            coerce::ConversionPlan::for_hashed(SHARED_VALIDATOR_CACHE.shared_schema_hash(&self.json_schema))
+        })
+    }
+
+    /// Converts `instance` against [`Self::json_schema`] as
+    /// [`coerce::coerce_frontmatter_with_pending`] does, reusing this
+    /// schema's conversion plan.
+    pub fn coerce_frontmatter_with_pending(
+        &self,
+        instance: &Value,
+        composition_pending: &HashSet<String>,
+    ) -> coerce::CoercionOutcome {
+        if self.accepts_as_is(instance) {
+            return coerce::CoercionOutcome {
+                value: instance.clone(),
+                changed: false,
+            };
+        }
+        coerce::coerce_with_plan(self.conversion(), &self.json_schema, instance, composition_pending)
+    }
+
+    /// Whether this schema's own compiled validators accept `instance`
+    /// unchanged: such a value is kept, so conversion needs nothing else.
+    fn accepts_as_is(&self, instance: &Value) -> bool {
+        match &self.validators {
+            CompiledValidators::Object(validator) => validator.is_valid(instance),
+            CompiledValidators::RootUnion(arms) => arms.iter().any(|arm| arm.is_valid(instance)),
+        }
+    }
+
     /// Whether this schema declares the top-level frontmatter property `name`:
     /// a `properties` key, a matching `patternProperties` pattern, or either
     /// of those in any root-union, `allOf`, or `if`/`then`/`else` arm
@@ -889,6 +1058,53 @@ impl EffectiveSchema {
     /// requiring; an optional property is declared.
     pub fn declares_top_level_property(&self, name: &str) -> bool {
         schema_declares_property(&self.json_schema, &self.json_schema, name, 0)
+    }
+
+    /// The cyclic named types [`Self::simplified`] reaches through
+    /// [`TypeExpr::Ref`], each lowered once under the schema's root `$defs`.
+    /// Empty when nothing recurses.
+    pub fn definitions(&self) -> &Arc<DefinitionTable> {
+        &self.definitions
+    }
+
+    /// The definition a [`TypeExpr::Ref`] in [`Self::simplified`] or in one
+    /// of [`Self::trigger_shapes`] names. A [`DefKey`] identifies one
+    /// definition wherever it is reached, so one lookup serves every layer.
+    ///
+    /// Look a reference up here, not by its `$defs` key: each table's keys
+    /// are those of its own lowering, and a trigger payload's keys may have
+    /// been re-keyed when its JSON merged under the document's.
+    pub fn definition(&self, key: &DefKey) -> Option<&Definition> {
+        std::iter::once(&self.definitions)
+            .chain(&self.trigger_definitions)
+            .find_map(|table| table.get(key))
+    }
+
+    /// One table holding every definition [`Self::definition`] finds: the
+    /// document's, then each trigger layer's it lacks. A reference from any
+    /// layer resolves in it to the body [`Self::definition`] returns, so the
+    /// expression type layer looks references up here. Merged on first use;
+    /// the document's own table when no trigger adds one.
+    pub fn layered_definitions(&self) -> &Arc<DefinitionTable> {
+        self.layered_definitions.get_or_init(|| {
+            if self.trigger_definitions.is_empty() {
+                return Arc::clone(&self.definitions);
+            }
+            let mut merged = self.definitions.as_ref().clone();
+            for table in &self.trigger_definitions {
+                merged.absorb(table);
+            }
+            Arc::new(merged)
+        })
+    }
+
+    /// The conservative projection of [`Self::json_schema`], the merged
+    /// schema of every layer: the declared layer's source for the baseline
+    /// and for layers no SimplifiedSchema represents. Projected on first use.
+    pub fn raw_declarations(&self) -> &crate::markdown::compose::expression::RawDeclarations {
+        self.raw_declarations.get_or_init(|| {
+            Arc::new(crate::markdown::compose::expression::RawDeclarations::from_json_schema(&self.json_schema))
+        })
     }
 
     /// The files this schema depends on (imports + examples + the referenced
@@ -950,20 +1166,48 @@ impl EffectiveSchema {
     /// attributed to the closest-matching arm and carry the corresponding
     /// `arm_index`.
     ///
-    /// The instance is type-coerced against the schema (see
-    /// [`coerce::coerce_frontmatter`]) on a working copy before validation, so
-    /// the report reflects post-coercion validity. No input is mutated —
+    /// The instance is converted against the schema by the conversion core
+    /// (see [`coerce::coerce_frontmatter`]) on a working copy before
+    /// validation, so the report reflects post-conversion validity. When some
+    /// value cannot convert, every other value that converts on its own is
+    /// still converted in the working copy, so the report names only the
+    /// values that fail, each with the core's reason. No input is mutated —
     /// eager-`file` values are left in their raw caller-supplied form. To
     /// rewrite them to their resolved document-relative paths, call
     /// [`Self::normalize_frontmatter`] explicitly on an already-valid
     /// instance.
+    ///
+    /// ## Nested templates
+    ///
+    /// A `{{ … }}` template below a top-level key, at a place the schema
+    /// marks `deferred` (`success: [{pr_list: "{{ fm.count }}"}]` against
+    /// `pr_list: number(deferred)`), is supplied only when it is rendered, so
+    /// it is accepted without judging its value; nothing is evaluated. Its
+    /// literal siblings and the shape of the collection holding it are still
+    /// judged: an unknown key, an extra or missing tuple element, or an
+    /// invalid literal beside it is reported. A template at an unmarked place,
+    /// and malformed template syntax anywhere, is judged as written. A whole
+    /// top-level template value is not deferred here (see
+    /// [`Self::validate_with_options`]).
     pub fn validate_with_positions(
         &self,
         frontmatter: &Value,
         positions: &PositionMap,
     ) -> ValidationReport {
-        let coerced = coerce::coerce_frontmatter(&self.json_schema, frontmatter);
-        self.validate_instance(&coerced.value, positions)
+        self.validate_converted(frontmatter, frontmatter, positions)
+    }
+
+    /// [`Self::validate_with_positions`] of `frontmatter`, whose templates
+    /// are found in `stored`, its form before literal tokens were decoded,
+    /// so decoded literal text is never taken for a template.
+    fn validate_converted(&self, frontmatter: &Value, stored: &Value, positions: &PositionMap) -> ValidationReport {
+        let _validate = timings::stage(ValidationStage::Validate);
+        if self.accepts_as_is(frontmatter) {
+            return self.validate_instance(frontmatter, frontmatter, stored, positions, &coerce::NestedTemplates::default());
+        }
+        let templates = self.nested_templates(stored);
+        let working_copy = coerce::validation_copy_with_plan(self.conversion(), &self.json_schema, frontmatter, &templates);
+        self.validate_instance(&working_copy, frontmatter, stored, positions, &templates)
     }
 
     /// Validates a working frontmatter instance at a runtime schema phase.
@@ -993,13 +1237,74 @@ impl EffectiveSchema {
         positions: &PositionMap,
         phase: SchemaPhase,
     ) -> Result<ValidationReport, SchemaError> {
-        let (projected, projected_document) = match &self.simplified {
+        let projected = self.phase_projection(phase)?;
+        Ok(match phase {
+            SchemaPhase::Launch => projected.validate_with_positions(frontmatter, positions),
+            // Raw, as `validate_raw` is, but nested templates at `deferred`
+            // places are deferred as in every phase.
+            SchemaPhase::Completion => {
+                let _validate = timings::stage(ValidationStage::Validate);
+                projected.validate_instance(frontmatter, frontmatter, frontmatter, positions, &projected.nested_templates(frontmatter))
+            }
+        })
+    }
+
+    /// Validates `stored`, a frontmatter value as loaded with its literal
+    /// tokens still encoded, unphased like [`Self::validate_with_positions`]
+    /// or at `phase` like [`Self::validate_for_phase_with_positions`].
+    ///
+    /// Each token is judged by the text it holds, and that text is data: it
+    /// is never deferred as a `{{ … }}` template, whether nested at a
+    /// `deferred` place or in a generated lifecycle verb's operand, so a
+    /// token holding `{{ fm.count }}` fails a number parameter as `three`
+    /// does. A malformed token leaves the value raw; composition reports it.
+    /// [`Self::validate_with_options`] judges its instance this way too.
+    ///
+    /// ## Errors
+    ///
+    /// See [`Self::validate_for_phase_with_positions`]; never fails without
+    /// a phase.
+    pub fn validate_stored(
+        &self,
+        stored: &Value,
+        positions: &PositionMap,
+        phase: Option<SchemaPhase>,
+    ) -> Result<ValidationReport, SchemaError> {
+        let projected;
+        let schema = match phase {
+            Some(phase) => {
+                projected = self.phase_projection(phase)?;
+                &projected
+            }
+            None => self,
+        };
+        Ok(schema.judge_stored(stored, positions, phase == Some(SchemaPhase::Completion)))
+    }
+
+    /// [`Self::validate_stored`] against this schema as it is: converted
+    /// first, or raw (`completion`) as the completion phase judges.
+    fn judge_stored(&self, stored: &Value, positions: &PositionMap, completion: bool) -> ValidationReport {
+        let decoded = crate::markdown::literal_token::decode_literal_tokens(stored).ok();
+        let decoded = decoded.as_ref().unwrap_or(stored);
+        if completion {
+            let _validate = timings::stage(ValidationStage::Validate);
+            self.validate_instance(decoded, decoded, stored, positions, &self.nested_templates(stored))
+        } else {
+            self.validate_converted(decoded, stored, positions)
+        }
+    }
+
+    /// This schema projected to `phase`'s presence rules.
+    fn phase_projection(&self, phase: SchemaPhase) -> Result<Self, SchemaError> {
+        let _resolve = timings::stage(ValidationStage::Resolve);
+        let (projected, definitions, projected_document) = match &self.simplified {
             Some(simplified) => {
                 let projected = phase::project(simplified, phase);
-                let projected_document = simplified::to_json_schema(&projected)?;
-                (Some(projected), Some(projected_document))
+                let definitions = phase::project_definitions(&self.definitions, phase);
+                let projected_document = simplified::to_json_schema_with_definitions(&projected, &definitions)?;
+                (Some(projected), Arc::new(definitions), Some(projected_document))
             }
-            None => (None, None),
+            None => (None, Arc::clone(&self.definitions), None),
         };
         let json_schema = phase_json_schema(&self.json_schema, projected_document, phase)?;
         let mut cache = SHARED_VALIDATOR_CACHE.clone().with_caller_origins(self.caller_origins.clone());
@@ -1010,7 +1315,9 @@ impl EffectiveSchema {
             CompiledValidators::build(&json_schema, &cache, self.base_dir.as_deref(), &self.file_resolution_context)?;
         let projected = Self {
             simplified: projected,
+            definitions,
             trigger_shapes: self.trigger_shapes.clone(),
+            trigger_definitions: self.trigger_definitions.clone(),
             json_schema,
             origins: self.origins.clone(),
             validators,
@@ -1020,13 +1327,11 @@ impl EffectiveSchema {
             caller_origins: self.caller_origins.clone(),
             dependencies: self.dependencies.clone(),
             advisories: self.advisories.clone(),
+            conversion: OnceLock::new(),
+            layered_definitions: OnceLock::new(),
+            raw_declarations: OnceLock::new(),
         };
-        Ok(match phase {
-            SchemaPhase::Launch => projected.validate_with_positions(frontmatter, positions),
-            SchemaPhase::Completion => {
-                projected.validate_raw_with_positions(frontmatter, positions)
-            }
-        })
+        Ok(projected)
     }
 
     /// Validates a frontmatter JSON value against this schema **without any
@@ -1049,18 +1354,62 @@ impl EffectiveSchema {
         frontmatter: &Value,
         positions: &PositionMap,
     ) -> ValidationReport {
-        self.validate_instance(frontmatter, positions)
+        let _validate = timings::stage(ValidationStage::Validate);
+        self.validate_instance(frontmatter, frontmatter, frontmatter, positions, &coerce::NestedTemplates::default())
+    }
+
+    /// The nested templates of `authored` that this schema marks `deferred`
+    /// ([`coerce::NestedTemplates::find`]).
+    fn nested_templates(&self, authored: &Value) -> coerce::NestedTemplates {
+        coerce::NestedTemplates::find(self.conversion(), &self.json_schema, authored)
     }
 
     /// Shared validation body over an already-prepared instance. Callers
     /// choose the preparation: [`Self::validate_with_positions`] passes a
     /// coerced working copy, the `validate_raw` pair passes the instance as
-    /// parsed.
-    fn validate_instance(&self, instance: &Value, positions: &PositionMap) -> ValidationReport {
+    /// parsed. Problems owed to one of `templates` are left out as they are
+    /// collected.
+    ///
+    /// Every value the schema types as a generated lifecycle verb's operands
+    /// is bound through that verb's runtime registration, whose verdict
+    /// decides its literal operands ([`bound_operands`]): the operands of an
+    /// accepted call are set aside like templates, and a rejected call is a
+    /// problem even where the types alone accept it. Calls are bound from
+    /// `authored`, the instance before conversion, since a registration
+    /// judges the value as written (`length` refuses `true`, which the
+    /// working copy holds as `"true"`). A malformed template in an operand
+    /// is a syntax problem whatever its type accepts; operands are scanned
+    /// for one in `stored`, `authored` as loaded with its literal tokens
+    /// still encoded.
+    fn validate_instance(
+        &self,
+        instance: &Value,
+        authored: &Value,
+        stored: &Value,
+        positions: &PositionMap,
+        templates: &coerce::NestedTemplates,
+    ) -> ValidationReport {
+        let bound = self
+            .conversion()
+            .marks_operands(&self.json_schema)
+            .then(|| bound_operands::BoundOperands::bind(&self.json_schema, authored, stored));
+        let widened;
+        let templates = match &bound {
+            Some(bound) if !bound.settled.is_empty() => {
+                widened = templates.with_settled(&bound.settled);
+                &widened
+            }
+            _ => templates,
+        };
+        let failures = std::cell::OnceCell::new();
+        let excused = |problem: &ValidationProblem| {
+            templates.excuses_problem(problem, self.conversion(), &self.json_schema, instance, &failures)
+        };
         let anchors = validate::FileRefAnchors::Resolved {
             base_dir: self.base_dir.as_deref(),
             fallback: self.file_ref_fallback_dir.as_deref(),
             context: &self.file_resolution_context,
+            excused: (!templates.is_empty()).then_some(&excused as &validate::Excused<'_>),
         };
         let mut problems = match &self.validators {
             // Root `anyOf` union. When a shared literal discriminant selects a
@@ -1101,6 +1450,7 @@ impl EffectiveSchema {
                 )
             }
         };
+        coerce::annotate_problems(self.conversion(), &self.json_schema, instance, templates, &mut problems);
         // Enrich each problem with its declared property description (Decision
         // #2). Whitespace-only descriptions (#8) and descriptions identical to
         // the rendered message (#9) are suppressed so the output stays additive.
@@ -1110,11 +1460,19 @@ impl EffectiveSchema {
                     .filter(|desc| !desc.trim().is_empty())
                     .filter(|desc| *desc != problem.message);
         }
+        // After the enrichment: a binder's problem names its call, and the
+        // description found at its place would be an arbitrary arm's.
+        if let Some(bound) = &bound {
+            bound.report_malformed(&mut problems, positions);
+            bound.report_rejections(&mut problems, positions);
+        }
         ValidationReport {
             valid: problems.is_empty(),
             problems,
             pending: Vec::new(),
+            deferred: templates.pointers(),
             advisories: self.advisories.clone(),
+            trigger_findings: Vec::new(),
         }
     }
 
@@ -1124,10 +1482,15 @@ impl EffectiveSchema {
     /// Top-level values that are a whole-value `$(...)` shell expression or
     /// still hold an unresolved `{{ ... }}` template are collected into
     /// [`ValidationReport::pending`]. With [`PendingPolicy::Defer`] (the
-    /// default), problems attributable to a pending key are dropped from the
-    /// report — mirroring compose, which lets a later shell-expansion pass
-    /// re-validate the resolved value. Keys in `options.excluded_keys` have
-    /// their problems dropped unconditionally (caller-owned keys).
+    /// default), a problem is dropped when its key is a whole-value `$(...)`
+    /// or when the authored value at the problem's own path holds a
+    /// `{{ ... }}` template — mirroring compose's pre-shell gate, which lets
+    /// a later pass re-validate the rendered value. A problem on a literal
+    /// sibling of a template stays, and so does one on a malformed template
+    /// (`{{ 1 + }}`), which no rendering can settle. Independently of the policy, templates at
+    /// places the schema marks `deferred` are never judged. Keys in
+    /// `options.excluded_keys` have their problems dropped unconditionally
+    /// (caller-owned keys).
     ///
     /// Nothing here executes a shell command, reads the environment, or
     /// touches the network: pending values are recognised lexically only.
@@ -1137,15 +1500,20 @@ impl EffectiveSchema {
         positions: &PositionMap,
         options: &ValidationOptions,
     ) -> ValidationReport {
-        // Stored literal tokens are judged by the text they hold. A malformed
-        // one stays raw; composition reports it.
-        let decoded = crate::markdown::literal_token::decode_literal_tokens(frontmatter).ok();
-        let mut report =
-            self.validate_with_positions(decoded.as_ref().unwrap_or(frontmatter), positions);
+        let mut report = self.judge_stored(frontmatter, positions, false);
         let pending = scan_pending_values(frontmatter);
-        let pending_keys: HashSet<&str> = pending.iter().map(|p| p.key.as_str()).collect();
+        let shell_pending_keys: HashSet<&str> = pending
+            .iter()
+            .filter(|p| p.reason == PendingValueReason::ShellExpression)
+            .map(|p| p.key.as_str())
+            .collect();
         let defer = matches!(options.pending_policy, PendingPolicy::Defer);
 
+        // Path-precise, as compose's pre-shell gate is: rendering a template
+        // changes only the value at its own path, so it can settle a problem
+        // there or on an ancestor whose subtree holds it, never one on an
+        // unrelated sibling. A whole-value `$( … )` replaces its whole key.
+        let deferred = &report.deferred;
         report.problems.retain(|problem| {
             let Some(key) = attributable_top_level_key(problem) else {
                 return true;
@@ -1153,7 +1521,22 @@ impl EffectiveSchema {
             if options.excluded_keys.contains(&key) {
                 return false;
             }
-            !(defer && pending_keys.contains(key.as_str()))
+            if !defer {
+                return true;
+            }
+            if shell_pending_keys.contains(key.as_str()) {
+                return false;
+            }
+            // A malformed `{{ … }}` span can never render into a valid value,
+            // so its problem stands, as plain validation and Claudine's launch
+            // verdict report it.
+            let holds = |text: &str| {
+                text.contains("{{")
+                    && crate::markdown::literal_token::holds_pending_syntax(text)
+                    && !crate::markdown::compose::expression::is_malformed_template(text)
+            };
+            !authored_node_at(frontmatter, &problem.path)
+                .is_some_and(|(pointer, node)| awaits_rendering(problem, node, &pointer, deferred, &holds))
         });
         report.valid = report.problems.is_empty();
         report.pending = pending;
@@ -1269,15 +1652,43 @@ pub struct ValidationReport {
     pub valid: bool,
     /// Individual problems, in `iter_errors` order.
     pub problems: Vec<ValidationProblem>,
-    /// Top-level values that could not be validated yet because they still
-    /// hold a `$(...)` shell expression or an unresolved `{{ ... }}` template
-    /// (R-5 Priority 3). Always empty for [`EffectiveSchema::validate`] /
+    /// Top-level values that could not be validated yet, wholly or in part,
+    /// because they still hold a `$(...)` shell expression or an unresolved
+    /// `{{ ... }}` template (R-5 Priority 3). A list or mapping holding a
+    /// template is listed even though at most its templates at places the
+    /// schema marks `deferred` are deferred.
+    /// Always empty for [`EffectiveSchema::validate`] /
     /// [`EffectiveSchema::validate_with_positions`]; populated only by
     /// [`EffectiveSchema::validate_with_options`], which mirrors the compose
     /// deferral rules without executing anything.
     pub pending: Vec<PendingValue>,
+    /// JSON Pointers of the `{{ ... }}` templates this validation accepted
+    /// without judging because the schema marks their place `deferred`. A
+    /// caller that sets problems aside for later rendering consults it (see
+    /// [`awaits_rendering`]): a problem left beside an accepted template is
+    /// genuine, since that template's value was already allowed for.
+    pub deferred: Vec<String>,
     /// Non-fatal findings discovered while resolving the effective schema.
     pub advisories: Vec<SchemaAdvisory>,
+    /// The schema triggers automatic discovery skipped as invalid, in
+    /// discovery order. Filled by [`DarkmatterSchemas::validate`] and
+    /// [`DarkmatterSchemas::validate_for_phase`] whether or not an effective
+    /// schema exists; empty from an [`EffectiveSchema`]'s own validation.
+    pub trigger_findings: Vec<triggers::InvalidTriggerFinding>,
+}
+
+impl ValidationReport {
+    /// The valid report of a document no schema applies to.
+    fn vacuous() -> Self {
+        Self {
+            valid: true,
+            problems: Vec::new(),
+            pending: Vec::new(),
+            deferred: Vec::new(),
+            advisories: Vec::new(),
+            trigger_findings: Vec::new(),
+        }
+    }
 }
 
 /// Coarse classification of a validation problem.
@@ -1380,6 +1791,36 @@ pub enum ValidationProblemCode {
     /// A `format: darkmatter-file` / `darkmatter-file-reference` value failed
     /// to parse, resolve, or match an existing file.
     InvalidFileReference,
+}
+
+/// Code of a frontmatter value whose type does not match its declaration.
+pub const SCHEMA_TYPE_MISMATCH_CODE: &str = "dm.schema.type_mismatch";
+/// Code of a failed non-type constraint (range, length, pattern, enum, …).
+pub const SCHEMA_CONSTRAINT_CODE: &str = "dm.schema.constraint";
+/// Code of an absent required key.
+pub const SCHEMA_MISSING_REQUIRED_CODE: &str = "dm.schema.missing_required";
+/// Code of a key the schema does not declare.
+pub const SCHEMA_UNKNOWN_KEY_CODE: &str = "dm.schema.unknown_key";
+/// Code of a `file(...)`-typed value that failed to parse, resolve, or match.
+pub const SCHEMA_INVALID_FILE_REFERENCE_CODE: &str = "dm.schema.invalid_file_reference";
+/// Code of a schema that could not be resolved, merged, or compiled.
+pub const SCHEMA_PREPARE_CODE: &str = "dm.schema.prepare";
+/// Code of the warning for a schema trigger automatic discovery skipped
+/// because its envelope or payload failed to load.
+pub const SCHEMA_INVALID_TRIGGER_CODE: &str = "dm.schema.invalid_trigger";
+
+impl ValidationProblemCode {
+    /// The shared diagnostic code DMLS and `md compose --output report-json`
+    /// report this problem under.
+    pub fn diagnostic_code(self) -> &'static str {
+        match self {
+            Self::MissingRequired => SCHEMA_MISSING_REQUIRED_CODE,
+            Self::TypeMismatch => SCHEMA_TYPE_MISMATCH_CODE,
+            Self::ConstraintViolation => SCHEMA_CONSTRAINT_CODE,
+            Self::UnknownKey => SCHEMA_UNKNOWN_KEY_CODE,
+            Self::InvalidFileReference => SCHEMA_INVALID_FILE_REFERENCE_CODE,
+        }
+    }
 }
 
 /// A parsed RFC 6901 JSON Pointer.
@@ -1508,8 +1949,9 @@ pub enum PendingValueReason {
 /// How [`EffectiveSchema::validate_with_options`] treats pending values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PendingPolicy {
-    /// Drop problems attributable to a pending top-level key (mirrors compose
-    /// when shell expansion will re-validate the value downstream).
+    /// Drop a problem whose key is a whole-value `$(...)`, or whose own
+    /// path holds an unresolved `{{ ... }}` template (mirrors compose when a
+    /// later pass will re-validate the rendered value).
     Defer,
     /// Keep every problem; pending values are still listed on
     /// [`ValidationReport::pending`] but do not suppress diagnostics.
@@ -1546,7 +1988,7 @@ pub enum SchemaOriginKind {
     ReferencedFile,
     /// The configured baseline schema.
     Baseline,
-    /// A matching trigger-schema payload layered between the baseline and the
+    /// A matching schema-trigger payload layered between the baseline and the
     /// document `$schema`.
     Trigger,
 }
@@ -1589,12 +2031,12 @@ impl SchemaOrigin {
         }
     }
 
-    /// A trigger-schema-payload origin carrying the envelope file path.
+    /// A schema-trigger-payload origin carrying the envelope file path.
     pub fn trigger(path: impl Into<PathBuf>) -> Self {
         Self::for_trigger(&triggers::TriggerSource::File(path.into()))
     }
 
-    /// A trigger-schema-payload origin for the envelope at `source`.
+    /// A schema-trigger-payload origin for the envelope at `source`.
     pub fn for_trigger(source: &triggers::TriggerSource) -> Self {
         Self {
             kind: SchemaOriginKind::Trigger,
@@ -1638,6 +2080,16 @@ impl SchemaOrigin {
 /// property name in schema declaration order.
 pub type SchemaOriginMap = indexmap::IndexMap<String, SchemaOrigin>;
 
+struct Derivation {
+    effective: Arc<Value>,
+    projected_document: Option<Value>,
+    phase: SchemaPhase,
+    derived: Arc<Value>,
+}
+const RECENT_DERIVATIONS: usize = 8;
+/// [`phase_json_schema`]'s memo; module-level so [`reset_process_caches_for_bench`] can clear it.
+static DERIVATIONS: std::sync::Mutex<Vec<Derivation>> = std::sync::Mutex::new(Vec::new());
+
 /// `effective` judged at `phase`: the phase projection of its document schema
 /// (`projected_document`, when it has one) merged over it, made passive.
 ///
@@ -1652,15 +2104,6 @@ fn phase_json_schema(
     projected_document: Option<Value>,
     phase: SchemaPhase,
 ) -> Result<Arc<Value>, SchemaError> {
-    struct Derivation {
-        effective: Arc<Value>,
-        projected_document: Option<Value>,
-        phase: SchemaPhase,
-        derived: Arc<Value>,
-    }
-    const RECENT_DERIVATIONS: usize = 8;
-    static DERIVATIONS: std::sync::Mutex<Vec<Derivation>> = std::sync::Mutex::new(Vec::new());
-
     let same = |derivation: &Derivation| {
         Arc::ptr_eq(&derivation.effective, effective)
             && derivation.phase == phase
@@ -1702,6 +2145,16 @@ fn phase_json_schema(
     Ok(derived)
 }
 
+struct Merge {
+    baseline: Option<Arc<Value>>,
+    layers: Vec<Arc<Value>>,
+    doc: Option<Value>,
+    merged: Arc<Value>,
+}
+const RECENT_MERGES: usize = 8;
+/// [`merged_trigger_schema`]'s memo; module-level so [`reset_process_caches_for_bench`] can clear it.
+static MERGES: std::sync::Mutex<Vec<Merge>> = std::sync::Mutex::new(Vec::new());
+
 /// The merge of `baseline`, the trigger `layers` (in order), and the document
 /// schema `doc`, highest precedence last.
 ///
@@ -1711,21 +2164,14 @@ fn phase_json_schema(
 /// verdict. An entry holds its inputs alive and is matched by `Arc` identity
 /// for the baseline and payloads and by value for the (small) document
 /// schema, so a hit is always the merge of equal inputs. The shared result
-/// also keeps the validator cache's pointer-keyed content hash warm.
+/// also keeps the validator cache's pointer-keyed content hash warm, which is
+/// why a document schema with no trigger layer (alone or over the baseline)
+/// is memoized here too: each request resolves it to a new value.
 fn merged_trigger_schema(
     baseline: Option<&Arc<Value>>,
     layers: &[TriggerLayer],
     doc: Option<Value>,
 ) -> Result<Arc<Value>, SchemaError> {
-    struct Merge {
-        baseline: Option<Arc<Value>>,
-        layers: Vec<Arc<Value>>,
-        doc: Option<Value>,
-        merged: Arc<Value>,
-    }
-    const RECENT_MERGES: usize = 8;
-    static MERGES: std::sync::Mutex<Vec<Merge>> = std::sync::Mutex::new(Vec::new());
-
     let same = |merge: &Merge| {
         merge.baseline.as_ref().map(Arc::as_ptr) == baseline.map(Arc::as_ptr)
             && merge.layers.len() == layers.len()
@@ -1742,18 +2188,26 @@ fn merged_trigger_schema(
         }
     }
 
-    let mut higher = layers
-        .iter()
-        .map(|layer| layer.json_schema.as_ref().clone())
-        .chain(doc.clone());
-    let mut acc = match baseline {
-        Some(base) => resolve::merge_baseline(base, higher.next().expect("a trigger layer"))?,
-        None => higher.next().expect("a trigger layer"),
+    // The lowest layer is borrowed as the first merge base; each higher one
+    // is cloned because a merge consumes it.
+    let (lowest, rest): (Option<&Value>, &[TriggerLayer]) = match (baseline, layers.split_first()) {
+        (Some(base), _) => (Some(base), layers),
+        (None, Some((first, rest))) => (Some(&first.json_schema), rest),
+        (None, None) => (None, layers),
     };
-    for layer in higher {
-        acc = resolve::merge_baseline(&acc, layer)?;
-    }
-    let merged = Arc::new(acc);
+    let mut higher = rest.iter().map(|layer| layer.json_schema.as_ref().clone()).chain(doc.clone());
+    let merged = match (lowest, higher.next()) {
+        (Some(lowest), Some(next)) => {
+            let mut acc = resolve::merge_baseline(lowest, next)?;
+            for layer in higher {
+                acc = resolve::merge_baseline(&acc, layer)?;
+            }
+            Arc::new(acc)
+        }
+        (None, Some(doc)) => Arc::new(doc),
+        (Some(lowest), None) => Arc::new(lowest.clone()),
+        (None, None) => unreachable!("the caller merges at least one schema"),
+    };
 
     let mut merges = MERGES.lock().expect("trigger merge memo poisoned");
     if merges.len() == RECENT_MERGES {
@@ -1796,6 +2250,11 @@ impl CompiledValidators {
     }
 }
 
+type Wrapped = (Arc<Value>, Arc<[Arc<Value>]>);
+const RECENT_SCHEMAS: usize = 8;
+/// [`wrapped_root_arms`]'s memo; module-level so [`reset_process_caches_for_bench`] can clear it.
+static WRAPPED: std::sync::Mutex<Vec<Wrapped>> = std::sync::Mutex::new(Vec::new());
+
 /// Each arm of `schema`'s root union, wrapped as a root schema, or `None` for
 /// a schema that is not a root union.
 ///
@@ -1804,10 +2263,6 @@ impl CompiledValidators {
 /// a large trigger payload has megabyte-sized arms, and each verdict would
 /// otherwise copy and rehash them for the validator cache.
 fn wrapped_root_arms(schema: &Arc<Value>) -> Option<Arc<[Arc<Value>]>> {
-    type Wrapped = (Arc<Value>, Arc<[Arc<Value>]>);
-    const RECENT_SCHEMAS: usize = 8;
-    static WRAPPED: std::sync::Mutex<Vec<Wrapped>> = std::sync::Mutex::new(Vec::new());
-
     let arms = schema.get("anyOf").and_then(Value::as_array)?;
     let mut wrapped = WRAPPED.lock().expect("root arm memo poisoned");
     if let Some((_, hit)) = wrapped.iter().find(|(held, _)| Arc::ptr_eq(held, schema)) {
@@ -1815,7 +2270,7 @@ fn wrapped_root_arms(schema: &Arc<Value>) -> Option<Arc<[Arc<Value>]>> {
     }
     let arms: Arc<[Arc<Value>]> = arms
         .iter()
-        .map(|arm| Arc::new(validate::wrap_arm_as_root_schema(arm)))
+        .map(|arm| Arc::new(validate::wrap_arm_as_root_schema(arm, schema)))
         .collect();
     if wrapped.len() == RECENT_SCHEMAS {
         wrapped.remove(0);
@@ -1825,14 +2280,15 @@ fn wrapped_root_arms(schema: &Arc<Value>) -> Option<Arc<[Arc<Value>]>> {
 }
 
 /// The top-level frontmatter key a problem is attributable to, mirroring the
-/// compose-time deferral rule: a missing-required failure is keyed by the
-/// missing property (its path points at the parent), everything else by the
-/// first pointer segment.
+/// compose-time deferral rule: the first pointer segment, or the missing
+/// property for a missing-required failure on the root itself (its path
+/// points at the parent, so a nested one belongs to the key that holds it).
 fn attributable_top_level_key(problem: &ValidationProblem) -> Option<String> {
-    if problem.code == ValidationProblemCode::MissingRequired {
-        return problem.property.clone();
+    match problem.instance_path.first() {
+        Some(key) => Some(key.to_string()),
+        None if problem.code == ValidationProblemCode::MissingRequired => problem.property.clone(),
+        None => None,
     }
-    problem.instance_path.first().map(str::to_string)
 }
 
 /// Scans a frontmatter instance for top-level values a later compose stage
@@ -1880,6 +2336,82 @@ fn pending_reason(value: &Value) -> Option<PendingValueReason> {
     } else {
         None
     }
+}
+
+/// The authored value a problem's JSON Pointer names, or its nearest
+/// existing ancestor when the pointer names a missing member, with that
+/// node's own pointer. `None` for the root pointer or an absent top-level
+/// key.
+pub fn authored_node_at<'a>(frontmatter: &'a Value, pointer: &str) -> Option<(String, &'a Value)> {
+    let mut segments = pointer
+        .strip_prefix('/')?
+        .split('/')
+        .map(|segment| segment.replace("~1", "/").replace("~0", "~"));
+    let key = segments.next().filter(|key| !key.is_empty())?;
+    let mut node = frontmatter.get(&key)?;
+    let encode = |segment: &str| segment.replace('~', "~0").replace('/', "~1");
+    let mut node_pointer = format!("/{}", encode(&key));
+    for segment in segments {
+        let child = match node {
+            Value::Object(map) => map.get(&segment),
+            Value::Array(items) => segment.parse::<usize>().ok().and_then(|index| items.get(index)),
+            _ => None,
+        };
+        match child {
+            Some(child) => {
+                node = child;
+                node_pointer.push('/');
+                node_pointer.push_str(&encode(&segment));
+            }
+            None => break,
+        }
+    }
+    Some((node_pointer, node))
+}
+
+/// Whether rendering a template could settle `problem`, so a caller that
+/// renders later may set it aside: `node` (at `node_pointer`, see
+/// [`authored_node_at`]) is a template itself, or a collection holding one,
+/// and that template is not one the schema already accepted (`deferred`, from
+/// [`ValidationReport::deferred`]). `holds` is the caller's template test.
+///
+/// Rendering changes values, never keys: an unknown or missing key on a
+/// collection is never set aside, and a problem on a literal sibling of a
+/// template never reaches a node that holds it.
+pub fn awaits_rendering(
+    problem: &ValidationProblem,
+    node: &Value,
+    node_pointer: &str,
+    deferred: &[String],
+    holds: &dyn Fn(&str) -> bool,
+) -> bool {
+    fn unaccepted(value: &Value, pointer: &mut String, deferred: &[String], holds: &dyn Fn(&str) -> bool) -> bool {
+        match value {
+            Value::String(text) => holds(text) && !deferred.iter().any(|accepted| accepted == pointer),
+            Value::Array(items) => items.iter().enumerate().any(|(index, item)| {
+                let len = pointer.len();
+                pointer.push_str(&format!("/{index}"));
+                let found = unaccepted(item, pointer, deferred, holds);
+                pointer.truncate(len);
+                found
+            }),
+            Value::Object(map) => map.iter().any(|(key, item)| {
+                let len = pointer.len();
+                pointer.push('/');
+                pointer.push_str(&key.replace('~', "~0").replace('/', "~1"));
+                let found = unaccepted(item, pointer, deferred, holds);
+                pointer.truncate(len);
+                found
+            }),
+            _ => false,
+        }
+    }
+    if !node.is_string()
+        && matches!(problem.code, ValidationProblemCode::UnknownKey | ValidationProblemCode::MissingRequired)
+    {
+        return false;
+    }
+    unaccepted(node, &mut node_pointer.to_string(), deferred, holds)
 }
 
 fn value_contains_marker(value: &Value, marker: &str) -> bool {
@@ -1995,6 +2527,7 @@ pub(crate) fn positions_for(source: &Markdown) -> PositionMap {
     // The raw YAML's first line is the file's second: the opening `---` is
     // line 1.
     const RAW_SOURCE_BASE_LINE: u32 = 2;
+    crate::note_work!(PositionMapBuild);
     let frontmatter = source.frontmatter();
     // Loaded text is kept even when frontmatter parsing failed, so only a
     // parsed frontmatter's own source may be projected.
@@ -2226,8 +2759,8 @@ mod claudine_compat_tests {
     }
 
     #[test]
-    fn ambiguous_string_still_reports_type_problem() {
-        let md = md_with_schema("$schema:\n  flag: boolean(required)\nflag: \"yes\"\n");
+    fn non_boolean_word_still_reports_type_problem() {
+        let md = md_with_schema("$schema:\n  flag: boolean(required)\nflag: \"maybe\"\n");
         let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()));
         let report = api.validate(&md).unwrap();
         assert!(!report.valid);
@@ -2988,6 +3521,19 @@ mod claudine_compat_tests {
     }
 
     #[test]
+    fn validate_with_options_judges_a_malformed_template_as_written() {
+        let effective = effective_number_field();
+        let instance = serde_json::json!({ "n": "{{ 1 + }}" });
+        let report = effective.validate_with_options(
+            &instance,
+            &PositionMap::new(),
+            &ValidationOptions::default(),
+        );
+        assert!(!report.valid, "a malformed template is never deferred");
+        assert!(report.problems.iter().any(|p| p.path == "/n"), "{:?}", report.problems);
+    }
+
+    #[test]
     fn validate_with_options_judges_shell_text_compose_never_expands() {
         let effective = effective_number_field();
         for value in [serde_json::json!(["$(echo 1)"]), serde_json::json!("1 $(echo 1)")] {
@@ -3279,7 +3825,7 @@ mod phase4_trigger_assembly {
 
     /// A Claudine-shaped trigger: activates on `prompt: string(required)`,
     /// layers a payload declaring `model: string(required)`.
-    const CLAUDINE_TRIGGER: &str = "kind: trigger-schema\n\
+    const CLAUDINE_TRIGGER: &str = "kind: schema-trigger\n\
         match:\n  prompt: string(required)\n\
         $schema: claudine.yaml\n";
     const CLAUDINE_PAYLOAD: &str = "$schema:\n  model: 'string(required)'\n";
@@ -3460,7 +4006,7 @@ mod phase4_trigger_assembly {
         // Far root (shadowed): matches on `title` — should NEVER activate.
         write(
             &root.join("schemas/claudine.trigger.yaml"),
-            "kind: trigger-schema\nmatch:\n  title: string(required)\n$schema: other.yaml\n",
+            "kind: schema-trigger\nmatch:\n  title: string(required)\n$schema: other.yaml\n",
         );
         write(
             &root.join("schemas/other.yaml"),
@@ -3496,6 +4042,26 @@ mod phase4_trigger_assembly {
 
     // ── Non-mergeable payload rejection ─────────────────────────────────
 
+    /// The one finding of discovery for `doc_path`, whose trigger file is
+    /// `name`; discovery itself succeeds.
+    fn only_finding(root: &Path, doc_path: &Path, name: &str) -> (DarkmatterSchemas, triggers::InvalidTriggerFinding) {
+        let api = DarkmatterSchemas::new(doc_context(root, doc_path))
+            .with_trigger_discovery()
+            .expect("an invalid trigger never fails discovery");
+        let findings: Vec<_> = api.discovery_findings().iter().filter(|finding| {
+            finding.source().file_name() == Some(name)
+        }).cloned().collect();
+        let [finding] = findings.as_slice() else {
+            panic!("one finding for {name} expected: {:?}", api.discovery_findings());
+        };
+        assert!(
+            api.trigger_registry().unwrap().triggers.iter().all(|trigger| trigger.source.file_name() != Some(name)),
+            "{name} must not be installed"
+        );
+        let finding = finding.clone();
+        (api, finding)
+    }
+
     #[test]
     fn non_mergeable_root_union_payload_rejected() {
         let repo = repo_fixture();
@@ -3503,7 +4069,7 @@ mod phase4_trigger_assembly {
         fs::create_dir_all(root.join("schemas")).unwrap();
         write(
             &root.join("schemas/bad.trigger.yaml"),
-            "kind: trigger-schema\n\
+            "kind: schema-trigger\n\
              match:\n  prompt: string(required)\n\
              $schema:\n  - a: string(required)\n  - b: string(required)\n",
         );
@@ -3511,14 +4077,10 @@ mod phase4_trigger_assembly {
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\nprompt: hello\n---\nbody\n");
 
-        let err = DarkmatterSchemas::new(doc_context(root, &doc_path))
-            .with_trigger_discovery()
-            .err()
-            .expect("non-mergeable payload must fail at scan time");
+        let (_, finding) = only_finding(root, &doc_path, "bad.trigger.yaml");
         assert!(
-            matches!(err, SchemaError::TriggerLoad { ref source, .. }
-                if matches!(**source, SchemaError::TriggerPayloadNotMergeable { .. })),
-            "root union payload must be rejected at scan time: {err:?}"
+            matches!(finding.cause(), SchemaError::TriggerPayloadNotMergeable { .. }),
+            "root union payload must be rejected at scan time: {finding:?}"
         );
     }
 
@@ -3562,7 +4124,7 @@ mod phase4_trigger_assembly {
         fs::create_dir_all(root.join("schemas")).unwrap();
         write(
             &root.join("schemas/self.trigger.yaml"),
-            "kind: trigger-schema\n\
+            "kind: schema-trigger\n\
              match:\n  prompt: string(required)\n\
              $schema: self.trigger.yaml\n",
         );
@@ -3570,14 +4132,10 @@ mod phase4_trigger_assembly {
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\nprompt: hello\n---\nbody\n");
 
-        let err = DarkmatterSchemas::new(doc_context(root, &doc_path))
-            .with_trigger_discovery()
-            .err()
-            .expect("self-referencing payload must fail at scan time");
+        let (_, finding) = only_finding(root, &doc_path, "self.trigger.yaml");
         assert!(
-            matches!(err, SchemaError::TriggerLoad { ref source, .. }
-                if matches!(**source, SchemaError::TriggerPayloadCycle { .. })),
-            "self-referencing payload must fail at scan time: {err:?}"
+            matches!(finding.cause(), SchemaError::TriggerPayloadCycle { .. }),
+            "self-referencing payload must be skipped at scan time: {finding:?}"
         );
     }
 
@@ -3589,7 +4147,7 @@ mod phase4_trigger_assembly {
         // a.trigger.yaml's payload references b.trigger.yaml (a trigger file).
         write(
             &root.join("schemas/a.trigger.yaml"),
-            "kind: trigger-schema\n\
+            "kind: schema-trigger\n\
              match:\n  prompt: string(required)\n\
              $schema: b.trigger.yaml\n",
         );
@@ -3602,14 +4160,35 @@ mod phase4_trigger_assembly {
         let doc_path = root.join("doc.md");
         write(&doc_path, "---\nprompt: hello\n---\nbody\n");
 
-        let err = DarkmatterSchemas::new(doc_context(root, &doc_path))
-            .with_trigger_discovery()
-            .err()
-            .expect("payload referencing a trigger must fail at scan time");
+        let (api, finding) = only_finding(root, &doc_path, "a.trigger.yaml");
         assert!(
-            matches!(err, SchemaError::TriggerLoad { ref source, .. }
-                if matches!(**source, SchemaError::TriggerPayloadCycle { .. })),
-            "payload referencing another trigger must fail at scan time: {err:?}"
+            matches!(finding.cause(), SchemaError::TriggerPayloadCycle { .. }),
+            "payload referencing another trigger must be skipped at scan time: {finding:?}"
+        );
+        // The referenced trigger is valid and still applies.
+        let effective = api.effective_for(&md_from_file(&doc_path)).unwrap().unwrap();
+        assert!(effective.json_schema["properties"].as_object().unwrap().contains_key("model"));
+    }
+
+    /// Discovery skipping a trigger does not make it a schema: a document
+    /// `$schema` naming the same ignored envelope still fails.
+    #[test]
+    fn document_schema_referencing_an_ignored_trigger_file_still_fails() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        fs::create_dir_all(root.join("schemas")).unwrap();
+        write(
+            &root.join("schemas/memory.trigger.yaml"),
+            "kind: schema-trigger\nname: Memory Trigger\ndescription: TODO\nmatch:\n",
+        );
+        let doc_path = root.join("doc.md");
+        write(&doc_path, "---\n$schema: ./schemas/memory.trigger.yaml\n---\nbody\n");
+
+        let (api, _) = only_finding(root, &doc_path, "memory.trigger.yaml");
+        let error = api.validate(&md_from_file(&doc_path)).expect_err("an authored trigger reference fails");
+        assert!(
+            matches!(error, SchemaError::TriggerSchemaReferenced { .. }),
+            "{error:?}"
         );
     }
 
@@ -3976,7 +4555,7 @@ mod phase4_trigger_assembly {
         let repo = repo_fixture();
         let root = repo.path();
         let trigger = |payload: &str, key: &str| {
-            format!("kind: trigger-schema\nmatch:\n  {key}: string(required)\n$schema: {payload}\n")
+            format!("kind: schema-trigger\nmatch:\n  {key}: string(required)\n$schema: {payload}\n")
         };
         write(&root.join("schemas/a.trigger.yaml"), &trigger("a.yaml", "prompt"));
         write(&root.join("schemas/b.trigger.yaml"), &trigger("b.yaml", "prompt"));

@@ -1,3 +1,7 @@
+---
+kind: canonical-documentation
+---
+
 # Getting Started with Claudine
 ![claudine](../../../assets/claudine-512.png)
 > Claude Code's ex-girlfriend who knows Claude's inner secrets, but is now dating other Agents.
@@ -647,68 +651,54 @@ Every Markdown document used with Claudine is bequeathed the following lifecycle
     - soon you'll be running around the office shouting "failure is not an option!"
         - of course it **is** still an option but at least you've minimized it and you're co-workers are all now afraid they don't have the same secret sauce you do
 
-In reality, there are two more lifecycle events **loop** and **next** that are available but this is an introduction and as these are more advanced topics we decided to simply tease you with _the unknown_ rather then unveil the mystery. Anyway thanks for being so understanding, here's a picture:
+Looping repeats work, while lifecycle directives decide what happens next.
+The [lifecycle guide](../topics/flow-control/lifecycle.md) describes the full
+event set and the loop gate.
 
 ![lifecycle](./lifecycle.png)
 
-### The Extra Lifecycle Events
-
-Ok we couldn't wait (adult in stature, child at heart). Let's talk about those last two lifecycle events which we so recklessly dangled in front of you in the last section. 
-
-Before we start with these outliers, however, let's set the stage by saying:
-
-- these are lifecycle hooks that not every Markdown document will have (they all can "opt into" them though) 
-- and these lifecycle hooks have extra features beyond just being normal lifecycle events
-
-The two hooks are:
-
-1. Loop - _provides a simple syntax for looping through executions of a Markdown prompt until an exit condition is met_
-2. Next - _provides a "hand off" to another Markdown document which can be done (or suggested) after the successful completion of a Markdown document_
-
-Both of these lifecycle-hooks are _introductory_ ways for you start orchestrating at the meta-harness level. In a later section we'll introduce **Sequences** and other constructs which give a more complete set of primitives for flow control but for now let's enjoy what we have.
+### Repeating and handing off work
 
 #### Looping
 
-You opt-in a markdown prompt to _looping_ by setting the `loop` frontmatter property. This property combines all the optional properties that a lifecycle event has with either a `until` or `while` expression:
+Put `loop:` on a prompt document, a sequence document, or a group to repeat
+that unit of work. Claudine runs a pass, completes its lifecycle events and
+loop gate, then checks `until:` or `while:`. Actions change state only when
+another pass will run:
 
 ```yaml
-phase: 1,
-total_phases: 6,
+phase: 1
+total_phases: 6
 loop:
-    until: "phase > total_phases"
+    until: "phase >= total_phases"
+    action: "increment(phase)"
+    max: 10
 ```
 
-In a real document this `until` expression probably counts on the `phase` frontmatter being incremented on each loop unless this is being provided for somehow. Without the increment, the `until` expression will never be met and looping could last forever. Forever is a long time.
+The body sees phases 1 through 6. Reaching phase 6 ends normally, so no action
+increments it again. If the condition still requests another pass at the cap,
+the loop fails rather than reporting success. The default cap is 100.
 
-Fortunately this is easily solved with the `action` primitive:
+A task's `when:` decides whether it runs at all. Within a loop, `break`
+ends the nearest loop and preserves its completed results. See
+[Looping](../topics/flow-control/looping.md) for iteration order, nested loops,
+results, and retry behavior.
+
+#### Calling or handing off to another prompt
+
+Use `proxy` to hand control to another document, or `prep` to run a helper
+and return to the next action. Both are lifecycle actions:
 
 ```yaml
-phase: 1,
-total_phases: 6,
-loop:
-    until: "phase > total_phases"
-    action: "phase++"
+success:
+    - prep: "@prompts/update-index.md"
+    - message: "The index is ready"
 ```
 
-> Note: here we only had one action but this can be as many as you want
-
-Disaster averted. 
-
-Can I be honest with you? When I said it might go on forever without an incrementor? Well I was being dramatic. In reality it would have hit the default looping limit of 99 and stopped then. Why did I embellish? To keep you sharp! Would you have finished this section if I hadn't? No. No you wouldn't have. You're welcome. Go get a drink (coffee not alcohol) we're about to hit the next topic.
-
-#### Next References
-
-The `next` property will opt-in a Markdown document to the **next** lifecycle hook. This hook is intended to provide a simple primitive that allows a document to either _suggest_ or _push_ execution to another Markdown document on successful completion.
-
-A `next` configuration can use any of the optional features that every lifecycle has but must use define either the `suggest` or `push` keys. Here's an example with Suggest:
-
-```yaml
-next:
-    suggest:
-        compose: "the-next-thing.md"
-```
-
-The suggestion will bring up an interactive dialog asking user if they'd like to continue onto the `the-next-thing.md` prompt. If **push** had been used instead then the next prompt would have been started immediately without any user interaction.
+A `prep` helper returns its disk changes, not its runtime variables or outputs.
+For a fixed list of steps, use a sequence. See
+[Flow Control](../topics/flow-control/flow-control.md) for `skip`, `retry`,
+`resume`, `proxy`, `break`, and `prep`.
 
 ### Lifecycle Actions
 

@@ -5,13 +5,21 @@ use crate::file_reference::{ParsedReference, PathTemplate, ReferenceKind, Templa
 
 /// Parse a raw reference string into a `ParsedReference`.
 ///
-/// Parsing is purely syntactic -- no filesystem access occurs.
+/// Parsing is purely syntactic -- no filesystem, environment, or network
+/// access occurs -- and it is the passive structural validator: a string it
+/// accepts is a well-formed reference on every host, and one it rejects can
+/// never resolve.
 pub(crate) fn parse(raw: &str) -> Result<ParsedReference, FileReferenceError> {
     trace!(raw, "parsing file reference");
 
     if raw.is_empty() {
         return Err(FileReferenceError::InvalidSyntax(
             "empty reference string".to_string(),
+        ));
+    }
+    if raw.contains('\0') {
+        return Err(FileReferenceError::InvalidSyntax(
+            "a file reference cannot contain a NUL character".to_string(),
         ));
     }
 
@@ -23,6 +31,16 @@ pub(crate) fn parse(raw: &str) -> Result<ParsedReference, FileReferenceError> {
     }
     let (kind, path_str) = detect_kind(remainder)?;
     let template = parse_template(path_str)?;
+    match kind {
+        DetectedKind::Url if recursive => {
+            return Err(FileReferenceError::InvalidSyntax(format!(
+                "the `%` recursive modifier does not apply to a URL: `{raw}`"
+            )));
+        }
+        DetectedKind::Url => check_url_authority(path_str)?,
+        DetectedKind::Vault => check_vault_payload(raw, path_str)?,
+        _ => {}
+    }
 
     let parsed = ParsedReference {
         authored: raw.to_string(),
@@ -160,6 +178,48 @@ fn detect_defensive_sigil<'a>(
         )));
     }
     Ok((kind, payload))
+}
+
+/// A URL needs a host. A literal authority must parse as one; an authority
+/// that holds a `{{NAME}}` template is accepted without reading the variable.
+fn check_url_authority(url: &str) -> Result<(), FileReferenceError> {
+    let after_scheme = url.find("://").map_or("", |at| &url[at + 3..]);
+    let authority = after_scheme
+        .find(['/', '?', '#'])
+        .map_or(after_scheme, |end| &after_scheme[..end]);
+    if authority.is_empty() {
+        return Err(FileReferenceError::InvalidSyntax(format!(
+            "a URL reference needs a host: `{url}`"
+        )));
+    }
+    if authority.contains("{{") {
+        return Ok(());
+    }
+    match ::url::Url::parse(url) {
+        Ok(parsed) if parsed.host_str().is_some_and(|host| !host.is_empty()) => Ok(()),
+        Ok(_) => Err(FileReferenceError::InvalidSyntax(format!(
+            "a URL reference needs a host: `{url}`"
+        ))),
+        Err(error) => Err(FileReferenceError::InvalidSyntax(format!(
+            "malformed URL reference `{url}`: {error}"
+        ))),
+    }
+}
+
+/// A vault payload names a path inside the vault, so it is non-empty and
+/// relative: a rooted payload would replace the vault root.
+fn check_vault_payload(raw: &str, payload: &str) -> Result<(), FileReferenceError> {
+    if payload.is_empty() {
+        return Err(FileReferenceError::InvalidSyntax(format!(
+            "a vault reference requires a path: `{raw}`"
+        )));
+    }
+    if is_rooted_magic_payload(payload) {
+        return Err(FileReferenceError::InvalidSyntax(format!(
+            "a vault reference path must be relative: `{raw}`"
+        )));
+    }
+    Ok(())
 }
 
 fn is_windows_device_prefix(s: &str) -> bool {

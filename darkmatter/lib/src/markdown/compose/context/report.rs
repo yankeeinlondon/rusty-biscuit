@@ -105,6 +105,12 @@ pub struct ComposeReport {
     /// reconciles its own before its report is merged into a parent, so a
     /// merged child report carries none.
     pub(crate) unknown_root_candidates: UnknownRootCandidates,
+
+    /// How many leading [`Self::warnings`] this document's passive call
+    /// check reported. Read only by pre-flight discovery, whose lenient
+    /// pass reports other warnings the compose pass would not. Never merged
+    /// from a child report.
+    pub(crate) passive_warnings: usize,
 }
 
 /// First-read undeclared-property candidates in read order, one per root.
@@ -119,6 +125,11 @@ pub(crate) struct UnknownRootCandidates {
 impl UnknownRootCandidates {
     pub(crate) fn len(&self) -> usize {
         self.list.len()
+    }
+
+    /// Every candidate, in first-read order.
+    pub(crate) fn as_slice(&self) -> &[UnknownRootCandidate] {
+        &self.list
     }
 
     /// Removes every candidate, in first-read order.
@@ -439,6 +450,20 @@ impl ComposeReport {
         }
     }
 
+    /// Adds the skipped-trigger warnings (`dm.schema.invalid_trigger`) in
+    /// `warnings` whose trigger this report does not already carry, in order;
+    /// any other warning is ignored.
+    pub(crate) fn add_trigger_warnings(&mut self, warnings: impl IntoIterator<Item = ComposeWarning>) {
+        for warning in warnings {
+            let Some(trigger) = warning.invalid_trigger_source() else {
+                continue;
+            };
+            if !self.warnings.iter().any(|kept| kept.invalid_trigger_source().as_ref() == Some(&trigger)) {
+                self.add_warning(warning);
+            }
+        }
+    }
+
     /// Adds a schema advisory unless this report already carries the same
     /// semantic code and referenced path.
     pub(crate) fn add_schema_advisory(
@@ -578,6 +603,21 @@ pub struct ComposeWarning {
     /// Which issue this warning reports, when its family declares one.
     /// Set only by a family's constructor; see [`WarningIdentity`].
     pub(crate) identity: Option<WarningIdentity>,
+
+    /// The shared diagnostic this warning reports, for a family whose
+    /// findings DMLS reports too (the call diagnostics and skipped schema
+    /// triggers): the same code, severity, message, authored position, and
+    /// types the editor shows. [`Self::message`] is that finding phrased
+    /// for a terminal row.
+    pub diagnostic: Option<Box<crate::markdown::compose::expression::Diagnostic>>,
+}
+
+/// A failed composition with the warnings it had reported before the
+/// failure ([`Markdown::compose_with_warnings`](crate::markdown::Markdown::compose_with_warnings)).
+#[derive(Debug)]
+pub struct ComposeFailure {
+    pub error: crate::markdown::types::MarkdownError,
+    pub warnings: Vec<ComposeWarning>,
 }
 
 /// The issue a coded warning reports, so each issue is reported once.
@@ -598,6 +638,15 @@ pub(crate) enum WarningSubject {
     /// keeps their key exactly `(source, code, path)`, and so they collapse
     /// across every document that references that schema.
     Path(PathBuf),
+    /// An embedded schema-bundle document, which names no host file and so
+    /// must never become a path, link, or watch. Invalid embedded triggers
+    /// collapse across every document that discovers them.
+    Embedded {
+        /// The bundle's name.
+        bundle: String,
+        /// The document's file name inside the bundle.
+        name: String,
+    },
     /// An unresolved identifier root, once per source document no matter how
     /// many times it is referenced there.
     Root {
@@ -631,7 +680,7 @@ pub(crate) enum ExpressionOrigin {
 impl WarningSubject {
     fn attribute_to(&mut self, source_document: &std::path::Path) {
         match self {
-            Self::Path(_) => {}
+            Self::Path(_) | Self::Embedded { .. } => {}
             Self::Root { document, .. } | Self::Expression { document, .. } => {
                 if document.is_none() {
                     *document = Some(source_document.to_path_buf());
@@ -670,6 +719,7 @@ impl ComposeWarning {
             consumer: None,
             resolution_failure: None,
             identity: None,
+            diagnostic: None,
         }
     }
 
@@ -700,6 +750,80 @@ impl ComposeWarning {
             path: Some(path),
             consumer: Some(consumer.into()),
             resolution_failure: None,
+            diagnostic: None,
+        }
+    }
+
+    /// Projects a schema trigger discovery skipped into the compose warning
+    /// model: a coded schema warning about the trigger, never about the
+    /// document `consumer` that discovered it.
+    ///
+    /// A disk trigger's identity and `path` are its normalized path; an
+    /// embedded trigger has no `path`. Either way the warning collapses
+    /// across every document and pass that discovers the same trigger. The
+    /// shared record is placed in the trigger file at the finding's
+    /// [`position`](crate::markdown::schemas::InvalidTriggerFinding::position)
+    /// and is source-free without one or for an embedded trigger.
+    pub(crate) fn from_invalid_trigger(
+        finding: &crate::markdown::schemas::InvalidTriggerFinding,
+        consumer: impl Into<PathBuf>,
+    ) -> Self {
+        use crate::markdown::schemas::TriggerSource;
+        let (path, subject) = match finding.identity() {
+            TriggerSource::File(path) => (Some(path.clone()), WarningSubject::Path(path.clone())),
+            TriggerSource::Embedded { bundle, name } => (
+                None,
+                WarningSubject::Embedded {
+                    bundle: bundle.clone(),
+                    name: name.clone(),
+                },
+            ),
+        };
+        let message = finding.message();
+        // The record's source is the trigger file at the finding's position.
+        // `line_number` stays `None`: it counts lines of the consuming
+        // document, which the trigger's line does not.
+        let diagnostic = crate::markdown::compose::expression::Diagnostic {
+            code: finding.code().to_string(),
+            severity: crate::markdown::compose::expression::Severity::Warning,
+            message: message.clone(),
+            source: path.as_ref().zip(finding.position()).map(|(file, (line, column))| {
+                crate::markdown::compose::expression::DiagnosticSource { file: Some(file.clone()), line, column }
+            }),
+            expected_type: None,
+            actual_type: None,
+        };
+        Self {
+            stage: "schema_validation".to_string(),
+            message,
+            line_number: None,
+            source: Some(finding.source_family().to_string()),
+            code: Some(finding.code().to_string()),
+            identity: Some(WarningIdentity { subject }),
+            path,
+            consumer: Some(consumer.into()),
+            resolution_failure: None,
+            diagnostic: Some(Box::new(diagnostic)),
+        }
+    }
+
+    /// The trigger a [`Self::from_invalid_trigger`] warning reports: the
+    /// finding's [`identity`](crate::markdown::schemas::InvalidTriggerFinding::identity),
+    /// so a host that also reads discovery findings directly can recognize
+    /// the same trigger. `None` for every other warning.
+    #[must_use]
+    pub fn invalid_trigger_source(&self) -> Option<crate::markdown::schemas::TriggerSource> {
+        use crate::markdown::schemas::TriggerSource;
+        if self.code.as_deref() != Some(crate::markdown::schemas::SCHEMA_INVALID_TRIGGER_CODE) {
+            return None;
+        }
+        match &self.identity.as_ref()?.subject {
+            WarningSubject::Path(path) => Some(TriggerSource::File(path.clone())),
+            WarningSubject::Embedded { bundle, name } => Some(TriggerSource::Embedded {
+                bundle: bundle.clone(),
+                name: name.clone(),
+            }),
+            WarningSubject::Root { .. } | WarningSubject::Expression { .. } => None,
         }
     }
 
@@ -963,6 +1087,7 @@ mod tests {
                 identity: Some(WarningIdentity {
                     subject: WarningSubject::Path(PathBuf::from("schema.yaml")),
                 }),
+                diagnostic: None,
             }
         };
         let mut report = ComposeReport::new();

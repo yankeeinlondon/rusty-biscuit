@@ -270,7 +270,7 @@ fn template_input_failures_are_never_suppressed() {
     let recorder = Recorder::new("template_unsuppressed_directive");
     recorder.write("doc.md", "::shell --when-error fallback argv-recorder {{ v }}\n");
     recorder.whitelist(&template_rule("argv-recorder {{ v }}"));
-    let assert = recorder.compose(&["v=[1]", "--allow-shell-timeout"]).failure();
+    let assert = recorder.compose(&["v=[1]", "--allow", "shell-timeout"]).failure();
     assert!(mentions(&stderr_of(&assert), "is an array or object"), "{}", stderr_of(&assert));
     assert!(!String::from_utf8_lossy(&assert.get_output().stdout).contains("fallback"));
 
@@ -385,4 +385,135 @@ fn a_native_result_keeps_the_original_channel_after_a_later_redirect() {
     assert!(!stdout.contains("Errors: stderr-probe"), "{stdout}");
     assert!(!stdout.contains("stdout-probe"), "{stdout}");
     assert_eq!(recorder.runs(), vec![strings(&["a b"])]);
+}
+
+const QUOTED_EMPTY_DOC: &str = "---\nmsg: \"\"\n---\n::shell argv-recorder -m \"{{ msg }}\" -s '' tail\n";
+
+/// A quoted empty word, authored (`''`) or a quoted hole filled with an empty
+/// string (`"{{ msg }}"`), is one empty argument when the command runs as
+/// resolved bytes, and its exact key spells it `""`. A key without it names
+/// different bytes and approves nothing.
+#[test]
+fn an_exact_rule_keeps_a_quoted_empty_argument() {
+    let recorder = Recorder::new("exact_quoted_empty_argument");
+    recorder.write("doc.md", QUOTED_EMPTY_DOC);
+    recorder.whitelist("exact argv-recorder -m \"\" -s \"\" tail\n");
+
+    recorder.compose(&[]).success();
+
+    assert_eq!(recorder.runs(), vec![strings(&["-m", "", "-s", "", "tail"])]);
+}
+
+#[test]
+fn an_exact_rule_without_the_quoted_empty_argument_approves_nothing() {
+    let recorder = Recorder::new("exact_dropped_empty_argument");
+    recorder.write("doc.md", QUOTED_EMPTY_DOC);
+    recorder.whitelist("exact argv-recorder -m -s tail\n");
+
+    recorder.compose(&[]).failure();
+
+    assert!(recorder.runs().is_empty());
+}
+
+/// An unquoted placeholder that resolves to an empty string still contributes
+/// no word to the resolved bytes, as a shell would split it.
+#[test]
+fn an_unquoted_empty_value_contributes_no_resolved_word() {
+    let recorder = Recorder::new("exact_unquoted_empty_value");
+    recorder.write("doc.md", "---\nmsg: \"\"\n---\n::shell argv-recorder -m {{ msg }} tail\n");
+    recorder.whitelist("exact argv-recorder -m tail\n");
+
+    recorder.compose(&[]).success();
+
+    assert_eq!(recorder.runs(), vec![strings(&["-m", "tail"])]);
+}
+
+/// A user blacklist `exact` rule naming an empty argument blocks the template
+/// fill that produces it.
+#[test]
+fn an_exact_blacklist_rule_blocks_a_template_fill_with_an_empty_argument() {
+    let recorder = Recorder::new("template_blacklist_empty_argument");
+    let command = "argv-recorder -m {{ msg }}";
+    recorder.write("doc.md", &format!("---\nmsg: \"\"\n---\n::shell {command}\n"));
+    recorder.whitelist(&template_rule(command));
+    recorder.blacklist("exact argv-recorder -m \"\"\n");
+
+    let assert = recorder.compose(&[]).failure();
+
+    assert!(mentions(&stderr_of(&assert), "user blacklist"), "{}", stderr_of(&assert));
+    assert!(recorder.runs().is_empty());
+}
+
+/// A frontmatter `$( … )` command shares the resolved-byte path: its quoted
+/// empty word is an empty argument under the key that spells it `""`.
+#[test]
+fn a_frontmatter_command_keeps_a_quoted_empty_argument() {
+    let recorder = Recorder::new("frontmatter_quoted_empty_argument");
+    recorder.write("doc.md", "---\nmsg: \"\"\nout: '$(argv-recorder -m \"{{ msg }}\")'\n---\nOut: {{ out }}\n");
+    recorder.whitelist("exact argv-recorder -m \"\"\n");
+
+    recorder.compose(&[]).success();
+
+    assert_eq!(recorder.runs(), vec![strings(&["-m", ""])]);
+}
+
+/// The rule lines the non-interactive approval hint suggests, as written in
+/// stderr after its "add one of these" line.
+fn suggested_rules(stderr: &str) -> Vec<String> {
+    let plain = biscuit_terminal::utils::escape_codes::strip_escape_codes(stderr);
+    plain
+        .lines()
+        .skip_while(|line| !line.contains("add one of these"))
+        .skip(1)
+        .map(|line| line.trim_start_matches(['┃', ' ']).trim_end().to_string())
+        .filter(|line| ["exact ", "template ", "prefix "].iter().any(|kind| line.starts_with(kind)))
+        .collect()
+}
+
+/// Each rule the non-interactive hint suggests approves the command when
+/// copied into the whitelist: the exact key of the resolved bytes (quoted
+/// empty argument included), the template shape, and the program prefix,
+/// with quotes, backslashes, and underscores printed as the rule spells them.
+/// A command that can run only as a template is offered no exact key.
+#[test]
+fn every_suggested_rule_approves_the_command() {
+    let cases = [
+        (
+            QUOTED_EMPTY_DOC,
+            vec![
+                r#"exact argv-recorder -m "" -s "" tail"#,
+                r#"template argv-recorder -m {{ string }} -s "" tail"#,
+                "prefix argv-recorder",
+            ],
+        ),
+        (
+            "---\nv: \"a;b\"\n---\n::shell argv-recorder {{ v }}\n",
+            vec!["template argv-recorder {{ string }}", "prefix argv-recorder"],
+        ),
+        (
+            "---\nv: x_y\n---\n::shell argv-recorder \"say \\\"hi\\\" a\\\\b\" {{ v }}\n",
+            vec![
+                r#"exact argv-recorder "say \"hi\" a\\b" x_y"#,
+                r#"template argv-recorder "say \"hi\" a\\b" {{ string }}"#,
+                "prefix argv-recorder",
+            ],
+        ),
+    ];
+    for (doc, expected) in cases {
+        let refused = Recorder::new("suggested_rules_refused");
+        refused.write("doc.md", doc);
+        let assert = refused.compose(&[]).failure();
+        let stderr = String::from_utf8_lossy(&assert.get_output().stderr).into_owned();
+        let rules = suggested_rules(&stderr);
+        assert_eq!(rules, expected, "{stderr}");
+        assert!(!rules.iter().any(|rule| rule.starts_with("exact") && rule.contains("{{")), "{rules:?}");
+
+        for rule in rules {
+            let approved = Recorder::new("suggested_rules_approved");
+            approved.write("doc.md", doc);
+            approved.whitelist(&format!("{rule}\n"));
+            approved.compose(&[]).success();
+            assert_eq!(approved.runs().len(), 1, "{rule}");
+        }
+    }
 }

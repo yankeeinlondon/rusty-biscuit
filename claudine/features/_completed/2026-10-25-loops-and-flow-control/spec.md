@@ -32,6 +32,17 @@ review_iterations: 1
 completed: true
 human_review: false
 pipeline_step: 15
+canonical_docs:
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/flow-control/flow-control.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/getting-started/index.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
 depends-on:
     - 2026-10-24-sequence-containers
 related:

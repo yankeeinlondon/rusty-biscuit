@@ -3,6 +3,7 @@ source: darkmatter/lib/tests/l1/schemas_convert_snapshots.rs
 expression: "convert_atom(\"string(required) -> The author's full name\")"
 ---
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": true,
   "properties": {
@@ -13,6 +14,5 @@ expression: "convert_atom(\"string(required) -> The author's full name\")"
   },
   "required": [
     "field"
-  ],
-  "$schema": "https://json-schema.org/draft/2020-12/schema"
+  ]
 }

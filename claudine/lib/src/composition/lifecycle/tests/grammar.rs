@@ -3,6 +3,8 @@
 //! authored paths through expansion (AC1–AC4, AC6, AC17; `with` placement for
 //! AC5).
 
+use crate::composition::LifecycleErrorInfoExt;
+use crate::composition::LifecycleCatchProtocolExt;
 use super::*;
 use actions::{LifecycleConditional, LifecycleNode};
 
@@ -802,6 +804,31 @@ fn the_stack_key_is_removed_grammar_in_every_stack() {
     assert_eq!(path, "loop.stack");
     let (path, ..) = removed(parse_err(json!({ "start": [{ "when": "fm.x", "then": { "stack": [] } }] })));
     assert_eq!(path, "start[0].then.stack");
+}
+
+#[test]
+fn removed_grammar_in_unselected_nested_bodies_keeps_its_authored_path() {
+    for (frontmatter, expected_path, expected_removed) in [
+        (
+            json!({ "start": [{ "when": "true", "then": [{ "info": "selected" }],
+                "else": [{ "when": "false", "then": [{ "info": "unused" }],
+                    "else": { "stack": [] } }] }] }),
+            "start[0].else[0].else.stack",
+            "stack",
+        ),
+        (
+            json!({ "loop": { "while": "true", "gate": [{ "when": "true",
+                "then": [{ "info": "selected" }],
+                "else": [{ "say": { "text": "unused", "route": "ops" } }] }] } }),
+            "loop.gate[0].else[0].say.route",
+            "say.route",
+        ),
+    ] {
+        let (path, key, replacement) = removed(parse_err(frontmatter));
+        assert_eq!(path, expected_path);
+        assert_eq!(key, expected_removed);
+        assert!(!replacement.is_empty());
+    }
 }
 
 #[test]

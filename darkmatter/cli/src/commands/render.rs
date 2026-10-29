@@ -19,11 +19,13 @@ use tracing::{debug, instrument};
 ///
 /// `features` is every `--feature` given, top-level and on `render`.
 #[instrument(skip_all, fields(command = "render"))]
+#[allow(clippy::too_many_arguments)]
 pub fn run_render(
     input: Option<&PathBuf>,
     output: OutputFormat,
     show: bool,
     indent: Option<usize>,
+    strict_style: bool,
     features: &[Feature],
     cli: &Cli,
     request: &MdRequest,
@@ -51,7 +53,7 @@ pub fn run_render(
         OutputFormat::Auto => {
             if stdout_is_tty {
                 let term = Terminal::new();
-                render_terminal_output(&md, input, cli, term, features)?;
+                render_terminal_output(&md, input, cli, term, strict_style, features)?;
                 if show {
                     open_output_artifact(&markdown_artifact(&md))?;
                 }
@@ -63,12 +65,11 @@ pub fn run_render(
             emit_or_show_artifact(markdown_artifact(&md), show)?;
         }
         OutputFormat::MarkdownPlus => {
-            let artifact = markdown_plus_artifact(&md, cli, input,
-            )?;
+            let artifact = markdown_plus_artifact(&md, cli, input, strict_style)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Html => {
-            let artifact = html_artifact(&md, cli, input, features)?;
+            let artifact = html_artifact(&md, cli, input, strict_style, features)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {

@@ -369,6 +369,17 @@ impl CliProcessFixture {
         wrap::seed_minimal_config(&self.home);
     }
 
+    /// Uses the shipped inline metadata contract without expanding unrelated
+    /// lifecycle types. Only data-only fixtures may opt in; pass the schema's
+    /// `include_str!` at the test site so CI retains that test's input edge.
+    /// Writes `schema` as the home `schemas/claudine.yaml`, shadowing the
+    /// embedded trigger, with the `document.yaml` library its metadata
+    /// imports beside it: a disk trigger imports only from disk.
+    pub fn seed_inline_metadata_schema(&self, schema: &str, document_library: &str) {
+        write(&self.home.join("schemas/claudine.yaml"), schema);
+        write(&self.home.join("schemas/document.yaml"), document_library);
+    }
+
     pub fn write_root_system_prompt(&self, content: &str) -> PathBuf {
         let path = self.cwd.join("system-prompt.md");
         write(&path, content);

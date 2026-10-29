@@ -148,6 +148,20 @@ The `HashVariant` enumeration provides the following options:
     - Removes all occurrences of the specified characters from the content before hashing
     - Useful for ignoring specific punctuation or symbols
 
+### Streaming with `XxHasher`
+
+`XxHasher` hashes content fed in pieces and gives the same digest as `xx_hash` over the whole. It implements `std::hash::Hasher` and `std::fmt::Write`, so `write!` can stream a formatted value without building its string.
+
+```rust
+use std::fmt::Write as _;
+use std::hash::Hasher as _;
+use biscuit_hash::{XxHasher, xx_hash};
+
+let mut hasher = XxHasher::new();
+write!(hasher, "{:?}", vec![1, 2, 3]).unwrap();
+assert_eq!(hasher.finish(), xx_hash("[1, 2, 3]"));
+```
+
 ### Using the `HashVariant` to Hash with xxHash
 
 The `xx_hash(content)` always just hashes exactly what you give it but if you want to pre-process the content with one or more of the variants provided above you will use the `xx_hash_variant(content, [v1,v2,v3])` which takes one or more variants as input.
