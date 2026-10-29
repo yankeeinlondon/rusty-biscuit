@@ -76,8 +76,11 @@ Focused review-time L1 executions on macOS:
 
 - `cd biscuit-speaks && just test elevenlabs`: 58 passed, including all five new publication tests.
 - `cd darkmatter && just test catalog::`: 174 passed, including lifecycle discovery and the global-catalog validation matrix.
+- Darkmatter `just test` with `BISCUIT_TEST_FILTER` selecting discovery, profile, combined diagnostics, named-import, and assertion-builder tests: 29 passed.
+- `cd claudine && just test-library user_blacklist`: 4 passed, exercising runtime dispatch, fresh rules, warnings, and unavailable-policy fallbacks.
+- Claudine `just test-library` with `BISCUIT_TEST_FILTER` selecting full approval and host-catalog tests: 56 passed, including committed artifact freshness and registry reconstruction.
 
-Remaining focused diagnostics, import, assertion, and policy executions are recorded after completion. No production source was modified during review.
+Every selected test passed in less than five seconds. Full suites and lints were not repeated; their implementation evidence is recorded above. Review frontmatter was parsed independently, and the review/spec diff passes `git diff --check`. No production source was modified during review.
 
 ## Input robustness
 
