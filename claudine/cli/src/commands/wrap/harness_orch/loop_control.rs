@@ -2234,9 +2234,9 @@ fn classify_attempt_phase(
     if materialized.frontmatter.get("loop").is_some()
         && let Some(values) = materialized.loop_values.as_mut()
     {
-        values.last_output = serde_json::Value::String(
+        values.last_output = std::sync::Arc::new(serde_json::Value::String(
             claudine::composition::trim_transport_newline(&outcome.final_response).to_string(),
-        );
+        ));
         values.last_exit_code = outcome.exit_code;
     }
     if outcome.termination == claudine::harness::ProcessTermination::Interrupted

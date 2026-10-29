@@ -23,10 +23,13 @@ impl TaskExecution<'_> {
         if self.interrupted() { return PrimaryOutcome::interrupted(String::new()); }
         let owned_runtime = Arc::new(RuntimeState::new());
         let runtime = self.runtime.unwrap_or(&owned_runtime);
-        let outer = runtime.snapshot();
-        let run_id = self.sequence_binding().get("run_id").and_then(Value::as_str)
+        // The enclosing scope moves out and back; its outputs are never copied.
+        let (outer_seq, outer_outputs) = runtime.replace_sequence_scope(None, Vec::new());
+        // The position `sequence_binding` reads: the runtime's, else the overlay's.
+        let run_id = outer_seq.as_ref().or_else(|| self.overlay.and_then(|overlay| overlay.get("seq")))
+            .and_then(|seq| seq.get("run_id")).and_then(Value::as_str)
             .unwrap_or(&sequence.plan.sequence_id).to_string();
-        runtime.replace_sequence_scope(Some(SequenceBinding::container(&run_id, Vec::new()).to_value()), Vec::new());
+        runtime.set_sequence_binding(SequenceBinding::container(&run_id, Vec::new()).to_value());
         let runtime_context = LifecycleRuntimeContext {
             settings: self.stack.settings, messaging: self.stack.messaging, term: self.stack.term,
             source_path: &sequence.origin_path, repo_root: self.stack.repo_root,
@@ -39,7 +42,7 @@ impl TaskExecution<'_> {
             Ok(mut frame) => self.run_sequence_attempts(sequence, runtime, &run_id, &mut runner, frame.as_mut()),
             Err(error) => PrimaryOutcome::failed(TaskDiagnostic::from_composition(TaskStage::Primary, &error)),
         };
-        runtime.replace_sequence_scope(outer.seq, outer.outputs);
+        runtime.replace_sequence_scope(outer_seq, outer_outputs);
         result
     }
 
@@ -75,7 +78,7 @@ impl TaskExecution<'_> {
             if signal == LifecycleSignal::Start {
                 let context = self.stack.prepared_context.cloned().unwrap_or_else(|| self.state.context().clone());
                 let mut supplied = match self.user_setters { Some(Value::Object(setters)) => setters.clone(), _ => Map::new() };
-                supplied.extend(runtime.snapshot().mutations);
+                supplied.extend(runtime.mutations());
                 match crate::composition::sequence::preflight::prepare_nested_sequence(
                     self.task, sequence, self.state, supplied, context, self.stack.file_resolution_context,
                     self.stack.group.is_some(), self.graph.nested_sources(),
@@ -103,15 +106,16 @@ impl TaskExecution<'_> {
                 signal = LifecycleSignal::Cancelled;
             }
             let sequence = prepared.as_ref().unwrap_or(sequence);
-            let seq = SequenceBinding::container(run_id, runtime.snapshot().outputs).to_value();
+            let (mutations, outputs) = runtime.mutations_and_outputs();
+            let seq = SequenceBinding::container(run_id, outputs).to_value();
             let base = self.sequence_frontmatter(sequence);
             let mut event_frontmatter = base.clone().unwrap_or_else(|| self.stack.frontmatter.clone());
-            event_frontmatter.extend(runtime.snapshot().mutations);
+            event_frontmatter.extend(mutations.clone());
             if let Some(live) = &own_live {
                 layer_onto(&mut live.lock().expect("sequence live frontmatter poisoned"), &event_frontmatter);
             }
             if let Some(live) = self.stack.live_frontmatter {
-                live.lock().expect("sequence live frontmatter poisoned").extend(runtime.snapshot().mutations);
+                live.lock().expect("sequence live frontmatter poisoned").extend(mutations);
             }
             let disabled = crate::composition::lifecycle::executor::DisabledShellRunner;
             let stack = StackExecutionContext {
@@ -152,10 +156,11 @@ impl TaskExecution<'_> {
                             break;
                         }
                         let overlay = crate::composition::sequence::build_step_overlay(&plan, index);
-                        let seq = SequenceBinding::step(&overlay, runtime.snapshot().outputs).to_value();
+                        let (mutations, outputs) = runtime.mutations_and_outputs();
+                        let seq = SequenceBinding::step(&overlay, outputs).to_value();
                         runtime.set_sequence_binding(seq.clone());
                         let mut data = base.clone().unwrap_or_else(|| self.state.data().clone());
-                        data.extend(runtime.snapshot().mutations);
+                        data.extend(mutations);
                         let state = match EffectiveStateBuilder::new().with_shared_frontmatter(data)
                             .with_context(self.state.context().clone()).with_allow_ctx_override(true).build()
                         {
@@ -257,8 +262,7 @@ impl TaskExecution<'_> {
                         // The pass's own slice of the cumulative outputs is its
                         // result: its terminal event, `finalize`, and gate read it.
                         if let Some(frame) = frame.as_deref_mut() {
-                            let outputs = runtime.snapshot().outputs;
-                            let pass = outputs[checkpoint.outputs().min(outputs.len())..].to_vec();
+                            let pass = runtime.outputs_from(checkpoint.outputs());
                             frame.record_pass(Value::Array(pass), i32::from(error.is_some()));
                         }
                         let breaking = loop_values.filter(|ambient| ambient.breaks.is_pending());
@@ -297,8 +301,9 @@ impl TaskExecution<'_> {
                     {
                         let ambient = frame.ambient();
                         let mut gate_frontmatter = base.clone().unwrap_or_else(|| self.stack.frontmatter.clone());
-                        gate_frontmatter.extend(runtime.snapshot().mutations);
-                        let gate_seq = SequenceBinding::container(run_id, runtime.snapshot().outputs).to_value();
+                        let (mutations, outputs) = runtime.mutations_and_outputs();
+                        gate_frontmatter.extend(mutations);
+                        let gate_seq = SequenceBinding::container(run_id, outputs).to_value();
                         let gate = StackExecutionContext {
                             seq: Some(&gate_seq), runtime_state: Some(runtime.as_ref()), frontmatter: &gate_frontmatter,
                             live_frontmatter, source_path: &sequence.origin_path, err: None, loop_values: Some(&ambient),

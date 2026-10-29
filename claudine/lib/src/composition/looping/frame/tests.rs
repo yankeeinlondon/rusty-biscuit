@@ -139,11 +139,25 @@ fn a_retried_pass_reads_the_previous_pass_result_again() {
     // The failed attempt reports, then the pass retries, twice.
     frame.record_pass(json!(["broken"]), 1);
     frame.retry_pass();
-    assert_eq!(frame.ambient().last_output, json!(["a1"]));
+    assert_eq!(*frame.ambient().last_output, json!(["a1"]));
     frame.record_pass(json!(["broken again"]), 1);
     frame.retry_pass();
-    assert_eq!((frame.ambient().last_output, frame.ambient().last_exit_code), (json!(["a1"]), 0));
+    assert_eq!((Value::clone(&frame.ambient().last_output), frame.ambient().last_exit_code), (json!(["a1"]), 0));
     assert_eq!(frame.count(), 2, "a retry never advances the count");
+}
+
+/// Every ambient shares the frame's recorded result rather than copying it,
+/// so building the `loop` global for an event or a page is cheap however
+/// large the previous result is.
+#[test]
+fn every_ambient_shares_the_frame_result_without_copying_it() {
+    let mut frame = LoopFrame::new(&config(LoopCondition::Until("true".into()), Some(3)), None, LoopResultKind::Document, Path::new("x"), "loop").unwrap();
+    frame.record_pass(json!("x".repeat(1024)), 0);
+    let first = frame.ambient();
+    let second = frame.ambient();
+    assert!(std::sync::Arc::ptr_eq(&first.last_output, &second.last_output));
+    assert!(std::ptr::eq(frame.last_output(), first.last_output.as_ref()));
+    assert!(std::sync::Arc::ptr_eq(&first.last_output, &first.clone().last_output), "a cloned ambient shares it too");
 }
 
 #[test]

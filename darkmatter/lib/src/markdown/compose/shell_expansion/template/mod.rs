@@ -35,15 +35,15 @@ pub use fill::{
     DocumentShellValues, HoleError, HoleEvaluator, LateValueError, LateValues, LookupEvaluator, RejectReason, SiteValues,
     fill_template, resolve_late_values,
 };
-pub use grammar::parse_authored;
+pub use grammar::{parse_authored, parse_authored_prepared};
 pub use matching::rule_covers;
 pub use target::{TemplateTargetError, resolve_direct_target};
 pub use typing::{
-    ApprovalType, HoleRefinement, HoleType, HoleValidator, StringLikeType, TypeProvenance, project_hole,
+    ApprovalType, HoleRefinement, HoleType, HoleValidator, StringLikeType, TypeProvenance, project_hole, project_hole_expr,
 };
 
 use super::tokenize::{ShellToken, apply_redirection};
-use crate::markdown::compose::expression::{GuardOrigin, TypeScope};
+use crate::markdown::compose::expression::{GuardOrigin, PreparedInterpolationView, TypeScope};
 use super::types::{ChainOperator, RedirectionConfig};
 use std::ops::Range;
 
@@ -243,6 +243,21 @@ impl CommandTemplate {
     pub fn project_types(&mut self, scope: &TypeScope<'_>) {
         for placeholder in self.placeholders_mut() {
             placeholder.typing = project_hole(&placeholder.expression, scope);
+        }
+    }
+
+    /// [`project_types`](Self::project_types) from retained syntax: each
+    /// placeholder is matched to its occurrence in `view` by span, and one
+    /// whose expression did not parse keeps the fallback type.
+    pub fn project_types_prepared(&mut self, view: PreparedInterpolationView<'_>, scope: &TypeScope<'_>) {
+        for placeholder in self.placeholders_mut() {
+            placeholder.typing = view
+                .placeholder_at(&placeholder.span)
+                .and_then(|occurrence| occurrence.expr())
+                .map_or_else(
+                    || HoleType::fallback(TypeProvenance::NotBareProperty),
+                    |expr| project_hole_expr(expr, scope),
+                );
         }
     }
 

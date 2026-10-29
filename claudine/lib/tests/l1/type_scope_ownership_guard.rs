@@ -33,6 +33,9 @@ use source_scan::{ident_offsets, line_at, matching_brace, production_sources, sa
 /// The one function that decides whether a guard proves a placeholder present.
 const PRESENCE_DECISION: &str = "placeholder_guard";
 
+/// The same decision for syntax already parsed; the text form delegates to it.
+const PRESENCE_DECISION_PARSED: &str = "placeholder_guard_expr";
+
 /// Files whose functions make static (approval-time) presence decisions.
 fn is_static_preflight_module(path: &str) -> bool {
     path == "composition/preflight.rs"
@@ -215,9 +218,9 @@ const ALLOWED: &[Allowed] = &[
     allowed(
         Primitive::PresenceLookup,
         "darkmatter/lib/src/lifecycle/shell_template.rs",
-        PRESENCE_DECISION,
+        PRESENCE_DECISION_PARSED,
         2,
-        "the one presence decision: the scope's type of the placeholder, then its guard",
+        "the one presence decision: the scope's type of the placeholder, then its guard; `placeholder_guard` parses and delegates",
     ),
 ];
 
@@ -310,9 +313,11 @@ fn enclosing<'a>(functions: &'a [Function<'a>], offset: usize) -> Option<&'a str
         .map(|function| function.name)
 }
 
-/// Whether sanitized `body` names `ident` (a call, a path, or a variant).
+/// Whether sanitized `body` names `ident` (a call, a path, or a variant). The
+/// presence decision is also named by its parsed-syntax form.
 fn names(body: &str, ident: &str) -> bool {
     !ident_offsets(body, ident).is_empty()
+        || (ident == PRESENCE_DECISION && !ident_offsets(body, PRESENCE_DECISION_PARSED).is_empty())
 }
 
 /// Calls of each [`Primitive`] outside, or beyond, its [`Allowed`] entries,

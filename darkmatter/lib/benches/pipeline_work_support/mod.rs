@@ -705,7 +705,7 @@ fn d11_rejected_candidates(cases: &mut Vec<Case>) {
 
 /// D12: an edit-and-reuse loop over 10 and 300 imported files: each run
 /// edits one file (new content, so a new revision) and resolves a schema
-/// importing every file. Past 256 revisions the memo empties completely.
+/// importing every file; only the edited file should reparse.
 fn d12_named_type_memo(cases: &mut Vec<Case>) {
     for files in [10usize, 300] {
         cases.push(Case::new("D12/edit_and_reuse", files, false, move || {

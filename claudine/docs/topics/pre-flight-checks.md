@@ -366,6 +366,31 @@ composition is just in time. Filled commands and prior composed output are
 not reusable authorization. The runtime must prove membership in the upfront
 approval set before executing the current bytes or filling the current shape.
 
+#### One syntax collection per shell site
+
+Static analysis of a sequence shell site (`SequencePreflight::prepare_site`) scans and parses the command's `{{ … }}` placeholders **once**. Darkmatter's `PreparedInterpolation` keeps every occurrence in source order — its byte range, trimmed expression text, and either the spanned syntax or the located parse failure. Every static check then reads that one collection instead of parsing the text again: the approval diagnostics, the target-identity scan, the template grammar, hole typing, late-root classification, and the guard (presence) lookups. A repeated `{{ name }}` is parsed twice because it is two occurrences; the collection is keyed by position, never by text.
+
+```yaml
+shell: "tool {{ name }} --label {{ name }}-{{ seq.outputs[0] }}"
+# three occurrences -> three parses, however many checks read them
+```
+
+The collection lives on the `prepare_site` stack and is dropped when it returns. It is never stored in a template, candidate, approval record, or cache, so it cannot make a value stale: approval-time resolution, runtime fills, and presence evaluation still evaluate the authored text fresh each time. Malformed syntax is retained rather than reported early; it suppresses the approval-diagnostics result as before, while valid reads beside it are still checked for target identity and late roots.
+
+A `set` value is a wrapper (`$( … )` plus an optional suffix). Extraction (`authored_shell_command`) finds the inner command and its byte range inside the value without parsing a template. Approval diagnostics and target identity read the whole raw value; the grammar, typing, and late-root checks read only the command's range, and a view translates each occurrence's coordinates into that range.
+
+```mermaid
+flowchart LR
+    A[raw command or set value] --> B[extract inner command range]
+    A --> C[PreparedInterpolation: parse each occurrence once]
+    C --> D[raw view: diagnostics, target identity, fallback holes, presence]
+    C --> E[command view: grammar, hole types, late roots]
+    D --> F[approval-time resolution: evaluated fresh]
+    E --> F
+```
+
+The text entry points (`approval_diagnostics`, `first_target_identity_root`, `parse_authored`, `project_types`, `late_roots_of`, `placeholder_guard`, `authored_shell_template`) remain for callers outside sequence preparation; each builds its own parse and shares the analysis body with its parsed counterpart (`…_prepared`, `…_expr`). Frontmatter `set` guard checks and the container, prompt, and discovery paths that bypass `prepare_site` still use the text forms.
+
 #### The first task and later tasks
 
 Upfront graph approval includes every task's `shell:` commands, container lifecycle `shell` actions and shell-valued `set` actions (in every branch), and the commands of every document a `prompt:` task names. How a command with a placeholder is approved depends on where its task sits:

@@ -50,6 +50,12 @@ const ALLOWLIST: &[Allowance] = &[
         1,
         "`PLAYA_DRY_RUN` disables TTS pre-warm before its worker starts, as it does playback",
     ),
+    ambient(
+        "composition/sequence/task/group/branch.rs",
+        "std::env::var",
+        1,
+        "`test-fixtures` hook that records a group attempt's branch counts for CLI tests",
+    ),
     ambient("config/antigravity.rs", "biscuit_file::home_dir", 1, HOME_CONFIG),
     ambient("config/backup.rs", "biscuit_file::home_dir", 1, "locates Claudine's configuration backups under the user's home"),
     ambient("config/claude.rs", "biscuit_file::home_dir", 1, HOME_CONFIG),

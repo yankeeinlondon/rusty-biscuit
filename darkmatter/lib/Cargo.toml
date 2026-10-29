@@ -346,7 +346,9 @@ source-inputs = [
     "renderable/tests/support/adjacent_code_matrix.rs",
 ]
 tiers = ["L1", "L2", "browser"]
-features = ["terminal-tests", "browser-tests", "effects-instrumentation"]
-local-features = ["effects-instrumentation"]
+# The named-type memo and validator-cache regressions count work through
+# `work-counters`; without it they compile out.
+features = ["terminal-tests", "browser-tests", "effects-instrumentation", "work-counters"]
+local-features = ["effects-instrumentation", "work-counters"]
 l2-backends = ["wezterm"]
 l1-include-slow = true

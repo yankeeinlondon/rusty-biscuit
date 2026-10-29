@@ -1,11 +1,13 @@
 //! The schema triggers discovery skipped as invalid during one top-level
 //! invocation, and which of them the user has already been shown.
 //!
-//! Claudine loads a document's effective schema several times before a
+//! Claudine prepares a document's effective schema several times before a
 //! provider launches (pre-validation, optional-value cleanup, the launch
 //! schema, drop-and-retry legs, status reports, interactive re-runs, and every
-//! loop or retry re-preparation). Each load runs discovery and reports the
-//! same skipped triggers again. [`TriggerFindings`] keeps them once each, by
+//! loop or retry re-preparation). Each entry point discovers triggers and
+//! reports the same skipped ones again; one pre-validation call discovers once
+//! and shares the result across its cleanup and verdict passes.
+//! [`TriggerFindings`] keeps them once each, by
 //! the finding's full source identity, in the order first observed, and a
 //! delivery cursor so a host shows each one exactly once per invocation —
 //! including when the run later fails for an unrelated reason.

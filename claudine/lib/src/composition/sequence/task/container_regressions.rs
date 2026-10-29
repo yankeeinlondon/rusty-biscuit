@@ -360,7 +360,18 @@ fn sibling_failure_cancels_opted_container_descendants_and_preserves_other_legs(
     let runtime = Arc::new(RuntimeState::new());
     let mut wiring = Wiring::new(&recorder, &fake);
     wiring.shell = &shell; wiring.runtime = Some(&runtime);
+    #[cfg(feature = "work-counters")]
+    let before = crate::work_counters::snapshot();
     let outcome = fixture.execute(&wiring);
+    // Branches exist only for admitted legs: `opted`, `plain`, `bad`, and the
+    // nested group's `a` and `b`; `unadmitted` builds none, and every branch
+    // is released once the group settles.
+    #[cfg(feature = "work-counters")]
+    {
+        use crate::work_counters::{Gauge, Work, live, snapshot};
+        assert_eq!(snapshot().since(&before).get(Work::RuntimeStateBranch), 5);
+        assert_eq!(live(Gauge::RuntimeStateBranch), 0);
+    }
     assert_eq!(outcome.status, TaskStatus::Failed, "{}", failure_message(&outcome));
     assert_eq!(runtime.outputs_value(), json!([]));
     let events = recorder.events();

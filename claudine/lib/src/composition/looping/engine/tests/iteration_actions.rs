@@ -481,7 +481,7 @@ fn last_output_and_last_exit_code_propagate() {
             let out = format!("run-{}", ctx.iteration);
             outputs.borrow_mut().push((
                 ctx.iteration,
-                ctx.ambient.last_output.clone(),
+                Value::clone(&ctx.ambient.last_output),
                 ctx.ambient.last_exit_code,
             ));
             Ok(LoopIterationOutput::success(out))

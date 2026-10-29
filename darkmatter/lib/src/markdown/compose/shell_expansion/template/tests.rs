@@ -504,3 +504,147 @@ mod guarded_discovery {
         assert!(matches!(error.error, HoleError::Missing { .. }), "{error:?}");
     }
 }
+
+// ── prepared (retained-syntax) consumers match the text entry points ─────
+
+mod prepared_parity {
+    use super::*;
+    use crate::lifecycle::shell_template::{placeholder_guard, placeholder_guard_expr};
+    use crate::markdown::compose::expression::{DeclaredTypes, Polarity, PreparedInterpolation, TypeScope, parse};
+    use std::collections::HashSet;
+
+    fn prepared(text: &str) -> PreparedInterpolation {
+        PreparedInterpolation::new(text)
+    }
+
+    fn schema(yaml: &str) -> crate::markdown::schemas::SimplifiedSchema {
+        let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).expect("schema YAML");
+        crate::markdown::schemas::parse_yaml_schema(&value).expect("schema parses")
+    }
+
+    #[test]
+    fn grammar_results_match_for_templates_and_every_rejection() {
+        for text in [
+            "tool {{ a }} \"{{ b }}\" pre-{{ c }}/post",
+            "tool {{ a }} {{ a }}",
+            "tool {{ 1 + }} x",
+            "{{ program }} arg",
+            "tool 2> {{ out }}",
+            "tool | cat",
+            "tool {{ a }} $(x)",
+            "tool 'unterminated {{ a }}",
+            "tool {{{ a }}} b",
+            "tool {{ \"a\" + `b` }}",
+            "",
+            "tool 日本 {{ name }} é",
+        ] {
+            let collection = prepared(text);
+            let from_view = parse_authored_prepared(collection.view(0..text.len()));
+            assert_eq!(from_view, parse_authored(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_failed_occurrence_keeps_the_fallback_type_in_both_paths() {
+        let text = "tool {{ 1 + }} {{ ok }}";
+        let template = parse_authored_prepared(prepared(text).view(0..text.len())).unwrap();
+        let typings: Vec<_> = template.placeholders().map(|hole| hole.typing.clone()).collect();
+        assert_eq!(typings[0], HoleType::fallback(TypeProvenance::NotBareProperty));
+        assert_eq!(typings[0], parse_authored(text).unwrap().placeholders().next().unwrap().typing);
+    }
+
+    #[test]
+    fn projected_types_match_with_schema_validators_and_refinements() {
+        let schema = schema("count: number(min(1))\nlevel: enum(low, high)\nplain: string\n");
+        let declared = DeclaredTypes::new(Some(&schema));
+        let command = "tool {{ count }} {{ level }} {{ plain }} {{ count }} {{ undeclared }} {{ count + 1 }}";
+        for guard in [None, Some(("level", Polarity::True))] {
+            let site = TypeScope::unguarded(&declared);
+            let scope = match guard {
+                Some((guard, polarity)) => site.assume(&parse(guard).unwrap(), polarity),
+                None => site,
+            };
+            let mut by_text = parse_authored(command).unwrap();
+            by_text.project_types(&scope);
+            let collection = prepared(command);
+            let mut by_view = parse_authored_prepared(collection.view(0..command.len())).unwrap();
+            by_view.project_types_prepared(collection.view(0..command.len()), &scope);
+            assert_eq!(by_view, by_text);
+        }
+    }
+
+    #[test]
+    fn repeated_text_is_matched_by_span_not_by_text() {
+        let command = "tool {{ count }} {{ count }}";
+        let collection = prepared(command);
+        let view = collection.view(0..command.len());
+        let template = parse_authored_prepared(view.clone()).unwrap();
+        let spans: Vec<_> = template.placeholders().map(|hole| hole.span.clone()).collect();
+        assert_eq!(spans, vec![5..16, 17..28]);
+        for span in spans {
+            assert!(view.placeholder_at(&span).is_some());
+        }
+    }
+
+    #[test]
+    fn an_inner_view_translates_spans_into_extracted_command_bytes() {
+        let value = "  $(  tool {{ é }}  )  ";
+        let ctx = SourceContext::new("/doc.md".into(), "doc.md".into(), value);
+        let command = crate::markdown::compose::authored_shell_command(value, "k", &ctx).unwrap();
+        assert_eq!(command.command, "tool {{ é }}");
+        assert_eq!(&value[command.span.clone()], command.command);
+        assert!(!command.conditional);
+        let collection = prepared(value);
+        let view = collection.view(command.span.clone());
+        let template = parse_authored_prepared(view).unwrap();
+        assert_eq!(template, parse_authored(command.command).unwrap());
+        let hole = template.placeholders().next().unwrap();
+        assert_eq!(&command.command[hole.span.clone()], "{{ é }}");
+    }
+
+    #[test]
+    fn extraction_matches_the_template_api_for_conditionals_suffixes_and_non_shell_values() {
+        let ctx = SourceContext::new("/doc.md".into(), "doc.md".into(), "");
+        for value in ["$(cmd {{ a }})::no-cache", " $( a ? b : c ) ", "$(cmd", "plain", "$()"] {
+            let command = crate::markdown::compose::authored_shell_command(value, "k", &ctx);
+            let template = crate::markdown::compose::authored_shell_template(value, "k", &ctx);
+            assert_eq!(command.is_some(), template.is_some(), "{value}");
+            if let (Some(command), Some((inner, result))) = (command, template) {
+                assert_eq!(command.command, inner);
+                if command.conditional {
+                    assert_eq!(result, Err(TemplateGrammarError::Conditional));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn late_roots_keep_traversal_order_and_adjacent_dedup() {
+        let deferred = DeferredShellRoots::new(["seq", "loop"]);
+        let derived = HashSet::new();
+        for text in ["seq.a + loop.b + seq.c", "seq.a + seq.b", "loop.x && seq.y && loop.z", "plain", "1 +"] {
+            let by_text = deferred.late_roots_of(text, &derived);
+            let by_expr = parse(text).ok().and_then(|expr| deferred.late_roots_of_expr(&expr, &derived));
+            assert_eq!(by_expr, by_text, "{text}");
+        }
+        let expr = parse("seq.a + loop.b + seq.c").unwrap();
+        assert_eq!(
+            deferred.late_roots_of_expr(&expr, &derived),
+            Some(vec!["seq".into(), "loop".into(), "seq".into()])
+        );
+    }
+
+    #[test]
+    fn presence_guards_match_for_guarded_and_unguarded_scopes() {
+        let declared = DeclaredTypes::new(None);
+        let site = TypeScope::unguarded(&declared);
+        let guarded = site.assume(&parse("name").unwrap(), Polarity::True);
+        for scope in [&site, &guarded] {
+            for text in ["name", "other", "name.x", "1 +"] {
+                let by_expr = parse(text).ok().and_then(|expr| placeholder_guard_expr(&expr, scope));
+                assert_eq!(by_expr, placeholder_guard(text, scope), "{text}");
+            }
+        }
+        assert!(placeholder_guard("name", &guarded).is_some());
+    }
+}

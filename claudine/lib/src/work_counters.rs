@@ -22,7 +22,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub enum Work {
     /// A complete `RuntimeState` snapshot taken.
     RuntimeSnapshot,
-    /// A private `RuntimeState` built for one group leg.
+    /// Committed output entries copied out of a `RuntimeState`, by a full
+    /// snapshot or by a projection that reads outputs.
+    RuntimeOutputsCopy,
+    /// A private `RuntimeState` built for one group leg, when the leg is
+    /// admitted; [`Gauge::RuntimeStateBranch`] counts the ones alive.
     RuntimeStateBranch,
     /// JSON nodes ([`value_nodes`]) deep-copied into group legs' live
     /// frontmatter cells: each cell copies the values the group-start view
@@ -92,6 +96,7 @@ impl Work {
     /// Every kind, in declaration order.
     pub const ALL: &[Work] = &[
         Work::RuntimeSnapshot,
+        Work::RuntimeOutputsCopy,
         Work::RuntimeStateBranch,
         Work::LiveFrontmatterCopy,
         Work::LiveFrontmatterView,
@@ -121,6 +126,51 @@ static COUNTS: [AtomicU64; Work::ALL.len()] = [const { AtomicU64::new(0) }; Work
 /// call site so it compiles away without the feature.
 pub fn add(work: Work, count: u64) {
     COUNTS[work as usize].fetch_add(count, Ordering::Relaxed);
+}
+
+/// Units of work alive at once, each with the most that were alive at one
+/// moment since the last [`reset_peak`]. Entered and left in pairs by the code
+/// that owns the unit; a test reads [`live`] and [`peak`] directly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(usize)]
+pub enum Gauge {
+    /// Group legs' private `RuntimeState` branches: built at admission and
+    /// dropped when the leg settles, before a replacement leg is admitted.
+    RuntimeStateBranch,
+}
+
+impl Gauge {
+    /// Every gauge, in declaration order.
+    pub const ALL: &[Gauge] = &[Gauge::RuntimeStateBranch];
+}
+
+static LIVE: [AtomicU64; Gauge::ALL.len()] = [const { AtomicU64::new(0) }; Gauge::ALL.len()];
+static PEAK: [AtomicU64; Gauge::ALL.len()] = [const { AtomicU64::new(0) }; Gauge::ALL.len()];
+
+/// One more `gauge` unit is alive.
+pub fn enter(gauge: Gauge) {
+    let live = LIVE[gauge as usize].fetch_add(1, Ordering::SeqCst) + 1;
+    PEAK[gauge as usize].fetch_max(live, Ordering::SeqCst);
+}
+
+/// One `gauge` unit entered with [`enter`] is gone.
+pub fn leave(gauge: Gauge) {
+    LIVE[gauge as usize].fetch_sub(1, Ordering::SeqCst);
+}
+
+/// How many `gauge` units are alive now.
+pub fn live(gauge: Gauge) -> u64 {
+    LIVE[gauge as usize].load(Ordering::SeqCst)
+}
+
+/// The most `gauge` units alive at one moment since the last [`reset_peak`].
+pub fn peak(gauge: Gauge) -> u64 {
+    PEAK[gauge as usize].load(Ordering::SeqCst)
+}
+
+/// Start a new peak measurement from the units alive now.
+pub fn reset_peak(gauge: Gauge) {
+    PEAK[gauge as usize].store(live(gauge), Ordering::SeqCst);
 }
 
 /// Every counter's value at one moment, or the work between two

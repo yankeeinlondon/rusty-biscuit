@@ -120,3 +120,72 @@ fn a_well_formed_import_target_supplies_its_named_type() {
         serde_json::json!({ "anyOf": [{ "type": "null" }, { "type": "string" }] })
     );
 }
+
+/// Undecodable bytes never reach the classifier; the import fails naming the
+/// file, as a target that is not a schema does.
+#[test]
+fn an_import_target_that_is_not_utf8_is_an_ambiguous_import() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let types = dir.path().join("types.yaml");
+    std::fs::write(&types, b"kind: schema\ntypes:\n  name: \xff\n").expect("write imported file");
+    let schema: YamlValue = serde_yaml_ng::from_str("value: name@./types.yaml\n").expect("fixture YAML parses");
+
+    match resolve_yaml_schema(&schema, dir.path(), &FileResolutionContext::new(dir.path())) {
+        Err(SchemaError::AmbiguousReferenced { path }) => assert_eq!(
+            biscuit_file::canonicalize_simplified(&path).unwrap_or(path),
+            biscuit_file::canonicalize_simplified(&types).expect("imported file canonicalizes")
+        ),
+        other => panic!("expected AmbiguousReferenced, got {:?}", other.map(|resolved| resolved.json_schema)),
+    }
+}
+
+/// Other valid spellings of the control: JSON-compatible YAML and the pure
+/// `$schema` envelope supply the same named type.
+#[test]
+fn json_compatible_and_pure_envelope_import_targets_supply_their_named_type() {
+    for (label, body) in [
+        ("JSON-compatible YAML", r#"{"kind": "schema", "types": {"name": "string"}}"#),
+        ("pure envelope", "$schema:\n  name: string\n"),
+    ] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (_, result) = import_from(dir.path(), body);
+
+        let resolved = result.unwrap_or_else(|error| panic!("{label}: {error}"));
+
+        assert_eq!(
+            resolved.json_schema["properties"]["value"],
+            serde_json::json!({ "anyOf": [{ "type": "null" }, { "type": "string" }] }),
+            "{label}"
+        );
+    }
+}
+
+/// An invalid entry beside the imported one fails the whole file, in either
+/// envelope: no entry is silently dropped to let the valid one through.
+#[test]
+fn an_invalid_sibling_entry_fails_an_import_of_a_valid_one() {
+    for (label, body) in [
+        ("tagged", "kind: schema\ntypes:\n  name: string\n  bad: 5\n"),
+        ("pure", "$schema:\n  name: string\n  bad: 5\n"),
+    ] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (types, result) = import_from(dir.path(), body);
+
+        let message = schema_document_message(label, &types, result);
+
+        assert!(message.contains("bad"), "{label}: {message}");
+    }
+}
+
+/// An empty `types` mapping is a valid table that declares nothing, so the
+/// import names the missing type rather than treating the file as invalid.
+#[test]
+fn an_empty_types_mapping_reports_the_imported_name_as_unknown() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (_, result) = import_from(dir.path(), "kind: schema\ntypes: {}\n");
+
+    match result {
+        Err(SchemaError::UnknownNamedType { name, .. }) => assert_eq!(name, "name"),
+        other => panic!("expected UnknownNamedType, got {:?}", other.map(|resolved| resolved.json_schema)),
+    }
+}

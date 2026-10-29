@@ -29,9 +29,9 @@ const UNGUARDED: &[Unguarded] = &[
     },
     Unguarded {
         path: "markdown/compose/shell_expansion/template/grammar.rs",
-        item: "Parser::take_hole",
+        item: "SchemaFree::scope",
         count: 1,
-        reason: "the schema-free parse-time typing; `project_types` replaces it with the site's scope",
+        reason: "the schema-free parse-time typing, from text or retained syntax; `project_types` replaces it with the site's scope",
     },
     Unguarded {
         path: "markdown/compose/shell_expansion/site.rs",

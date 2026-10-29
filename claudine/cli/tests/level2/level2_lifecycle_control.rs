@@ -6605,10 +6605,8 @@ fn level2_lifecycle_sequence_step_proxy_rebuilds_target_launch_bundle() {
 
 // ── AC6: inline-compose proxy closure rewrites only the final target ─────────
 
-/// A fake `goose` for inline-compose: it drains the prompt and prints a fixed
-/// replacement body to stdout, which inline-compose captures and writes back to
-/// the *active* document's body. The body is deliberately distinct from every
-/// fixture's authored body so the "unchanged body" closure guard cannot trip.
+/// A fake `goose` that rewrites the active document with a distinct body so the
+/// unchanged-body closure guard can detect an agent that did no work.
 fn write_inline_body_goose(bin_dir: &Path, events_log: &Path, new_body: &str) {
     // File-aware: the agent is the writer, so it learns the active document
     // from the delivered prompt header and edits it in place. A stub that only
@@ -6648,8 +6646,9 @@ fn run_inline_compose_await_exit(staged: &Staged) -> String {
     let claudine = common::claudine_bin();
     let sentinel = format!("L2_INLINE_DONE_{seq}");
     let env_prefix = staged_env_prefix_augmented(staged);
+    // Keep the complete sentinel out of the echoed command, even when it wraps.
     let cmd = format!(
-        "cd {ws} && {env_prefix}{claudine} inline-compose --goose {md} ; echo {sentinel}",
+        "cd {ws} && {env_prefix}{claudine} inline-compose --goose {md} ; printf '\\nL2_INLINE_DONE_%s\\n' {seq}",
         ws = staged.workspace.path().display(),
         md = staged.md_file.display(),
     );
@@ -6659,14 +6658,20 @@ fn run_inline_compose_await_exit(staged: &Staged) -> String {
 
     let deadline = Instant::now() + Duration::from_secs(40);
     let mut pane = String::new();
+    let mut completed = false;
     while Instant::now() < deadline {
         pane = harness.capture().map(|f| f.plain).unwrap_or_default();
         if pane.lines().any(|l| l.trim() == sentinel) {
+            completed = true;
             break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
     kill_session_by_name(&session);
+    assert!(
+        completed,
+        "inline-compose did not exit before the deadline; pane:\n{pane}"
+    );
     pane
 }
 

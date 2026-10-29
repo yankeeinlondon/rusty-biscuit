@@ -564,14 +564,14 @@ enum JudgedIn {
 impl JudgedIn {
     /// A caller-supplied property is judged in the context it was authored
     /// in; its value is already projected from there.
-    /// `property` is the top-level property the keyword judges, if any.
+    /// `property` is the top-level property the keyword judges, if any; a
+    /// whole-instance origin ([`super::validate::CallerOrigins::whole_instance`])
+    /// applies whatever it names.
     fn for_keyword(file_values: &super::validate::FileValues, property: Option<&str>) -> Self {
         match file_values {
             super::validate::FileValues::Syntax => Self::Syntax,
             super::validate::FileValues::Resolved { base_dir, fallback, context, callers } => {
-                let origin =
-                    property.map_or(super::validate::ValueOrigin::Document, |property| callers.origin_of(property));
-                match origin {
+                match callers.origin_at(property) {
                     super::validate::ValueOrigin::Caller(origin) => Self::Resolved {
                         base_dir: None,
                         fallback: None,

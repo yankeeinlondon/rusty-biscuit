@@ -9,7 +9,7 @@
 //!
 //! Each [`SubtreeCompose::compose`] call associates one
 //! [`EvaluationSession`]: the caller's runtime globals ([`RuntimeBinding`]:
-//! eager, lazy, or unavailable) over Darkmatter's own seed state
+//! eager, lazy, member-aware, or unavailable) over Darkmatter's own seed state
 //! (`ctx`/`env`/`fm`/`current` + read-side functions via
 //! [`ResolutionContext`]). A root resolves as a reserved namespace, then a
 //! registered global, then a document property; an absent document property is
@@ -108,7 +108,9 @@ fn undeclared_view(globals: &HashMap<String, RuntimeBinding<'_>>) -> Result<Bind
         .fold(BindingView::builder(ScopeId::new(UNDECLARED_SCOPE)), |builder, (root, binding)| {
             let availability = match binding {
                 RuntimeBinding::Unavailable(reason) => Availability::Unavailable(reason.clone()),
-                RuntimeBinding::Eager(_) | RuntimeBinding::Lazy(_) => Availability::Available,
+                RuntimeBinding::Eager(_) | RuntimeBinding::Lazy(_) | RuntimeBinding::Members { .. } => {
+                    Availability::Available
+                }
             };
             builder.declare(root.clone(), "caller-supplied global", availability)
         })

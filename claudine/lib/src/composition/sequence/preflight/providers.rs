@@ -21,6 +21,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use darkmatter::markdown::FrontmatterMap;
 use darkmatter::markdown::compose::SharedFrontmatter;
 use darkmatter::markdown::compose::shell_expansion::template::{
     DeferredShellRoots, derived_deferred_keys, value_read_roots,
@@ -222,8 +223,9 @@ impl ProviderPrediction {
 
 /// The layers one prompt task's hints are read from.
 pub(crate) struct HintLayers<'a> {
-    /// The prompt document's authored frontmatter.
-    pub(crate) document: &'a Map<String, Value>,
+    /// The prompt document's authored frontmatter, borrowed from the loaded
+    /// document.
+    pub(crate) document: &'a FrontmatterMap,
     pub(crate) document_path: &'a Path,
     /// The task's `with`, as authored.
     pub(crate) with: &'a Map<String, Value>,
@@ -255,6 +257,13 @@ pub(crate) struct HintLayers<'a> {
 /// error is a resolution context that could not be built, which fails
 /// preflight.
 ///
+/// A hint written as a literal (no `{{` and no `$(`) is classified before
+/// any state is built: a caller setter, a literal `with` entry, and a literal
+/// document value build no prediction state at all. Only a document value
+/// that reads something builds the layered state its reads are classified
+/// over, and only one that is then evaluated builds the early-binding state;
+/// each is built at most once per task, fresh for that task.
+///
 /// ## Errors
 ///
 /// `evaluate`'s outer error, unchanged.
@@ -263,17 +272,48 @@ pub(crate) fn predict(
     evaluate: &mut Evaluator<'_>,
 ) -> Result<ProviderPrediction, crate::composition::CompositionError> {
     let mut dependencies = Vec::new();
-    crate::note_work!(PredictionStateBuild);
-    let mut document_state: Map<String, Value> = layers
-        .document
-        .iter()
-        .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value)))
-        .collect();
-    document_state.extend(layers.with_evaluated.iter().map(|(key, value)| (key.clone(), value.clone())));
-    document_state.extend(layers.caller_setters.iter().map(|(key, value)| (key.clone(), value.clone())));
-    let agent = reject_empty_agent_list(predict_key("agent", layers, &document_state, &mut dependencies, evaluate)?);
-    let model = predict_key("model", layers, &document_state, &mut dependencies, evaluate)?;
+    let mut states = PredictionStates::default();
+    let agent = reject_empty_agent_list(predict_key("agent", layers, &mut states, &mut dependencies, evaluate)?);
+    let model = predict_key("model", layers, &mut states, &mut dependencies, evaluate)?;
     Ok(ProviderPrediction { agent, model, dependencies })
+}
+
+/// The frontmatter-sized states a document hint that reads an expression
+/// needs, built on first use and shared by the task's two keys.
+#[derive(Default)]
+struct PredictionStates {
+    /// The authored layers, caller setters over `with` over the document: what
+    /// a document value's reads are classified over.
+    authored: Option<Map<String, Value>>,
+    /// The early-binding state a document value is evaluated against: the
+    /// document's stored text under the evaluated `with` and the setters.
+    early: Option<Map<String, Value>>,
+}
+
+impl PredictionStates {
+    fn authored(&mut self, layers: &HintLayers<'_>) -> &Map<String, Value> {
+        self.authored.get_or_insert_with(|| {
+            crate::note_work!(PredictionStateBuild);
+            let mut state: Map<String, Value> = layers.document.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            state.extend(layers.with.iter().map(|(k, v)| (k.clone(), v.clone())));
+            state.extend(layers.caller_setters.iter().map(|(k, v)| (k.clone(), v.clone())));
+            state
+        })
+    }
+
+    fn early(&mut self, layers: &HintLayers<'_>) -> &Map<String, Value> {
+        self.early.get_or_insert_with(|| {
+            crate::note_work!(PredictionStateBuild);
+            let mut state: Map<String, Value> = layers
+                .document
+                .iter()
+                .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value)))
+                .collect();
+            state.extend(layers.with_evaluated.iter().map(|(key, value)| (key.clone(), value.clone())));
+            state.extend(layers.caller_setters.iter().map(|(key, value)| (key.clone(), value.clone())));
+            state
+        })
+    }
 }
 
 /// See [`HintState::EmptyAgentList`].
@@ -300,7 +340,7 @@ pub(crate) type Evaluator<'a> = dyn FnMut(
 fn predict_key(
     key: &str,
     layers: &HintLayers<'_>,
-    document_state: &Map<String, Value>,
+    states: &mut PredictionStates,
     dependencies: &mut Vec<(String, Value)>,
     evaluate: &mut Evaluator<'_>,
 ) -> Result<HintState, crate::composition::CompositionError> {
@@ -348,10 +388,13 @@ fn predict_key(
         source_path: layers.document_path.to_path_buf(),
         property: key.to_string(),
     };
-    crate::note_work!(PredictionStateBuild);
-    let mut raw_state: Map<String, Value> = layers.document.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    raw_state.extend(layers.with.iter().map(|(k, v)| (k.clone(), v.clone())));
-    raw_state.extend(layers.caller_setters.iter().map(|(k, v)| (k.clone(), v.clone())));
+    // A literal reads nothing, so no layer can make it late, circular, or a
+    // failed `with` read: it is the value. Whether it is runtime-written is
+    // decided over the whole graph (`defer_runtime_written`).
+    if !reads_expression(value) {
+        return Ok(HintState::Static { value: value.clone(), source });
+    }
+    let raw_state = states.authored(layers);
     let late_with: HashSet<String> = layers
         .with_deferred
         .iter()
@@ -362,13 +405,13 @@ fn predict_key(
     if let Some(state) = decided.into_state(source.clone()) {
         return Ok(state);
     }
-    if let Some(failure) = failed_with_read(key, layers, &raw_state) {
+    if let Some(failure) = failed_with_read(key, layers, raw_state) {
         return Ok(failure);
     }
     if !contains_expression(value) {
         return Ok(HintState::Static { value: value.clone(), source });
     }
-    Ok(match evaluate(value, document_state)? {
+    Ok(match evaluate(value, states.early(layers))? {
         Ok(value) => HintState::Static { value, source },
         Err(cause) => HintState::Failed { source, cause },
     })
@@ -430,9 +473,7 @@ fn classify_reads<'v>(
     dependencies: &mut Vec<(String, Value)>,
 ) -> ReadClass {
     // A literal reads nothing.
-    let Some(value) = lookup(key).filter(|value| {
-        value_text(value).is_some_and(|text| text.contains("{{") || text.contains("$("))
-    }) else {
+    let Some(value) = lookup(key).filter(|value| reads_expression(value)) else {
         return ReadClass::Evaluable;
     };
     let state = read_closure(key, lookup);
@@ -510,6 +551,12 @@ fn value_text(value: &Value) -> Option<String> {
         Value::Array(_) | Value::Object(_) => Some(value.to_string()),
         _ => None,
     }
+}
+
+/// Whether `value` holds a `{{ … }}` span or a `$( … )` substitution: the
+/// only forms that read another value. Anything else is a literal.
+fn reads_expression(value: &Value) -> bool {
+    value_text(value).is_some_and(|text| text.contains("{{") || text.contains("$("))
 }
 
 fn contains_expression(value: &Value) -> bool {
