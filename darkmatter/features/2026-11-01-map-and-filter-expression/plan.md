@@ -2,7 +2,7 @@
 kind: plan
 created: 2026-10-20
 total_phases: 5
-phase: 4
+phase: 6
 agent: codex/gpt-6.1-sol
 yolo: true
 source_files_during_phase_1: []
@@ -102,6 +102,120 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
 - .claude/skills/darkmatter/expressions.md
+source_files_during_phase_4:
+- claudine/lib/tests/l1/collection_host_compat.rs
+- darkmatter/cli/tests/l1/compose_call_warnings.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+- darkmatter/lib/tests/l1/collection_expression_surfaces.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs
+docs_updated_during_phase_4:
+- darkmatter/features/2026-11-01-map-and-filter-expression/plan.md
+- darkmatter/features/2026-11-01-map-and-filter-expression/implementation-log.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+- .claude/skills/darkmatter/testing.md
+source_files_during_phase_5:
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+docs_updated_during_phase_5:
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/expression-engine.md
+- darkmatter/docs/inline/call-check.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/dmls/docs/features.md
+- darkmatter/dmls/docs/autocomplete.md
+- darkmatter/dmls/docs/hover.md
+- darkmatter/features/2026-11-01-map-and-filter-expression/plan.md
+- darkmatter/features/2026-11-01-map-and-filter-expression/implementation-log.md
+- darkmatter/features/2026-11-01-map-and-filter-expression/spec.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+- .claude/skills/darkmatter/expressions.md
+source_code:
+- claudine/lib/src/composition/lifecycle/prewarm/classify.rs
+- claudine/lib/src/composition/lifecycle/prewarm/classify/tests.rs
+- claudine/lib/src/dispatch/matcher.rs
+- claudine/lib/src/dispatch/matcher/tests.rs
+- claudine/lib/tests/l1/claudine_schemas.rs
+- claudine/lib/tests/l1/collection_host_compat.rs
+- darkmatter/cli/tests/l1/compose_call_warnings.rs
+- darkmatter/dmls/src/diagnostics/call_check.rs
+- darkmatter/dmls/src/diagnostics/frontmatter.rs
+- darkmatter/dmls/src/overlay/expressions.rs
+- darkmatter/dmls/src/providers/collections.rs
+- darkmatter/dmls/src/providers/dsl.rs
+- darkmatter/dmls/src/providers/frontmatter.rs
+- darkmatter/dmls/src/providers/semantic_tokens.rs
+- darkmatter/dmls/tests/fixtures/response_contracts/a3_completions.json
+- darkmatter/dmls/tests/l1/collection_editor.rs
+- darkmatter/lib/src/lifecycle/schema_projection.rs
+- darkmatter/lib/src/lifecycle/signatures.rs
+- darkmatter/lib/src/markdown/compose/collection_blocks/error.rs
+- darkmatter/lib/src/markdown/compose/context/options.rs
+- darkmatter/lib/src/markdown/compose/expression/absence.rs
+- darkmatter/lib/src/markdown/compose/expression/ast.rs
+- darkmatter/lib/src/markdown/compose/expression/binding.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/bind.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/registration.rs
+- darkmatter/lib/src/markdown/compose/expression/call_binding/signature.rs
+- darkmatter/lib/src/markdown/compose/expression/call_check.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/catalog/tests.rs
+- darkmatter/lib/src/markdown/compose/expression/diagnostics.rs
+- darkmatter/lib/src/markdown/compose/expression/error.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/collections.rs
+- darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/host/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/lint.rs
+- darkmatter/lib/src/markdown/compose/expression/mod.rs
+- darkmatter/lib/src/markdown/compose/expression/parser.rs
+- darkmatter/lib/src/markdown/compose/expression/prepared.rs
+- darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/iterable.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/lexical.rs
+- darkmatter/lib/src/markdown/compose/expression/scope/projection.rs
+- darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+- darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+- darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+- darkmatter/lib/src/markdown/compose/nested.rs
+- darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+- darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+- darkmatter/lib/src/markdown/compose/preflight/collect.rs
+- darkmatter/lib/src/markdown/compose/remote.rs
+- darkmatter/lib/src/markdown/compose/report_diagnostics.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/candidate.rs
+- darkmatter/lib/src/markdown/compose/shell_expansion/template/fill.rs
+- darkmatter/lib/src/markdown/compose/site_scope.rs
+- darkmatter/lib/src/markdown/errors/blocks.rs
+- darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+- darkmatter/lib/src/markdown/types.rs
+- darkmatter/lib/tests/l1/collection_execution.rs
+- darkmatter/lib/tests/l1/collection_expression_surfaces.rs
+- darkmatter/lib/tests/l1/function_binding_registry.rs
+- darkmatter/lib/tests/l1/function_call_binding.rs
+- darkmatter/lib/tests/l1/lifecycle_schema_generation.rs
+- darkmatter/lib/tests/l1/main.rs
+- darkmatter/lib/tests/prompts/dasherized_identifier_corpus.rs
+- darkmatter/schemas/partials/functions.yaml
+documentation:
+- .claude/skills/darkmatter/expressions.md
+- .claude/skills/darkmatter/testing.md
+- darkmatter/README.md
+- darkmatter/dmls/docs/autocomplete.md
+- darkmatter/dmls/docs/diagnostics.md
+- darkmatter/dmls/docs/features.md
+- darkmatter/dmls/docs/hover.md
+- darkmatter/docs/inline/call-check.md
+- darkmatter/docs/iterables.md
+- darkmatter/docs/topics/darkmatter-expressions.md
+- darkmatter/docs/topics/expression-engine.md
+- darkmatter/docs/topics/schemas/definition.md
+- darkmatter/features/2026-11-01-map-and-filter-expression/implementation-log.md
+- darkmatter/features/2026-11-01-map-and-filter-expression/plan.md
+- darkmatter/features/2026-11-01-map-and-filter-expression/spec.md
+completed_phase: 5
+implemented: true
 ---
 
 # Map and Filter Implementation Plan
@@ -445,7 +559,7 @@ Depends on integrated Phase 3. Darkmatter and Claudine tasks can run
 concurrently in separate test files. All cases here are L1: hermetic
 filesystem/subprocess tests do not require a terminal or browser.
 
-- [ ] **Verify compose surfaces**
+- [x] **Verify compose surfaces**
   - Exercise both functions through frontmatter interpolation, body
     interpolation, and `::block when`, including nested lexical access and
     the agreed warning behavior. Assert typed arrays remain typed in
@@ -460,7 +574,7 @@ filesystem/subprocess tests do not require a terminal or browser.
     path. Run the existing opt-in grammar corpus with `just test-prompts`;
     behavior fixtures use frozen copies and never depend on live prompts.
 
-- [ ] **Verify lifecycle integration**
+- [x] **Verify lifecycle integration**
   - Use Claudine's normal lifecycle preparation, binding, and execution path
     with fixture-owned dependency specs. Run the motivating `filter` rule
     through `when:` and `error:`: one unimplemented dependency rejects and
@@ -502,7 +616,7 @@ matrix review finding accounts for the other cells in its row and column.
 Depends on Phase 4. Documentation owners may work concurrently only when
 editing separate files; final validation follows their integration.
 
-- [ ] **Document expression behavior**
+- [x] **Document expression behavior**
   - Update `darkmatter/docs/topics/darkmatter-expressions.md` with callback
     placement, both arrows, patterns, precedence, lexical shadowing, explicit
     `local`/`fm`, protected names, typed collections, null behavior, truthiness,
@@ -524,7 +638,7 @@ editing separate files; final validation follows their integration.
 
 Depends on Wave 6; execute the integration gates sequentially.
 
-- [ ] **Run scoped verification**
+- [x] **Run scoped verification**
   - Run `just test` and `just lint` from `darkmatter/`, then the affected
     Claudine package-area L1 and lint recipes. Use nextest-backed recipes,
     never `cargo test` or an unsolicited `cargo fmt`. Do not run lint
@@ -540,7 +654,7 @@ Depends on Wave 6; execute the integration gates sequentially.
     test-l2` or `just test-browser` with the shared harness; never activate
     terminal/browser windows or send OS input.
 
-- [ ] **Close acceptance evidence**
+- [x] **Close acceptance evidence**
   - Complete the twelve-criterion test map, record command results and
     environment coverage, and confirm all Phase 1 gates were resolved and
     implemented. Report any remaining failure as incomplete implementation.
