@@ -234,7 +234,9 @@ fn launch(name: &str, provider: Option<&str>, mode: EditorMode, args: &[&str]) -
     let marker = unique_marker();
     let launcher = write_launcher(&fixture, provider, mode, args, &marker);
 
-    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    // The editor and provider inherit terminal state; prior tests must not supply their TTY.
+    let mut harness = TmuxHarness::new();
+    harness.spawn_shell().expect("tmux harness");
     harness
         .send_text(format!("/bin/sh {}\n", sh_quote(&launcher.display().to_string())).as_bytes())
         .expect("send launcher");
