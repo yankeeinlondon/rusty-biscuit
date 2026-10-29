@@ -260,6 +260,7 @@ mod collection_analysis;
 mod collection_blocks;
 mod collection_discovery;
 mod collection_execution;
+mod collection_expression_surfaces;
 #[cfg(feature = "effects-instrumentation")]
 mod collection_effects;
 mod url_root_identity;

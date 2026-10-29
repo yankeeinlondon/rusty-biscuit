@@ -653,3 +653,22 @@ fn callback_example_arrows_preserve_nested_calls_patterns_and_quoted_text() {
         assert!(error.contains(reason), "{example}: {error}");
     }
 }
+
+#[test]
+fn shipped_callback_examples_passively_parse_through_the_catalog() {
+    let source = include_str!("../../../../../../schemas/partials/functions.yaml");
+    let catalog = load_catalog(source, CATALOG_PATH, EXAMPLE_FILES).unwrap();
+    for name in ["map", "filter"] {
+        let descriptors = catalog.descriptors_for(name);
+        assert_eq!(descriptors.len(), 1, "{name}");
+        assert!(!descriptors[0].accepts_value_arguments());
+        assert!(!descriptors[0].examples.is_empty());
+        for example in &descriptors[0].examples {
+            let FunctionExample::Call { call, display_only, .. } = example else {
+                panic!("{name}: expected inline call corpus");
+            };
+            assert!(display_only.is_none(), "{call}");
+            assert!(parse(call).is_ok(), "{call}");
+        }
+    }
+}

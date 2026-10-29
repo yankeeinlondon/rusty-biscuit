@@ -50,9 +50,9 @@
 //! - Dot access on a `null` base or missing path returns `null` (no error).
 //! - Bracket access never errors: out-of-bounds, `null` base, key on non-collection,
 //!   and missing object keys all return `null`.
-//! - Functions added in the expression-syntax expansion (math, collection,
-//!   string predicates / mutations) propagate `null` arguments through to
-//!   `null` results, and return errors for type mismatches.
+//! - Each function's catalog signature defines its null behavior. In particular,
+//!   `map(null, x => x)` and `filter(null, x => x)` return empty arrays without
+//!   executing the callback; null items and callback results remain data.
 //!
 //! ## Arithmetic Errors
 //!
