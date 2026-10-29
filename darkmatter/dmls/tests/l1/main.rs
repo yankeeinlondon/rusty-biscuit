@@ -11,6 +11,7 @@ mod common;
 
 mod bench_index;
 mod claudine_editor_parity;
+mod collection_editor;
 mod claudine_schema_discovery;
 mod content_policy_baseline;
 mod context_construction_guard;

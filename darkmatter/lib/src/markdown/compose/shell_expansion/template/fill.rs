@@ -67,7 +67,7 @@ impl<'a, L: EvaluationLookup> LookupEvaluator<'a, L> {
 
 impl<L: EvaluationLookup> HoleEvaluator for LookupEvaluator<'_, L> {
     fn evaluate(&self, expression: &str) -> Result<Value, ExpressionError> {
-        let expr = parse(expression).map_err(|error| ExpressionError::Parse(error.to_string()))?;
+        let expr = parse(expression).map_err(ExpressionError::from)?;
         evaluate(&expr, self.lookup)
     }
 }

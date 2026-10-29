@@ -71,6 +71,7 @@ enum EvaluationMode {
     Pure,
     Context,
     Lazy,
+    Callback,
 }
 
 #[derive(Clone, Copy)]
@@ -78,16 +79,13 @@ struct FunctionBinding {
     canonical: &'static str,
     aliases: &'static [&'static str],
     evaluation: EvaluationMode,
-    /// `None` only for a lazy function, which the evaluator computes.
+    /// `None` for lazy and callback functions, which the evaluator computes.
     handler: Option<FunctionHandler>,
     /// Registered source exclusions (`reject_sources`): parameter name and the
     /// original value kinds it refuses before any conversion.
     rejects: &'static [(&'static str, &'static [ValueKind])],
     /// Registered numeric recovery: `(subject, fallback)` parameter names.
     recovery: Option<(&'static str, &'static str)>,
-    /// Registered narrowing fact: parameter name, kind, and type text
-    /// (`None` for the internal non-null fact).
-    fact: Option<(&'static str, call_binding::FactKind, Option<&'static str>)>,
     /// Registered malformed-reference rule: the parameter whose malformed
     /// reference text makes the call `false`.
     malformed_reference: Option<&'static str>,
@@ -107,7 +105,6 @@ impl FunctionBinding {
             handler,
             rejects: &[],
             recovery: None,
-            fact: None,
             malformed_reference: None,
         }
     }
@@ -124,6 +121,10 @@ impl FunctionBinding {
         Self::new(canonical, &[], EvaluationMode::Lazy, None)
     }
 
+    const fn callback(canonical: &'static str) -> Self {
+        Self::new(canonical, &[], EvaluationMode::Callback, None)
+    }
+
     const fn rejecting(self, rejects: &'static [(&'static str, &'static [ValueKind])]) -> Self {
         Self { rejects, ..self }
     }
@@ -138,18 +139,6 @@ impl FunctionBinding {
     const fn false_for_malformed_reference(self, parameter: &'static str) -> Self {
         Self {
             malformed_reference: Some(parameter),
-            ..self
-        }
-    }
-
-    const fn narrowing(
-        self,
-        parameter: &'static str,
-        kind: call_binding::FactKind,
-        ty: Option<&'static str>,
-    ) -> Self {
-        Self {
-            fact: Some((parameter, kind, ty)),
             ..self
         }
     }
@@ -257,7 +246,7 @@ fn build_registry(catalog: &FunctionCatalog) -> Result<Registry, RegistryError> 
             (EvaluationMode::Pure, Some(FunctionHandler::Pure(_))) | (
                 EvaluationMode::Context,
                 Some(FunctionHandler::Context(_))
-            ) | (EvaluationMode::Lazy, None)
+            ) | (EvaluationMode::Lazy | EvaluationMode::Callback, None)
         );
         if !valid_handler {
             return Err(RegistryError::InvalidHandler(binding.canonical.to_string()));
@@ -298,17 +287,14 @@ fn compile_binding(
     if binding.evaluation == EvaluationMode::Lazy {
         builder = builder.evaluation(call_binding::EvaluationMode::Lazy);
     }
+    if binding.evaluation == EvaluationMode::Callback {
+        builder = builder.evaluation(call_binding::EvaluationMode::Callback);
+    }
     for (parameter, kinds) in binding.rejects {
         builder = builder.reject_sources(*parameter, kinds);
     }
     if let Some((subject, fallback)) = binding.recovery {
         builder = builder.numeric_recovery(subject, fallback);
-    }
-    if let Some((parameter, kind, ty)) = binding.fact {
-        let ty = ty.map_or(call_binding::FactType::NonNull, |text| {
-            call_binding::FactType::Type(std::borrow::Cow::Borrowed(text))
-        });
-        builder = builder.narrows(parameter, kind, ty);
     }
     if let Some(parameter) = binding.malformed_reference {
         builder = builder.false_for_malformed_reference(parameter);
@@ -873,7 +859,11 @@ fn call_entry(
     let Some(handler) = entry.binding.handler else {
         return Err(ExpressionError::Other {
             function: name.to_string(),
-            message: format!("{canonical}() evaluates its arguments lazily and is called only by the evaluator"),
+            message: if entry.binding.evaluation == EvaluationMode::Lazy {
+                format!("{canonical}() evaluates its arguments lazily and is called only by the evaluator")
+            } else {
+                format!("{canonical}() requires evaluator-owned callback evaluation")
+            },
         });
     };
     let context = match handler {
@@ -2056,7 +2046,7 @@ mod registration_tests {
                     binding.handler,
                     Some(FunctionHandler::Context(_))
                 ),
-                EvaluationMode::Lazy => binding.handler.is_none(),
+                EvaluationMode::Lazy | EvaluationMode::Callback => binding.handler.is_none(),
             };
             assert!(paired, "{}", binding.canonical);
             assert_eq!(super::lazy_function(binding.canonical).is_some(), binding.evaluation == EvaluationMode::Lazy);

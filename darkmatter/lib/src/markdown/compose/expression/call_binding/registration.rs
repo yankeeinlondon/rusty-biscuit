@@ -1,16 +1,20 @@
 //! Function registrations: compiled overloads plus the Rust-side facts a
 //! signature cannot express (evaluation mode, source exclusions, numeric
-//! recovery, a narrowing fact), validated once when the registration is
-//! built.
+//! recovery), and the narrowing fact the signatures' `narrows(...)` clauses
+//! declare, validated once when the registration is built.
 
 use std::borrow::Cow;
+use std::ops::Range;
 
 use super::signature::{CompiledParameter, CompiledSignature};
 use super::translate::{NoNamedTypes, TranslateError, TypeResolver};
 use crate::markdown::coercion::{Shape, ValueKind};
 use crate::markdown::schemas::simplified::{
-    FunctionType, PropertyAtom, PropertyDef, TypeExpr, grammar::parse_type_definition, serialize_property_def,
+    FunctionType, NarrowsKind, PropertyAtom, PropertyDef, TypeExpr, grammar::parse_type_definition,
+    serialize_property_def,
 };
+use crate::markdown::schemas::simplified::narrowing;
+use crate::markdown::schemas::{GrammarRelated, SchemaError};
 
 /// When a function's arguments are evaluated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -21,6 +25,8 @@ pub enum EvaluationMode {
     /// Arguments are evaluated and bound one at a time as the function
     /// needs them (`and`, `or`); see [`super::LazyCall`].
     Lazy,
+    /// Inline callbacks stay unevaluated until the evaluator binds each item.
+    Callback,
 }
 
 /// `numeric_recovery`: when `subject` fails to bind for any reason and a
@@ -59,11 +65,10 @@ pub enum FactType {
     Type(Cow<'static, str>),
 }
 
-/// A registered narrowing fact: what a call's boolean result proves about
+/// A narrowing fact, declared by a function's `narrows(...)` clauses: what a call's boolean result proves about
 /// the original value of the argument bound to `parameter`.
 ///
-/// Analysis reads it from the registration (built-ins and test or host
-/// functions alike); no predicate runs to narrow a type.
+/// Analysis reads it from the registration; no predicate runs to narrow a type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NarrowingFact {
     parameter: String,
@@ -101,12 +106,20 @@ impl NarrowingFact {
 /// Why a registration cannot be served.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum RegistrationError {
+    /// `span` and `related` are byte ranges in the signature text, as
+    /// [`SchemaError::Grammar`](crate::markdown::schemas::SchemaError::Grammar)
+    /// reports them.
     #[error("{function}: the signature does not parse: {message}")]
-    Grammar { function: String, message: String },
+    Grammar {
+        function: String,
+        message: String,
+        span: Range<usize>,
+        related: Vec<GrammarRelated>,
+    },
     #[error("{function}: a registration describes `function(...)` types only; found `{found}`")]
     NotAFunction { function: String, found: String },
-    /// An executable function whose parameter or result would be a function
-    /// value; function values do not exist at runtime.
+    /// A function-valued result or a parameter outside callback evaluation mode;
+    /// stored function values do not exist at runtime.
     #[error("{function}: overload {} takes or returns a function value at `{path}`, which no call can supply", overload + 1)]
     FunctionValued { function: String, overload: usize, path: String },
     #[error("{function}: overload {}: {source}", overload + 1)]
@@ -129,8 +142,11 @@ pub enum RegistrationError {
     InvalidLazy { function: String },
     #[error("{function}: overloads {} and {} have the same binding contract", first + 1, second + 1)]
     DuplicateOverload { function: String, first: usize, second: usize },
+    /// A programmatically built declaration has no source text, so the
+    /// failure names its overloads (zero-based): the one whose clause is
+    /// invalid, or the two that disagree, earlier first.
     #[error("{function}: invalid narrowing fact: {message}")]
-    InvalidFact { function: String, message: String },
+    InvalidFact { function: String, message: String, overloads: Vec<usize> },
     #[error("{function}: invalid malformed-reference rule: {message}")]
     InvalidReferenceRule { function: String, message: String },
 }
@@ -228,7 +244,6 @@ pub struct RegistrationBuilder {
     evaluation: EvaluationMode,
     exclusions: Vec<(String, Vec<ValueKind>)>,
     recovery: Option<NumericRecovery>,
-    fact: Option<(String, FactKind, FactType)>,
     malformed_reference: Option<String>,
 }
 
@@ -240,7 +255,6 @@ impl RegistrationBuilder {
             evaluation: EvaluationMode::Eager,
             exclusions: Vec::new(),
             recovery: None,
-            fact: None,
             malformed_reference: None,
         }
     }
@@ -262,13 +276,6 @@ impl RegistrationBuilder {
             subject: subject.into(),
             fallback: fallback.into(),
         });
-        self
-    }
-
-    /// Registers the narrowing fact the function's boolean result proves
-    /// about the argument bound to `parameter`; a later call replaces it.
-    pub fn narrows(mut self, parameter: impl Into<String>, kind: FactKind, ty: FactType) -> Self {
-        self.fact = Some((parameter.into(), kind, ty));
         self
     }
 
@@ -296,7 +303,8 @@ impl RegistrationBuilder {
     /// ## Errors
     ///
     /// A [`RegistrationError`]: unparseable or non-function signatures,
-    /// function-valued parameters or results, untranslatable types, rules
+    /// function-valued results or stored parameters, callback parameters outside
+    /// callback evaluation mode, untranslatable types, rules
     /// naming unknown parameters, conflicting rules, an invalid recovery or
     /// lazy registration, two overloads with one binding contract, or an
     /// invalid narrowing fact (on a function that does not return
@@ -310,7 +318,7 @@ impl RegistrationBuilder {
         };
         let mut overloads = Vec::with_capacity(types.len());
         for (overload, ty) in types.iter().enumerate() {
-            let signature = CompiledSignature::compile(&name, ty, resolver).map_err(|source| match source {
+            let signature = CompiledSignature::compile_with_callbacks(&name, ty, resolver, self.evaluation == EvaluationMode::Callback).map_err(|source| match source {
                 TranslateError::FunctionValue { path } => RegistrationError::FunctionValued {
                     function: name.clone(),
                     overload,
@@ -382,10 +390,7 @@ impl RegistrationBuilder {
             }
         }
 
-        let fact = match self.fact {
-            Some((parameter, kind, ty)) => Some(compile_fact(&name, &overloads, parameter, kind, ty)?),
-            None => None,
-        };
+        let fact = compile_declared_fact(&name, &types)?;
 
         let malformed_reference = match self.malformed_reference {
             Some(parameter) => Some(reference_rule_index(&name, &overloads, parameter)?),
@@ -432,59 +437,60 @@ fn reference_rule_index(
     Ok(index)
 }
 
-/// Validates a narrowing fact against the compiled overloads.
-fn compile_fact(
+/// Compiles the narrowing fact a function's `narrows(...)` clauses declare.
+///
+/// Validity is decided by the schema-owned
+/// [`declaration_problem`](crate::markdown::schemas::simplified::narrowing::declaration_problem),
+/// the same rules the grammar applies; registration re-checks because a
+/// programmatically built [`FunctionType`] never passed through the grammar.
+/// This only lowers a valid declaration. `Ok(None)` means no overload
+/// declares a clause.
+///
+/// ## Errors
+///
+/// [`RegistrationError::InvalidFact`] for any declaration problem.
+pub(crate) fn compile_declared_fact(
     function: &str,
-    overloads: &[CompiledSignature],
-    parameter: String,
-    kind: FactKind,
-    ty: FactType,
-) -> Result<NarrowingFact, RegistrationError> {
-    let fail = |message: String| RegistrationError::InvalidFact {
-        function: function.to_string(),
-        message,
-    };
-    if overloads.iter().any(|signature| !matches!(signature.returns(), Shape::Boolean { .. })) {
-        return Err(fail("only a function returning `boolean` can narrow".to_string()));
-    }
-    let mut positions = overloads.iter().filter_map(|signature| signature.parameter(&parameter));
-    let Some(first) = positions.next() else {
-        return Err(RegistrationError::UnknownParameter {
+    overloads: &[FunctionType],
+) -> Result<Option<NarrowingFact>, RegistrationError> {
+    if let Some(problem) = narrowing::declaration_problem(overloads) {
+        let overloads = match problem.scope {
+            narrowing::ProblemScope::Overload(index) => vec![index],
+            narrowing::ProblemScope::Overloads { first, later } => vec![first, later],
+        };
+        return Err(RegistrationError::InvalidFact {
             function: function.to_string(),
-            rule: "narrows",
-            parameter,
+            message: problem.overload_message(),
+            overloads,
         });
-    };
-    let index = first.index();
-    if first.is_rest() || positions.any(|other| other.index() != index || other.is_rest()) {
-        return Err(fail(format!("parameter `{parameter}` must be a single argument at one position in every overload")));
     }
-    let target = match &ty {
-        FactType::NonNull => None,
-        FactType::Type(text) => {
-            let def = parse_type_definition(function, text)
-                .map_err(|error| fail(format!("`{text}` does not parse: {error}")))?;
-            let PropertyDef::Single(atom) = def else {
-                return Err(fail(format!("`{text}` must be a single type, not a union")));
-            };
-            if matches!(atom.ty, TypeExpr::Union(_)) {
-                return Err(fail(format!("`{text}` must be a single type, not a union")));
-            }
-            if kind == FactKind::TrueIff && !crate::markdown::compose::expression::scope::is_exact_fact_type(&atom) {
-                return Err(fail(format!(
-                    "a true-iff fact needs `null` or the bare type of one value family, not `{text}`"
-                )));
-            }
-            Some(atom)
-        }
+    let Some((overload, clause)) =
+        overloads.iter().find_map(|overload| overload.narrows.as_ref().map(|clause| (overload, clause)))
+    else {
+        return Ok(None);
     };
-    Ok(NarrowingFact {
-        parameter,
+    let index = overload
+        .parameters
+        .as_slice()
+        .iter()
+        .position(|parameter| parameter.name == clause.parameter)
+        .expect("a valid declaration names a declared parameter");
+    let (ty, target) = match &clause.target {
+        None => (FactType::NonNull, None),
+        Some(atom) => (FactType::Type(Cow::Owned(narrowing::canonical_target(atom))), Some(atom.clone())),
+    };
+    let kind = match clause.kind {
+        NarrowsKind::TrueImplies => FactKind::TrueImplies,
+        NarrowsKind::TrueIff => FactKind::TrueIff,
+        NarrowsKind::FalseImplies => FactKind::FalseImplies,
+    };
+    Ok(Some(NarrowingFact {
+        parameter: clause.parameter.clone(),
         index,
         kind,
         ty,
         target,
-    })
+    }))
 }
 
 /// Recovery needs a required subject, an optional numeric fallback, and a
@@ -518,9 +524,17 @@ fn recovery_indexes(
 
 /// The `function(...)` options of a grammar definition.
 fn function_types(function: &str, text: &str) -> Result<Vec<FunctionType>, RegistrationError> {
-    let def = parse_type_definition(function, text).map_err(|error| RegistrationError::Grammar {
-        function: function.to_string(),
-        message: error.to_string(),
+    let def = parse_type_definition(function, text).map_err(|error| {
+        let (span, related) = match &error {
+            SchemaError::Grammar { span, related, .. } => (span.clone(), related.clone()),
+            _ => (0..0, Vec::new()),
+        };
+        RegistrationError::Grammar {
+            function: function.to_string(),
+            message: error.to_string(),
+            span,
+            related,
+        }
     })?;
     let atoms: Vec<PropertyAtom> = match def {
         PropertyDef::Single(atom) => match atom.ty {

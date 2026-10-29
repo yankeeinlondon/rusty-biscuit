@@ -279,6 +279,22 @@ pub struct ComposeOptions {
     /// [`Self::ignore_invalid_references`]: every other failure still fails.
     pub(crate) allow_missing_transclusions: bool,
 
+    /// When `true`, a `::map` source with no iterable declaration is a
+    /// warning instead of an error. Waives only the static source-typing
+    /// requirement.
+    pub(crate) allow_untyped_map_variables: bool,
+
+    /// [`Self::allow_untyped_map_variables`] for `::filter` sources.
+    pub(crate) allow_untyped_filter_variables: bool,
+
+    /// Request-wide allowances for collection expansion: source items visited
+    /// and bytes materialized. Shared by nested collections, child
+    /// compositions, and explicit nested composition.
+    pub(crate) iteration_limits: super::super::expression::iteration::IterationLimits,
+
+    /// Installed by the pipeline and shared with every expression context.
+    pub(crate) iteration_budget: Option<super::super::expression::iteration::IterationBudget>,
+
     /// Whether `@`-prefixed paths resolve to the git repository root.
     /// Default: true.
     pub(crate) resolve_repo_root: bool,
@@ -660,6 +676,9 @@ impl std::fmt::Debug for ComposeOptions {
             .field("code_fallback_language", &self.code_fallback_language)
             .field("ignore_invalid_references", &self.ignore_invalid_references)
             .field("allow_missing_transclusions", &self.allow_missing_transclusions)
+            .field("allow_untyped_map_variables", &self.allow_untyped_map_variables)
+            .field("allow_untyped_filter_variables", &self.allow_untyped_filter_variables)
+            .field("iteration_limits", &self.iteration_limits)
             .field("resolve_repo_root", &self.resolve_repo_root)
             .field("shell_timeout", &self.shell_timeout)
             .field("shell_policy_root", &self.shell_policy_root)
@@ -946,6 +965,10 @@ impl ComposeOptions {
             code_fallback_language: "txt".to_string(),
             ignore_invalid_references: None,
             allow_missing_transclusions: false,
+            allow_untyped_map_variables: false,
+            allow_untyped_filter_variables: false,
+            iteration_limits: Default::default(),
+            iteration_budget: None,
             resolve_repo_root: true,
             source_derivation: SourceDerivation::Ordinary,
             source_opening: None,
@@ -1595,6 +1618,45 @@ impl ComposeOptions {
         self
     }
 
+    /// Reports a `::map` source with no iterable declaration as a warning
+    /// instead of an error.
+    ///
+    /// The recovery waives only the static source-typing requirement: a
+    /// source whose declaration is known to be unsuitable still fails, and
+    /// runtime shape checks, expression errors, and shell authorization still
+    /// apply. Default: `false`.
+    #[must_use]
+    pub fn with_allow_untyped_map_variables(mut self, allow: bool) -> Self {
+        self.allow_untyped_map_variables = allow;
+        self
+    }
+
+    /// [`Self::with_allow_untyped_map_variables`] for `::filter` sources.
+    /// Default: `false`.
+    #[must_use]
+    pub fn with_allow_untyped_filter_variables(mut self, allow: bool) -> Self {
+        self.allow_untyped_filter_variables = allow;
+        self
+    }
+
+    /// Sets how many source items one request may visit across every
+    /// `::map` / `::filter`, nested directive, and child composition.
+    /// Rejected items count; exhaustion fails the request. Default: 100,000.
+    #[must_use]
+    pub fn with_max_iteration_visits(mut self, visits: std::num::NonZeroU64) -> Self {
+        self.iteration_limits = self.iteration_limits.with_max_visits(visits);
+        self
+    }
+
+    /// Sets how many bytes of collection expansion one request may
+    /// materialize, nested copies included. Exhaustion fails the request.
+    /// Default: 16,777,216 (16 MiB).
+    #[must_use]
+    pub fn with_max_expansion_bytes(mut self, bytes: std::num::NonZeroU64) -> Self {
+        self.iteration_limits = self.iteration_limits.with_max_expansion_bytes(bytes);
+        self
+    }
+
     /// Removes a transclusion whose target does not exist, with a warning,
     /// instead of failing the document.
     #[must_use]
@@ -1706,6 +1768,7 @@ impl ComposeOptions {
         context.caller_file_provenance = self.caller_file_provenance.clone();
         context.nested_compose = self.nested_compose.clone();
         context.host_globals = self.host_globals.clone();
+        context.iteration = self.expression_iteration_budget();
         context
     }
 
@@ -1752,7 +1815,18 @@ impl ComposeOptions {
         context.current = self.current_authority();
         context.caller_file_provenance = self.caller_file_provenance.clone();
         context.host_globals = self.host_globals.clone();
+        context.iteration = self.expression_iteration_budget();
         context
+    }
+
+    fn expression_iteration_budget(&self) -> super::super::expression::iteration::IterationBudget {
+        if self.nested_compose.is_discovery() {
+            super::super::expression::iteration::IterationBudget::discovery(self.iteration_limits)
+        } else {
+            self.iteration_budget.clone().unwrap_or_else(|| {
+                super::super::expression::iteration::IterationBudget::new(self.iteration_limits)
+            })
+        }
     }
 
     fn context_values_for_resolution(&self) -> serde_json::Map<String, serde_json::Value> {
@@ -2260,6 +2334,24 @@ impl ComposeOptions {
     pub fn max_transclusion_depth(&self) -> usize {
         self.max_transclusion_depth
     }
+
+    /// Whether an untyped `::map` source is a warning rather than an error.
+    #[must_use]
+    pub fn allow_untyped_map_variables(&self) -> bool {
+        self.allow_untyped_map_variables
+    }
+
+    /// Whether an untyped `::filter` source is a warning rather than an error.
+    #[must_use]
+    pub fn allow_untyped_filter_variables(&self) -> bool {
+        self.allow_untyped_filter_variables
+    }
+
+    /// The request-wide visit and expansion-byte allowances.
+    #[must_use]
+    pub fn iteration_limits(&self) -> super::super::expression::iteration::IterationLimits {
+        self.iteration_limits
+    }
 }
 
 impl Default for ComposeOptions {
@@ -2457,10 +2549,9 @@ const PATH_ENCODING_LOSSY_FALLBACK: u8 = 3;
 /// captured once and cloned into every `ComposeOptions::clone`, so it is also
 /// clone-stable.
 fn graph_context_fingerprint(ctx: &ComposeContext) -> u64 {
-    use biscuit_hash::canonical_json;
     use serde_json::Value;
 
-    let values_canonical = canonical_json(&Value::Object(ctx.values().clone()));
+    let values_canonical = crate::markdown::compose::cache::hashing::ordered_canonical(&Value::Object(ctx.values().clone()));
     let mut parts = vec![GRAPH_CONTEXT_DOMAIN.to_string(), values_canonical];
 
     let mut env_pairs: Vec<_> = ctx.env().iter().collect();
@@ -2842,6 +2933,11 @@ impl ComposeOptions {
             code_fallback_language,
             ignore_invalid_references,
             allow_missing_transclusions,
+            allow_untyped_map_variables,
+            allow_untyped_filter_variables,
+            iteration_limits,
+            // Runtime counters are execution state; their limits are identity above.
+            iteration_budget: _,
             resolve_repo_root,
             source_derivation,
             source_opening,
@@ -2903,7 +2999,6 @@ impl ComposeOptions {
             file_ref_fallback_dir,
         } = self;
 
-        use biscuit_hash::canonical_json;
         use serde_json::Value;
 
         // Both identity domains below encode the baseline schema, and the
@@ -2957,7 +3052,7 @@ impl ComposeOptions {
         match external_state {
             Some(v) => {
                 enc.tag(1);
-                enc.str(&canonical_json(v));
+                enc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(v));
             }
             None => enc.tag(0),
         }
@@ -2965,7 +3060,7 @@ impl ComposeOptions {
         match set_overrides {
             Some(v) => {
                 enc.tag(1);
-                enc.str(&canonical_json(v));
+                enc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(v));
             }
             None => enc.tag(0),
         }
@@ -2973,7 +3068,7 @@ impl ComposeOptions {
         match data_overrides {
             Some(v) => {
                 enc.tag(1);
-                enc.str(&canonical_json(v));
+                enc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(v));
             }
             None => enc.tag(0),
         }
@@ -2983,7 +3078,7 @@ impl ComposeOptions {
         enc.count(caller_input_records.len());
         for (property, record) in caller_input_records {
             enc.str(property);
-            enc.str(&canonical_json(record.raw()));
+            enc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(record.raw()));
             encode_file_resolution_context(&mut enc, record.origin());
         }
         enc.field("caller_file_provenance");
@@ -3031,6 +3126,14 @@ impl ComposeOptions {
 
         enc.field("allow_missing_transclusions");
         enc.bool(*allow_missing_transclusions);
+        enc.field("allow_untyped_map_variables");
+        enc.bool(*allow_untyped_map_variables);
+        enc.field("allow_untyped_filter_variables");
+        enc.bool(*allow_untyped_filter_variables);
+        enc.field("max_iteration_visits");
+        enc.u64(iteration_limits.max_visits().get());
+        enc.field("max_expansion_bytes");
+        enc.u64(iteration_limits.max_expansion_bytes().get());
 
         enc.field("resolve_repo_root");
         enc.bool(*resolve_repo_root);
@@ -3186,7 +3289,7 @@ impl ComposeOptions {
         match one_off_replace {
             Some(m) => {
                 enc.tag(1);
-                enc.str(&canonical_json(&Value::Object(m.clone())));
+                enc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(&Value::Object(m.clone())));
             }
             None => enc.tag(0),
         }
@@ -3382,6 +3485,14 @@ impl ComposeOptions {
 
         cenc.field("allow_missing_transclusions");
         cenc.bool(*allow_missing_transclusions);
+        cenc.field("allow_untyped_map_variables");
+        cenc.bool(*allow_untyped_map_variables);
+        cenc.field("allow_untyped_filter_variables");
+        cenc.bool(*allow_untyped_filter_variables);
+        cenc.field("max_iteration_visits");
+        cenc.u64(iteration_limits.max_visits().get());
+        cenc.field("max_expansion_bytes");
+        cenc.u64(iteration_limits.max_expansion_bytes().get());
         // A cached result composed under a weaker policy must not stand in
         // for one whose warnings would block.
         cenc.field("blocking_policy");
@@ -3417,7 +3528,7 @@ impl ComposeOptions {
         match one_off_replace {
             Some(m) => {
                 cenc.tag(1);
-                cenc.str(&canonical_json(&Value::Object(m.clone())));
+                cenc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(&Value::Object(m.clone())));
             }
             None => cenc.tag(0),
         }
@@ -3425,7 +3536,7 @@ impl ComposeOptions {
         match external_state {
             Some(v) => {
                 cenc.tag(1);
-                cenc.str(&canonical_json(v));
+                cenc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(v));
             }
             None => cenc.tag(0),
         }
@@ -3433,7 +3544,7 @@ impl ComposeOptions {
         match set_overrides {
             Some(v) => {
                 cenc.tag(1);
-                cenc.str(&canonical_json(v));
+                cenc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(v));
             }
             None => cenc.tag(0),
         }
@@ -3441,7 +3552,7 @@ impl ComposeOptions {
         match data_overrides {
             Some(v) => {
                 cenc.tag(1);
-                cenc.str(&canonical_json(v));
+                cenc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(v));
             }
             None => cenc.tag(0),
         }
@@ -3451,7 +3562,7 @@ impl ComposeOptions {
         cenc.count(caller_input_records.len());
         for (property, record) in caller_input_records {
             cenc.str(property);
-            cenc.str(&canonical_json(record.raw()));
+            cenc.str(&crate::markdown::compose::cache::hashing::ordered_canonical(record.raw()));
             encode_file_resolution_context(&mut cenc, record.origin());
         }
         cenc.field("baseline_schema");
@@ -3727,6 +3838,33 @@ mod tests {
 
     /// Without a fallback set, the resolution context leaves the field as
     /// `None` — preserving the legacy document-only resolution behavior.
+    #[test]
+    fn callback_context_adapters_share_request_budget_and_discovery_is_free() {
+        use super::super::super::expression::iteration::{IterationBudget, IterationLimits, IterationPath};
+        use std::num::NonZeroU64;
+
+        let directory = tempfile::tempdir().unwrap();
+        let context = biscuit_file::FileResolutionContext::new(directory.path());
+        let mut request = test_request_in(ComposeOptions::new(), context);
+        let limits = IterationLimits::default().with_max_visits(NonZeroU64::new(1).unwrap());
+        let budget = IterationBudget::new(limits);
+        request.iteration_budget = Some(budget.clone());
+        request.iteration_limits = limits;
+        let body = request.expression_resolution_context(&request.remote_fetch_runtime());
+        let frontmatter = request.frontmatter_resolution_context();
+        let path = IterationPath::empty();
+        body.iteration.reserve_visit(&path).unwrap();
+        assert_eq!(frontmatter.iteration.usage().visits, 1);
+        assert_eq!(budget.usage().visits, 1);
+
+        request.nested_compose = super::super::super::nested::NestedComposeSlot::discover();
+        let discovery = request.frontmatter_resolution_context();
+        discovery.iteration.reserve_visit(&path).unwrap();
+        discovery.iteration.reserve_visit(&path).unwrap();
+        assert_eq!(budget.usage().visits, 1, "preflight does not consume execution visits");
+        assert!(frontmatter.iteration.reserve_visit(&path).is_err());
+    }
+
     #[test]
     fn frontmatter_resolution_context_without_fallback_is_none() {
         let options = test_request(ComposeOptions::new());

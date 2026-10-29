@@ -3,7 +3,7 @@
 use super::super::super::Markdown;
 use super::super::super::types::{AuthoredSpan, MarkdownError, MarkdownResult};
 use super::super::context::effective_state as state;
-use super::super::body_origin::{BodyOrigin, BodyProvenance, DataRanges};
+use super::super::body_origin::{BodyOrigin, BodyProvenance, DataRanges, ScopeRanges};
 use super::super::directive_targets::{DirectiveTargetRewrite, rewrite_directive_targets};
 use super::super::interpolation;
 use super::super::shell_expansion;
@@ -15,6 +15,7 @@ use super::super::expression::absence::MissingRoot;
 use super::super::pipeline::{FinalVerdict, blocking_guard};
 use super::super::schema_validation::PreparedSchemas;
 use super::super::ComposeWarning;
+use super::super::site_scope::{SiteHook, SiteLookup};
 use super::super::{ComposeReport, EffectiveState};
 use serde_json::Value;
 use tracing::debug;
@@ -33,7 +34,9 @@ use tracing::debug;
 /// `ComposeOptions::fail_fast`, and the body is left unrewritten. Only the
 /// shell-command discovery pass defers such failures to warnings. The failure
 /// is anchored to its authored span when `body.origin` (the map from the
-/// current body back to the loaded text) proves one.
+/// current body back to the loaded text) proves one, and a failure inside a
+/// repeated `::map` / `::filter` copy keeps that copy's items
+/// ([`MarkdownError::InIteration`]).
 ///
 /// Under a blocking policy, a warning or undeclared read an evaluated
 /// expression reported stops the stage before the next expression is
@@ -65,24 +68,38 @@ pub(crate) fn run_stage(
     // expression functions (`frontmatter`, `file_exists`, `markdown_title`, …)
     // resolve filesystem paths and — when remote reads are enabled — HTTP(S)
     // URL arguments through the run's remote-fetch runtime.
-    let lookup = DeferrableLookup {
+    let document = DeferrableLookup {
         inner: state::ResolvingLookup::new(
             state,
             options.expression_resolution_context(&runtime.remote_fetch),
         ),
         defer_not_captured: options.defer_missing_runtime_context,
     };
-    let evaluator = Evaluator::new(&lookup)
-        .with_presentation_values(state.presentation_values())
-        .observing_missing_roots();
     body.data.ensure_describes(markdown.content())?;
     let origin = body.origin.as_ref().filter(|origin| origin.describes(markdown.content()));
     let verdict = FinalVerdict { markdown, state, schemas };
-    let targets = rewrite_targets_guarded(markdown, &body.data, &evaluator, origin, report, options, verdict)?;
+    // A repeated body's sites read the frame of the copy they lie in; the
+    // text the target pass leaves has shifted, so the second pass reads the
+    // ranges carried past its edits.
+    let targets = {
+        let sited = SiteLookup::new(&document, &body.scopes, Some(&runtime.iteration));
+        let evaluator = Evaluator::new(&sited)
+            .with_presentation_values(state.presentation_values())
+            .observing_missing_roots();
+        let targets = rewrite_targets_guarded(
+            markdown, &body.data, &evaluator, origin, &body.scopes, report, options, verdict, Some(&sited),
+        )?;
+        // An absent property in a whole-value directive target already warns as a
+        // skipped nullable target; a second warning would report one issue twice.
+        drop(evaluator.take_missing_roots());
+        targets
+    };
     report.add_warnings(targets.warnings);
-    // An absent property in a whole-value directive target already warns as a
-    // skipped nullable target; a second warning would report one issue twice.
-    drop(evaluator.take_missing_roots());
+    let scopes = body.scopes.after_edits(&targets.edits);
+    let lookup = SiteLookup::new(&document, &scopes, Some(&runtime.iteration));
+    let evaluator = Evaluator::new(&lookup)
+        .with_presentation_values(state.presentation_values())
+        .observing_missing_roots();
     let origin = origin.map(|origin| origin.after_edits(&targets.edits, &targets.output));
     let data = body.data.after_edits(&targets.edits, &targets.output);
     let authored = markdown.loaded_source_context_for_errors();
@@ -119,8 +136,9 @@ pub(crate) fn run_stage(
         options.expression_failure_policy(),
         "interpolation",
         guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
+        Some(&lookup),
     )
-    .map_err(|failure| anchor_authored_failure(markdown, origin.as_ref(), failure))?;
+    .map_err(|failure| anchor_authored_failure(markdown, origin.as_ref(), &scopes, failure))?;
     drop(guard);
 
     let data = data.after_edits(&result.edits, &result.output);
@@ -130,6 +148,7 @@ pub(crate) fn run_stage(
             .advanced(markdown.content(), &targets.edits, &targets.output)?
             .advanced(&targets.output, &result.edits, &result.output)
     });
+    body.scopes = scopes.after_edits(&result.edits);
     body.data = data;
     *markdown.content_mut() = result.output;
     report.add_warnings(result.warnings);
@@ -152,14 +171,17 @@ pub(crate) fn run_stage(
 /// Out of line so its guard and failure temporaries stay out of
 /// `run_stage`'s frame, which recurs once per nested composition.
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 fn rewrite_targets_guarded<L: EvaluationLookup>(
     markdown: &Markdown,
     data: &DataRanges,
     evaluator: &interpolation::Evaluator<'_, L>,
     origin: Option<&BodyOrigin>,
+    ranges: &ScopeRanges,
     report: &ComposeReport,
     options: &crate::markdown::compose::ComposeRequest,
     verdict: FinalVerdict<'_>,
+    site: Option<&dyn SiteHook>,
 ) -> MarkdownResult<DirectiveTargetRewrite> {
     // A target's absent root is reported as a skipped target, never as an
     // undeclared read, so this pass judges warnings alone.
@@ -170,11 +192,13 @@ fn rewrite_targets_guarded<L: EvaluationLookup>(
         evaluator,
         markdown.frontmatter_line_count(),
         guard.as_deref_mut().map(|guard| guard as &mut dyn FnMut(&[ComposeWarning]) -> MarkdownResult<()>),
+        site,
     )
-    .map_err(|failure| anchor_authored_failure(markdown, origin, failure))
+    .map_err(|failure| anchor_authored_failure(markdown, origin, ranges, failure))
 }
 
-/// Anchors a body failure to its authored span when `origin` proves one.
+/// Anchors a body failure to its authored span when `origin` proves one, and
+/// gives a failure inside a repeated copy (`ranges`) that copy's items.
 ///
 /// `origin` maps the text the failing span indexes back to the loaded
 /// document. An expression inside text an earlier stage inserted (an authored
@@ -183,19 +207,22 @@ fn rewrite_targets_guarded<L: EvaluationLookup>(
 fn anchor_authored_failure(
     markdown: &Markdown,
     origin: Option<&BodyOrigin>,
+    ranges: &ScopeRanges,
     failure: interpolation::LocatedInterpolationError,
 ) -> MarkdownError {
     let interpolation::LocatedInterpolationError { error, span } = failure;
-    let error = *error;
-    let Some(context) = markdown.loaded_source_context_for_errors() else {
-        return error;
-    };
-    match span
-        .zip(origin)
-        .and_then(|(span, origin)| origin.project(&span))
-        .and_then(|range| AuthoredSpan::locate(&context.content, range))
+    let mut error = *error;
+    if let Some(context) = markdown.loaded_source_context_for_errors()
+        && let Some(authored) = span
+            .clone()
+            .zip(origin)
+            .and_then(|(span, origin)| origin.project(&span))
+            .and_then(|range| AuthoredSpan::locate(&context.content, range))
     {
-        Some(span) => error.with_authored_span(context, span),
+        error = error.with_authored_span(context, authored);
+    }
+    match span {
+        Some(span) => super::super::site_scope::scope_failure(error, markdown, origin, ranges, span),
         None => error,
     }
 }

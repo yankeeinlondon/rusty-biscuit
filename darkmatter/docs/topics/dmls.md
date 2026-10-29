@@ -166,6 +166,15 @@ anchor. Transclusion targets
 and frontmatter file values are checked on disk, the way composition reads
 them.
 
+## Map and filter in the editor
+
+DMLS analyzes `::map` and `::filter` regions without running them: it
+highlights the callback and options, reports malformed headers, untyped or
+unsuitable sources, pattern mismatches, and unsupported sort keys, and
+completes and hovers locals using the same scope the composer uses. See
+[DMLS diagnostics](../../dmls/docs/diagnostics.md) and
+[features](../../dmls/docs/features.md).
+
 ## Learn more
 
 - [How DMLS resolves file references](../../dmls/docs/file-references.md):

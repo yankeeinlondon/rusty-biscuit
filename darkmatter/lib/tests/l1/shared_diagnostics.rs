@@ -66,6 +66,8 @@ fn a_category_3_call_composes_with_a_located_warning() {
         source: at(&path, position),
         expected_type: Some("number".to_string()),
         actual_type: Some("string | null".to_string()),
+        span: None,
+        iteration_path: Default::default(),
     };
     assert_eq!(found, [&expected(position_of(content, "label, 9", 0)), &expected(position_of(content, "label, 5", 0))]);
     let warning = report.warnings.iter().find(|warning| warning.diagnostic.is_some()).unwrap();
@@ -211,4 +213,70 @@ fn a_transcluded_child_warning_is_located_in_the_child() {
     let file = source.file.as_deref().expect("a file");
     assert_eq!(file.file_name(), child_path.file_name(), "{file:?}");
     assert_eq!((source.line, source.column), position_of(child, "label, 5", 0));
+}
+
+// ── collection sites ─────────────────────────────────────────────────────
+
+/// `(surface, opener tail, body)` for a `min(flag, 5)` call at every place a
+/// `::map` / `::filter` holds an expression. The callbacks carry an escaped
+/// quote and a multibyte character ahead of the call, so a position projected
+/// from the decoded text would be off.
+const COLLECTION_SURFACES: &[(&str, &str, &str)] = &[
+    ("positional callback", "data \"i => i == \\\"é\\\" || min(flag, 5) > 1\"", "x\n"),
+    ("filter option", "data filter=\"i => i == \\\"é\\\" || min(flag, 5) > 1\"", "x\n"),
+    ("sort option", "data sort=\"i => min(flag, 5)\"", "x\n"),
+    ("while option", "data while=\"i => min(flag, 5) > 1\"", "x\n"),
+    ("until option", "data until=\"i => min(flag, 5) > 1\"", "x\n"),
+    ("gate", "data when=\"min(flag, 5) > 1\"", "x\n"),
+    ("body", "data", "{{ min(flag, 5) }}\n"),
+];
+
+const COLLECTION_SCHEMA: &str = "---\n$schema:\n  flag: boolean(required)\n  label: string\n  data: any[](required)\nflag: true\nlabel: \"7\"\ndata: [1, 2, 3]\n---\n";
+
+/// [`position_of`] counting columns in characters, for fixtures with multibyte text.
+fn char_position_of(text: &str, needle: &str) -> (usize, usize) {
+    let offset = text.find(needle).unwrap_or_else(|| panic!("no `{needle}`"));
+    let before = &text[..offset];
+    let line_start = before.rfind('\n').map_or(0, |index| index + 1);
+    (before.matches('\n').count() + 1, before[line_start..].chars().count() + 1)
+}
+
+/// The rejection's record is located at the authored argument on every
+/// collection surface, for both kinds, and the call never ran.
+#[test]
+fn a_rejected_call_in_a_collection_is_located_at_its_authored_argument() {
+    for (opener, closer) in [("map", "end-map"), ("filter", "end-filter")] {
+        for (surface, tail, body) in COLLECTION_SURFACES {
+            let content = format!("{COLLECTION_SCHEMA}::{opener} {tail}\n{body}::{closer}\n");
+            let dir = TempDir::new().unwrap();
+            let (path, result) = compose_in(dir.path(), &content);
+            let error = result.err().unwrap_or_else(|| panic!("{opener} {surface}: composed"));
+            let diagnostic = error.call_diagnostic().unwrap_or_else(|| panic!("{opener} {surface}: no call diagnostic: {error}"));
+            assert_eq!(diagnostic.code, INCOMPATIBLE_CALL_CODE, "{opener} {surface}");
+            assert_eq!(diagnostic.severity, Severity::Error, "{opener} {surface}");
+            assert_eq!(diagnostic.source, at(&path, char_position_of(&content, "flag, 5")), "{opener} {surface}");
+        }
+    }
+}
+
+/// A category 3 call in a callback or a body is one warning per authored
+/// site, located at the argument, however many items the region visits.
+#[test]
+fn an_uncertain_call_in_a_collection_warns_once_per_site_at_its_argument() {
+    for (opener, closer) in [("map", "end-map"), ("filter", "end-filter")] {
+        let content = format!(
+            "{COLLECTION_SCHEMA}::{opener} data \"i => min(label, 5) > 1 ? i : i\"\n{{{{ min(label, 6) }}}}\n::{closer}\n"
+        );
+        let dir = TempDir::new().unwrap();
+        let (path, result) = compose_in(dir.path(), &content);
+        let (_, report) = result.unwrap_or_else(|error| panic!("{opener}: composes: {error}"));
+        let found: Vec<&Diagnostic> = report.warnings.iter().filter_map(|warning| warning.diagnostic.as_deref()).collect();
+        let sources: Vec<_> = found.iter().map(|diagnostic| diagnostic.source.clone()).collect();
+        assert_eq!(
+            sources,
+            [at(&path, position_of(&content, "label, 5", 0)), at(&path, position_of(&content, "label, 6", 0))],
+            "{opener}: {found:#?}"
+        );
+        assert!(found.iter().all(|diagnostic| diagnostic.code == UNCERTAIN_CALL_CODE), "{opener}");
+    }
 }

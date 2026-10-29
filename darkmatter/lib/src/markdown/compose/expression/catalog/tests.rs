@@ -624,3 +624,116 @@ fn has_binary_and_has_command_share_one_probe() {
         );
     }
 }
+
+/// A `narrows` clause on each overload of `is_string`; `second` replaces the
+/// second overload's clause (`None` leaves it absent).
+fn with_narrows(first: &str, second: Option<&str>) -> String {
+    let add = |signature: &str, clause: &str| signature.replacen("returns(boolean);", &format!("returns(boolean); {clause};"), 1);
+    let one = "function(parameters(x: string); returns(boolean); category(Logical)) -> One.";
+    let two = "function(parameters(x: number, y: number); returns(boolean); category(Logical)) -> Two.";
+    let second = second.map_or_else(|| two.to_string(), |clause| add(two, clause));
+    FIXTURE.replacen(one, &add(one, first), 1).replacen(two, &second, 1)
+}
+
+/// Overloads share one declared fact: the control loads and every
+/// disagreement fails the whole file as a schema error naming `is_string`,
+/// since the schema grammar applies the declaration rules.
+#[test]
+fn overloads_must_agree_on_the_declared_fact() {
+    let load = |source: &str| load_catalog(source, "fixture.yaml", EXAMPLE_FILES);
+    load(&with_narrows("narrows(x: string; true-iff)", Some("narrows(x: string; true-iff)"))).expect("control: same fact");
+    for (cell, source) in [
+        ("absent on the second", with_narrows("narrows(x: string; true-iff)", None)),
+        ("different kind", with_narrows("narrows(x: string; true-iff)", Some("narrows(x: string; true-implies)"))),
+        ("different target", with_narrows("narrows(x: string; true-iff)", Some("narrows(x: number; true-iff)"))),
+        ("presence versus type", with_narrows("narrows(x; false-implies)", Some("narrows(x: string; false-implies)"))),
+    ] {
+        let error = load(&source).expect_err(cell);
+        assert!(matches!(error, CatalogError::Schema(_)), "{cell}: {error:?}");
+        assert!(error.to_string().contains("`is_string`"), "{cell}: {error}");
+    }
+}
+
+/// Targets compare by meaning: description and constraint order do not make
+/// two overloads disagree.
+#[test]
+fn equivalent_target_spellings_agree() {
+    let source = with_narrows(
+        "narrows(x: string(min(1); max(5)); true-implies)",
+        Some("narrows(x: string(max(5); min(1)); true-implies)"),
+    );
+    load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).expect("equivalent spellings agree");
+}
+
+/// A clause naming a parameter only the later overload declares is not
+/// skipped on the overload that omits it: the grammar rejects it per overload.
+#[test]
+fn a_clause_naming_a_parameter_the_overload_omits_fails_the_load() {
+    let source = with_narrows("narrows(x: string; true-iff)", Some("narrows(y: string; true-implies)"));
+    let error = load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).expect_err("y is not declared");
+    assert!(error.to_string().contains("does not declare") || error.to_string().contains("different"), "{error}");
+    let only_later = FIXTURE.replacen(
+        "function(parameters(x: number, y: number); returns(boolean); category(Logical)) -> Two.",
+        "function(parameters(x: number, y: number); returns(boolean); narrows(y: number; true-implies); category(Logical)) -> Two.",
+        1,
+    );
+    let error = load_catalog(&only_later, "fixture.yaml", EXAMPLE_FILES).expect_err("only the later overload declares");
+    assert!(error.to_string().contains("`is_string`"), "{error}");
+}
+
+/// Overloads with one binding contract stay duplicates whatever their clauses say.
+#[test]
+fn duplicate_binding_contracts_stay_duplicates_despite_differing_clauses() {
+    let source = with_narrows("narrows(x: string; true-iff)", Some("narrows(x; false-implies)"))
+        .replacen("parameters(x: number, y: number)", "parameters(x: string)", 1);
+    let error = load_catalog(&source, "fixture.yaml", EXAMPLE_FILES).expect_err("same contract");
+    assert!(error.to_string().contains("the same binding contract"), "{error}");
+}
+
+#[test]
+fn callback_example_arrows_preserve_nested_calls_patterns_and_quoted_text() {
+    for (call, expected) in [
+        ("filter([1, 2, 3], n => n > 1)", json!([2, 3])),
+        ("filter([1, 2, 3], n -> n > 1)", json!([2, 3])),
+        (r#"map({z: "=>", a: "->"}, {key, value} => value)"#, json!(["=>", "->"])),
+        ("map([[1, 2]], xs => filter(xs, n -> n > 1))", json!([[2]])),
+    ] {
+        let source = format!("kind: schema\ncategories: [Collection]\ntypes:\n  demo: |-\n    function(parameters(void); returns(unknown); category(Collection); example({call} => {expected}))\n");
+        let catalog = load_catalog(&source, "callback-example.yaml", &[]).unwrap();
+        let FunctionExample::Call { call: parsed, expected: parsed_expected, result, .. } = &catalog.descriptors[0].examples[0] else {
+            panic!("an inline example");
+        };
+        assert_eq!(parsed.as_ref(), call);
+        assert_eq!(parsed_expected, &ExampleOutcome::Value(expected.clone()));
+        assert_eq!(result.as_ref(), expected.to_string());
+    }
+    for (example, reason) in [
+        ("filter([1, 2, 3], n =>) => [2, 3]", "not a valid expression"),
+        ("filter([1, 2, 3], n => n > 1) => n", "must be a literal"),
+        ("filter([1, 2, 3], n => n > 1) =>", "must be a literal"),
+    ] {
+        let source = format!("kind: schema\ncategories: [Collection]\ntypes:\n  demo: |-\n    function(parameters(void); returns(unknown); category(Collection); example({example}))\n");
+        let error = load_catalog(&source, "callback-example.yaml", &[]).unwrap_err().to_string();
+        assert!(error.contains("callback-example.yaml"), "{error}");
+        assert!(error.contains(reason), "{example}: {error}");
+    }
+}
+
+#[test]
+fn shipped_callback_examples_passively_parse_through_the_catalog() {
+    let source = include_str!("../../../../../../schemas/partials/functions.yaml");
+    let catalog = load_catalog(source, CATALOG_PATH, EXAMPLE_FILES).unwrap();
+    for name in ["map", "filter"] {
+        let descriptors = catalog.descriptors_for(name);
+        assert_eq!(descriptors.len(), 1, "{name}");
+        assert!(!descriptors[0].accepts_value_arguments());
+        assert!(!descriptors[0].examples.is_empty());
+        for example in &descriptors[0].examples {
+            let FunctionExample::Call { call, display_only, .. } = example else {
+                panic!("{name}: expected inline call corpus");
+            };
+            assert!(display_only.is_none(), "{call}");
+            assert!(parse(call).is_ok(), "{call}");
+        }
+    }
+}

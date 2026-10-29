@@ -803,6 +803,22 @@ unsupported presentation, or alias leaves the range `None` but always keeps
 the error. A projection-only failure after a successful parse is the
 projection error at the root path. Source-free parsers discard the path.
 
+A failure with two locations carries them structurally, never as offsets in
+message text: `SchemaError::Grammar.related: Vec<GrammarRelated>` (span in
+the same text, or `arm: Some(i)` for another option of a YAML-sequence
+union), projected by the same path into `LocatedDefinitionFailure.related`.
+Narrowing overload problems carry `NarrowsProblem.related` (the other
+overload; its span is `None` for an overload without a clause, which the
+grammar fills from `Parser::arm_spans` and the YAML-list parser from the
+option's scalar). Registration's text path keeps them on
+`RegistrationError::Grammar`; the programmatic path has no text and gives
+`InvalidFact.overloads` instead; `HostCatalogError::span()/related()` are
+located in the catalog source. A standalone file's payload failure is folded
+into `SchemaError::SchemaDocument`'s message, so DMLS locates it when the
+overlay is assembled (`overlay::file_failures`, keyed by the path the error
+names) and diagnostics read `DocumentOverlay::file_failures`; a diagnostic
+request must never read or parse a file.
+
 `decode_plain_scalar_node` (`yaml_scalar.rs`) is `decode_scalar_node`
 restricted to plain scalars (same-line tags/anchors skipped; quoted, block,
 flow, alias, comment, empty, and later-line-property values are `None`, and
@@ -1030,3 +1046,13 @@ catalog that fails to load is a `dm.schema.host_catalog` warning. Inside an
 md event's stack DMLS uses that event's registry `BindingView`
 (`dmls/src/overlay/event_views.rs`), so `err` where the event has none is
 `dm.expression.unavailable_global`.
+
+- **`function(...)` narrowing clause.** `narrows(param: T; true-implies |
+  true-iff | false-implies)` (or presence-only `narrows(param; kind)`, which
+  lowers to `FactType::NonNull`) is an optional, at-most-one clause after
+  `returns(...)`; it is description-only and a document schema reaching it
+  fails to load. Validation lives with the signature grammar
+  (`simplified/signature.rs`): boolean returns, a declared non-rest parameter,
+  a self-contained single-type target (no union or named reference), `true-iff`
+  only for `null` and bare families, and all overloads agreeing. Docs:
+  `docs/topics/schemas/definition.md#narrowing-facts`.

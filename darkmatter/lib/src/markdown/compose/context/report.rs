@@ -99,6 +99,13 @@ pub struct ComposeReport {
     /// instructions must skip them. Never merged from a child report.
     pub(crate) body_data: Option<crate::markdown::compose::body_origin::DataRanges>,
 
+    /// The repeated copies of the composed body ([`Self::body_data`]'s
+    /// counterpart for `::map` / `::filter`), and the body before any stage
+    /// rewrote it. Read by pre-flight discovery to attribute a directive to
+    /// the authored site and original item it was repeated for. Never merged
+    /// from a child report.
+    pub(crate) body_sites: crate::markdown::compose::body_origin::BodySites,
+
     /// Reads of roots unknown when they were evaluated (spec Requirement 4).
     /// Frontmatter pass 1 runs before the final state and schema exist, so
     /// these are candidates, not warnings: each document's pipeline
@@ -792,6 +799,8 @@ impl ComposeWarning {
             }),
             expected_type: None,
             actual_type: None,
+            span: None,
+            iteration_path: Default::default(),
         };
         Self {
             stage: "schema_validation".to_string(),

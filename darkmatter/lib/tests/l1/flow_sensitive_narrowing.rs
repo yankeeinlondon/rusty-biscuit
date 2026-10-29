@@ -1,5 +1,6 @@
 //! Flow-sensitive narrowing at the library's public API: registered
-//! narrowing facts (true-iff, true-implies, false-implies), recursive arms
+//! narrowing facts (true-iff, true-implies, false-implies) and the calls the
+//! call check rejects, which grant none, recursive arms
 //! classified by their definition, short-circuit and compound guards,
 //! impossible branches, `::block` guards through `BodyGuards` (the scope
 //! composition and DMLS both build), lifecycle fact lifetime, and the proof
@@ -21,6 +22,7 @@ use darkmatter::markdown::compose::expression::{
 };
 use darkmatter::markdown::compose::page_blocks::BodyGuards;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeSource};
+use darkmatter::markdown::schemas::simplified::{PropertyAtom, PropertyDef, TypeExpr, grammar::parse_type_definition};
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, SimplifiedSchema, parse_yaml_schema};
 use serde_json::json;
 use tempfile::TempDir;
@@ -56,12 +58,25 @@ fn category_of(declared: &DeclaredTypes<'_>, expression: &str, function: &str) -
         .category()
 }
 
-/// A one-argument predicate counting its entries, registered with `fact`.
-fn predicate(name: &str, fact: Option<(FactKind, FactType)>) -> TestFunctionGuard {
-    let mut builder = FunctionRegistration::builder(name, "function(parameters(value: unknown | null); returns(boolean))");
-    if let Some((kind, ty)) = fact {
-        builder = builder.narrows("value", kind, ty);
+/// The `narrows(...)` clause text declaring `fact` on `value`.
+fn clause(kind: FactKind, ty: &FactType) -> String {
+    let kind = match kind {
+        FactKind::TrueImplies => "true-implies",
+        FactKind::TrueIff => "true-iff",
+        FactKind::FalseImplies => "false-implies",
+    };
+    match ty {
+        FactType::NonNull => format!("narrows(value; {kind})"),
+        FactType::Type(text) => format!("narrows(value: {text}; {kind})"),
     }
+}
+
+/// A one-argument predicate counting its entries, declaring `fact` in its
+/// signature.
+fn predicate(name: &str, fact: Option<(FactKind, FactType)>) -> TestFunctionGuard {
+    let narrows = fact.map(|(kind, ty)| format!("; {}", clause(kind, &ty))).unwrap_or_default();
+    let signature = format!("function(parameters(value: unknown | null); returns(boolean){narrows})");
+    let builder = FunctionRegistration::builder(name, signature);
     hooks::register(builder.build().expect("the predicate registers"), Arc::new(|_| Ok(json!(true))))
 }
 
@@ -174,37 +189,433 @@ mod registered_facts {
         assert_eq!(narrowed(&declared, "looks_empty(x)", Polarity::True, "x"), "number | null");
     }
 
-    /// Registration validates a fact before anything evaluates.
+    /// The one `function(...)` a signature text declares.
+    fn function_of(text: &str) -> darkmatter::markdown::schemas::simplified::FunctionType {
+        match parse_type_definition("pred", text).expect("parses") {
+            PropertyDef::Single(PropertyAtom { ty: TypeExpr::Function(function), .. }) => *function,
+            other => panic!("one function, found {other:?}"),
+        }
+    }
+
+    /// Registration validates a declared fact before anything evaluates.
+    /// Signature text is rejected by the grammar, which applies the
+    /// schema-owned declaration rules; a programmatic [`FunctionType`] that
+    /// skipped the grammar gets the same rules as a typed `InvalidFact`.
     #[test]
     fn registration_rejects_invalid_facts() {
-        let build = |signature: &str, parameter: &str, kind: FactKind, fact: FactType| {
-            FunctionRegistration::builder("pred", signature).narrows(parameter, kind, fact).build()
+        let build = |returns: &str, parameter: &str, kind: FactKind, fact: &FactType| {
+            let clause = clause(kind, fact).replacen("(value", &format!("({parameter}"), 1);
+            let signature = format!("function(parameters(value: unknown | null); returns({returns}); {clause})");
+            FunctionRegistration::builder("pred", signature).build()
         };
-        let boolean = "function(parameters(value: unknown | null); returns(boolean))";
         assert!(matches!(
-            build("function(parameters(value: unknown | null); returns(number))", "value", FactKind::TrueIff, ty("number")),
-            Err(RegistrationError::InvalidFact { .. })
+            build("number", "value", FactKind::TrueIff, &ty("number")),
+            Err(RegistrationError::Grammar { .. })
         ));
         assert!(matches!(
-            build(boolean, "other", FactKind::TrueImplies, ty("number")),
-            Err(RegistrationError::UnknownParameter { rule: "narrows", .. })
+            build("boolean", "other", FactKind::TrueImplies, &ty("number")),
+            Err(RegistrationError::Grammar { .. })
         ));
-        for not_a_family in ["file", "string(min(3))", "enum(a, b)"] {
+        for not_a_family in ["file", "string(min(3))", "enum(a, b)", "(string | number)[]"] {
+            let text = build("boolean", "value", FactKind::TrueIff, &ty(not_a_family));
+            assert!(matches!(&text, Err(RegistrationError::Grammar { message, .. }) if message.contains("true-iff")), "{not_a_family}: {:?}", text.map(|_| ()));
+            assert!(build("boolean", "value", FactKind::TrueImplies, &ty(not_a_family)).is_ok(), "{not_a_family}");
+
+            // The same declaration built without the grammar.
+            let mut function = function_of(&format!(
+                "function(parameters(value: unknown | null); returns(boolean); narrows(value: {not_a_family}; true-implies))"
+            ));
+            function.narrows.as_mut().expect("clause").kind = darkmatter::markdown::schemas::simplified::NarrowsKind::TrueIff;
+            let programmatic = FunctionRegistration::builder_from_types("pred", vec![function]).build();
             assert!(
-                matches!(build(boolean, "value", FactKind::TrueIff, ty(not_a_family)), Err(RegistrationError::InvalidFact { .. })),
-                "{not_a_family}"
+                matches!(&programmatic, Err(RegistrationError::InvalidFact { message, .. }) if message.contains("true-iff")),
+                "{not_a_family}: {:?}",
+                programmatic.map(|_| ())
             );
-            assert!(build(boolean, "value", FactKind::TrueImplies, ty(not_a_family)).is_ok(), "{not_a_family}");
         }
         assert!(matches!(
-            build(boolean, "value", FactKind::TrueImplies, ty("string | number")),
-            Err(RegistrationError::InvalidFact { .. })
+            build("boolean", "value", FactKind::TrueImplies, &ty("string | number")),
+            Err(RegistrationError::Grammar { .. })
         ));
         for family in ["string", "number", "boolean", "object", "unknown[]", "null"] {
-            let fact = build(boolean, "value", FactKind::TrueIff, ty(family)).expect(family);
+            let fact = build("boolean", "value", FactKind::TrueIff, &ty(family)).expect(family);
             let fact = fact.narrowing_fact().expect("registered");
             assert_eq!((fact.parameter(), fact.index(), fact.kind()), ("value", 0, FactKind::TrueIff));
         }
+    }
+
+    /// A named type anywhere in a target (an object member, tuple position,
+    /// grouped-array arm, union arm, or dictionary value) depends on a
+    /// definition the fact cannot carry, so registration fails before any
+    /// fact exists: signature text through the grammar, and a programmatic
+    /// [`FunctionType`] holding the same nested name through the compiler.
+    /// Self-contained compound targets stay one-way facts.
+    #[test]
+    fn registration_rejects_named_types_nested_in_a_target() {
+        let signature = |target: &str| {
+            format!("function(parameters(value: unknown | null); returns(boolean); narrows(value: {target}; true-implies))")
+        };
+        for target in ["{a: Name}", "tuple([Name])", "Name[]", "(Name | string)[]", "{a: string | Name}", "{<string>: Name}"] {
+            let text = FunctionRegistration::builder("pred", signature(target)).build();
+            assert!(
+                matches!(&text, Err(RegistrationError::Grammar { message, .. }) if message.contains("named type `Name`") && !message.contains("union")),
+                "{target}: {:?}",
+                text.map(|_| ())
+            );
+        }
+        for target in ["{a: string}", "tuple([string])", "string(min(3))", "enum(a, b)", "file", "(string | number)[]"] {
+            let registered = FunctionRegistration::builder("pred", signature(target)).build().expect(target);
+            assert_eq!(registered.narrowing_fact().expect(target).kind(), FactKind::TrueImplies, "{target}");
+        }
+
+        // The same targets built without the grammar: each self-contained
+        // control has its innermost `string` replaced by the name.
+        fn plant_name(atom: &mut PropertyAtom) {
+            let next = match &mut atom.ty {
+                TypeExpr::InlineObject(shape) => {
+                    shape.properties.values_mut().chain(shape.pattern_keys.iter_mut().map(|key| &mut key.def)).next()
+                }
+                TypeExpr::Tuple(tuple) => Some(&mut tuple.elements[0].def),
+                TypeExpr::Union(arms) => return plant_name(arms.first_mut().expect("an arm")),
+                _ => {
+                    atom.ty = TypeExpr::local("Name");
+                    return;
+                }
+            };
+            match next.expect("a member") {
+                PropertyDef::Single(child) => plant_name(child),
+                PropertyDef::Union(arms) => plant_name(arms.last_mut().expect("an arm")),
+            }
+        }
+        for control in ["{a: string}", "tuple([string])", "(string | number)[]", "{a: number | string}", "{<string>: string}"] {
+            let mut function = function_of(&signature(control));
+            let target = function.narrows.as_mut().and_then(|clause| clause.target.as_mut()).expect("a target");
+            plant_name(target);
+            let programmatic = FunctionRegistration::builder_from_types("pred", vec![function]).build();
+            assert!(
+                matches!(&programmatic, Err(RegistrationError::InvalidFact { message, .. }) if message.contains("named type `Name`")),
+                "{control}: {:?}",
+                programmatic.map(|_| ())
+            );
+            assert!(FunctionRegistration::builder_from_types("pred", vec![function_of(&signature(control))]).build().is_ok(), "{control}");
+        }
+    }
+
+    /// A grouped array of a union is one array type, so it is a supported
+    /// one-way target: registration accepts it and the guard proves it.
+    #[test]
+    fn a_grouped_union_array_is_a_one_way_target() {
+        let registered = FunctionRegistration::builder(
+            "pred",
+            "function(parameters(value: unknown | null); returns(boolean); narrows(value: (string | number)[]; true-implies))",
+        )
+        .build()
+        .expect("a grouped union array registers");
+        let fact = registered.narrowing_fact().expect("declared");
+        assert_eq!(fact.kind(), FactKind::TrueImplies);
+
+        let schema = schema("source: unknown\nchoice:\n  - string[](required)\n  - number(required)\n");
+        let declared = DeclaredTypes::new(Some(&schema));
+        let _guard = predicate("is_mixed_list", Some((FactKind::TrueImplies, ty("(string | number)[]"))));
+        assert_eq!(narrowed(&declared, "is_mixed_list(source)", Polarity::True, "source"), "(string | number)[]");
+        // An array alternative becomes the target; the number cannot be one.
+        assert_eq!(narrowed(&declared, "is_mixed_list(choice)", Polarity::True, "choice"), "(string | number)[]");
+        assert_eq!(narrowed(&declared, "is_mixed_list(source)", Polarity::False, "source"), "unknown");
+    }
+
+    /// Every overload must declare the same fact. Signature text is rejected
+    /// by the grammar; programmatic overloads that skipped it are checked by
+    /// the compiler, not skipped.
+    #[test]
+    fn registration_rejects_overloads_that_disagree_on_the_fact() {
+        let one = "function(parameters(value: unknown | null); returns(boolean); narrows(value: string; true-iff))";
+        let build = |second: &str| FunctionRegistration::builder("pred", format!("{one} | {second}")).build();
+        let programmatic =
+            |second: &str| FunctionRegistration::builder_from_types("pred", vec![function_of(one), function_of(second)]).build();
+        let control = "function(parameters(value: unknown | null, extra: string); returns(boolean); narrows(value: string; true-iff))";
+        assert!(build(control).is_ok(), "control: two binding contracts declare the same fact");
+        assert!(programmatic(control).is_ok(), "control, programmatic");
+        let disagreements = [
+            ("absent", "function(parameters(value: unknown | null, extra: string); returns(boolean))"),
+            (
+                "different target",
+                "function(parameters(value: unknown | null, extra: string); returns(boolean); narrows(value: number; true-iff))",
+            ),
+            (
+                "different kind",
+                "function(parameters(value: unknown | null, extra: string); returns(boolean); narrows(value: string; true-implies))",
+            ),
+            (
+                "different position",
+                "function(parameters(extra: string, value: unknown | null); returns(boolean); narrows(value: string; true-iff))",
+            ),
+            (
+                "different parameter and kind",
+                "function(parameters(value: unknown | null, extra: string); returns(boolean); narrows(extra; false-implies))",
+            ),
+        ];
+        let first_clause = "narrows(value: string; true-iff)";
+        for (case, second) in disagreements {
+            // Signature text keeps both declarations' spans in that text: a
+            // missing fact at the declaring clause, relating the overload
+            // without one; different facts at the later clause, relating
+            // the first.
+            let text = format!("{one} | {second}");
+            let Err(RegistrationError::Grammar { span, related, .. }) = build(second) else {
+                panic!("{case}: a grammar failure");
+            };
+            let [related] = related.as_slice() else { panic!("{case}: one related location: {related:?}") };
+            if case == "absent" {
+                assert_eq!(&text[span], first_clause, "{case}");
+                assert_eq!(&text[related.span.clone()], second, "{case}");
+            } else {
+                assert_eq!(span.start, text.rfind("narrows").unwrap(), "{case}");
+                assert_eq!(&text[related.span.clone()], first_clause, "{case}");
+            }
+            // A programmatic declaration has no text: no range, but both
+            // overloads by index.
+            assert!(
+                matches!(programmatic(second), Err(RegistrationError::InvalidFact { ref overloads, .. }) if *overloads == [0, 1]),
+                "{case}, programmatic"
+            );
+        }
+
+        // Only the later overload lacks the parameter the clause names.
+        let first = function_of(one);
+        let mut later = function_of("function(parameters(other: unknown | null, extra: string); returns(boolean); narrows(other; false-implies))");
+        later.narrows.as_mut().expect("clause").parameter = "value".into();
+        let result = FunctionRegistration::builder_from_types("pred", vec![first, later]).build();
+        assert!(
+            matches!(&result, Err(RegistrationError::InvalidFact { overloads, .. }) if *overloads == [1]),
+            "{:?}",
+            result.map(|_| ())
+        );
+    }
+}
+
+/// A fact applies only to a call the passive call check accepts: a call it
+/// rejects (an argument no value of its type can bind, or a wrong argument
+/// count) proves neither side, while an argument whose fit is unknown,
+/// uncertain, or maybe null keeps the fact. No predicate handler runs.
+mod rejected_calls {
+    use super::*;
+
+    const TYPES: &str = "foo: unknown\nbar: unknown\nlabel: string(required)\nn: number\nmixed:\n  - string(required)\n  - number(required)\n  - boolean(required)\n";
+
+    /// A two-parameter predicate declaring `clause` on `value`.
+    fn probe(name: &str, clause: &str) -> TestFunctionGuard {
+        let signature = format!("function(parameters(value: unknown, count: number); returns(boolean); {clause})");
+        hooks::register(FunctionRegistration::builder(name, signature).build().expect("the probe registers"), Arc::new(|_| Ok(json!(true))))
+    }
+
+    /// The call check's verdict on the `count` argument of the first call in
+    /// `guard`.
+    #[track_caller]
+    fn count_category(declared: &DeclaredTypes<'_>, guard: &str) -> ArgumentCategory {
+        checks(declared, guard)[0].arguments.get(1).expect("the count argument is checked").category
+    }
+
+    /// `path`'s type with no guard at all.
+    fn unguarded(declared: &DeclaredTypes<'_>, path: &str) -> String {
+        text(TypeScope::unguarded(declared).type_of_expr(&parse(path).unwrap()).expect("a stable subject").shape())
+    }
+
+    #[test]
+    fn a_rejected_call_grants_no_fact_on_either_side() {
+        let schema = schema(TYPES);
+        let declared = DeclaredTypes::new(Some(&schema));
+        hooks::reset_handler_entries();
+        let _probe = probe("probe_pred", "narrows(value: file; true-implies)");
+
+        assert_eq!(count_category(&declared, "probe_pred(foo, 1)"), Compatible);
+        assert_eq!(narrowed(&declared, "probe_pred(foo, 1)", Polarity::True, "foo"), "file");
+        assert_eq!(narrowed(&declared, "!probe_pred(foo, 1)", Polarity::False, "foo"), "file");
+
+        assert_eq!(count_category(&declared, "probe_pred(foo, {})"), Incompatible);
+        assert_eq!(category_of(&declared, "probe_pred(foo, {})", "probe_pred"), Incompatible);
+        for guard in ["probe_pred(foo, {})", "!probe_pred(foo, {})", "(probe_pred(foo, {}))"] {
+            for polarity in [Polarity::True, Polarity::False] {
+                assert_eq!(narrowed(&declared, guard, polarity, "foo"), "unknown", "{guard} on {polarity:?}");
+            }
+        }
+        assert_eq!(hooks::handler_entries("probe_pred"), 0);
+    }
+
+    /// The gate sits before the polarity rules, so true-iff and
+    /// false-implies facts are withheld from a rejected call alike.
+    #[test]
+    fn every_implication_kind_withholds_a_rejected_calls_fact() {
+        let schema = schema(TYPES);
+        let declared = DeclaredTypes::new(Some(&schema));
+        hooks::reset_handler_entries();
+        let _iff = probe("probe_iff", "narrows(value: string; true-iff)");
+        let _false = probe("probe_false", "narrows(value: file; false-implies)");
+        let whole = unguarded(&declared, "mixed");
+
+        assert_eq!(narrowed(&declared, "probe_iff(mixed, 1)", Polarity::True, "mixed"), "string");
+        assert_ne!(narrowed(&declared, "probe_iff(mixed, 1)", Polarity::False, "mixed"), whole);
+        assert_eq!(narrowed(&declared, "probe_iff(mixed, [])", Polarity::True, "mixed"), whole);
+        assert_eq!(narrowed(&declared, "probe_iff(mixed, [])", Polarity::False, "mixed"), whole);
+
+        assert_eq!(narrowed(&declared, "probe_false(foo, 1)", Polarity::False, "foo"), "file");
+        assert_eq!(narrowed(&declared, "probe_false(foo, 'many')", Polarity::False, "foo"), "unknown");
+        assert_eq!(narrowed(&declared, "!probe_false(foo, 'many')", Polarity::True, "foo"), "unknown");
+        assert_eq!(hooks::handler_entries("probe_iff") + hooks::handler_entries("probe_false"), 0);
+    }
+
+    /// Only a proven rejection withholds a fact: an argument the check can
+    /// only call unknown, uncertain, or maybe-null may bind when the
+    /// document runs, and a guard that runs at all has bound.
+    #[test]
+    fn an_argument_that_may_bind_keeps_the_fact() {
+        let schema = schema(TYPES);
+        let declared = DeclaredTypes::new(Some(&schema));
+        let _probe = probe("probe_pred", "narrows(value: file; true-implies)");
+        for (count, category) in [("bar", Unknown), ("undeclared", Unknown), ("label", Uncertain), ("n", NullableMatch)] {
+            let guard = format!("probe_pred(foo, {count})");
+            assert_eq!(count_category(&declared, &guard), category, "{guard}");
+            assert_ne!(category_of(&declared, &guard, "probe_pred"), Incompatible, "{guard}");
+            assert_eq!(narrowed(&declared, &guard, Polarity::True, "foo"), "file", "{guard}");
+        }
+    }
+
+    /// No overload takes one or three arguments, so neither count refines
+    /// `foo`.
+    #[test]
+    fn a_wrong_argument_count_grants_no_fact() {
+        let schema = schema(TYPES);
+        let declared = DeclaredTypes::new(Some(&schema));
+        let _probe = probe("probe_pred", "narrows(value: file; true-implies)");
+        for guard in ["probe_pred(foo)", "probe_pred(foo, 1, 2)"] {
+            assert_eq!(category_of(&declared, guard, "probe_pred"), Incompatible, "{guard}");
+            for polarity in [Polarity::True, Polarity::False] {
+                assert_eq!(narrowed(&declared, guard, polarity, "foo"), "unknown", "{guard} on {polarity:?}");
+            }
+        }
+    }
+
+    /// The call check reads each operand under the earlier operands' facts,
+    /// so a rejected guard leaves the later `frontmatter` file argument
+    /// unknown in a conjunction, a ternary, and a `when` lowered from `&&`.
+    #[test]
+    fn a_rejected_guard_does_not_narrow_later_operands() {
+        let schema = schema(TYPES);
+        let declared = DeclaredTypes::new(Some(&schema));
+        hooks::reset_handler_entries();
+        let _probe = probe("probe_pred", "narrows(value: file; true-implies)");
+        let call = |guard: &str| format!("{guard} && frontmatter(foo, 'title')");
+        assert_eq!(category_of(&declared, &call("probe_pred(foo, 1)"), "frontmatter"), Compatible);
+        assert_eq!(category_of(&declared, &call("probe_pred(foo, {})"), "frontmatter"), Unknown);
+        assert_eq!(category_of(&declared, "and(probe_pred(foo, {}), frontmatter(foo, 'title'))", "frontmatter"), Unknown);
+        assert_eq!(category_of(&declared, "probe_pred(foo, {}) ? frontmatter(foo, 'title') : ''", "frontmatter"), Unknown);
+        assert_eq!(category_of(&declared, "!probe_pred(foo, {}) ? '' : frontmatter(foo, 'title')", "frontmatter"), Unknown);
+        assert_eq!(hooks::handler_entries("probe_pred"), 0);
+    }
+
+    /// `::block when="..."` reads the same scope, so a rejected guard leaves
+    /// its body's file argument unknown.
+    #[test]
+    fn a_rejected_block_guard_does_not_narrow_its_body() {
+        let schema = schema(TYPES);
+        let declared = DeclaredTypes::new(Some(&schema));
+        let _probe = probe("probe_pred", "narrows(value: file; true-implies)");
+        let body_category = |guard: &str| {
+            let body = format!("::block when=\"{guard}\"\n{{{{ frontmatter(foo, 'title') }}}}\n::end-block\n");
+            let site = BodyGuards::scan(&body).scope_at(TypeScope::unguarded(&declared), body.find("frontmatter").unwrap());
+            check_expression_calls(&parse_spanned("frontmatter(foo, 'title')").unwrap(), &site)[0].category()
+        };
+        assert_eq!(body_category("probe_pred(foo, 1)"), Compatible);
+        assert_eq!(body_category("probe_pred(foo, {})"), Unknown);
+        assert_eq!(body_category("probe_pred(foo, {}) && true"), Unknown);
+        assert_eq!(hooks::handler_entries("probe_pred"), 0);
+    }
+}
+
+/// The catalog's own `narrows(...)` declarations (the shipped built-ins),
+/// read through the scope: what each branch proves about the original value.
+mod declared_builtin_facts {
+    use super::*;
+
+    /// `file_exists` and `is_file_type` both make an `unknown` subject a
+    /// `file` on the true side. Existence is not `true-iff`: the false side
+    /// excludes nothing, because a valid path to a missing file is still a
+    /// possible file value.
+    #[test]
+    fn the_file_predicates_narrow_unknown_to_file_on_the_true_side_only() {
+        let schema = schema("source: unknown\nchoice:\n  - file(required)\n  - number(required)\n");
+        let declared = DeclaredTypes::new(Some(&schema));
+        hooks::reset_handler_entries();
+        for predicate in ["is_file_type", "file_exists"] {
+            let guard = format!("{predicate}(source)");
+            assert_eq!(narrowed(&declared, &guard, Polarity::True, "source"), "file", "{predicate}");
+            assert_eq!(narrowed(&declared, &guard, Polarity::False, "source"), "unknown", "{predicate}");
+            let guard = format!("{predicate}(choice)");
+            assert_eq!(narrowed(&declared, &guard, Polarity::True, "choice"), "file", "{predicate}");
+            assert_eq!(narrowed(&declared, &guard, Polarity::False, "choice"), "file | number", "{predicate}");
+        }
+        assert_eq!(category_of(&declared, "frontmatter(source, 'title')", "frontmatter"), Unknown);
+        for predicate in ["is_file_type", "file_exists"] {
+            let call = format!("{predicate}(source) && frontmatter(source, 'title')");
+            assert_eq!(category_of(&declared, &call, "frontmatter"), Compatible, "{predicate}");
+        }
+        assert_eq!(hooks::handler_entries("file_exists"), 0);
+        assert_eq!(hooks::handler_entries("is_file_type"), 0);
+    }
+
+    /// The migrated `true-iff` primitives keep both branch shapes, and
+    /// `is_empty` proves only presence on its false side.
+    #[test]
+    fn the_migrated_primitives_keep_their_branch_shapes() {
+        let schema = schema(UNION);
+        let declared = DeclaredTypes::new(Some(&schema));
+        assert_eq!(narrowed(&declared, "is_string(foo)", Polarity::True, "foo"), "string");
+        assert_eq!(narrowed(&declared, "is_string(foo)", Polarity::False, "foo"), "number");
+        assert_eq!(narrowed(&declared, "is_number(foo)", Polarity::True, "foo"), "number");
+        assert_eq!(narrowed(&declared, "is_number(foo)", Polarity::False, "foo"), "string");
+        assert_eq!(narrowed(&declared, "is_null(x)", Polarity::True, "x"), "null");
+        assert_eq!(narrowed(&declared, "is_null(x)", Polarity::False, "x"), "number");
+        assert_eq!(narrowed(&declared, "is_empty(x)", Polarity::False, "x"), "number");
+        assert_eq!(narrowed(&declared, "is_empty(x)", Polarity::True, "x"), "number | null");
+        assert_eq!(narrowed(&declared, "is_empty(foo)", Polarity::False, "foo"), "number | string");
+        let objects = schema_with_object_and_array();
+        let declared = DeclaredTypes::new(Some(&objects));
+        assert_eq!(narrowed(&declared, "is_array(v)", Polarity::True, "v"), "unknown[]");
+        assert_eq!(narrowed(&declared, "is_array(v)", Polarity::False, "v"), "string | {a: string}");
+        assert_eq!(narrowed(&declared, "is_object(v)", Polarity::False, "v"), "string | unknown[]");
+    }
+
+    fn schema_with_object_and_array() -> SimplifiedSchema {
+        schema("v:\n  - string(required)\n  - unknown[](required)\n  - \"{ a: string }\"\n")
+    }
+
+    /// A function's aliases resolve to the same registration, so they narrow
+    /// identically.
+    #[test]
+    fn aliases_narrow_like_the_canonical_name() {
+        let schema = schema("source: unknown\n");
+        let union = super::schema(UNION);
+        let declared = DeclaredTypes::new(Some(&schema));
+        for alias in ["fileExists", "fileexists"] {
+            assert_eq!(narrowed(&declared, &format!("{alias}(source)"), Polarity::True, "source"), "file", "{alias}");
+        }
+        let declared = DeclaredTypes::new(Some(&union));
+        assert_eq!(narrowed(&declared, "isstring(foo)", Polarity::True, "foo"), "string");
+        assert_eq!(narrowed(&declared, "isstring(foo)", Polarity::False, "foo"), "number");
+    }
+
+    /// When the argument carrying the fact is omitted, the call proves
+    /// nothing about any other argument.
+    #[test]
+    fn an_omitted_optional_fact_argument_narrows_nothing() {
+        let schema = schema(UNION);
+        let declared = DeclaredTypes::new(Some(&schema));
+        let signature = "function(parameters(first: unknown | null, second?: unknown | null); returns(boolean); narrows(second: string; true-iff))";
+        let builder = FunctionRegistration::builder("optional_fact", signature);
+        let _guard = hooks::register(builder.build().expect("registers"), Arc::new(|_| Ok(json!(true))));
+        assert_eq!(narrowed(&declared, "optional_fact(foo)", Polarity::True, "foo"), "number | string");
+        assert_eq!(narrowed(&declared, "optional_fact(foo)", Polarity::False, "foo"), "number | string");
+        assert_eq!(narrowed(&declared, "optional_fact(1, foo)", Polarity::True, "foo"), "string");
+        assert_eq!(narrowed(&declared, "optional_fact(1, foo)", Polarity::False, "foo"), "number");
     }
 }
 

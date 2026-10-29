@@ -1387,6 +1387,53 @@ fn migrated_shipped_definitions_declare_their_presence() {
     );
 }
 
+/// Every shipped catalog entry carrying `narrows(...)` compiles a fact
+/// through the public registration path, and doing so runs nothing: the
+/// effect counters stay put and the catalog file is untouched.
+#[test]
+fn shipped_catalog_narrows_clauses_compile_facts_passively() {
+    use darkmatter::markdown::compose::expression::call_binding::{FactKind, FactType, FunctionRegistration};
+    use darkmatter::markdown::compose::expression::expression_function_descriptors;
+
+    let path = repo_root().join("darkmatter/schemas/partials/functions.yaml");
+    let before = fingerprint([path.as_path()]);
+    let counters = effect_counters();
+
+    let mut declared: BTreeMap<String, Vec<_>> = BTreeMap::new();
+    for descriptor in expression_function_descriptors() {
+        declared.entry(descriptor.name.to_string()).or_default().push(descriptor.function_type.clone());
+    }
+    let mut facts = BTreeMap::new();
+    for (name, overloads) in declared {
+        if overloads.iter().all(|overload| overload.narrows.is_none()) {
+            continue;
+        }
+        let registration = FunctionRegistration::builder_from_types(name.clone(), overloads)
+            .build()
+            .unwrap_or_else(|error| panic!("`{name}` registers: {error}"));
+        let fact = registration.narrowing_fact().unwrap_or_else(|| panic!("`{name}` compiles a fact")).clone();
+        facts.insert(name, (fact.kind(), fact.fact_type().clone()));
+    }
+
+    let ty = |text: &'static str| FactType::Type(text.into());
+    assert_eq!(
+        facts,
+        BTreeMap::from([
+            ("file_exists".to_string(), (FactKind::TrueImplies, ty("file"))),
+            ("is_array".to_string(), (FactKind::TrueIff, ty("unknown[]"))),
+            ("is_empty".to_string(), (FactKind::FalseImplies, FactType::NonNull)),
+            ("is_file_type".to_string(), (FactKind::TrueImplies, ty("file"))),
+            ("is_null".to_string(), (FactKind::TrueIff, ty("null"))),
+            ("is_number".to_string(), (FactKind::TrueIff, ty("number"))),
+            ("is_object".to_string(), (FactKind::TrueIff, ty("object"))),
+            ("is_string".to_string(), (FactKind::TrueIff, ty("string"))),
+        ]),
+    );
+
+    assert_eq!(effect_counters(), counters, "compiling a shipped fact ran an effect");
+    assert!(before == fingerprint([path.as_path()]), "compiling a shipped fact mutated the catalog");
+}
+
 /// The first `steps` property condition anywhere in `expr`.
 fn steps_condition(expr: &MatchExpr) -> Option<&PropertyAtom> {
     match expr {

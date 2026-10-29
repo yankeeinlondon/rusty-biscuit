@@ -15,6 +15,7 @@ mod cursor;
 mod definitions;
 pub mod grammar;
 mod lint;
+pub(crate) mod narrowing;
 pub mod query;
 mod serialize;
 mod signature;
@@ -44,7 +45,7 @@ pub use query::{
 };
 pub use serialize::{serialize_property_atom, serialize_property_def};
 pub use source::{
-    LocatedDefinitionFailure, SchemaConstraintConflictKind, SchemaConstraintOrigin,
+    LocatedDefinitionFailure, LocatedRelated, SchemaConstraintConflictKind, SchemaConstraintOrigin,
     SchemaConstraintParticipant, SchemaReferenceSite, SchemaSourceId,
     SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaUnionRejection,
     SchemaValueEntry, SchemaValueKind, SchemaValueNode, SourceAware, flow_collection_end, locate_schema_value,
@@ -59,7 +60,7 @@ pub use standalone::{
 };
 pub use types::{
     CallExample, Constraint, ExampleOutcome, FunctionParameter, FunctionParameters, FunctionType,
-    LOCAL_REFERENCE, OperandForm, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
+    LOCAL_REFERENCE, NarrowsClause, NarrowsKind, OperandForm, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaArm, SchemaShape,
     SimplifiedSchema, SimplifiedType, SuggestionCandidate, TupleElement, TupleType, TypeExpr, operands_verb,
 };
 #[cfg(feature = "work-counters")]
@@ -73,7 +74,7 @@ use indexmap::IndexMap;
 use serde_yaml_ng::Value as YamlValue;
 
 use crate::markdown::schemas::{
-    errors::SchemaError,
+    errors::{GrammarRelated, SchemaError},
     reference::{SchemaReference, classify_schema_reference},
 };
 
@@ -196,6 +197,7 @@ pub(crate) fn parse_yaml_schema_located(
                                 describe_yaml(other)
                             ),
                             span: 0..0,
+                            related: Vec::new(),
                         }));
                     }
                 };
@@ -206,6 +208,7 @@ pub(crate) fn parse_yaml_schema_located(
                     property: "<root>".into(),
                     message: "root union must have at least one arm".into(),
                     span: 0..0,
+                    related: Vec::new(),
                 }));
             }
             Ok(SimplifiedSchema::Union(arms))
@@ -217,6 +220,7 @@ pub(crate) fn parse_yaml_schema_located(
                 describe_yaml(other)
             ),
             span: 0..0,
+            related: Vec::new(),
         })),
     }
 }
@@ -258,6 +262,7 @@ fn parse_schema_shape(
             property: context.to_string(),
             message: "expected a mapping of property names to type expressions".into(),
             span: 0..0,
+            related: Vec::new(),
         })
     })?;
 
@@ -270,6 +275,7 @@ fn parse_schema_shape(
                 property: context.to_string(),
                 message: "property names must be strings".into(),
                 span: 0..0,
+                related: Vec::new(),
             })
         })?;
         // `$constraints` is reserved schema metadata (object arity, O-C3): it is
@@ -293,6 +299,7 @@ fn parse_schema_shape(
                     property: context.to_string(),
                     message,
                     span: 0..0,
+                    related: Vec::new(),
                 })
             })?;
             let def = parse_property_definition_at_depth(
@@ -336,6 +343,7 @@ fn parse_dollar_constraints(
             property: context.to_string(),
             message: "`$constraints` must be a mapping of constraint keywords to values".into(),
             span: 0..0,
+            related: Vec::new(),
         })
     })?;
     let mut out = Vec::with_capacity(map.len());
@@ -345,6 +353,7 @@ fn parse_dollar_constraints(
                 property: context.to_string(),
                 message: "`$constraints` keys must be strings".into(),
                 span: 0..0,
+                related: Vec::new(),
             })
         })?;
         out.push(
@@ -387,6 +396,7 @@ fn parse_dollar_constraint(context: &str, key: &str, v: &YamlValue) -> Result<Co
                 property: context.to_string(),
                 message: format!("unknown `$constraints` key `{other}`"),
                 span: 0..0,
+                related: Vec::new(),
             });
         }
     };
@@ -401,6 +411,7 @@ fn constraints_usize(context: &str, key: &str, value: &YamlValue) -> Result<usiz
             property: context.to_string(),
             message: format!("`$constraints.{key}` requires a non-negative integer"),
             span: 0..0,
+            related: Vec::new(),
         })
 }
 
@@ -409,6 +420,7 @@ fn constraints_keys(context: &str, key: &str, value: &YamlValue) -> Result<Vec<S
         property: context.to_string(),
         message,
         span: 0..0,
+        related: Vec::new(),
     };
     let keys = value
         .as_sequence()
@@ -432,6 +444,7 @@ fn constraints_flag(context: &str, key: &str, value: &YamlValue) -> Result<(), S
             property: context.to_string(),
             message: format!("`$constraints.{key}` is a flag constraint and must be `true`"),
             span: 0..0,
+            related: Vec::new(),
         })
     }
 }
@@ -484,6 +497,7 @@ fn parse_property_definition_at_depth(
                                     "property-level union arm[{idx}] is itself a `|` union; list each option separately"
                                 ),
                                 span: 0..s.len(),
+                                related: Vec::new(),
                             }));
                         }
                     },
@@ -508,6 +522,7 @@ fn parse_property_definition_at_depth(
                                 describe_yaml(other)
                             ),
                             span: 0..0,
+                            related: Vec::new(),
                         }));
                     }
                 }
@@ -519,14 +534,20 @@ fn parse_property_definition_at_depth(
                     property: name.to_string(),
                     message: "property-level union must have at least one arm".into(),
                     span: 0..0,
+                    related: Vec::new(),
                 }));
             }
-            if let Some((idx, span)) = grammar::second_suggestion_span(&arms) {
-                return Err(DefinitionFailure::at(&path.union_arm(idx))(SchemaError::Grammar {
+            if let Some(duplicate) = grammar::second_suggestion_span(&arms) {
+                return Err(DefinitionFailure::at(&path.union_arm(duplicate.arm))(SchemaError::Grammar {
                     property: name.to_string(),
                     message: "a property definition may contain at most one `suggest` constraint"
                         .into(),
-                    span,
+                    span: duplicate.span,
+                    related: vec![GrammarRelated {
+                        message: grammar::FIRST_SUGGESTION.into(),
+                        span: duplicate.first_span,
+                        arm: (duplicate.first_arm != duplicate.arm).then_some(duplicate.first_arm),
+                    }],
                 }));
             }
             if let Some((idx, message)) = signature::duplicate_overload_arm(&arms, None) {
@@ -534,6 +555,29 @@ fn parse_property_definition_at_depth(
                     property: name.to_string(),
                     message,
                     span: 0..0,
+                    related: Vec::new(),
+                }));
+            }
+            if let Some(problem) = narrowing::overload_arms_problem(&arms) {
+                // Each arm is its own YAML scalar: each span is in the arm it
+                // was located in, and an overload without a clause is its
+                // whole scalar.
+                let related = problem
+                    .related
+                    .and_then(|related| {
+                        let span = related.span.or_else(|| match items.get(related.overload) {
+                            Some(YamlValue::String(text)) => Some(0..text.len()),
+                            _ => None,
+                        })?;
+                        Some(GrammarRelated { message: related.message, span, arm: Some(related.overload) })
+                    })
+                    .into_iter()
+                    .collect();
+                return Err(DefinitionFailure::at(&path.union_arm(problem.located))(SchemaError::Grammar {
+                    property: name.to_string(),
+                    message: problem.message,
+                    span: problem.span,
+                    related,
                 }));
             }
             Ok(PropertyDef::Union(arms))
@@ -545,6 +589,7 @@ fn parse_property_definition_at_depth(
                 describe_yaml(other)
             ),
             span: 0..0,
+            related: Vec::new(),
         })),
     }
 }
@@ -568,6 +613,7 @@ fn parse_mapping_atom(
                 grammar::MAX_INLINE_OBJECT_DEPTH,
             ),
             span: 0..0,
+            related: Vec::new(),
         }));
     }
     let mut shape = parse_schema_shape(context, value, nested_object_depth + 1, path)?;

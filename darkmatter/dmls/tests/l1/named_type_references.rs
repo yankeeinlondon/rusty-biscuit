@@ -508,6 +508,60 @@ fn an_error_inside_a_referenced_schema_points_into_that_file() {
     fixture.shutdown();
 }
 
+/// A rejected `narrows` declaration in a file this document reaches, as a
+/// referenced schema or through a named import, is related at its tokens in
+/// that file: the rejected token first, then the declaration it conflicts
+/// with.
+#[test]
+fn a_rejected_narrows_declaration_in_an_imported_file_is_related_into_that_file() {
+    let workspace = LspWorkspace::new();
+    let first = "narrows(x: string; true-iff)";
+    let duplicate = format!("function(parameters(x: unknown | null); returns(boolean); {first}; narrows(x; false-implies))");
+    let disagreeing = format!(
+        "function(parameters(x: unknown | null); returns(boolean); {first}) | \
+         function(parameters(x: unknown | null, y: string); returns(boolean); narrows(x: number; true-iff))"
+    );
+    let wrapper = write(&workspace, "wrapper.yaml", &format!("$schema:\n  pred: '{duplicate}'\n"));
+    let types = write(&workspace, "types.yaml", &format!("kind: schema\ntypes:\n  pred: |-\n    {disagreeing}\n"));
+    let referencing = write(&workspace, "referencing.md", "---\n$schema: ./wrapper.yaml\n---\n\nBody\n");
+    let importing = write(&workspace, "importing.md", "---\n$schema:\n  p: 'pred@./types.yaml'\n---\n\nBody\n");
+    let standalone = write(&workspace, "standalone.yaml", "kind: schema\ntypes:\n  p: pred@./types.yaml\n");
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(initialize_params(workspace.path()));
+    for (document, imported, primary, related) in [
+        (&referencing, &wrapper, ("narrows", 1), (first, 0)),
+        (&importing, &types, ("narrows(x: number; true-iff)", 0), (first, 0)),
+        (&standalone, &types, ("narrows(x: number; true-iff)", 0), (first, 0)),
+    ] {
+        open(&fixture, document);
+        let diagnostics = fixture.wait_for_diagnostics(&document.uri);
+        let rejected: Vec<&Value> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["message"].as_str().is_some_and(|message| message.contains("narrows")))
+            .collect();
+        let [diagnostic] = rejected.as_slice() else {
+            panic!("{}: one narrows diagnostic: {diagnostics:#?}", document.uri);
+        };
+        let imported_uri = canonical_uri(&imported.path);
+        let locations: Vec<Value> = diagnostic["relatedInformation"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{}: related information: {diagnostic:#?}", document.uri))
+            .iter()
+            .map(|related| related["location"].clone())
+            .collect();
+        assert_eq!(
+            locations,
+            vec![
+                json!({ "uri": imported_uri, "range": range_of(&imported.text, primary.0, primary.1) }),
+                json!({ "uri": imported_uri, "range": range_of(&imported.text, related.0, related.1) }),
+            ],
+            "{}: {diagnostic:#?}",
+            document.uri
+        );
+    }
+    fixture.shutdown();
+}
+
 #[test]
 fn editing_an_imported_definition_refreshes_every_assistance_without_reopening() {
     let workspace = LspWorkspace::new();

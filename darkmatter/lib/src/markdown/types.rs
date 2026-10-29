@@ -235,6 +235,17 @@ pub enum MarkdownError {
     #[error("Page block error: {0}")]
     PageBlock(#[from] Box<crate::markdown::compose::page_blocks::PageBlockError>),
 
+    /// Collection (`::map` / `::filter`) error.
+    #[error("Collection error: {0}")]
+    Collection(#[from] Box<crate::markdown::compose::collection_blocks::CollectionError>),
+
+    /// A later body stage failed at a site a `::map` / `::filter` body
+    /// repeated. The message, code, and recoverability are the wrapped
+    /// error's ([`Self::without_iteration`]); the wrapper adds the authored
+    /// site and the original items of the copy.
+    #[error("{0}")]
+    InIteration(#[source] Box<crate::markdown::compose::collection_blocks::IterationFailure>),
+
     /// Shell block pipeline error.
     #[error("Shell block error: {0}")]
     ShellBlock(#[from] Box<crate::markdown::compose::ShellBlockError>),
@@ -347,6 +358,12 @@ impl From<crate::markdown::compose::page_blocks::PageBlockError> for MarkdownErr
     }
 }
 
+impl From<crate::markdown::compose::collection_blocks::CollectionError> for MarkdownError {
+    fn from(err: crate::markdown::compose::collection_blocks::CollectionError) -> Self {
+        MarkdownError::Collection(Box::new(err))
+    }
+}
+
 impl From<crate::markdown::compose::ShellBlockError> for MarkdownError {
     fn from(err: crate::markdown::compose::ShellBlockError) -> Self {
         MarkdownError::ShellBlock(Box::new(err))
@@ -363,6 +380,34 @@ impl From<crate::markdown::reference::ReferenceError> for MarkdownError {
 pub type MarkdownResult<T> = Result<T, MarkdownError>;
 
 impl MarkdownError {
+    /// The failure itself, past every [`Self::InIteration`] context: what a
+    /// recovery or fatality decision classifies.
+    pub fn without_iteration(&self) -> &MarkdownError {
+        let mut error = self;
+        while let MarkdownError::InIteration(failure) = error {
+            error = &failure.error;
+        }
+        error
+    }
+
+    /// A request-fatal iteration exhaustion anywhere in this failure's chain.
+    pub fn iteration_failure(&self) -> Option<&crate::markdown::compose::expression::iteration::IterationError> {
+        use crate::markdown::compose::expression::ExpressionError;
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = current {
+            let expression = error.downcast_ref::<ExpressionError>()
+                .or_else(|| error.downcast_ref::<Box<ExpressionError>>().map(AsRef::as_ref));
+            if let Some(ExpressionError::IterationLimit(limit)) = expression.map(ExpressionError::without_callbacks) {
+                return Some(limit);
+            }
+            if let Some(limit) = error.downcast_ref::<crate::markdown::compose::expression::iteration::IterationError>() {
+                return Some(limit);
+            }
+            current = error.source();
+        }
+        None
+    }
+
     /// The class of the file-reference failure nearest the top of this
     /// error's cause chain, if a file reference failed.
     ///
@@ -514,7 +559,7 @@ impl MarkdownError {
 
         let finding = self.rejected_call()?.rejection_diagnostic()?;
         // A condition: located by its text on its line.
-        let condition = match self {
+        let condition = match self.without_iteration() {
             MarkdownError::PageBlock(inner) => match inner.as_ref() {
                 PageBlockError::Condition(condition) => match condition.as_ref() {
                     ConditionError::Eval { ctx, expr, line, .. } => Some((ctx.as_ref(), expr, *line)),
@@ -650,8 +695,9 @@ impl MarkdownError {
     /// compose with no file locus) leaves the error untouched so the renderer
     /// keeps the late-binding presentation rather than linking a non-file.
     ///
-    /// Errors that are not `Interpolation`, or whose `source` is already
-    /// `OnDisk`/`OnDiskSpan`/`Supplied`, pass through unchanged.
+    /// An [`Self::InIteration`] context passes the call to the error it
+    /// wraps. Errors that are not `Interpolation`, or whose `source` is
+    /// already `OnDisk`/`OnDiskSpan`/`Supplied`, pass through unchanged.
     pub(crate) fn with_on_disk_source(self, ctx: &SourceContext) -> Self {
         match self {
             MarkdownError::Interpolation {
@@ -674,6 +720,10 @@ impl MarkdownError {
                     source,
                     cause,
                 }
+            }
+            MarkdownError::InIteration(mut failure) => {
+                failure.error = Box::new(failure.error.with_on_disk_source(ctx));
+                MarkdownError::InIteration(failure)
             }
             other => other,
         }
@@ -733,6 +783,8 @@ impl BlockError for MarkdownError {
             MarkdownError::Transclusion(inner) => inner.status_block(term),
             MarkdownError::ShellExpansion(inner) => inner.status_block(term),
             MarkdownError::PageBlock(inner) => inner.status_block(term),
+            MarkdownError::Collection(inner) => inner.status_block(term),
+            MarkdownError::InIteration(inner) => inner.status_block(term),
             MarkdownError::ShellBlock(inner) => inner.status_block(term),
             MarkdownError::TocLinking(inner) => inner.status_block(term),
             MarkdownError::FileLinks(inner) => inner.status_block(term),

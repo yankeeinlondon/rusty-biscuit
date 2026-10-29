@@ -1,4 +1,4 @@
-//! Every registered expression function binds through the one coercion
+//! Every value-argument expression function binds through the one coercion
 //! engine before its handler runs (spec criterion 10), and no handler keeps
 //! its own arity, type, or conversion code (criterion 11).
 //!
@@ -584,12 +584,20 @@ registry_rows! {
         converts(domain("as_markdown(42)")));
 }
 
-/// The rows above cover exactly the registry's canonical functions, so a
-/// newly registered function fails here until it has a row.
+/// Value-handler rows and inline callback contracts cover the registry exactly.
+/// A callback has no value handler to count; its call is checked passively.
 #[test]
 fn every_registered_function_has_a_row() {
-    let rows: BTreeSet<&str> = ROW_NAMES.iter().copied().collect();
+    let mut rows: BTreeSet<&str> = ROW_NAMES.iter().copied().collect();
     assert_eq!(rows.len(), ROW_NAMES.len(), "a function has two rows");
+    let declared = darkmatter::markdown::compose::expression::DeclaredTypes::new(None);
+    let scope = darkmatter::markdown::compose::expression::TypeScope::unguarded(&declared);
+    for (name, source) in [("map", "map([1], x => x)"), ("filter", "filter([1], x -> x)")] {
+        assert!(rows.insert(name), "a callback also has a value-handler row");
+        let expression = darkmatter::markdown::compose::expression::parse_spanned(source).unwrap();
+        let checks = darkmatter::markdown::compose::expression::check_expression_calls(&expression, &scope);
+        assert_eq!(checks[0].category(), darkmatter::markdown::compose::expression::ArgumentCategory::Compatible);
+    }
     let registered: BTreeSet<&str> = dispatchable_canonical_names().into_iter().collect();
     let missing: Vec<_> = registered.difference(&rows).collect();
     let extra: Vec<_> = rows.difference(&registered).collect();

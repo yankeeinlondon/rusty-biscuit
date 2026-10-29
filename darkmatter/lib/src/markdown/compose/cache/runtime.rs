@@ -41,6 +41,17 @@ pub(crate) struct ComposeResult {
     pub report: ComposeReport,
     /// Every runtime-context group read by a source in this subtree.
     pub context_groups: crate::markdown::compose::ContextRequirements,
+    /// What composing this subtree consumed of the request's iteration
+    /// allowances. A reuse reserves the same amount, so a cached child never
+    /// bypasses a budget its first composition paid.
+    pub usage: crate::markdown::compose::expression::iteration::ExpansionUsage,
+}
+
+/// A child composition's result and whether this call reused it.
+pub(crate) struct ComposeOutcome {
+    pub result: Arc<ComposeResult>,
+    /// `true` when this call did not run the composition.
+    pub reused: bool,
 }
 
 /// The cached result of an individual operation (code transclusion, TOC linking).
@@ -70,6 +81,11 @@ pub(crate) struct RunLocalCache {
     markdown_documents: Arc<DashMap<String, Markdown>>,
     toc_headings: Arc<DashMap<String, Vec<MarkdownTocNode>>>,
     compose_results: Arc<DashMap<String, Arc<SingleFlightSlot<ComposeResult>>>>,
+    /// The typed collection failure of each composition that ended in one.
+    /// It is request-fatal, so a consumer that was waiting on the same key
+    /// receives it whole instead of recomposing the subtree to reach it
+    /// again, or seeing it as its formatted text.
+    compose_failures: Arc<DashMap<String, crate::markdown::compose::collection_blocks::CollectionError>>,
     operation_results: Arc<DashMap<String, Arc<SingleFlightSlot<OperationResult>>>>,
     stats: Arc<Mutex<CacheStats>>,
     access_mode: CacheAccessMode,
@@ -97,6 +113,7 @@ impl RunLocalCache {
             markdown_documents: Arc::new(DashMap::new()),
             toc_headings: Arc::new(DashMap::new()),
             compose_results: Arc::new(DashMap::new()),
+            compose_failures: Arc::new(DashMap::new()),
             operation_results: Arc::new(DashMap::new()),
             stats: Arc::new(Mutex::new(CacheStats::default())),
             access_mode,
@@ -164,7 +181,41 @@ impl RunLocalCache {
     /// If another thread is computing (InFlight), waits up to 30s then
     /// falls back to duplicate computation to avoid rayon deadlock.
     /// If absent, marks InFlight, runs the closure, caches the result.
+    #[cfg(test)]
     pub fn get_or_compute_compose<F>(
+        &self,
+        key: &str,
+        compute: F,
+    ) -> MarkdownResult<Arc<ComposeResult>>
+    where
+        F: FnOnce() -> MarkdownResult<ComposeResult>,
+    {
+        self.get_or_compute_compose_outcome(key, compute).map(|outcome| outcome.result)
+    }
+
+    /// [`Self::get_or_compute_compose`], also saying whether this call ran
+    /// `compute`.
+    ///
+    /// A call that did not (a hit, or a wait on another consumer's
+    /// computation) is a reuse: the caller reserves the result's recorded
+    /// usage, because the work it stands for did not run in this call.
+    pub fn get_or_compute_compose_outcome<F>(
+        &self,
+        key: &str,
+        compute: F,
+    ) -> MarkdownResult<ComposeOutcome>
+    where
+        F: FnOnce() -> MarkdownResult<ComposeResult>,
+    {
+        let computed = std::cell::Cell::new(false);
+        let result = self.compose_slot(key, || {
+            computed.set(true);
+            compute()
+        })?;
+        Ok(ComposeOutcome { result, reused: !computed.get() })
+    }
+
+    fn compose_slot<F>(
         &self,
         key: &str,
         compute: F,
@@ -239,6 +290,9 @@ impl RunLocalCache {
                 Ok(arc_result)
             }
             Err(err) => {
+                if let crate::markdown::types::MarkdownError::Collection(collection) = &err {
+                    self.compose_failures.insert(key.to_string(), (**collection).clone());
+                }
                 {
                     let mut state = slot.state.lock().unwrap();
                     *state = SlotState::Failed(err.to_string());
@@ -373,6 +427,9 @@ impl RunLocalCache {
             SlotState::Failed(msg) => {
                 let msg = msg.clone();
                 drop(state);
+                if let Some(typed) = self.compose_failures.get(key) {
+                    return Err(crate::markdown::types::MarkdownError::Collection(Box::new(typed.value().clone())));
+                }
                 self.record_miss();
                 let result = fallback_compute()?;
                 let arc_result = Arc::new(result);
@@ -493,6 +550,7 @@ mod tests {
                         content: format!("result-{}", call_count),
                         report: ComposeReport::new(),
                         context_groups: Default::default(),
+                        usage: Default::default(),
                     })
                 })
                 .unwrap();
@@ -517,6 +575,7 @@ mod tests {
                     content: "hello".to_string(),
                     report: ComposeReport::new(),
                     context_groups: Default::default(),
+                    usage: Default::default(),
                 })
             })
             .unwrap();
@@ -528,6 +587,7 @@ mod tests {
                     content: "should not compute".to_string(),
                     report: ComposeReport::new(),
                     context_groups: Default::default(),
+                    usage: Default::default(),
                 })
             })
             .unwrap();
@@ -571,6 +631,7 @@ mod tests {
                                     content: "shared-result".to_string(),
                                     report: ComposeReport::new(),
                                     context_groups: Default::default(),
+                                    usage: Default::default(),
                                 })
                             },
                         )
@@ -633,6 +694,7 @@ mod tests {
                     content: "original".to_string(),
                     report: ComposeReport::new(),
                     context_groups: Default::default(),
+                    usage: Default::default(),
                 })
             })
             .unwrap();
@@ -643,6 +705,7 @@ mod tests {
             markdown_documents: Arc::clone(&cache.markdown_documents),
             toc_headings: Arc::clone(&cache.toc_headings),
             compose_results: Arc::clone(&cache.compose_results),
+            compose_failures: Arc::clone(&cache.compose_failures),
             operation_results: Arc::clone(&cache.operation_results),
             stats: Arc::clone(&cache.stats),
         };
@@ -653,6 +716,7 @@ mod tests {
                     content: "refreshed".to_string(),
                     report: ComposeReport::new(),
                     context_groups: Default::default(),
+                    usage: Default::default(),
                 })
             })
             .unwrap();
@@ -774,6 +838,7 @@ mod tests {
                     content: "compose-content".to_string(),
                     report: ComposeReport::new(),
                     context_groups: Default::default(),
+                    usage: Default::default(),
                 })
             })
             .unwrap();

@@ -6,6 +6,7 @@ types:
         function(
             parameters(value: unknown | null);
             returns(boolean);
+            narrows(value: file; true-implies);
             category(Project);
         ) -> Returns true when the value is text naming a Markdown file of the project.
     project_label: |-

@@ -213,3 +213,29 @@ fn a_running_editor_recovers_and_withdraws_host_facts_after_watched_changes() {
     assert_eq!(findings(&latest(&mut fixture)), both_incomplete(), "deleted facts withdraw narrowing");
     fixture.shutdown();
 }
+
+/// A recorded fact that disagrees with the catalog's `narrows(...)` clause
+/// makes only that function incomplete: its calls warn and the guard stops
+/// narrowing, while `project_label` keeps its trusted facts.
+#[test]
+fn a_host_facts_artifact_that_disagrees_with_the_catalog_fact_reports_that_function_incomplete() {
+    let catalog = include_str!("../../../lib/tests/fixtures/host_functions/project.yaml");
+    let artifact = include_str!("../../../lib/tests/fixtures/host_functions/project.facts.json");
+    type Edit = fn(&mut Value);
+    let edits: [(&str, Edit); 2] = [
+        ("facts: []", |root| root["functions"]["is_project_file"]["facts"] = json!([])),
+        ("wrong kind", |root| root["functions"]["is_project_file"]["facts"][0]["kind"] = json!("true_iff")),
+    ];
+    for (label, edit) in edits {
+        let mut root: Value = serde_json::from_str(artifact).unwrap();
+        edit(&mut root);
+        let found = diagnostics(catalog, Some(&serde_json::to_string_pretty(&root).unwrap()));
+        let reported = findings(&found);
+        assert!(reported.iter().any(|(_, code)| code == INCOMPLETE), "{label}: {found:#?}");
+        assert_ne!(reported, both_incomplete(), "{label}: project_label stays complete: {found:#?}");
+        assert_ne!(reported, expect(&[(4, INCOMPATIBLE), (8, UNCERTAIN), (9, INCOMPATIBLE)]), "{label}: {found:#?}");
+        assert!(reported.iter().any(|(line, code)| *line == 9 && code == INCOMPATIBLE), "{label}: project_label(42) still checked: {found:#?}");
+        let message = found.iter().find(|d| d["code"] == json!(INCOMPLETE)).unwrap()["message"].as_str().unwrap();
+        assert!(message.contains("catalog"), "{label}: {message}");
+    }
+}

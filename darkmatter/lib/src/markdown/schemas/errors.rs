@@ -25,6 +25,21 @@ use std::{ops::Range, path::PathBuf};
 
 use thiserror::Error;
 
+/// A secondary location of a [`SchemaError::Grammar`] failure: the earlier
+/// declaration a duplicate or a disagreeing overload conflicts with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrammarRelated {
+    /// What the location is, as an editor would label it.
+    pub message: String,
+    /// Byte range in the same type-expression text as the primary `span`,
+    /// unless `arm` names another option.
+    pub span: Range<usize>,
+    /// Set only when the failing definition is a YAML sequence union, whose
+    /// options are separate scalars: the zero-based option whose text `span`
+    /// is in. The primary failure is then located at a sibling option.
+    pub arm: Option<usize>,
+}
+
 /// One reference of a rejected [`SchemaError::NonDescendingCycle`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CycleReference {
@@ -82,12 +97,15 @@ pub enum SchemaError {
     /// `property` identifies the offending property (or a synthetic name like
     /// `"<root>"` / `"<arm[N]>"` when the failure is structural).
     /// `message` is a short description; `span` is the byte range within the
-    /// originating type-and-constraint string.
+    /// originating type-and-constraint string. `related` holds the earlier
+    /// declarations a duplicate or disagreeing overload conflicts with;
+    /// empty for a failure with one location.
     #[error("invalid SimplifiedSchema for property `{property}`: {message}")]
     Grammar {
         property: String,
         message: String,
         span: Range<usize>,
+        related: Vec<GrammarRelated>,
     },
 
     /// A parsed SimplifiedSchema failed to convert to JSON Schema.
@@ -586,6 +604,7 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
                 property,
                 message,
                 span,
+                ..
             } => {
                 let body = vec![
                     Prose::new(format!(
@@ -1281,6 +1300,7 @@ mod tests {
             property: "title".into(),
             message: "unexpected `(`".into(),
             span: 6..7,
+            related: Vec::new(),
         };
         let rendered = err.to_string();
         assert!(rendered.contains("title"));
@@ -1309,6 +1329,7 @@ mod tests {
             property: "title".into(),
             message: "unexpected `(`".into(),
             span: 6..7,
+            related: Vec::new(),
         };
         let out = render(&err);
         assert!(out.contains("SchemaError"), "missing header type: {out}");

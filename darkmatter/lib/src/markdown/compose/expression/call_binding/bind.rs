@@ -306,6 +306,26 @@ impl FunctionRegistration {
         Err(self.failure(candidates, supplied))
     }
 
+    /// Binds a value argument of a callback registration without inventing a
+    /// JSON value for its inline callback. The evaluator checks callback syntax
+    /// and arity separately; current callback registrations have one overload.
+    ///
+    /// ## Errors
+    /// A type or arity error from the same binder used by eager calls.
+    pub fn bind_callback_value(&self, index: usize, value: Value) -> Result<Value, CallBindingError> {
+        let signature = &self.overloads[0];
+        let Some(parameter) = signature.parameter_for(index) else {
+            return Err(self.failure(vec![candidate(signature, arity_problem(signature, index + 1))], index + 1));
+        };
+        match bind_argument(parameter, index, &value, &BindOptions::default()) {
+            Ok((Bound::Kept(_), _)) => Ok(value),
+            Ok((Bound::Converted(value), _)) => Ok(value),
+            Err(error) => Err(self.failure(
+                vec![candidate(signature, SignatureProblem::Arguments(vec![*error]))], index + 1,
+            )),
+        }
+    }
+
     /// Starts an incremental binding for a lazy function; `None` for an eager
     /// one.
     pub fn lazy_call(&self) -> Option<LazyCall<'_>> {

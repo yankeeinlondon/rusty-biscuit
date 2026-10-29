@@ -949,6 +949,12 @@ fn prepare_content(
 )> {
     // Restricted, never widened: an operation the request disabled (the
     // passive `md compose` reference check's `ShellExpansion`) stays off.
+    // A `::map` / `::filter` body is repeated per item at composition and read
+    // through the frame of each copy. This preparation never executes it: a
+    // second run of the callbacks would precede the real one, and a shell
+    // command in a repeated body has no single value to run with. So shell
+    // expansion is left to the composition that owns the copies.
+    let repeats_bodies = md.content().contains("::map") || md.content().contains("::filter");
     let inline_pre_options = options.compose.clone().derive(|compose| {
         let enabled: Vec<ComposeOperation> = [
             ComposeOperation::TextReplacement,
@@ -958,6 +964,11 @@ fn prepare_content(
         ]
         .into_iter()
         .filter(|operation| compose.is_enabled(*operation))
+        .filter(|operation| {
+            !(repeats_bodies
+                && compose.is_enabled(ComposeOperation::CollectionBlocks)
+                && *operation == ComposeOperation::ShellExpansion)
+        })
         .collect();
         compose.only(&enabled)
     });

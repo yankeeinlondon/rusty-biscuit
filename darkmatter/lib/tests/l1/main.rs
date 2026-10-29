@@ -261,6 +261,13 @@ mod trigger_selection_parity;
 mod trigger_spelling_guard;
 mod type_scope_ownership_guard;
 mod unknown_identifier_warning;
+mod collection_analysis;
+mod collection_blocks;
+mod collection_discovery;
+mod collection_execution;
+mod collection_expression_surfaces;
+#[cfg(feature = "effects-instrumentation")]
+mod collection_effects;
 mod url_root_identity;
 mod yaml_block_parity;
 mod lifecycle_passive_compose;

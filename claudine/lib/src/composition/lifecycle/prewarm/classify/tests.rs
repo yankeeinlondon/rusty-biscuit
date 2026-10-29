@@ -164,6 +164,8 @@ fn function_calls_are_ineligible_wherever_they_appear() {
         &inputs(),
         &[
             (json!("{{ upper(title) }}"), skip(SkipReason::FunctionCall)),
+            (json!("{{ map([], x => no_such_function(x)) }}"), skip(SkipReason::FunctionCall)),
+            (json!("{{ filter([], {value} -> value) }}"), skip(SkipReason::FunctionCall)),
             // Zero arguments: no variable read, so a root-only check passes it.
             (json!("on {{ date() }}"), skip(SkipReason::FunctionCall)),
             // A read-only function that probes the login shell.
@@ -297,6 +299,7 @@ const DECIDED_ROOTS: &[(&str, bool)] = &[
     ("ctx", true),
     ("env", true),
     ("current", false),
+    ("local", false),
     ("loop", false),
     ("err", false),
     ("timing", false),
@@ -339,4 +342,15 @@ fn every_reserved_namespace_and_declared_global_has_a_decided_timing() {
             }
         }
     }
+}
+
+#[test]
+fn a_local_read_is_late_and_never_a_frontmatter_read() {
+    let scope = LifecycleScope::Event(LifecycleSignal::Success);
+    // `title` is a frontmatter key; `local.title` is a directive-local binding
+    // that does not exist at this site, so it must not fall back to the key.
+    let local = phrase_in(LifecycleSignal::Success, json!("{{ local.title }}"));
+    assert_eq!(classify(scope, &local, &inputs()), late("local"));
+    let bare = phrase_in(LifecycleSignal::Success, json!("{{ title }}"));
+    assert_eq!(classify(scope, &bare, &inputs()), early("Widget"));
 }

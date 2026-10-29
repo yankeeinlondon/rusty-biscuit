@@ -68,3 +68,61 @@ fn deny_all_fails_the_category_3_document() {
         assert!(stderr.contains("category 3"), "the severity and message are unchanged: {stderr}");
     }
 }
+
+#[test]
+fn an_invalid_call_in_an_empty_callback_rejects_before_execution() {
+    let fixture = CliProcessFixture::named("compose_callback_call_rejected");
+    let document = fixture.write_file("cwd/doc.md", "Body {{ map([], x => min(true, 5)) }}\n");
+    let output = fixture.command().args(["compose", "--output", "report-json"]).arg(&document).output().unwrap();
+    assert_ne!(output.status.code(), Some(0));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report["document"].is_null(), "{report}");
+    assert!(report["diagnostics"].as_array().unwrap().iter().any(|diagnostic| {
+        diagnostic["code"] == "dm.expression.incompatible_call"
+            && diagnostic["message"].as_str().unwrap().contains("min")
+    }), "{report}");
+}
+
+#[test]
+fn callback_expressions_compose_through_frontmatter_body_and_conditions() {
+    let fixture = CliProcessFixture::named("compose_callback_surfaces");
+    let document = fixture.write_file("cwd/doc.md", "---\nselected: \"{{ filter([1, 2, 3], n => n > 1) }}\"\n---\n::block when=\"map(selected, n -> n * 2)\"\n{{ map(selected, n => n * 2) }}\n::end-block\n");
+    let output = fixture.command().arg("compose").arg(&document).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "[4,6]");
+    assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn a_misplaced_lambda_has_a_located_cli_diagnostic_and_no_document() {
+    let fixture = CliProcessFixture::named("compose_misplaced_callback");
+    let document = fixture.write_file("cwd/doc.md", "before\n{{ n => n }}\n");
+    let output = fixture.command().args(["compose", "--output", "report-json"]).arg(&document).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report["document"].is_null(), "{report}");
+    let diagnostic = &report["diagnostics"][0];
+    assert_eq!(diagnostic["code"], "dm.expression.invalid_callback", "{report}");
+    assert!(diagnostic.to_string().contains("doc.md"), "{report}");
+    assert_eq!(diagnostic["source"]["line"], 2, "{report}");
+    assert_eq!(diagnostic["source"]["column"], 1, "{report}");
+}
+
+#[test]
+fn a_callback_file_failure_keeps_key_context_location_and_no_document() {
+    let fixture = CliProcessFixture::named("compose_callback_failure");
+    let document = fixture.write_file("cwd/doc.md", "before\n{{ map({team: [1]}, {value} => filter(value, n => frontmatter('./missing.md'))) }}\n");
+    let output = fixture.command().args(["compose", "--output", "report-json"]).arg(&document).output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report["document"].is_null(), "{report}");
+    let diagnostic = &report["diagnostics"][0];
+    assert_eq!(diagnostic["code"], "dm.expression.evaluation_failure", "{report}");
+    assert!(diagnostic.to_string().contains("doc.md"), "{report}");
+    assert_eq!(diagnostic["source"]["line"], 2, "{report}");
+    assert_eq!(diagnostic["source"]["column"], 1, "{report}");
+    assert_eq!(diagnostic["iteration_path"], serde_json::json!([
+        {"collection": "map", "position": "team"},
+        {"collection": "filter", "position": 0}
+    ]), "{report}");
+}

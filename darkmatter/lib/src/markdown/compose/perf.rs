@@ -18,6 +18,7 @@ pub(crate) enum PerfMetricKind {
     EffectiveStateBuild,
     TextReplacement,
     PageBlocks,
+    CollectionBlocks,
     Interpolation,
     ShellExpansion,
     ShellBlocks,
@@ -41,6 +42,7 @@ impl PerfMetricKind {
             Self::EffectiveStateBuild => ComposeStage::EffectiveStateBuild,
             Self::TextReplacement => ComposeStage::TextReplacement,
             Self::PageBlocks => ComposeStage::PageBlocks,
+            Self::CollectionBlocks => ComposeStage::CollectionBlocks,
             Self::Interpolation => ComposeStage::Interpolation,
             Self::ShellExpansion => ComposeStage::ShellExpansion,
             Self::ShellBlocks => ComposeStage::ShellBlocks,
@@ -64,6 +66,7 @@ impl PerfMetricKind {
             Self::EffectiveStateBuild,
             Self::TextReplacement,
             Self::PageBlocks,
+            Self::CollectionBlocks,
             Self::Interpolation,
             Self::ShellExpansion,
             Self::ShellBlocks,
@@ -87,6 +90,7 @@ impl ComposeOperationPerfMetric {
             Self::FrontmatterShellExpansion => PerfMetricKind::FrontmatterShellExpansion,
             Self::TextReplacement => PerfMetricKind::TextReplacement,
             Self::PageBlocks => PerfMetricKind::PageBlocks,
+            Self::CollectionBlocks => PerfMetricKind::CollectionBlocks,
             Self::Interpolation => PerfMetricKind::Interpolation,
             Self::ShellExpansion => PerfMetricKind::ShellExpansion,
             Self::ShellBlocks => PerfMetricKind::ShellBlocks,
@@ -105,7 +109,7 @@ pub(crate) struct PerfCollector {
     enabled: bool,
     start: Option<Instant>,
     /// Fixed-size array indexed by `PerfMetricKind` ordinal.
-    durations: [(Duration, usize); 17],
+    durations: [(Duration, usize); 18],
     /// Per-`::shell`-directive spans (DM-3). Empty when disabled.
     shell_spans: Vec<ShellCommandSpan>,
     /// Per-group context-capture timings (DM-4). Empty when disabled.
@@ -119,7 +123,7 @@ impl PerfCollector {
         Self {
             enabled,
             start: if enabled { Some(Instant::now()) } else { None },
-            durations: [(Duration::ZERO, 0); 17],
+            durations: [(Duration::ZERO, 0); 18],
             shell_spans: Vec::new(),
             capture_timings: Vec::new(),
         }
@@ -490,6 +494,7 @@ pub enum ComposeStage {
     EffectiveStateBuild,
     TextReplacement,
     PageBlocks,
+    CollectionBlocks,
     Interpolation,
     ShellExpansion,
     ShellBlocks,
@@ -512,6 +517,7 @@ impl std::fmt::Display for ComposeStage {
             Self::EffectiveStateBuild => "effective state build",
             Self::TextReplacement => "text replacement",
             Self::PageBlocks => "page blocks",
+            Self::CollectionBlocks => "collection blocks",
             Self::Interpolation => "interpolation",
             Self::ShellExpansion => "shell expansion",
             Self::ShellBlocks => "shell blocks",
@@ -530,7 +536,7 @@ impl std::fmt::Display for ComposeStage {
 impl ComposeStage {
     /// Returns the `ComposePhase` this stage belongs to (DM-2).
     ///
-    /// Feeds the claudine perf tree, where the 17 flat stages nest under
+    /// Feeds the claudine perf tree, where the 18 flat stages nest under
     /// their four phases.
     pub fn phase(&self) -> ComposePhase {
         match self {
@@ -540,6 +546,7 @@ impl ComposeStage {
             | Self::EffectiveStateBuild
             | Self::TextReplacement
             | Self::PageBlocks
+            | Self::CollectionBlocks
             | Self::Interpolation
             | Self::ShellExpansion
             | Self::ShellBlocks

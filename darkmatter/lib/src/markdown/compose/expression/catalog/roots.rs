@@ -30,6 +30,11 @@ pub enum RootMembers {
     ContextVariables,
     /// Environment variables: string values, open key set, `null` when unset.
     EnvironmentVariables,
+    /// The names bound by the enclosing lexical scopes (callback and
+    /// iteration parameters). The key set exists only at a site inside a
+    /// scope, so a descriptor enumerates no members, and outside any scope
+    /// every key is absent.
+    LexicalBindings,
 }
 
 /// Descriptor for one reserved expression root.
@@ -54,7 +59,7 @@ impl ReservedRootDescriptor {
     pub fn context_members(&self) -> &'static [ContextVariableDescriptor] {
         match self.members {
             RootMembers::ContextVariables => context_variable_descriptors(),
-            RootMembers::DocumentFrontmatter | RootMembers::EnvironmentVariables => &[],
+            RootMembers::DocumentFrontmatter | RootMembers::EnvironmentVariables | RootMembers::LexicalBindings => &[],
         }
     }
 }
@@ -89,6 +94,13 @@ const RESERVED_ROOTS: &[ReservedRootDescriptor] = &[
         description: "The ctx keys, each observed when referenced. Request-owned identity, \
             source path, and resolution anchors stay fixed; mutable facts such as the branch refresh.",
     },
+    ReservedRootDescriptor {
+        name: super::super::LOCAL_ROOT,
+        evaluation: RootEvaluation::Eager,
+        mirrors: None,
+        members: RootMembers::LexicalBindings,
+        description: "Bindings of the enclosing callback or directive scopes; empty outside any scope.",
+    },
 ];
 
 /// All reserved expression roots, in display order.
@@ -101,9 +113,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_reserved_roots_are_exactly_fm_ctx_env_current() {
+    fn the_reserved_roots_are_exactly_fm_ctx_env_current_local() {
         let names: Vec<&str> = reserved_root_descriptors().iter().map(|root| root.name).collect();
-        assert_eq!(names, ["fm", "ctx", "env", "current"]);
+        assert_eq!(names, ["fm", "ctx", "env", "current", "local"]);
     }
 
     /// A lazy root mirrors an eager root with the identical member set, so

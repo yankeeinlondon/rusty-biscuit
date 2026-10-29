@@ -510,6 +510,7 @@ pub fn function_call_at<'a>(
             entries.iter().map(|(_, value)| value).collect()
         }
         SpannedExprKind::FunctionCall { args, .. } => args.iter().collect(),
+        SpannedExprKind::CallbackCall { args, .. } => args.iter().map(|arg| arg.expression()).collect(),
         _ => Vec::new(),
     };
     for child in children {
@@ -518,7 +519,7 @@ pub fn function_call_at<'a>(
         }
     }
     match &expr.kind {
-        SpannedExprKind::FunctionCall { name, .. } => {
+        SpannedExprKind::FunctionCall { name, .. } | SpannedExprKind::CallbackCall { name, .. } => {
             let name_span = expr.span.start..expr.span.start + name.len();
             // Exclusive end so a cursor on `(` does not match; the source-text
             // check rejects synthetic `and`/`or` calls whose span starts at the
@@ -566,6 +567,7 @@ pub fn expression_at(expr: &SpannedExpr, offset: usize) -> Option<&SpannedExpr> 
             entries.iter().map(|(_, value)| value).collect()
         }
         SpannedExprKind::FunctionCall { args, .. } => args.iter().collect(),
+        SpannedExprKind::CallbackCall { args, .. } => args.iter().map(|arg| arg.expression()).collect(),
         _ => Vec::new(),
     };
     for child in children {
@@ -768,6 +770,8 @@ pub enum ExprCompletionKind {
     ReservedRoot,
     /// An expression function.
     Function,
+    /// A lexical local of an enclosing callback or collection body.
+    LocalBinding,
 }
 
 /// One completion candidate for an expression context — either a body `{{ }}`
@@ -878,6 +882,127 @@ pub fn completion_candidates(partial: &str, frontmatter_keys: &[String]) -> Vec<
     }
 
     items
+}
+
+/// [`completion_candidates`] and the host's `extra` candidates as seen from
+/// `site`: the lexical locals visible there (`name` and `local.name`) are
+/// offered, and a frontmatter key a local shadows is not (`fm.<key>` still
+/// reaches it).
+///
+/// Locals come from the library's scope inventory and are typed by it; this
+/// reads names and declared types, and resolves nothing.
+pub fn scoped_completion_candidates(
+    partial: &str,
+    frontmatter_keys: &[String],
+    extra: impl IntoIterator<Item = ExprCompletion>,
+    site: &TypeScope<'_>,
+) -> Vec<ExprCompletion> {
+    let locals: Vec<String> = site
+        .lexical()
+        .map(|layer| layer.names().into_iter().map(str::to_string).collect())
+        .unwrap_or_default();
+    let mut items: Vec<ExprCompletion> = completion_candidates(partial, frontmatter_keys)
+        .into_iter()
+        .chain(extra)
+        .filter(|item| !(item.kind == ExprCompletionKind::FrontmatterKey && locals.contains(&item.label)))
+        .collect();
+    if locals.is_empty() {
+        return items;
+    }
+    let root = local_root_name();
+    if root.starts_with(partial) {
+        items.push(ExprCompletion {
+            label: root.to_string(),
+            insert_text: root.to_string(),
+            kind: ExprCompletionKind::ReservedRoot,
+            detail: Some("reserved root".to_string()),
+            documentation: Some("The bindings of enclosing callbacks and collection bodies.".to_string()),
+        });
+    }
+    for name in &locals {
+        let detail = local_detail(site, name);
+        for label in [name.clone(), format!("{root}.{name}")] {
+            if label.starts_with(partial) {
+                items.push(ExprCompletion {
+                    insert_text: label.clone(),
+                    label,
+                    kind: ExprCompletionKind::LocalBinding,
+                    detail: Some(detail.clone()),
+                    documentation: None,
+                });
+            }
+        }
+    }
+    items.sort_by_key(|item| item.kind != ExprCompletionKind::LocalBinding);
+    items
+}
+
+/// The lexical scope at a cursor, including unfinished callback bodies.
+/// Recovery only supplies a placeholder and missing delimiters; the shared
+/// parser and branch analysis still decide every binding and projected type.
+pub fn cursor_scope<'d>(expression: &str, offset: usize, site: &TypeScope<'d>) -> TypeScope<'d> {
+    let offset = offset.min(expression.len());
+    if let Ok(parsed) = parse(expression) {
+        return branch_scope(&parsed, &(offset..offset), site.clone());
+    }
+    let prefix = &expression[..offset];
+    let start = identifier_prefix_start(prefix);
+    let mut recovered = format!("{}null", &prefix[..start]);
+    let Ok(tokens) = darkmatter::markdown::compose::expression::Lexer::new(&recovered).tokenize_all() else {
+        return site.clone();
+    };
+    use darkmatter::markdown::compose::expression::Token;
+    let mut closing = Vec::new();
+    for token in tokens {
+        match token {
+            Token::LParen => closing.push(')'),
+            Token::LBracket => closing.push(']'),
+            Token::LBrace => closing.push('}'),
+            Token::RParen | Token::RBracket | Token::RBrace => { closing.pop(); }
+            _ => {}
+        }
+    }
+    recovered.extend(closing.into_iter().rev());
+    parse(&recovered).map(|parsed| branch_scope(&parsed, &(start..start), site.clone())).unwrap_or_else(|_| site.clone())
+}
+
+/// Callback declaration and arrow spans from the shared parser, including
+/// nested callbacks. The owner is the function receiving the callback.
+pub fn callback_bindings(expr: &SpannedExpr) -> Vec<(&str, &str, SourceSpan, SourceSpan)> {
+    fn walk<'a>(expr: &'a SpannedExpr, out: &mut Vec<(&'a str, &'a str, SourceSpan, SourceSpan)>) {
+        if let SpannedExprKind::CallbackCall { name, args } = &expr.kind {
+            for arg in args {
+                if let darkmatter::markdown::compose::expression::SpannedCallArgument::Callback(callback) = arg {
+                    let fields: Vec<_> = match &callback.pattern {
+                        darkmatter::markdown::compose::expression::SpannedBindingPattern::Identifier(value) => vec![value],
+                        darkmatter::markdown::compose::expression::SpannedBindingPattern::Fields(fields) => fields.iter().collect(),
+                    };
+                    for field in fields {
+                        out.push((name, &field.value, field.span.clone(), callback.arrow.clone()));
+                    }
+                }
+            }
+        }
+        for child in children(expr) { walk(child, out); }
+    }
+    let mut out = Vec::new();
+    walk(expr, &mut out);
+    out
+}
+
+/// The reserved root that always names a lexical local, from the library's
+/// root catalog.
+fn local_root_name() -> &'static str {
+    darkmatter::markdown::compose::expression::LOCAL_ROOT
+}
+
+/// `local: <type>` for the binding `name` at `site`.
+fn local_detail(site: &TypeScope<'_>, name: &str) -> String {
+    let ty = site.type_of_expr(&darkmatter::markdown::compose::expression::Expr::Variable(name.to_string()));
+    match ty {
+        Some(ty) => format!("local: {}", type_text(&ty)),
+        None => local_root_name().to_string(),
+    }
 }
 
 /// The hover block for a host global or one of its members (`seq`,
@@ -1079,6 +1204,20 @@ pub fn hover_markdown_condition(
     )
 }
 
+/// [`hover_markdown`] for an expression already parsed out of a larger
+/// authored value, such as a `::map` callback's body: `expression` is the
+/// text its spans index and `expr_offset` the cursor's offset into it.
+pub fn hover_markdown_parsed(
+    parsed: SpannedExpr,
+    expression: &str,
+    expr_offset: usize,
+    site: &TypeScope<'_>,
+    frontmatter_scalar: impl Fn(&str) -> Option<String>,
+    schema_property: impl Fn(&str) -> Option<String>,
+) -> String {
+    hover_markdown_from(Ok(parsed), expression, expr_offset, site, frontmatter_scalar, schema_property, None)
+}
+
 /// The expression hover for an expression inside `event`'s lifecycle stack,
 /// parsed with `parser`: identical to [`hover_markdown`] and
 /// [`hover_markdown_condition`], except that a root the event's view declares
@@ -1135,6 +1274,19 @@ fn hover_markdown_from(
         return value;
     };
 
+    let bindings = callback_bindings(&expr);
+    if let Some((owner, name, declaration, _)) = bindings.iter().find(|(_, _, span, _)| span.contains(&expr_offset))
+        && let Some(body) = callback_body_for_declaration(&expr, declaration)
+    {
+        let inner = branch_scope(&expr, &body.span, site.clone());
+        if let Some(ty) = inner.type_of_expr(&darkmatter::markdown::compose::expression::Expr::Variable((*name).to_string())) {
+            value.push_str(&format!("\n\n**Parameter** `{name}` of `{owner}`\n\n{}", local_binding_line(name, &ty)));
+            return value;
+        }
+    }
+    let cursor_site = branch_scope(&expr, &(expr_offset..expr_offset), site.clone());
+    let site = &cursor_site;
+
     // D5: a cursor on a known function-name identifier wins.
     if let Some(name) = function_call_at(&expr, expression, expr_offset) {
         let overloads = function_overloads(name);
@@ -1157,6 +1309,21 @@ fn hover_markdown_from(
     let frontmatter_member = name
         .strip_prefix(document_root().name)
         .and_then(|rest| rest.strip_prefix('.'));
+    // A lexical local shadows every document property of the same name, so
+    // its scoped type is the whole answer (frontmatter and schema lookups
+    // would describe a different binding).
+    if site.resolves_to_local(&name) {
+        if let Some(ty) = scoped_type(&expr, sub_expr, site) {
+            value.push_str(&format!("\n\n{}", local_binding_line(&name, &ty)));
+            let root = name.strip_prefix("local.").unwrap_or(&name).split('.').next().unwrap_or(&name);
+            if let Some(span) = site.lexical().and_then(|layer| layer.span_of_name(root))
+                && let Some((owner, _, _, _)) = bindings.iter().find(|(_, _, declaration, _)| declaration == span)
+            {
+                value.push_str(&format!("\n\nParameter of `{owner}`."));
+            }
+        }
+        return value;
+    }
     if let Some(tail) = name
         .strip_prefix(context_root().name)
         .and_then(|rest| rest.strip_prefix('.'))
@@ -1193,6 +1360,19 @@ fn hover_markdown_from(
     value
 }
 
+fn callback_body_for_declaration<'a>(expr: &'a SpannedExpr, declaration: &SourceSpan) -> Option<&'a SpannedExpr> {
+    if let SpannedExprKind::CallbackCall { args, .. } = &expr.kind {
+        for arg in args {
+            if let darkmatter::markdown::compose::expression::SpannedCallArgument::Callback(callback) = arg
+                && callback.pattern_span.start <= declaration.start && declaration.end <= callback.pattern_span.end
+            {
+                return Some(&callback.body);
+            }
+        }
+    }
+    children(expr).into_iter().find_map(|child| callback_body_for_declaration(child, declaration))
+}
+
 /// The type of `node` (a node of `expr`) at `site` extended by the branch
 /// facts of `expr` that enclose it, when an enclosing guard refined its
 /// declaration or proves it present. `None` for an unrefined type and for a
@@ -1202,9 +1382,32 @@ fn hover_markdown_from(
 /// [`branch_scope`]; DMLS decides none itself. Static: both branches of a
 /// ternary get their own side's type, whichever would run.
 pub fn local_type(expr: &SpannedExpr, node: &SpannedExpr, site: &TypeScope<'_>) -> Option<ScopedType> {
-    let scope = branch_scope(expr, &node.span, site.clone());
-    let ty = scope.type_of_expr(&node.erase())?;
+    let ty = scoped_type(expr, node, site)?;
     (ty.is_refined() || ty.guard_presence().is_some()).then_some(ty)
+}
+
+/// The type of `node` at its own branch of `expr` under `site`, refined or
+/// not; the one read [`local_type`] and the local-binding hover share.
+fn scoped_type(expr: &SpannedExpr, node: &SpannedExpr, site: &TypeScope<'_>) -> Option<ScopedType> {
+    branch_scope(expr, &node.span, site.clone()).type_of_expr(&node.erase())
+}
+
+/// The hover line for a read of the lexical local `path`: its declared or
+/// result type, with the guards that narrowed it when any did.
+fn local_binding_line(path: &str, ty: &ScopedType) -> String {
+    let mut guards: Vec<String> = Vec::new();
+    for origin in ty.refinements().iter().chain(ty.guard_presence()) {
+        let label = format!("`{}`", origin.label());
+        if !guards.contains(&label) {
+            guards.push(label);
+        }
+    }
+    let text = type_text(ty);
+    if guards.is_empty() {
+        format!("Local `{path}`: `{text}`")
+    } else {
+        format!("Local `{path}`: `{text}` (narrowed by {})", guards.join(", "))
+    }
 }
 
 /// The hover line giving [`local_type`] and the guards that narrowed it, or
@@ -1225,7 +1428,12 @@ pub fn local_type_line(expr: &SpannedExpr, node: &SpannedExpr, site: &TypeScope<
 /// A scoped type as type text: its non-null alternatives in the schema
 /// grammar, then `null` when it is still admitted.
 pub fn type_text(ty: &ScopedType) -> String {
-    match ty.shape() {
+    shape_text(ty.shape())
+}
+
+/// [`type_text`] for a bare [`Shape`], such as one entry type of a source.
+pub fn shape_text(shape: &Shape) -> String {
+    match shape {
         Shape::Unknown { non_null: true } => "unknown (not null)".to_string(),
         Shape::Unknown { non_null: false } => "unknown".to_string(),
         Shape::Arms { arms, nullable } => {
@@ -1521,6 +1729,7 @@ fn children(expr: &SpannedExpr) -> Vec<&SpannedExpr> {
             entries.iter().map(|(_, value)| value).collect()
         }
         SpannedExprKind::FunctionCall { args, .. } => args.iter().collect(),
+        SpannedExprKind::CallbackCall { args, .. } => args.iter().map(|arg| arg.expression()).collect(),
         _ => Vec::new(),
     }
 }
@@ -2201,6 +2410,53 @@ mod tests {
         let status = source.find("status").unwrap();
         let sub = expression_at(&expr, status + 1).unwrap();
         assert_eq!(root_identifier(sub).as_deref(), Some("status"));
+    }
+
+    #[test]
+    fn callback_cursor_scopes_keep_nested_ownership_and_restore_outer_bindings() {
+        let declared = darkmatter::markdown::compose::expression::DeclaredTypes::for_schema(None);
+        let site = TypeScope::unguarded(&declared);
+        let source = "map([{name: 'outer'}], p => [map([1], p -> p), p.name, fm.p])";
+        for (needle, expected) in [("p -> p", "literal(1.0)"), ("p.name", "literal(outer)")] {
+            let at = source.find(needle).unwrap() + if needle == "p -> p" { 5 } else { 1 };
+            let hover = hover_markdown(source, at, &site, |_| Some("document".into()), |_| None);
+            assert!(hover.contains("Local `p"), "{hover}");
+            assert!(hover.contains(expected), "{hover}");
+            assert!(hover.contains("Parameter of `map`"), "{hover}");
+            assert!(!hover.contains("from frontmatter"), "{hover}");
+        }
+        let declaration = hover_markdown(source, source.find("p =>").unwrap(), &site, |_| None, |_| None);
+        assert!(declaration.contains("**Parameter** `p` of `map`"), "{declaration}");
+        let frontmatter = hover_markdown(source, source.find("fm.p").unwrap() + 1, &site, |_| Some("document".into()), |_| None);
+        assert!(frontmatter.contains("from frontmatter `p`"), "{frontmatter}");
+        let source = "[map([1], p => p), p]";
+        assert!(cursor_scope(source, source.rfind('p').unwrap(), &site).lexical().is_none());
+        let source = "map(p, p => p)";
+        assert!(cursor_scope(source, 4, &site).lexical().is_none());
+    }
+
+    #[test]
+    fn callback_completion_recovers_incomplete_bodies_and_prioritizes_locals() {
+        let declared = darkmatter::markdown::compose::expression::DeclaredTypes::for_schema(None);
+        let site = TypeScope::unguarded(&declared);
+        for source in ["map([1], p => ", "map([1], p -> local.p", "map([{key: 1}], {key} => ke"] {
+            let scope = cursor_scope(source, source.len(), &site);
+            let candidates = scoped_completion_candidates("", &["p".into(), "title".into()], [], &scope);
+            assert_eq!(candidates[0].kind, ExprCompletionKind::LocalBinding, "{source}");
+            assert!(candidates.iter().any(|item| item.label.starts_with("local.")), "{source}");
+            assert!(!candidates.iter().any(|item| item.label == "p" && item.kind == ExprCompletionKind::FrontmatterKey && source.contains("p =>")));
+        }
+        assert!(cursor_scope("map([1], p", 10, &site).lexical().is_none());
+    }
+
+    #[test]
+    fn function_and_expression_lookup_descend_into_inline_callbacks() {
+        let source = "map(items, p => upper(p.name))";
+        let expr = parse(source).unwrap();
+        assert_eq!(function_call_at(&expr, source, 1), Some("map"));
+        assert_eq!(function_call_at(&expr, source, source.find("upper").unwrap() + 1), Some("upper"));
+        let member = expression_at(&expr, source.find("p.name").unwrap() + 2).unwrap();
+        assert_eq!(root_identifier(member).as_deref(), Some("p.name"));
     }
 
     #[test]

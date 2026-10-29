@@ -19,7 +19,8 @@ use super::super::{
 use tracing::{debug, info};
 
 use transclusion::{ApplyTarget, ResolvedTransclusion, SectionSlot, TransclusionEngine};
-use super::super::body_origin::BodyProvenance;
+use super::super::body_origin::{BodyProvenance, EditOrigin};
+use super::super::site_scope::{SiteHook, SiteLookup};
 use super::super::value_origin::DataPaths;
 
 impl Markdown {
@@ -61,6 +62,9 @@ impl Markdown {
             ComposeOperation::PageBlocks => {
                 inline::page_blocks::run_stage(self, state, options, runtime, report, body, schemas)
             }
+            ComposeOperation::CollectionBlocks => {
+                inline::collection_blocks::run_stage(self, state, options, runtime, report, body, schemas)
+            }
             ComposeOperation::Interpolation => {
                 report.interpolations_applied =
                     inline::interpolation::run_stage(self, state, options, runtime, report, body, schemas)
@@ -99,10 +103,11 @@ impl Markdown {
         let sb_ctx = self.full_source_context_for_errors();
         let line_offset = self.frontmatter_line_count();
         body.data.ensure_describes(&self.content)?;
-        let lookup = super::super::context::effective_state::ResolvingLookup::new(
+        let document = super::super::context::effective_state::ResolvingLookup::new(
             state,
             options.expression_resolution_context(&runtime.remote_fetch),
         );
+        let lookup = SiteLookup::new(&document, &body.scopes, Some(&runtime.iteration));
         let evaluator = shell_expansion::template::LookupEvaluator::new(&lookup);
         let templates = body
             .authored
@@ -110,12 +115,17 @@ impl Markdown {
             .filter(|authored| authored.text().contains("::shell-block"))
             .map(|authored| shell_blocks::BlockTemplates {
                 authored,
-                guards: crate::markdown::compose::page_blocks::BodyGuards::scan_body(authored.text(), line_offset),
+                scopes: crate::markdown::compose::collection_blocks::BodyScopes::scan_body(
+                    authored.text(),
+                    line_offset,
+                    &options.enabled_operations,
+                ),
                 scope: shell_expansion::site::SiteScope::new(
                     options,
                     schemas.effective_for(self),
                 ),
                 evaluator: &evaluator,
+                site: Some(&lookup),
                 ctx: shell_expansion::site::authored_context(self, Some(authored.text())),
             });
         let (new_content, stage_report, edits) = shell_blocks::run_shell_blocks_stage_in(
@@ -126,7 +136,21 @@ impl Markdown {
             &mut runtime.shell,
             &sb_ctx,
             line_offset,
-        )?;
+        )
+        .map_err(|error| match lookup.entered() {
+            // The stage entered the failing command's line, or the block's
+            // opener when the block itself failed.
+            Some(offset) => {
+                let end = self.content[offset..].find('\n').map_or(self.content.len(), |at| offset + at);
+                body.scope_failure(self, offset..end, error)
+            }
+            None => error.into(),
+        })?;
+        for edit in edits.iter().filter(|edit| edit.origin == EditOrigin::Data) {
+            lookup.charge(edit.range.start, edit.replacement_len).map_err(|error| {
+                body.scope_failure(self, edit.range.clone(), inline::shell_expansion::collection_budget(error))
+            })?;
+        }
         body.advance(&self.content, &edits, &new_content)?;
         self.content = new_content;
         report.shell_blocks_applied += stage_report.shell_blocks_applied;
@@ -234,6 +258,7 @@ impl Markdown {
         let parse_start = perf_collector.is_enabled().then(std::time::Instant::now);
         body.data.ensure_describes(&self.content)?;
         let data = Some(&body.data);
+        let iteration = runtime.iteration.clone();
 
         let parsed_directives = if operations.iter().any(|op| {
             matches!(
@@ -280,6 +305,15 @@ impl Markdown {
 
         let mut prepared = Vec::new();
         let mut next_order = 0usize;
+        // The authored site and original items of each directive a
+        // collection body repeated.
+        let content_now = self.content.clone();
+        let line_offset = self.frontmatter_line_count();
+        let sites: Vec<Option<super::super::preflight::ScopedSite>> = parsed_directives
+            .iter()
+            .flatten()
+            .map(|directive| body.site_at(&content_now, &directive.span, line_offset))
+            .collect();
 
         // Borrow the document into a transclusion engine for the prepare and
         // resolve stages. The borrow ends before the apply stage mutates
@@ -312,6 +346,9 @@ impl Markdown {
                             &mut next_order,
                             resolved_cache.as_ref(),
                             watch.as_mut(),
+                            &body.scopes,
+                            body.origin.as_ref().filter(|origin| origin.describes(&content_now)),
+                            &sites,
                         )?;
                     }
                 }
@@ -344,6 +381,9 @@ impl Markdown {
                             &mut next_order,
                             None,
                             watch.as_mut(),
+                            &body.scopes,
+                            body.origin.as_ref().filter(|origin| origin.describes(&content_now)),
+                            &sites,
                         )?;
                     }
                 }
@@ -443,7 +483,10 @@ impl Markdown {
                 Err(failure) => {
                     let (anchor, error) = *failure;
                     if transclusion_failure_is_fatal(&error) || options.fail_fast {
-                        return Err(error);
+                        return Err(match &anchor.target {
+                            ApplyTarget::Replace(span) => body.scope_failure(self, span.clone(), error),
+                            ApplyTarget::Section(_) => error,
+                        });
                     }
                     // Tolerating the failure is a promise that the output stays
                     // usable, and a document that silently omits a transcluded
@@ -485,6 +528,11 @@ impl Markdown {
             }
         }
 
+        for (_, span, replacement, _) in &replacements {
+            body.scopes.charge(&iteration, span.start, replacement.len()).map_err(|error| {
+                body.scope_failure(self, span.clone(), inline::shell_expansion::collection_budget(error))
+            })?;
+        }
         if !replacements.is_empty() {
             replacements.sort_by(|left, right| {
                 right
@@ -600,7 +648,7 @@ fn tolerated_failure_warning(error: &MarkdownError) -> ComposeWarning {
 
 fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
     matches!(
-        error,
+        error.without_iteration(),
         MarkdownError::Transclusion(inner)
             if matches!(
                 inner.as_ref(),
@@ -613,9 +661,12 @@ fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
         || error.rejected_call().is_some()
         // A policy that blocks the child's warning blocks the document.
         || error.blocked_diagnostics().is_some()
+        || error.iteration_failure().is_some()
         || error.pre_approval_violation().is_some()
         || error.shell_input_violation().is_some()
         || error.shell_span_failure()
+        // A collection failure never becomes a successful notice.
+        || matches!(error.without_iteration(), MarkdownError::Collection(_))
 }
 
 #[cfg(test)]

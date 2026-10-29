@@ -331,6 +331,17 @@ fn write_function(out: &mut String, function: &FunctionType, constraints: &[Cons
     out.push_str("); returns(");
     out.push_str(&serialize_property_def(&function.returns));
     out.push(')');
+    if let Some(clause) = &function.narrows {
+        out.push_str("; narrows(");
+        out.push_str(&clause.parameter);
+        if let Some(target) = &clause.target {
+            out.push_str(": ");
+            out.push_str(&serialize_property_atom(target));
+        }
+        out.push_str("; ");
+        out.push_str(clause.kind.keyword());
+        out.push(')');
+    }
     if function.fallible {
         out.push_str("; fallible");
     }
@@ -1227,5 +1238,56 @@ mod tests {
             "{ author: person(required) -> The author, editor: string@this }",
             "{author: person(required) -> The author,editor: string@this}",
         );
+    }
+}
+
+#[cfg(test)]
+mod narrows_serialization_tests {
+    use super::super::grammar::parse_type_definition;
+    use super::super::types::*;
+    use super::*;
+
+    fn atom_of(text: &str) -> PropertyAtom {
+        match parse_type_definition("f", text).unwrap_or_else(|error| panic!("{text}: {error}")) {
+            PropertyDef::Single(atom) => atom,
+            other => panic!("{text}: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn every_clause_shape_round_trips_repeatedly_and_follows_returns() {
+        for source in [
+            "function(parameters(x: unknown | null); returns(boolean); narrows(x: string; true-iff))",
+            "function(parameters(value: unknown); returns(boolean); narrows(value: file; true-implies))",
+            "function(parameters(x: unknown); returns(boolean); narrows(x: string(min(3)); false-implies))",
+            "function(parameters(x: unknown); returns(boolean); narrows(x; false-implies))",
+            "function(narrows(x; false-implies); fallible; returns(boolean); parameters(x: unknown))",
+        ] {
+            let first = atom_of(source);
+            let text = serialize_property_atom(&first);
+            let second = atom_of(&text);
+            assert_eq!(first, second, "{source} -> {text}");
+            assert_eq!(serialize_property_atom(&second), text, "serialization is stable");
+            let returns = text.find("returns(boolean)").expect("returns");
+            let narrows = text.find("narrows(").expect("narrows");
+            assert!(returns < narrows, "{text}");
+            if let Some(fallible) = text.find("fallible") {
+                assert!(narrows < fallible, "{text}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_clause_spellings_are_canonical() {
+        let text = serialize_property_atom(&atom_of(
+            "function(parameters(x: unknown); returns(boolean); narrows( x : file ; true-implies ))",
+        ));
+        assert!(text.contains("; narrows(x: file; true-implies)"), "{text}");
+        let text = serialize_property_atom(&atom_of(
+            "function(parameters(x: unknown); returns(boolean); narrows(x; false-implies))",
+        ));
+        assert!(text.contains("; narrows(x; false-implies)"), "{text}");
+        let none = serialize_property_atom(&atom_of("function(parameters(x: unknown); returns(boolean))"));
+        assert!(!none.contains("narrows"), "{none}");
     }
 }

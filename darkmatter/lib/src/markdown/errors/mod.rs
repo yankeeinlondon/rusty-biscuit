@@ -21,6 +21,7 @@ use crate::markdown::compose::ShellBlockError;
 use crate::markdown::compose::ShellExpansionError;
 use crate::markdown::compose::TocLinkingError;
 use crate::markdown::compose::TransclusionError;
+use crate::markdown::compose::collection_blocks::{CollectionError, IterationFailure};
 use crate::markdown::compose::conditions::ConditionError;
 use crate::markdown::compose::context::merge::CtxMergeError;
 use crate::markdown::compose::page_blocks::PageBlockError;
@@ -70,6 +71,12 @@ pub fn as_block_error<'a>(
         return Some(v);
     }
     if let Some(v) = err.downcast_ref::<PageBlockError>() {
+        return Some(v);
+    }
+    if let Some(v) = err.downcast_ref::<CollectionError>() {
+        return Some(v);
+    }
+    if let Some(v) = err.downcast_ref::<IterationFailure>() {
         return Some(v);
     }
     if let Some(v) = err.downcast_ref::<ConditionError>() {

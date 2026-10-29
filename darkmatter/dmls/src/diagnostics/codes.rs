@@ -24,6 +24,7 @@
 //! | `dm.expression.uncertain_call` | `WARNING` | Argument category 3; with `expressions.strict`, also 2 (may be `null`) and 4 (type unknown). |
 //! | `dm.expression.always_false_call` | `WARNING` | An authored literal argument is not a well-formed file reference (`file_exists("https://")`), so the call is always `false`; composition reports the same warning. |
 //! | `dm.expression.incomplete_analysis` | `WARNING` | The host function's facts artifact is missing, stale, or invalid, so nothing is known about the call; it may still be right. |
+//! | `dm.collection.malformed`, `dm.expression.invalid_callback`, `dm.collection.invalid_source`, `dm.collection.pattern_mismatch`, `dm.collection.invalid_sort_key`, `dm.collection.untyped_*_source` | `ERROR` | A `::map` / `::filter` region composition rejects. Darkmatter owns each code and span; DMLS reports the same. |
 //! | `dm.lifecycle.incomplete_analysis` | `WARNING` | No host catalog's lifecycle artifact could be used (missing, stale, or invalid), so lifecycle stacks are analyzed as the `md` host's, which may not be the document's host. |
 //!
 //! Design: `claudine/fixes/2026-09-13-better-static-analysis/spec.md` (D7).
@@ -182,6 +183,30 @@ pub mod code {
     /// is Darkmatter's.
     pub const EXPRESSION_INCOMPLETE_ANALYSIS: &str =
         darkmatter::markdown::compose::expression::INCOMPLETE_ANALYSIS_CODE;
+    /// A malformed `::map` / `::filter` region, header, or option. The code
+    /// is Darkmatter's (`collection_blocks::diagnostics`), as are the
+    /// collection codes below; composition reports under the same ones.
+    pub const COLLECTION_MALFORMED: &str = darkmatter::markdown::compose::collection_blocks::diagnostics::MALFORMED_CODE;
+    /// A `::map` source with no iterable declaration (a warning when the
+    /// untyped-source recovery is allowed).
+    pub const COLLECTION_UNTYPED_MAP_SOURCE: &str =
+        darkmatter::markdown::compose::collection_blocks::diagnostics::UNTYPED_MAP_SOURCE_CODE;
+    /// A `::filter` source with no iterable declaration (a warning when the
+    /// untyped-source recovery is allowed).
+    pub const COLLECTION_UNTYPED_FILTER_SOURCE: &str =
+        darkmatter::markdown::compose::collection_blocks::diagnostics::UNTYPED_FILTER_SOURCE_CODE;
+    /// A source known not to be iterable.
+    pub const COLLECTION_INVALID_SOURCE: &str =
+        darkmatter::markdown::compose::collection_blocks::diagnostics::INVALID_SOURCE_CODE;
+    /// A callback that does not parse or binds a protected name.
+    pub const EXPRESSION_INVALID_CALLBACK: &str =
+        darkmatter::markdown::compose::collection_blocks::diagnostics::INVALID_CALLBACK_CODE;
+    /// A pattern that cannot bind its input or result.
+    pub const COLLECTION_PATTERN_MISMATCH: &str =
+        darkmatter::markdown::compose::collection_blocks::diagnostics::PATTERN_MISMATCH_CODE;
+    /// A `sort=` key that is provably not a number or a string.
+    pub const COLLECTION_INVALID_SORT_KEY: &str =
+        darkmatter::markdown::compose::collection_blocks::diagnostics::INVALID_SORT_KEY_CODE;
     /// A fenced-code info string whose language token no grammar recognizes.
     pub const FENCE_UNKNOWN_LANGUAGE: &str = "dm.fence.unknown_language";
     /// A `::shell` / `::shell-block` / `$()` command the shell policy disallows.

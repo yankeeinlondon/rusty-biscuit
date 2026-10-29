@@ -8,6 +8,7 @@ A themed markdown renderer for terminal and browser workflows with markdown, mar
 
 The user-facing CLI surface is defined in `src/args/`: `cli.rs` holds global
 flags, `command.rs` holds subcommands, `target.rs` holds command targets,
+`render.rs` holds the shared `RenderOptions` for default and explicit rendering,
 `enums.rs` holds output/format enums, `wrappers.rs` holds CLI conversion types,
 `parsers.rs` holds value parsers, and `completion.rs` holds shell completion
 helpers.
@@ -65,6 +66,9 @@ just -f darkmatter/justfile install
 ```bash
 # Render markdown using auto mode
 md README.md
+
+# The same render command, named explicitly
+md render README.md
 
 # Pipe from stdin
 cat README.md | md

@@ -4,19 +4,15 @@ use serde_json::Value;
 
 use super::{FunctionBinding, bound, json_number, numberlike_value};
 use crate::markdown::compose::expression::call_binding::BoundCall;
-use crate::markdown::compose::expression::call_binding::FactKind::{FalseImplies, TrueIff, TrueImplies};
 
 pub(super) const BINDINGS: &[FunctionBinding] = &[
-    FunctionBinding::pure("is_null", &["isnull"], is_null).narrowing("x", TrueIff, Some("null")),
-    // True for `null` and empty values, so only the false side learns presence.
-    FunctionBinding::pure("is_empty", &["isempty"], is_empty).narrowing("x", FalseImplies, None),
-    FunctionBinding::pure("is_string", &["isstring"], is_string).narrowing("x", TrueIff, Some("string")),
-    FunctionBinding::pure("is_number", &["isnumber"], is_number).narrowing("x", TrueIff, Some("number")),
-    FunctionBinding::pure("is_array", &["isarray"], is_array).narrowing("x", TrueIff, Some("unknown[]")),
-    FunctionBinding::pure("is_object", &["isobject"], is_object).narrowing("x", TrueIff, Some("object")),
-    // True only for text a file parameter can take, so the true side proves
-    // `file`; the false side proves nothing (`"https://"` is still a string).
-    FunctionBinding::pure("is_file_type", &[], is_file_type).narrowing("value", TrueImplies, Some("file")),
+    FunctionBinding::pure("is_null", &["isnull"], is_null),
+    FunctionBinding::pure("is_empty", &["isempty"], is_empty),
+    FunctionBinding::pure("is_string", &["isstring"], is_string),
+    FunctionBinding::pure("is_number", &["isnumber"], is_number),
+    FunctionBinding::pure("is_array", &["isarray"], is_array),
+    FunctionBinding::pure("is_object", &["isobject"], is_object),
+    FunctionBinding::pure("is_file_type", &[], is_file_type),
     FunctionBinding::pure("is_positive", &["ispositive"], is_positive),
     FunctionBinding::pure("is_negative", &["isnegative"], is_negative),
     FunctionBinding::pure("is_integer", &["isinteger"], is_integer),
@@ -103,4 +99,40 @@ fn abs(call: &BoundCall<'_>) -> Result<Value, String> {
 fn round(call: &BoundCall<'_>) -> Result<Value, String> {
     let selected = bound(call.args().selected(0), "round", 0)?;
     json_number(numberlike_value(selected, "round")?.round())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::markdown::compose::expression::{DeclaredTypes, Polarity, Shape, TypeScope, parse};
+    use crate::markdown::schemas::{PropertyAtom, SimplifiedType};
+
+    fn shape_of_x_after(guard: &str, polarity: Polarity) -> Shape {
+        let declared = DeclaredTypes::new(None);
+        let scope = TypeScope::unguarded(&declared).assume(&parse(guard).unwrap(), polarity);
+        scope.type_of_expr(&parse("x").unwrap()).unwrap().shape().clone()
+    }
+
+    fn file() -> Shape {
+        Shape::Arms { arms: vec![PropertyAtom::bare(SimplifiedType::File)], nullable: false }
+    }
+
+    #[test]
+    fn file_exists_true_side_proves_a_file_like_is_file_type() {
+        assert_eq!(shape_of_x_after("file_exists(x)", Polarity::True), file());
+        assert_eq!(shape_of_x_after("fileExists(x)", Polarity::True), file());
+        assert_eq!(shape_of_x_after("is_file_type(x)", Polarity::True), file());
+    }
+
+    #[test]
+    fn file_exists_false_side_proves_nothing() {
+        assert_eq!(shape_of_x_after("file_exists(x)", Polarity::False), Shape::Unknown { non_null: false });
+    }
+
+    #[test]
+    fn file_exists_does_not_transfer_its_fact_to_an_independent_read() {
+        let declared = DeclaredTypes::new(None);
+        let scope = TypeScope::unguarded(&declared).assume(&parse("file_exists(frontmatter('t', 'include'))").unwrap(), Polarity::True);
+        let read = parse("frontmatter('t', 'include')").unwrap();
+        assert!(scope.type_of_expr(&read).is_none(), "a call result is not a stable subject, so no fact attaches");
+    }
 }

@@ -2,6 +2,14 @@
 
 Detail behind the "CLI orientation" section of [SKILL.md](SKILL.md).
 
+`args::RenderOptions` defines the arguments shared by top-level default
+rendering (`Cli::render`, flattened) and `Command::Render`. After the help and
+`--save` shortcuts, `Cli::command_or_render` supplies the default command and
+combines top-level and explicit-render features once. Both forms enter the
+same `run_subcommand` branch and `run_render(&RenderOptions, &Cli, &MdRequest)`;
+render policy is resolved there. Keep render argument definitions and
+preparation shared, including `--indent`.
+
 Every source-file argument opens through `cli/src/io::open_argument` (or
 `resolve_file_path` for a context of its own): parse with `FileReference`
 first, so a bare `@`/`&`/`^` or `!x.md` is `InvalidReference` even when that

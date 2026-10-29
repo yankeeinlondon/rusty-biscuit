@@ -19,11 +19,13 @@ Math
   round(x, [fallback])
 Collection
   contains(haystack, needle)
+  filter(iterable, callback)
   first(x)
   has_key(obj, key)
   keys(obj)
   last(x)
   length(val)
+  map(iterable, callback)
   values(obj)
 String Predicates
   ends_with(x, find)

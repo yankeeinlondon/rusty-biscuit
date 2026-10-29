@@ -19,6 +19,8 @@ mod content_policy_fixtures;
 
 mod approval_prompt;
 mod claudine_schema_bundle;
+mod collection_blocks;
+mod compose_collection_controls;
 mod clean;
 mod clean_fidelity;
 mod clean_frontmatter;

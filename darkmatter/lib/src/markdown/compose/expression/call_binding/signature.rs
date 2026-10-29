@@ -8,7 +8,7 @@ use serde_json::Value;
 use super::error::{CallBindingError, ContractViolation};
 use super::translate::{TranslateError, TypeResolver, shape_from_property_def};
 use crate::markdown::coercion::{Shape, ValueKind, check_exact};
-use crate::markdown::schemas::simplified::{FunctionType, PropertyAtom, PropertyDef, serialize_property_def};
+use crate::markdown::schemas::simplified::{FunctionType, PropertyAtom, PropertyDef, TypeExpr, serialize_property_def};
 
 /// One compiled parameter.
 #[derive(Debug, Clone)]
@@ -16,6 +16,7 @@ pub struct CompiledParameter {
     name: String,
     index: usize,
     shape: Shape,
+    callback: Option<FunctionType>,
     optional: bool,
     rest: bool,
     admits_null: bool,
@@ -33,6 +34,11 @@ impl CompiledParameter {
 
     pub fn index(&self) -> usize {
         self.index
+    }
+
+    /// The inline callback contract, when this is a callback-only parameter.
+    pub fn callback(&self) -> Option<&FunctionType> {
+        self.callback.as_ref()
     }
 
     pub fn shape(&self) -> &Shape {
@@ -94,15 +100,33 @@ impl CompiledSignature {
     /// cannot be translated; [`TranslateError::FunctionValue`] when a
     /// parameter or the return type reaches a `function` type.
     pub fn compile(function: &str, ty: &FunctionType, resolver: &dyn TypeResolver) -> Result<Self, TranslateError> {
+        Self::compile_with_callbacks(function, ty, resolver, false)
+    }
+
+    pub(super) fn compile_with_callbacks(function: &str, ty: &FunctionType, resolver: &dyn TypeResolver, callbacks: bool) -> Result<Self, TranslateError> {
         let declared = ty.parameters.as_slice();
         let mut parameters = Vec::with_capacity(declared.len());
         for (index, parameter) in declared.iter().enumerate() {
-            let shape = shape_from_property_def(&parameter.def, resolver).map_err(|error| prefix(&parameter.name, error))?;
+            let callback = match &parameter.def {
+                PropertyDef::Single(atom) if callbacks && !parameter.rest && !atom.is_array => match &atom.ty {
+                    TypeExpr::Function(callback) => Some(callback.as_ref().clone()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let shape = if let Some(callback) = &callback {
+                Self::compile(function, callback, resolver).map_err(|error| prefix(&parameter.name, error))?;
+                // No JSON value can stand in for an inline callback.
+                Shape::Assert(Box::new(Shape::Any), crate::markdown::coercion::Assertion::new("inline callback", |_| false))
+            } else {
+                shape_from_property_def(&parameter.def, resolver).map_err(|error| prefix(&parameter.name, error))?
+            };
             parameters.push(CompiledParameter {
                 name: parameter.name.clone(),
                 index,
                 admits_null: shape.admits_null_explicitly(),
                 shape,
+                callback,
                 optional: parameter.optional,
                 rest: parameter.rest,
                 type_text: type_text(&parameter.def),

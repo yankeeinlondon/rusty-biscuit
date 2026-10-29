@@ -353,6 +353,10 @@ mod tests {
             start_line: 1,
             end_line: content.lines().count(),
             opening_text: opener_line.to_string(),
+            opener_span: 0..opener_line.len(),
+            closer_span: 0..0,
+            quoted: false,
+            container: Vec::new(),
         }
     }
 

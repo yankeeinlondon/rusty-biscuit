@@ -208,6 +208,26 @@ flowchart LR
     B -->|"shell, directive, and transclusion stages:<br/>carried as text, never scanned"| O["composed output"]
 ```
 
+#### Structural preparation of `::map` and `::filter`
+
+[Map](./inline/map.md) and [filter](./inline/filter.md) regions are prepared in
+one structural traversal together with [page blocks](./inline/page-blocks.md),
+between text replacement and interpolation. Gates, sources, and every callback
+(selection, sort key, prefix, mapping) finish for all reached items before the
+region bodies reach ordinary interpolation, shell, and transclusion stages.
+Each repeated body keeps its own local bindings, so those later stages read the
+right item. `--disable collection-blocks` skips this stage without affecting
+page blocks.
+
+```mermaid
+flowchart LR
+    G[Gate and source] --> C[Callbacks per reached item]
+    C --> B[Scoped body copies]
+    B --> I[Interpolation]
+    I --> S[Shell and links]
+    S --> T[Transclusion]
+```
+
 ### 2. Transclusion
 
 The **transclusion** stage is typified by recursive operations which have the potential to be time consuming (and more dependent on 

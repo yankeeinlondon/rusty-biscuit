@@ -83,6 +83,11 @@ pub enum ComposeOperation {
     /// relative, `&` repository-rooted, a declared portable `{{VAR}}`
     /// written as `{{{VAR}}}`, or `~/`).
     LinkNormalization,
+
+    /// Expands `::map` / `::filter` collection regions into per-item body
+    /// copies. Independent of [`ComposeOperation::PageBlocks`]; the two share
+    /// one structural traversal when both are enabled.
+    CollectionBlocks,
 }
 
 /// Operation-level performance metric kinds.
@@ -101,6 +106,8 @@ pub enum ComposeOperationPerfMetric {
     TextReplacement,
     /// Page blocks.
     PageBlocks,
+    /// Collection blocks (`::map` / `::filter`).
+    CollectionBlocks,
     /// Body interpolation.
     Interpolation,
     /// Shell directive expansion.
@@ -173,6 +180,14 @@ pub(crate) const COMPOSE_OPERATION_DESCRIPTORS: &[ComposeOperationDescriptor] = 
         default_enabled: true,
         label: "page blocks",
         perf_kind: Some(ComposeOperationPerfMetric::PageBlocks),
+    },
+    ComposeOperationDescriptor {
+        operation: ComposeOperation::CollectionBlocks,
+        index: 16,
+        phase: ComposePhase::InlinePre,
+        default_enabled: true,
+        label: "collection blocks",
+        perf_kind: Some(ComposeOperationPerfMetric::CollectionBlocks),
     },
     ComposeOperationDescriptor {
         operation: ComposeOperation::Interpolation,
@@ -358,7 +373,7 @@ impl ComposeOperation {
     /// Returns the descriptor for this operation.
     ///
     /// Descriptors are ordered by default execution order. The lookup is a
-    /// small linear search because the table is fixed at 16 entries.
+    /// small linear search because the table is fixed at 17 entries.
     pub fn descriptor(self) -> &'static ComposeOperationDescriptor {
         COMPOSE_OPERATION_DESCRIPTORS
             .iter()
@@ -384,6 +399,7 @@ impl ComposeOperation {
             Self::FrontmatterShellExpansion,
             Self::TextReplacement,
             Self::PageBlocks,
+            Self::CollectionBlocks,
             Self::Interpolation,
             Self::ShellExpansion,
             Self::ShellBlocks,
@@ -425,6 +441,7 @@ impl std::fmt::Display for ComposeOperation {
             Self::FrontmatterShellExpansion => write!(f, "Frontmatter Shell Expansion"),
             Self::TextReplacement => write!(f, "TextReplacement"),
             Self::PageBlocks => write!(f, "PageBlocks"),
+            Self::CollectionBlocks => write!(f, "CollectionBlocks"),
             Self::Interpolation => write!(f, "Interpolation"),
             Self::ShellExpansion => write!(f, "ShellExpansion"),
             Self::ShellBlocks => write!(f, "ShellBlocks"),

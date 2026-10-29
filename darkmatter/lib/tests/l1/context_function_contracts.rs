@@ -68,6 +68,41 @@ fn file_exists_inspects_its_argument_without_converting_it() {
     }
 }
 
+/// A migrated predicate's declared implication is about the original value,
+/// so the handlers never convert before asking: convertible inputs answer
+/// for what they are, not for what they could become.
+#[test]
+fn migrated_predicates_answer_about_the_original_value() {
+    let dir = TempDir::new().expect("tempdir");
+    let lookup = lookup_at(dir.path(), &[]);
+    hooks::reset_handler_entries();
+    for (expression, expected) in [
+        ("is_number(\"4\")", false),
+        ("is_number(4)", true),
+        ("is_string(4)", false),
+        ("is_string(\"4\")", true),
+        ("is_file_type(42)", false),
+        ("is_file_type(null)", false),
+        ("is_file_type(\"./a.md\")", true),
+        ("is_empty(0)", false),
+        ("is_empty(false)", false),
+        ("is_empty(\"0\")", false),
+        ("is_empty(null)", true),
+        ("is_empty(\"\")", true),
+        ("is_null(null)", true),
+        ("is_null(0)", false),
+        ("is_null(\"\")", false),
+        ("is_null(\"null\")", false),
+        ("is_array(\"[]\")", false),
+        ("is_array([])", true),
+        ("is_object(\"{}\")", false),
+        ("is_object({})", true),
+    ] {
+        assert_eq!(run(&lookup, expression).unwrap(), json!(expected), "{expression}");
+    }
+    assert!(hooks::handler_entries("is_number") > 0, "the handlers ran: this is a behavior test");
+}
+
 /// Criterion 44: a boolean reaching `has_command(cmd: string | null)` converts
 /// to its text, so `has_command(true)` asks about a command named `true`.
 #[test]

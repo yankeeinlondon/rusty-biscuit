@@ -428,6 +428,11 @@ fn approve_template_only(
     }
 }
 
+/// The scope of a site, layered over the document's declared types.
+pub(crate) type SiteTypes<'f> = &'f dyn for<'d> Fn(
+    crate::markdown::compose::expression::TypeScope<'d>,
+) -> crate::markdown::compose::expression::TypeScope<'d>;
+
 /// What one document's shell stages need to build its command sites: the
 /// owner's effective schema its placeholders are typed by, and the roots its
 /// host declared.
@@ -479,9 +484,10 @@ impl<'a> SiteScope<'a> {
     /// it has no placeholder or is not a valid template (it then runs only as
     /// resolved bytes).
     ///
-    /// `guards` are the body `::block` guards enclosing the site, outermost
-    /// first (none for a frontmatter value). They must be the guards
-    /// discovery typed the site under, so its shape matches its approval.
+    /// `types_at` layers the guards and `::map` / `::filter` bodies enclosing
+    /// the site over the document's declared types (the identity for a
+    /// frontmatter value). It must be the scope discovery typed the site
+    /// under, so its shape matches its approval.
     ///
     /// ## Errors
     ///
@@ -496,7 +502,7 @@ impl<'a> SiteScope<'a> {
         ctx: SourceContext,
         evaluator: &'e dyn HoleEvaluator,
         frame: SiteFrame,
-        guards: &[&crate::markdown::compose::page_blocks::BodyGuard],
+        types_at: SiteTypes<'_>,
     ) -> Result<Option<TemplateSite<'e>>, ShellExpansionError> {
         let derived = std::collections::HashSet::new();
         let scope = template::candidate::CandidateScope {
@@ -512,10 +518,7 @@ impl<'a> SiteScope<'a> {
                 .with_host_globals(&host_roots);
         // The site's types must be the ones discovery typed it with, so its
         // shape matches what was approved.
-        let types = crate::markdown::compose::page_blocks::guards::within(
-            guards,
-            crate::markdown::compose::expression::TypeScope::unguarded(&declared),
-        );
+        let types = types_at(crate::markdown::compose::expression::TypeScope::unguarded(&declared));
         // Presence is checked when each hole is filled, so discovery's
         // approval-time evaluation is not repeated here.
         let candidate = scope.build(authored, template, origin, &types, &|_| None)?;

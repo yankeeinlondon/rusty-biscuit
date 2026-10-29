@@ -13,7 +13,7 @@
 //! referenced child. There is no second discovery compose that runs the full
 //! transclusion merge.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
 
@@ -491,6 +491,14 @@ fn collect_document(
         &authored_ctx,
         markdown.frontmatter_line_count(),
     )?;
+    detect_dynamic_collection_source(
+        markdown.content(),
+        options,
+        &authored_pending,
+        &deferred_keys,
+        &authored_ctx,
+        markdown.frontmatter_line_count(),
+    )?;
 
     // ── Resolve this document's inline state ───────────────────────
     // Interpolation + text replacement only: never page blocks (so
@@ -514,15 +522,19 @@ fn collect_document(
     // re-validates them, so they are not yet final violations here.
     let mut inline_exclude_keys = options.exclude_keys.clone();
     inline_exclude_keys.insert("$schema".to_string());
-    let mut inline_options = discovery
-        .clone()
-        .derive(|options| options.only(&inline_ops).with_exclude_keys(inline_exclude_keys));
-    inline_options.defer_shell_pending_schema_problems = true;
-    inline_options.defer_missing_runtime_context = true;
-    inline_options.defer_expression_failures = true;
-    // The call check covers what the terminal pass composes, so a rejection
-    // here is the one that pass would raise, with the same earlier warnings.
-    inline_options.call_check_operations = Some(discovery.enabled_operations);
+    let inline_options_for = |ops: &[ComposeOperation]| {
+        let mut inline_options = discovery
+            .clone()
+            .derive(|options| options.only(ops).with_exclude_keys(inline_exclude_keys.clone()));
+        inline_options.defer_shell_pending_schema_problems = true;
+        inline_options.defer_missing_runtime_context = true;
+        inline_options.defer_expression_failures = true;
+        // The call check covers what the terminal pass composes, so a rejection
+        // here is the one that pass would raise, with the same earlier warnings.
+        inline_options.call_check_operations = Some(discovery.enabled_operations);
+        inline_options
+    };
+    let inline_options = inline_options_for(&inline_ops);
     let mut prepared = markdown.clone();
     let (outcome, failed_warnings) = prepared.run_root_pipeline_collecting(inline_options, None);
     let mut prepared_report = outcome.inspect_err(|_| options.preflight_failure_warnings.record(failed_warnings))?;
@@ -553,6 +565,30 @@ fn collect_document(
     body_data.ensure_describes(prepared.content())?;
     let line_offset = prepared.frontmatter_line_count();
     let prepared_ctx = prepared.full_source_context_for_errors();
+
+    // ── Every candidate copy of each collection body ───────────────
+    // Discovery is condition-blind: a `::map` / `::filter` body is repeated
+    // for every item of its source, ignoring gates, selection, order, and
+    // prefix, so a child any item could reach is walked and approved. The
+    // copies carry the frame of their item, so a target that reads it
+    // resolves per item.
+    let expansion = if options.is_enabled(ComposeOperation::CollectionBlocks)
+        && (markdown.content().contains("::map") || markdown.content().contains("::filter"))
+    {
+        let mut ops = inline_ops.clone();
+        ops.push(ComposeOperation::CollectionBlocks);
+        let mut expanded = markdown.clone();
+        let (outcome, failed_warnings) = expanded.run_root_pipeline_collecting(inline_options_for(&ops), None);
+        let report = outcome.inspect_err(|_| options.preflight_failure_warnings.record(failed_warnings))?;
+        let data = report
+            .body_data
+            .clone()
+            .unwrap_or_else(|| crate::markdown::compose::body_origin::DataRanges::none_for(expanded.content()));
+        data.ensure_describes(expanded.content())?;
+        Some((expanded, report.body_sites, data))
+    } else {
+        None
+    };
 
     // ── Planned ICMP effects ───────────────────────────────────────
     // What discovery evaluated (which may include a target computed from
@@ -620,19 +656,22 @@ fn collect_document(
     // Discovery is condition-blind, so every site is collected; each is
     // typed on the true side of the `::block when=` guards around it, as the
     // compose pass types it once those guards have selected it.
-    let body_guards = crate::markdown::compose::page_blocks::BodyGuards::scan_body(markdown.content(), markdown.frontmatter_line_count());
+    let body_scopes = crate::markdown::compose::collection_blocks::BodyScopes::scan_body(
+        markdown.content(),
+        markdown.frontmatter_line_count(),
+        &options.enabled_operations,
+    );
     let authored_offset = markdown.frontmatter_line_count();
     let mut body_sites = Vec::with_capacity(authored_directives.len());
     let mut body_awaiting = Vec::with_capacity(authored_directives.len());
     for (authored, line) in &authored_directives {
         let template = crate::markdown::compose::shell_expansion::parser::authored_template(authored);
-        let guards = body_guards.enclosing_line(line - authored_offset);
         body_sites.push(site_ctx.build(
             &scope,
             authored,
             template,
             ShellCommandOrigin::Body { line: *line },
-            &guards,
+            &|types| body_scopes.scope_at_line(types, line - authored_offset),
         )?);
         body_awaiting.push(site_ctx.awaits_execution(authored));
     }
@@ -732,7 +771,7 @@ fn collect_document(
                     start_line: pair.start_line + authored_offset,
                     command_line: command.start_line + authored_offset,
                 },
-                &body_guards.enclosing_line(command.start_line),
+                &|types| body_scopes.scope_at_line(types, command.start_line),
             )?;
             let awaiting = site_ctx.awaits_execution(&command.raw_command);
             block.push((site, command.raw_command, command.start_line, awaiting));
@@ -859,12 +898,24 @@ fn collect_document(
     // ── Recurse into referenced children (condition-blind) ─────────
     let transclusion_opts = options.transclusion_options();
 
-    for directive in transclusion::parse_directives_in(
-        prepared.content(),
-        Some(&body_data),
-        prepared_ctx.clone(),
-        line_offset,
-    )? {
+    let (scan_content, scan_data, scan_ctx, scan_sites) = match &expansion {
+        Some((expanded, sites, data)) => {
+            (expanded.content(), data, expanded.full_source_context_for_errors(), Some(sites))
+        }
+        None => (prepared.content(), &body_data, prepared_ctx.clone(), None),
+    };
+    // The site of a directive a collection body repeated, and the
+    // children already walked for a repeated site's target and values.
+    let scoped_site = |span: &std::ops::Range<usize>| -> Option<super::ScopedSite> {
+        scan_sites?.site_at(scan_content, span, line_offset)
+    };
+    let mut scoped_walked: HashMap<(String, u64), std::sync::Arc<super::PreflightGraphNode>> = HashMap::new();
+    for directive in transclusion::parse_directives_in(scan_content, Some(scan_data), scan_ctx.clone(), line_offset)? {
+        let site = scoped_site(&directive.span);
+        // A copy whose item produced no target has nothing to resolve.
+        if site.is_some() && directive.raw_target.trim().is_empty() {
+            continue;
+        }
         // `::file` and `::url` can both reference Markdown children that
         // contain shell directives. `::code` inserts literal code (no shell
         // directives): its target is resolved but never read.
@@ -878,7 +929,7 @@ fn collect_document(
                 &transclusion_opts,
                 &options.source,
                 directive.line,
-                prepared_ctx.clone(),
+                scan_ctx.clone(),
             ) {
                 Ok(transclusion::ResolvedTarget::File { path, resolved, .. }) => {
                     super::PreflightResolvedTarget::File { path, resolved }
@@ -890,6 +941,7 @@ fn collect_document(
                 Err(e) => return Err(e.into()),
             };
             targets.push(super::PreflightTargetEdge {
+                site: site.clone(),
                 kind: super::PreflightTargetKind::Code,
                 line: directive.line,
                 raw_target: directive.raw_target.clone(),
@@ -906,7 +958,7 @@ fn collect_document(
             &transclusion_opts,
             &options.source,
             directive.line,
-            prepared_ctx.clone(),
+            scan_ctx.clone(),
         ) {
             Ok(r) => r,
             // Remote transclusion disabled: the child cannot appear in the
@@ -919,34 +971,58 @@ fn collect_document(
 
         match resolved {
             transclusion::ResolvedTarget::File { path, resolved, .. } => {
-                let mut child = Markdown::try_from(path.as_path())?;
-                transclusion::apply_directive_set_overlay(&mut child, &directive.options);
-                let child_options = transclusion::markdown_child_options(
-                    options,
-                    &child_state_data,
-                    &directive.options,
-                    &path,
-                    transclusion::source_opening(&directive.raw_target, &resolved),
-                );
-                let child = collect_recursive(
-                    &child,
-                    &child_options,
-                    seen,
-                    entries,
-                    candidates,
-                    icmp,
-                    capabilities,
-                    trigger_warnings,
-                    visited,
-                    remote_fetch,
-                    root,
-                    None,
-                    &for_children,
-                )?;
+                let parameters = super::parameters_identity(&directive.options);
+                let walked_key = site.as_ref().map(|_| {
+                    let canonical = biscuit_file::canonicalize_simplified(&path).unwrap_or_else(|_| path.clone());
+                    (canonical.to_string_lossy().to_string(), parameters)
+                });
+                let reused = walked_key.as_ref().and_then(|key| scoped_walked.get(key).cloned());
+                let child = match reused {
+                    Some(child) => child,
+                    None => {
+                        let mut child = Markdown::try_from(path.as_path())?;
+                        transclusion::apply_directive_set_overlay(&mut child, &directive.options);
+                        let child_options = transclusion::markdown_child_options(
+                            options,
+                            &child_state_data,
+                            &directive.options,
+                            &path,
+                            transclusion::source_opening(&directive.raw_target, &resolved),
+                        );
+                        // The same file with other values is another child: a
+                        // sibling copy that walked it before must not hide it.
+                        if let Some((canonical, _)) = &walked_key
+                            && scoped_walked.keys().any(|(walked, _)| walked == canonical)
+                        {
+                            visited.remove(canonical);
+                        }
+                        let child = std::sync::Arc::new(collect_recursive(
+                            &child,
+                            &child_options,
+                            seen,
+                            entries,
+                            candidates,
+                            icmp,
+                            capabilities,
+                            trigger_warnings,
+                            visited,
+                            remote_fetch,
+                            root,
+                            None,
+                            &for_children,
+                        )?);
+                        if let Some(key) = walked_key {
+                            scoped_walked.insert(key, std::sync::Arc::clone(&child));
+                        }
+                        child
+                    }
+                };
                 edges.push(super::PreflightGraphEdge {
+                    site,
+                    parameters,
                     directive: directive.clone(),
                     resolved_target: super::PreflightResolvedTarget::File { path, resolved },
-                    child: std::sync::Arc::new(child),
+                    child,
                 });
             }
             transclusion::ResolvedTarget::Url { url, .. } => {
@@ -974,6 +1050,8 @@ fn collect_document(
                     &InheritedDiscovery::default(),
                 )?;
                 edges.push(super::PreflightGraphEdge {
+                    site,
+                    parameters: super::parameters_identity(&directive.options),
                     directive: directive.clone(),
                     resolved_target: super::PreflightResolvedTarget::Url(url),
                     child: std::sync::Arc::new(child),
@@ -998,6 +1076,7 @@ fn collect_document(
                 prepared.source_context_for_errors(),
             )? {
                 targets.push(super::PreflightTargetEdge {
+                    site: None,
                     kind: super::PreflightTargetKind::TocLinking,
                     line: directive.line + line_offset,
                     raw_target,
@@ -1274,7 +1353,7 @@ fn scan_one_frontmatter(
                 };
                 // A standalone `$( … )` value is unguarded: a body block that
                 // later reads the key grants it nothing.
-                Some(site_ctx.build(&scope, &authored, template, origin.clone(), &[])?)
+                Some(site_ctx.build(&scope, &authored, template, origin.clone(), &|types| types)?)
             }
             None => None,
         };
@@ -1462,7 +1541,7 @@ impl DiscoverySiteContext {
             crate::markdown::compose::shell_expansion::template::TemplateGrammarError,
         >,
         origin: ShellCommandOrigin,
-        guards: &[&crate::markdown::compose::page_blocks::BodyGuard],
+        types_at: crate::markdown::compose::shell_expansion::site::SiteTypes<'_>,
     ) -> MarkdownResult<ShellCandidate> {
         let has_holes = template
             .as_ref()
@@ -1474,11 +1553,9 @@ impl DiscoverySiteContext {
         let declared =
             crate::markdown::compose::expression::DeclaredTypes::for_schema(effective).with_host_globals(&host_roots);
         // `SiteScope::site` narrows the compose pass's site by the same
-        // guards, so the approved shape is the shape that runs.
-        let types = crate::markdown::compose::page_blocks::guards::within(
-            guards,
-            crate::markdown::compose::expression::TypeScope::unguarded(&declared),
-        );
+        // guards and collection bodies, so the approved shape is the shape
+        // that runs.
+        let types = types_at(crate::markdown::compose::expression::TypeScope::unguarded(&declared));
         let lookup = crate::markdown::compose::context::effective_state::ResolvingLookup::new(
             &self.state,
             self.resolution.clone(),
@@ -1744,6 +1821,77 @@ fn detect_authored_dynamic_target(
     Ok(())
 }
 
+/// Rejects a `::file` / `::code` / `::url` target that a collection body
+/// repeats for items whose source is not available before execution: a
+/// frontmatter value a shell command has yet to produce, or a root the host
+/// declares late.
+///
+/// The target's own text may read only a local (`{{ i }}`), so
+/// [`detect_authored_dynamic_target`] cannot see the dependency; it is the
+/// region's source that carries it. The error names the authored target and
+/// the key it depends on, and nothing has run.
+fn detect_dynamic_collection_source(
+    content: &str,
+    options: &crate::markdown::compose::ComposeRequest,
+    pending: &[(String, String)],
+    derived: &HashSet<String>,
+    ctx: &biscuit_terminal::errors::SourceContext,
+    line_offset: usize,
+) -> MarkdownResult<()> {
+    use crate::markdown::compose::collection_blocks::{CollectionRegion, parser::parse_collection_regions_in};
+    use crate::markdown::compose::directives_api::{DirectiveKind, scan_darkmatter_directives};
+
+    if (pending.is_empty() && derived.is_empty() && options.deferred_shell_roots().is_empty())
+        || !options.is_enabled(ComposeOperation::CollectionBlocks)
+        || !(content.contains("::map") || content.contains("::filter"))
+    {
+        return Ok(());
+    }
+    let Ok(regions) = parse_collection_regions_in(content, None, &options.enabled_operations, None) else {
+        // The compose pass reports a malformed region with its source link.
+        return Ok(());
+    };
+    let unavailable = |reference: &str| -> Option<String> {
+        let root = crate::markdown::compose::expression::fm_namespace::strip_fm_prefix(reference)
+            .split('.')
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        let pending_key = pending.iter().any(|(key, _)| *key == root);
+        (pending_key || derived.contains(&root) || options.deferred_shell_roots().contains(&root)).then_some(root)
+    };
+    fn walk<'r>(regions: &'r [CollectionRegion], out: &mut Vec<&'r CollectionRegion>) {
+        for region in regions {
+            out.push(region);
+            walk(&region.children, out);
+        }
+    }
+    let mut flat = Vec::new();
+    walk(&regions, &mut flat);
+    let directives: Vec<_> = scan_darkmatter_directives(content)
+        .into_iter()
+        .filter(|directive| matches!(directive.kind, DirectiveKind::File | DirectiveKind::Code | DirectiveKind::Url))
+        .collect();
+    for region in flat {
+        let Some(key) = unavailable(&region.header.source.value) else {
+            continue;
+        };
+        if let Some(directive) = directives
+            .iter()
+            .find(|directive| region.body_span.start <= directive.span.start && directive.span.end <= region.body_span.end)
+        {
+            return Err(ShellExpansionError::DynamicCommandShape {
+                ctx: Box::new(ctx.clone()),
+                command: content[directive.span.clone()].to_string(),
+                key,
+                origin: ShellCommandOrigin::Body { line: directive.line + line_offset },
+            }
+            .into());
+        }
+    }
+    Ok(())
+}
+
 /// Functions whose discovery value differs from their compose value: shell
 /// probes answer `false` without launching (R8), `as_markdown` composes
 /// nothing, and `ping`/`ping_under` answer `null` without sending ICMP (R6).
@@ -1762,7 +1910,7 @@ const UNEVALUATED_IN_DISCOVERY: &[&str] = &[
 fn authored_as_markdown_literals(markdown: &Markdown) -> Vec<String> {
     let mut literals = Vec::new();
     for expression in authored_expressions(markdown) {
-        visit_calls(&expression, &mut |name, args| {
+        visit_calls(&expression, &mut |name, args, _locals| {
             if name == "as_markdown"
                 && let [Expr::StringLiteral(content)] = args
             {
@@ -1781,7 +1929,7 @@ fn authored_as_markdown_literals(markdown: &Markdown) -> Vec<String> {
 fn authored_icmp_probes(markdown: &Markdown, options: &crate::markdown::compose::ComposeRequest) -> Vec<PlannedIcmpProbe> {
     let authority = options.icmp_authority().discovering();
     for expression in authored_expressions(markdown) {
-        visit_calls(&expression, &mut |name, args| {
+        visit_calls(&expression, &mut |name, args, _locals| {
             if name != "ping" && name != "ping_under" {
                 return;
             }
@@ -1822,48 +1970,65 @@ fn authored_expressions(markdown: &Markdown) -> Vec<Expr> {
 }
 
 /// Calls `visit` with the name and arguments of every function call in
-/// `expression`, outermost first.
-fn visit_calls(expression: &Expr, visit: &mut impl FnMut(&str, &[Expr])) {
+/// `expression`, outermost first, retaining the enclosing callback bindings.
+fn visit_calls(expression: &Expr, visit: &mut impl FnMut(&str, &[Expr], &[&str])) {
+    visit_calls_in_scope(expression, &[], visit);
+}
+
+fn visit_calls_in_scope(expression: &Expr, locals: &[&str], visit: &mut impl FnMut(&str, &[Expr], &[&str])) {
     match expression {
+        Expr::CallbackCall { args, .. } => {
+            use crate::markdown::compose::expression::CallArgument;
+            for arg in args {
+                match arg {
+                    CallArgument::Value(value) => visit_calls_in_scope(value, locals, visit),
+                    CallArgument::Callback(callback) => {
+                        let mut inner = locals.to_vec();
+                        inner.extend(callback.pattern.names());
+                        visit_calls_in_scope(&callback.body, &inner, visit);
+                    }
+                }
+            }
+        }
         Expr::FunctionCall { name, args } => {
-            visit(name, args);
+            visit(name, args, locals);
             for argument in args {
-                visit_calls(argument, visit);
+                visit_calls_in_scope(argument, locals, visit);
             }
         }
         Expr::UnaryNot(inner)
         | Expr::UnaryMinus(inner)
         | Expr::Paren(inner)
-        | Expr::MemberAccess { base: inner, .. } => visit_calls(inner, visit),
+        | Expr::MemberAccess { base: inner, .. } => visit_calls_in_scope(inner, locals, visit),
         Expr::Fallback { primary, fallback } => {
-            visit_calls(primary, visit);
-            visit_calls(fallback, visit);
+            visit_calls_in_scope(primary, locals, visit);
+            visit_calls_in_scope(fallback, locals, visit);
         }
         Expr::Ternary {
             condition,
             then_branch,
             else_branch,
         } => {
-            visit_calls(condition, visit);
-            visit_calls(then_branch, visit);
-            visit_calls(else_branch, visit);
+            visit_calls_in_scope(condition, locals, visit);
+            visit_calls_in_scope(then_branch, locals, visit);
+            visit_calls_in_scope(else_branch, locals, visit);
         }
         Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
-            visit_calls(left, visit);
-            visit_calls(right, visit);
+            visit_calls_in_scope(left, locals, visit);
+            visit_calls_in_scope(right, locals, visit);
         }
         Expr::Index { base, index } => {
-            visit_calls(base, visit);
-            visit_calls(index, visit);
+            visit_calls_in_scope(base, locals, visit);
+            visit_calls_in_scope(index, locals, visit);
         }
         Expr::ArrayLiteral(items) => {
             for item in items {
-                visit_calls(item, visit);
+                visit_calls_in_scope(item, locals, visit);
             }
         }
         Expr::ObjectLiteral(entries) => {
             for (_, value) in entries {
-                visit_calls(value, visit);
+                visit_calls_in_scope(value, locals, visit);
             }
         }
         Expr::Variable(_) | Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
@@ -1897,7 +2062,7 @@ fn unobserved_read(expression: &Expr, unobserved: &[String]) -> Option<String> {
 /// The first function in [`UNEVALUATED_IN_DISCOVERY`] that `expression` calls.
 fn unevaluated_call(expression: &Expr) -> Option<String> {
     let mut found = None;
-    visit_calls(expression, &mut |name, _| {
+    visit_calls(expression, &mut |name, _, _locals| {
         if found.is_none() && UNEVALUATED_IN_DISCOVERY.contains(&name) {
             found = Some(format!("{name}()"));
         }
@@ -2012,7 +2177,7 @@ fn dynamic_nested_dependency(
     unobserved: &[String],
 ) -> Option<String> {
     let mut found = None;
-    visit_calls(expression, &mut |name, args| {
+    visit_calls(expression, &mut |name, args, locals| {
         if found.is_some() || name != "as_markdown" {
             return;
         }
@@ -2021,10 +2186,11 @@ fn dynamic_nested_dependency(
             return;
         }
         let mut roots = Vec::new();
-        collect_expression_roots(argument, &mut roots);
+        collect_expression_roots_in_scope(argument, locals, &mut roots);
         found = unevaluated_call(argument)
             .or_else(|| lazy_root_read(argument))
-            .or_else(|| unobserved_read(argument, unobserved))
+            .or_else(|| roots.iter().find(|root| unobserved.contains(root))
+                .map(|key| format!("frontmatter.{key}, whose value discovery does not observe")))
             .or_else(|| {
                 pending
                     .iter()
@@ -2036,57 +2202,23 @@ fn dynamic_nested_dependency(
 }
 
 fn collect_expression_roots(expression: &Expr, roots: &mut Vec<String>) {
-    match expression {
-        Expr::Variable(path) => {
-            let path = crate::markdown::compose::expression::fm_namespace::strip_fm_prefix(path);
-            if let Some(root) = path.split('.').next()
-                && !root.is_empty()
-            {
-                roots.push(root.to_string());
+    collect_expression_roots_in_scope(expression, &[], roots);
+}
+
+fn collect_expression_roots_in_scope(expression: &Expr, locals: &[&str], roots: &mut Vec<String>) {
+    use crate::markdown::compose::expression::{AccessStep, static_access_reads_in_scope};
+    for read in static_access_reads_in_scope(expression, locals) {
+        let path = read.variable;
+        let root = if path == "fm" {
+            match read.steps.first() {
+                Some(AccessStep::Key(key) | AccessStep::Member(key)) => *key,
+                _ => continue,
             }
-        }
-        Expr::UnaryNot(inner)
-        | Expr::UnaryMinus(inner)
-        | Expr::Paren(inner)
-        | Expr::MemberAccess { base: inner, .. } => collect_expression_roots(inner, roots),
-        Expr::Fallback { primary, fallback } => {
-            collect_expression_roots(primary, roots);
-            collect_expression_roots(fallback, roots);
-        }
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            collect_expression_roots(condition, roots);
-            collect_expression_roots(then_branch, roots);
-            collect_expression_roots(else_branch, roots);
-        }
-        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
-            collect_expression_roots(left, roots);
-            collect_expression_roots(right, roots);
-        }
-        Expr::Index { base, index } => {
-            if let Some(key) =
-                crate::markdown::compose::expression::fm_namespace::literal_index_key(base, index)
-            {
-                roots.push(key.to_string());
-                return;
-            }
-            collect_expression_roots(base, roots);
-            collect_expression_roots(index, roots);
-        }
-        Expr::FunctionCall { args, .. } | Expr::ArrayLiteral(args) => {
-            for argument in args {
-                collect_expression_roots(argument, roots);
-            }
-        }
-        Expr::ObjectLiteral(entries) => {
-            for (_, value) in entries {
-                collect_expression_roots(value, roots);
-            }
-        }
-        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
+        } else {
+            path.strip_prefix("fm.").unwrap_or(path).split('.').next().unwrap_or(path)
+        };
+        if root.is_empty() { continue; }
+        roots.push(root.to_string());
     }
 }
 
