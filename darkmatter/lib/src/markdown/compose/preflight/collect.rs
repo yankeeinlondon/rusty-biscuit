@@ -1910,7 +1910,7 @@ const UNEVALUATED_IN_DISCOVERY: &[&str] = &[
 fn authored_as_markdown_literals(markdown: &Markdown) -> Vec<String> {
     let mut literals = Vec::new();
     for expression in authored_expressions(markdown) {
-        visit_calls(&expression, &mut |name, args| {
+        visit_calls(&expression, &mut |name, args, _locals| {
             if name == "as_markdown"
                 && let [Expr::StringLiteral(content)] = args
             {
@@ -1929,7 +1929,7 @@ fn authored_as_markdown_literals(markdown: &Markdown) -> Vec<String> {
 fn authored_icmp_probes(markdown: &Markdown, options: &crate::markdown::compose::ComposeRequest) -> Vec<PlannedIcmpProbe> {
     let authority = options.icmp_authority().discovering();
     for expression in authored_expressions(markdown) {
-        visit_calls(&expression, &mut |name, args| {
+        visit_calls(&expression, &mut |name, args, _locals| {
             if name != "ping" && name != "ping_under" {
                 return;
             }
@@ -1970,53 +1970,65 @@ fn authored_expressions(markdown: &Markdown) -> Vec<Expr> {
 }
 
 /// Calls `visit` with the name and arguments of every function call in
-/// `expression`, outermost first.
-fn visit_calls(expression: &Expr, visit: &mut impl FnMut(&str, &[Expr])) {
+/// `expression`, outermost first, retaining the enclosing callback bindings.
+fn visit_calls(expression: &Expr, visit: &mut impl FnMut(&str, &[Expr], &[&str])) {
+    visit_calls_in_scope(expression, &[], visit);
+}
+
+fn visit_calls_in_scope(expression: &Expr, locals: &[&str], visit: &mut impl FnMut(&str, &[Expr], &[&str])) {
     match expression {
         Expr::CallbackCall { args, .. } => {
+            use crate::markdown::compose::expression::CallArgument;
             for arg in args {
-                visit_calls(arg.expression(), visit);
+                match arg {
+                    CallArgument::Value(value) => visit_calls_in_scope(value, locals, visit),
+                    CallArgument::Callback(callback) => {
+                        let mut inner = locals.to_vec();
+                        inner.extend(callback.pattern.names());
+                        visit_calls_in_scope(&callback.body, &inner, visit);
+                    }
+                }
             }
         }
         Expr::FunctionCall { name, args } => {
-            visit(name, args);
+            visit(name, args, locals);
             for argument in args {
-                visit_calls(argument, visit);
+                visit_calls_in_scope(argument, locals, visit);
             }
         }
         Expr::UnaryNot(inner)
         | Expr::UnaryMinus(inner)
         | Expr::Paren(inner)
-        | Expr::MemberAccess { base: inner, .. } => visit_calls(inner, visit),
+        | Expr::MemberAccess { base: inner, .. } => visit_calls_in_scope(inner, locals, visit),
         Expr::Fallback { primary, fallback } => {
-            visit_calls(primary, visit);
-            visit_calls(fallback, visit);
+            visit_calls_in_scope(primary, locals, visit);
+            visit_calls_in_scope(fallback, locals, visit);
         }
         Expr::Ternary {
             condition,
             then_branch,
             else_branch,
         } => {
-            visit_calls(condition, visit);
-            visit_calls(then_branch, visit);
-            visit_calls(else_branch, visit);
+            visit_calls_in_scope(condition, locals, visit);
+            visit_calls_in_scope(then_branch, locals, visit);
+            visit_calls_in_scope(else_branch, locals, visit);
         }
         Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
-            visit_calls(left, visit);
-            visit_calls(right, visit);
+            visit_calls_in_scope(left, locals, visit);
+            visit_calls_in_scope(right, locals, visit);
         }
         Expr::Index { base, index } => {
-            visit_calls(base, visit);
-            visit_calls(index, visit);
+            visit_calls_in_scope(base, locals, visit);
+            visit_calls_in_scope(index, locals, visit);
         }
         Expr::ArrayLiteral(items) => {
             for item in items {
-                visit_calls(item, visit);
+                visit_calls_in_scope(item, locals, visit);
             }
         }
         Expr::ObjectLiteral(entries) => {
             for (_, value) in entries {
-                visit_calls(value, visit);
+                visit_calls_in_scope(value, locals, visit);
             }
         }
         Expr::Variable(_) | Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
@@ -2050,7 +2062,7 @@ fn unobserved_read(expression: &Expr, unobserved: &[String]) -> Option<String> {
 /// The first function in [`UNEVALUATED_IN_DISCOVERY`] that `expression` calls.
 fn unevaluated_call(expression: &Expr) -> Option<String> {
     let mut found = None;
-    visit_calls(expression, &mut |name, _| {
+    visit_calls(expression, &mut |name, _, _locals| {
         if found.is_none() && UNEVALUATED_IN_DISCOVERY.contains(&name) {
             found = Some(format!("{name}()"));
         }
@@ -2165,7 +2177,7 @@ fn dynamic_nested_dependency(
     unobserved: &[String],
 ) -> Option<String> {
     let mut found = None;
-    visit_calls(expression, &mut |name, args| {
+    visit_calls(expression, &mut |name, args, locals| {
         if found.is_some() || name != "as_markdown" {
             return;
         }
@@ -2174,10 +2186,11 @@ fn dynamic_nested_dependency(
             return;
         }
         let mut roots = Vec::new();
-        collect_expression_roots(argument, &mut roots);
+        collect_expression_roots_in_scope(argument, locals, &mut roots);
         found = unevaluated_call(argument)
             .or_else(|| lazy_root_read(argument))
-            .or_else(|| unobserved_read(argument, unobserved))
+            .or_else(|| roots.iter().find(|root| unobserved.contains(root))
+                .map(|key| format!("frontmatter.{key}, whose value discovery does not observe")))
             .or_else(|| {
                 pending
                     .iter()
@@ -2189,8 +2202,12 @@ fn dynamic_nested_dependency(
 }
 
 fn collect_expression_roots(expression: &Expr, roots: &mut Vec<String>) {
-    use crate::markdown::compose::expression::{AccessStep, static_access_reads};
-    for read in static_access_reads(expression) {
+    collect_expression_roots_in_scope(expression, &[], roots);
+}
+
+fn collect_expression_roots_in_scope(expression: &Expr, locals: &[&str], roots: &mut Vec<String>) {
+    use crate::markdown::compose::expression::{AccessStep, static_access_reads_in_scope};
+    for read in static_access_reads_in_scope(expression, locals) {
         let path = read.variable;
         let root = if path == "fm" {
             match read.steps.first() {

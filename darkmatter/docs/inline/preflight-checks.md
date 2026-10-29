@@ -114,6 +114,19 @@ flag: "{{ has_alias('ll') }}"
 ::shell echo alias-{{ flag }}   <!-- UnevaluatedDependencyShape: frontmatter.flag -->
 ```
 
+Callback bindings keep their lexical meaning during discovery. A bare `part`
+and `local.part` below both refer to the literal callback item, even though
+`fm.part` awaits shell execution. Preflight accepts the local forms and
+includes `echo child` in the approval set without running it. Replacing the
+argument with `fm.part` rejects the unknown nested shape.
+
+```md
+---
+part: "$(echo pending)"
+---
+{{ map(['::shell echo child'], part => as_markdown(part)) }}
+```
+
 ## ICMP Effects
 
 Shell commands are not the only approvable effect. `ping` and `ping_under` are

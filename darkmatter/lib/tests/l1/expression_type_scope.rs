@@ -435,9 +435,14 @@ fn assert_sound(declared: &DeclaredTypes<'_>, guard: &str, files: &ResolutionCon
         (Polarity::True, site.assume(&parsed, Polarity::True)),
         (Polarity::False, site.assume(&parsed, Polarity::False)),
     ];
+    let x_type = type_at(&site, "x");
+    let y_type = type_at(&site, "y");
+    let x_samples: Vec<_> = samples().into_iter().filter(|value| x_type.admits(value)).collect();
+    let y_samples: Vec<_> = samples().into_iter().filter(|value| y_type.admits(value)).collect();
+    let side_types = sides.each_ref().map(|(_, scope)| [type_at(scope, "x"), type_at(scope, "y")]);
     let mut reached = [false, false];
-    for x in samples().into_iter().filter(|value| type_at(&site, "x").admits(value)) {
-        for y in samples().into_iter().filter(|value| type_at(&site, "y").admits(value)) {
+    for x in &x_samples {
+        for y in &y_samples {
             let lookup = Values(
                 HashMap::from([("x".to_string(), x.clone()), ("y".to_string(), y.clone())]),
                 Some(files.clone()),
@@ -447,13 +452,12 @@ fn assert_sound(declared: &DeclaredTypes<'_>, guard: &str, files: &ResolutionCon
             };
             let taken = if darkmatter::markdown::compose::expression::is_truthy(&outcome) { 0 } else { 1 };
             reached[taken] = true;
-            let (polarity, scope) = &sides[taken];
-            for (name, value) in [("x", &x), ("y", &y)] {
-                let ty = type_at(scope, name);
+            let (polarity, _) = &sides[taken];
+            for ((name, value), ty) in [("x", x), ("y", y)].into_iter().zip(&side_types[taken]) {
                 assert!(
                     ty.admits(value),
                     "{guard} is {polarity:?} for x={x}, y={y}, but the analyzed {name} ({}) excludes {value}",
-                    shape_text(&ty)
+                    shape_text(ty)
                 );
             }
         }

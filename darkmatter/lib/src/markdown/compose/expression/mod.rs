@@ -90,6 +90,7 @@ pub mod resolve_ctx;
 pub mod scope;
 pub mod semantics;
 
+pub(crate) use absence::static_access_reads_in_scope;
 pub use absence::{
     AccessStep, StaticAccessRead, StaticVariableRead, branch_scope, static_access_reads, static_callback_reads,
     static_variable_reads, static_variable_reads_in_scope,

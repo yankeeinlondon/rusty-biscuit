@@ -307,6 +307,14 @@ pub fn static_access_reads(expr: &Expr) -> Vec<StaticAccessRead<'_>> {
     reads
 }
 
+/// Free access reads from a subtree whose enclosing callback bindings are
+/// supplied separately. Explicit `fm` reads remain document dependencies.
+pub(crate) fn static_access_reads_in_scope<'e>(expr: &'e Expr, locals: &[&str]) -> Vec<StaticAccessRead<'e>> {
+    let mut reads = static_access_reads(expr);
+    reads.retain(|read| !is_lexical_read(read.variable, locals));
+    reads
+}
+
 fn walk_access<'e>(expr: &'e Expr, reads: &mut Vec<StaticAccessRead<'e>>) {
     match expr {
         Expr::Variable(_) | Expr::MemberAccess { .. } | Expr::Index { .. } | Expr::Paren(_) => {
