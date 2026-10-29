@@ -5766,7 +5766,7 @@ fn the_ci_documentation_states_the_implemented_behavior() {
         (
             ".github/ci/README.md",
             "exactly six top-level jobs",
-            "`ci.yml` defines eight top-level jobs",
+            "`ci.yml` defines ten top-level jobs",
         ),
         (
             ".github/ci/README.md",
@@ -5781,7 +5781,7 @@ fn the_ci_documentation_states_the_implemented_behavior() {
         (
             "docs/topics/ci-cd.md",
             "exactly six top-level jobs",
-            "`ci.yml` defines eight top-level jobs",
+            "`ci.yml` defines ten top-level jobs",
         ),
         (
             "docs/topics/ci-cd.md",
@@ -5791,7 +5791,7 @@ fn the_ci_documentation_states_the_implemented_behavior() {
         (
             ".claude/skills/rust-devops/ci-cd.md",
             "exactly six top-level jobs",
-            "`ci.yml` defines eight top-level jobs",
+            "`ci.yml` defines ten top-level jobs",
         ),
     ];
     for (file, phrase, why) in RETIRED {
@@ -5823,9 +5823,6 @@ fn the_ci_documentation_states_the_implemented_behavior() {
         ("docs/topics/ci-cd.md", "ci-reporting"),
         ("docs/topics/ci-cd.md", "SUITE_REGISTRY"),
         ("docs/topics/ci-cd.md", "change inventory"),
-        ("docs/topics/ci-cd.md", "exactly eight top-level jobs"),
-        (".github/ci/README.md", "exactly eight top-level jobs"),
-        (".claude/skills/rust-devops/ci-cd.md", "exactly eight top-level jobs"),
         (".claude/skills/rust-devops/ci-cd.md", "ci-reporting"),
         (".claude/skills/rust-devops/ci-cd.md", "change_inventory"),
         (".claude/skills/rust-testing/verification-scope.md", "repo-deps"),
@@ -5840,6 +5837,18 @@ fn the_ci_documentation_states_the_implemented_behavior() {
         assert!(
             source.contains(phrase),
             "{file} must state {phrase:?} — see fixes/2026-09-11-cicd-cleanup/spec.md AC14"
+        );
+    }
+
+    let job_count = top_level_job_ids("ci.yml").len();
+    for file in [
+        "docs/topics/ci-cd.md",
+        ".github/ci/README.md",
+        ".claude/skills/rust-devops/ci-cd.md",
+    ] {
+        assert!(
+            read(file).contains(&format!("exactly {job_count} top-level jobs")),
+            "{file} must state the current workflow's job count ({job_count})"
         );
     }
 

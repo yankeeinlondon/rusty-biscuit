@@ -2,14 +2,16 @@
 
 This page records the non-obvious decisions an agent needs before changing the
 repository's CI, pre-push hook, or release automation. The live authorities are
-`docs/topics/ci-cd.md`, `.github/ci/README.md`, package
+`docs/topics/ci-cd.md`, `docs/releases.md`, `.github/ci/README.md`, package
 `[package.metadata.ci]`, and `.github/ci/environments.json`.
 
-## The eight jobs of `ci.yml`
+## The jobs of `ci.yml`
 
-`ci.yml` defines exactly eight top-level jobs and a contract test pins the set:
+`ci.yml` defines exactly 10 top-level jobs and a contract test pins the set:
 `validation`, `scope`, `preflight`, `build`, `area-ci`, `area-drift`, `ci-gate`,
-`ci-reporting`. The first seven block; `ci-reporting` is advisory and carries
+`certify-nightly`, `publish-observations`, and `ci-reporting`. The first seven
+block merges; certification and observation publication are outside the gate
+but can fail the scheduled run. `ci-reporting` is advisory and carries
 `continue-on-error: true`.
 
 **No job owns a test suite on CI's behalf.** `preflight` is bootstrap
