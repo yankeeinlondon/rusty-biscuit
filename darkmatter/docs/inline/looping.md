@@ -1,3 +1,6 @@
+---
+kind: "future-feature"
+---
 # Looping Directive
 
 Darkmatter provides a looping directive that looks structurally like:

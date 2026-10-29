@@ -43,7 +43,7 @@ command = 'sh -c "echo CFProcessPath=/usr/bin/true >> $NEXTEST_ENV"'
 
 [[profile.default.scripts]]
 platform = { host = "cfg(target_os = \"macos\")" }
-filter = 'package(worktree-cli) & (test(/^commands::git_graph::tests::gathered_graph_lays_out_/) | test(=commands::git_graph::tests::the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60) | test(=commands::list::tests::run_pipeline_gathers_the_graph_on_a_narrow_image_terminal))'
+filter = 'package(git-wt-cli) & (test(/^commands::git_graph::tests::gathered_graph_lays_out_/) | test(=commands::git_graph::tests::the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60) | test(=commands::list::tests::run_pipeline_gathers_the_graph_on_a_narrow_image_terminal))'
 setup = 'coretext-small-bundle'
 
 # Every biscuit-visualized render over the host's fonts asks fontique, so the

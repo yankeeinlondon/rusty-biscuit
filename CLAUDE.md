@@ -207,6 +207,10 @@ Update alongside code changes:
       example for each rule, and use a Mermaid diagram wherever a flow,
       lifecycle, or state change is easier to see than to read. A page that
       only a repo veteran can follow is not finished
+    - explain what a section covers before giving its rules or details. Do not
+      assume knowledge of GitHub Actions or third-party tools; explain unfamiliar
+      terms in plain language. Organize instructions around developer tasks,
+      show exactly how to use the feature, and illustrate choices with examples
 - `docs/dependencies.md` (and per-area `docs/dependencies.md`) when crates are added/removed
 - `.claude/skills/` when architecture or workflows change
 - This file when workspace layout, commands, or repo-wide conventions change
